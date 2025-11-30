@@ -27,11 +27,13 @@ contextBridge.exposeInMainWorld('ipcRenderer', {
     checkDirectoryExists: (dirPath) => ipcRenderer.invoke('check-directory-exists', dirPath),
     // Thunderstore API
     fetchCommunities: () => ipcRenderer.invoke('fetch-communities'),
+    fetchCommunityImages: () => ipcRenderer.invoke('fetch-community-images'),
     fetchPackages: (communityIdentifier) => ipcRenderer.invoke('fetch-packages', communityIdentifier),
     fetchPackageByName: (name) => ipcRenderer.invoke('fetch-package-by-name', name),
     importProfile: (code) => ipcRenderer.invoke('import-profile', code),
     importProfileFromFile: (path) => ipcRenderer.invoke('import-profile-from-file', path),
     openModFolder: (profileId, modName) => ipcRenderer.invoke('open-mod-folder', { profileId, modName }),
     exportProfile: (profileId) => ipcRenderer.invoke('export-profile', profileId),
+    deleteProfileFolder: (profileId) => ipcRenderer.invoke('delete-profile-folder', profileId),
 });
 //# sourceMappingURL=preload.js.map

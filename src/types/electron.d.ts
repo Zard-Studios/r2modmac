@@ -9,12 +9,14 @@ export interface IElectronAPI {
     installMod: (profileId: string, downloadUrl: string, modName: string) => Promise<{ success: boolean; error?: string }>;
     checkDirectoryExists: (dirPath: string) => Promise<boolean>;
     fetchCommunities: () => Promise<Community[]>;
-    fetchPackages: (communityIdentifier: string) => Promise<Package[]>;
+    fetchCommunityImages: () => Promise<Record<string, string>>;
+    fetchPackages: (communityId: string) => Promise<Package[]>;
     fetchPackageByName: (name: string) => Promise<Package | null>;
     importProfile: (code: string) => Promise<any>;
     importProfileFromFile: (path: string) => Promise<any>;
-    openModFolder: (profileId: string, modName: string) => Promise<boolean>;
-    exportProfile: (profileId: string) => Promise<{ success: boolean, path?: string }>;
+    openModFolder: (profileId: string, modName: string) => Promise<void>;
+    exportProfile: (profileId: string) => Promise<any>;
+    deleteProfileFolder: (profileId: string) => Promise<boolean>;
 }
 
 declare global {

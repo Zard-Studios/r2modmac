@@ -41,8 +41,18 @@ export function ModDetailModal({ mod, isOpen, onClose, onInstall, isInstalled }:
                         <p className="text-sm text-gray-400 mb-2">by {mod.full_name.split('-')[0]}</p>
                         <div className="flex items-center gap-3 text-xs text-gray-500">
                             <span className="bg-gray-700 px-2 py-1 rounded">v{mod.version_number}</span>
-                            <span>📥 {mod.downloads.toLocaleString()} downloads</span>
-                            <span>📦 {(mod.file_size / 1024).toFixed(0)} KB</span>
+                            <span className="flex items-center gap-1">
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                </svg>
+                                {mod.downloads.toLocaleString()} downloads
+                            </span>
+                            <span className="flex items-center gap-1">
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+                                </svg>
+                                {(mod.file_size / 1024).toFixed(0)} KB
+                            </span>
                         </div>
                     </div>
 

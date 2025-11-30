@@ -32,10 +32,12 @@ contextBridge.exposeInMainWorld('ipcRenderer', {
 
     // Thunderstore API
     fetchCommunities: () => ipcRenderer.invoke('fetch-communities'),
+    fetchCommunityImages: () => ipcRenderer.invoke('fetch-community-images'),
     fetchPackages: (communityIdentifier: string) => ipcRenderer.invoke('fetch-packages', communityIdentifier),
     fetchPackageByName: (name: string) => ipcRenderer.invoke('fetch-package-by-name', name),
     importProfile: (code: string) => ipcRenderer.invoke('import-profile', code),
     importProfileFromFile: (path: string) => ipcRenderer.invoke('import-profile-from-file', path),
     openModFolder: (profileId: string, modName: string) => ipcRenderer.invoke('open-mod-folder', { profileId, modName }),
     exportProfile: (profileId: string) => ipcRenderer.invoke('export-profile', profileId),
+    deleteProfileFolder: (profileId: string) => ipcRenderer.invoke('delete-profile-folder', profileId),
 })

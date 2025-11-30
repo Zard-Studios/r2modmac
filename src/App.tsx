@@ -5,19 +5,27 @@ import { SearchBar } from './components/SearchBar'
 import { VirtualizedModGrid } from './components/VirtualizedModGrid'
 import { ModDetailModal } from './components/ModDetailModal'
 import { ProfileList } from './components/ProfileList'
-import { fetchCommunities, fetchPackages } from './api/thunderstore'
+import { ProgressModal } from './components/ProgressModal'
+import { fetchPackages } from './api/thunderstore'
 import { useProfileStore } from './store/useProfileStore'
 import type { Community, Package, PackageVersion } from './types/thunderstore'
 import type { InstalledMod } from './types/profile'
 
 function App() {
   const [communities, setCommunities] = useState<Community[]>([])
+  const [communityImages, setCommunityImages] = useState<Record<string, string>>({})
   const [packages, setPackages] = useState<Package[]>([])
   const [loading, setLoading] = useState(true)
   const [loadingMods, setLoadingMods] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedMod, setSelectedMod] = useState<Package | null>(null)
   const [gameSearchQuery, setGameSearchQuery] = useState('')
+  const [progressState, setProgressState] = useState({
+    isOpen: false,
+    title: '',
+    progress: 0,
+    currentTask: ''
+  })
 
   const {
     profiles,
@@ -27,7 +35,8 @@ function App() {
     selectProfile,
     deleteProfile,
     addMod,
-    removeMod
+    removeMod,
+    toggleMod
   } = useProfileStore()
 
   const [selectedCommunity, setSelectedCommunity] = useState<string | null>(null)
@@ -48,14 +57,19 @@ function App() {
   }, [selectedCommunity])
 
   const loadData = async () => {
+    setLoading(true)
     try {
-      const data = await fetchCommunities()
+      const [data, images] = await Promise.all([
+        window.ipcRenderer.fetchCommunities(),
+        window.ipcRenderer.fetchCommunityImages()
+      ])
       setCommunities(data)
+      setCommunityImages(images)
+      console.log(`Loaded ${data.length} communities and ${Object.keys(images).length} images`)
     } catch (err) {
-      console.error('Failed to load communities', err)
-    } finally {
-      setLoading(false)
+      console.error('Failed to load data', err)
     }
+    setLoading(false)
   }
 
   const loadPackages = async (communityId: string) => {
@@ -134,11 +148,23 @@ function App() {
     }
 
     const version = pkg.versions[0];
+
+    setProgressState({
+      isOpen: true,
+      title: `Installing ${pkg.name}`,
+      progress: 0,
+      currentTask: 'Starting installation...'
+    });
+
     try {
+      setProgressState(prev => ({ ...prev, progress: 10, currentTask: 'Checking dependencies...' }));
       await installModWithDependencies(pkg, version, new Set(), profileIdToUse);
-      alert(`Successfully installed ${pkg.name} and dependencies`);
+      setProgressState(prev => ({ ...prev, progress: 100, currentTask: 'Done!' }));
+      setTimeout(() => setProgressState(prev => ({ ...prev, isOpen: false })), 500);
+      // alert(`Successfully installed ${pkg.name} and dependencies`); // Removed alert
     } catch (err: any) {
       console.error('Failed to install mod:', err);
+      setProgressState(prev => ({ ...prev, isOpen: false }));
       alert(`Failed to install mod: ${err.message}`);
     }
   };
@@ -170,15 +196,32 @@ function App() {
   const processImportResult = async (result: any) => {
     if (result.type === 'profile') {
       // It's an r2modman profile export
-      const profileName = `Imported: ${result.name}`;
+      const profileName = result.name;
       const newProfileId = createProfile(profileName, selectedCommunity!);
+
+      setProgressState({
+        isOpen: true,
+        title: 'Importing Profile',
+        progress: 0,
+        currentTask: 'Creating profile...'
+      });
 
       // Wait for profile creation
       setTimeout(async () => {
         // Install all mods from the profile
         let installedCount = 0;
+        const totalMods = result.mods.length;
 
-        for (const mod of result.mods) {
+        for (let i = 0; i < totalMods; i++) {
+          const mod = result.mods[i];
+          const progress = Math.round(((i + 1) / totalMods) * 100);
+
+          setProgressState(prev => ({
+            ...prev,
+            progress,
+            currentTask: `Installing ${mod.name} (${i + 1}/${totalMods})...`
+          }));
+
           // mod.name is "Team-Name"
           // Try to find in local list first
           let pkg: Package | undefined | null = packages.find(p => p.full_name === mod.name);
@@ -224,13 +267,19 @@ function App() {
             console.warn(`Mod ${mod.name} could not be found or fetched.`);
           }
         }
-        alert(`Imported profile "${result.name}" with ${installedCount} mods.`);
+
+        setProgressState(prev => ({ ...prev, progress: 100, currentTask: 'Import Complete!' }));
+        setTimeout(() => {
+          setProgressState(prev => ({ ...prev, isOpen: false }));
+          alert(`Imported profile "${result.name}" with ${installedCount} mods.`);
+        }, 500);
+
       }, 500);
 
     } else if (result.type === 'package') {
       // It's a single package (Modpack)
       const pkg = result.package;
-      const profileName = `Imported: ${pkg.name}`;
+      const profileName = pkg.name;
       const newProfileId = createProfile(profileName, selectedCommunity!);
 
       setTimeout(() => {
@@ -279,11 +328,12 @@ function App() {
               <p>Loading games...</p>
             </div>
           ) : (
-            <div className="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden shadow-2xl">
+            <div>
               <GameSelector
                 communities={filteredCommunities}
                 selectedCommunity={selectedCommunity}
                 onSelect={setSelectedCommunity}
+                communityImages={communityImages}
               />
             </div>
           )}
@@ -393,34 +443,53 @@ function App() {
           </div>
 
           {activeProfile?.mods.map(mod => {
+            // Strip version from mod.fullName for comparison with packages
+            const modNameWithoutVersion = mod.fullName.replace(/-\d+\.\d+\.\d+$/, '');
+
             // Check for updates
-            const pkg = packages.find(p => p.full_name === mod.fullName);
+            const pkg = packages.find(p => p.full_name === modNameWithoutVersion);
             const latestVersion = pkg?.versions[0].version_number;
             const hasUpdate = latestVersion && latestVersion !== mod.versionNumber;
 
             return (
               <div
                 key={mod.uuid4}
-                className="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-800 group cursor-pointer transition-all border border-transparent hover:border-gray-700 relative pr-16"
+                className={`flex items-center gap-3 p-2 rounded-lg hover:bg-gray-800 group cursor-pointer transition-all border border-transparent hover:border-gray-700 relative pr-16 overflow-hidden ${!mod.enabled ? 'opacity-50' : ''}`}
                 onClick={() => {
-                  if (pkg) setSelectedMod(pkg);
+                  toggleMod(activeProfile.id, mod.uuid4);
                 }}
               >
+                {/* Caution Tape Overlay for disabled mods */}
+                {!mod.enabled && (
+                  <div
+                    className="absolute inset-0 pointer-events-none z-10 opacity-30"
+                    style={{
+                      background: 'repeating-linear-gradient(45deg, #000 0px, #000 20px, #fbbf24 20px, #fbbf24 40px)',
+                      mixBlendMode: 'multiply'
+                    }}
+                  />
+                )}
+
                 {/* Mod Icon */}
-                <div className="w-10 h-10 bg-gray-800 rounded-lg overflow-hidden flex-shrink-0 border border-gray-700">
+                <div className="w-10 h-10 bg-gray-800 rounded-lg overflow-hidden flex-shrink-0 border border-gray-700 relative">
                   {mod.iconUrl ? (
                     <img src={mod.iconUrl} alt="" className="w-full h-full object-cover" />
                   ) : (
                     <div className="w-full h-full flex items-center justify-center text-gray-600 text-xs">?</div>
                   )}
+                  {!mod.enabled && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/50">
+                      <span className="text-xs font-bold text-white">OFF</span>
+                    </div>
+                  )}
                 </div>
 
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                    <div className="text-sm font-medium text-gray-200 truncate group-hover:text-white transition-colors">
+                    <div className={`text-sm font-medium truncate transition-colors ${mod.enabled ? 'text-gray-200 group-hover:text-white' : 'text-gray-500 line-through'}`}>
                       {mod.fullName.split('-')[1] || mod.fullName}
                     </div>
-                    {hasUpdate && (
+                    {hasUpdate && mod.enabled && (
                       <div className="text-amber-400 text-[10px] bg-amber-400/10 px-1.5 py-0.5 rounded border border-amber-400/20" title={`Update available: ${latestVersion}`}>
                         UPDATE
                       </div>
@@ -432,6 +501,31 @@ function App() {
                 </div>
 
                 <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center opacity-0 group-hover:opacity-100 transition-opacity gap-1 bg-gray-800/90 rounded-lg p-1 shadow-sm backdrop-blur-sm">
+                  <button
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      if (pkg) {
+                        setSelectedMod(pkg);
+                      } else {
+                        // Try to fetch package info
+                        try {
+                          const fetchedPkg = await window.ipcRenderer.fetchPackageByName(mod.fullName);
+                          if (fetchedPkg) {
+                            setSelectedMod(fetchedPkg);
+                          } else {
+                            alert("Could not fetch details for this mod.");
+                          }
+                        } catch (err) {
+                          console.error("Failed to fetch mod details", err);
+                          alert("Failed to fetch mod details.");
+                        }
+                      }
+                    }}
+                    className="p-1.5 text-gray-400 hover:text-blue-400 hover:bg-blue-400/10 rounded-md transition-colors"
+                    title="View Details"
+                  >
+                    ℹ️
+                  </button>
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -513,6 +607,12 @@ function App() {
           isInstalled={activeProfileId ? profiles.find(p => p.id === activeProfileId)?.mods.some(m => m.uuid4 === selectedMod.versions[0].uuid4) ?? false : false}
         />
       )}
+      <ProgressModal
+        isOpen={progressState.isOpen}
+        title={progressState.title}
+        progress={progressState.progress}
+        currentTask={progressState.currentTask}
+      />
     </>
   )
 }

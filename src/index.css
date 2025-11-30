@@ -23,6 +23,10 @@ body {
   min-height: 100vh;
   background-color: #111827;
   /* gray-900 */
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
 }
 
 /* Custom Scrollbar */

@@ -76,14 +76,89 @@ ipcMain.handle('check-directory-exists', async (_, dirPath) => {
 // Thunderstore API handlers
 ipcMain.handle('fetch-communities', async () => {
     try {
+        const fetchPage = (url) => {
+            return new Promise((resolve, reject) => {
+                https.get(url, (res) => {
+                    let data = '';
+                    res.on('data', chunk => data += chunk);
+                    res.on('end', () => {
+                        try {
+                            const json = JSON.parse(data);
+                            resolve(json);
+                        }
+                        catch (e) {
+                            reject(e);
+                        }
+                    });
+                }).on('error', reject);
+            });
+        };
+        let allResults = [];
+        let nextUrl = 'https://thunderstore.io/api/experimental/community/';
+        while (nextUrl) {
+            console.log(`Fetching communities from: ${nextUrl}`);
+            const data = await fetchPage(nextUrl);
+            if (data.results) {
+                allResults = [...allResults, ...data.results];
+                nextUrl = data.pagination?.next_link || null;
+            }
+            else {
+                // Fallback for non-paginated response or error
+                if (Array.isArray(data)) {
+                    allResults = data;
+                }
+                else {
+                    allResults = [data];
+                }
+                nextUrl = null;
+            }
+        }
+        console.log(`Fetched total ${allResults.length} communities`);
+        return allResults;
+    }
+    catch (error) {
+        console.error('Failed to fetch communities', error);
+        throw error;
+    }
+});
+// Fetch community cover images from /communities/ page
+ipcMain.handle('fetch-community-images', async () => {
+    try {
         return new Promise((resolve, reject) => {
-            https.get('https://thunderstore.io/api/experimental/community/', (res) => {
+            https.get('https://thunderstore.io/communities/', (res) => {
                 let data = '';
                 res.on('data', chunk => data += chunk);
                 res.on('end', () => {
                     try {
-                        const json = JSON.parse(data);
-                        resolve(json.results || json);
+                        // Extract image URLs from both <link rel="preload"> and <img> tags
+                        const imageMap = {};
+                        // Pattern 1: <link rel="preload" as="image" href="..."/>
+                        const preloadRegex = /<link rel="preload" as="image" href="(https:\/\/gcdn\.thunderstore\.io\/live\/community\/([a-z0-9-]+)\/[^"]+)"/g;
+                        let match;
+                        while ((match = preloadRegex.exec(data)) !== null) {
+                            const coverUrl = match[1];
+                            const identifier = match[2];
+                            // Only accept images that look like covers (contain 360x480 or 'cover' or 'cov' or 'banner')
+                            if (coverUrl.includes('360x480') || coverUrl.includes('cover') || coverUrl.includes('cov') || coverUrl.includes('Banner')) {
+                                if (!imageMap[identifier]) {
+                                    imageMap[identifier] = coverUrl;
+                                    console.log(`[preload] Extracted image for ${identifier}: ${coverUrl}`);
+                                }
+                            }
+                        }
+                        // Pattern 2: <img class="image__src" ... src="https://gcdn.thunderstore.io/live/community/IDENTIFIER/..."/>
+                        // More flexible - accepts any image from the community folder
+                        const imgRegex = /<img[^>]*class="image__src"[^>]*src="(https:\/\/gcdn\.thunderstore\.io\/live\/community\/([a-z0-9-]+)\/[^"]+\.(png|webp|jpg))"/g;
+                        while ((match = imgRegex.exec(data)) !== null) {
+                            const coverUrl = match[1];
+                            const identifier = match[2];
+                            if (!imageMap[identifier]) {
+                                imageMap[identifier] = coverUrl;
+                                console.log(`[img] Extracted image for ${identifier}: ${coverUrl}`);
+                            }
+                        }
+                        console.log(`Extracted ${Object.keys(imageMap).length} community images`);
+                        resolve(imageMap);
                     }
                     catch (e) {
                         reject(e);
@@ -93,7 +168,7 @@ ipcMain.handle('fetch-communities', async () => {
         });
     }
     catch (error) {
-        console.error('Failed to fetch communities', error);
+        console.error('Failed to fetch community images', error);
         throw error;
     }
 });
@@ -120,9 +195,17 @@ ipcMain.handle('fetch-packages', async (_, communityIdentifier) => {
     }
 });
 ipcMain.handle('fetch-package-by-name', async (_, nameString) => {
-    // nameString is "Namespace-Name"
-    // Handle names with dashes correctly (e.g. "Team-Name-With-Dashes")
-    const parts = nameString.split('-');
+    // nameString might be "Namespace-Name" or "Namespace-Name-Version"
+    // 1. Strip version if present
+    const versionMatch = nameString.match(/^(.*)-(\d+\.\d+\.\d+)$/);
+    let cleanName = nameString;
+    if (versionMatch) {
+        cleanName = versionMatch[1];
+        console.log(`Stripped version for fetch: ${nameString} -> ${cleanName}`);
+    }
+    // 2. Split Namespace and Name
+    // Assumption: Namespace is the first part before the first dash
+    const parts = cleanName.split('-');
     const namespace = parts[0];
     const name = parts.slice(1).join('-');
     console.log(`Fetching package by name: ${namespace}/${name}`);
@@ -134,16 +217,23 @@ ipcMain.handle('fetch-package-by-name', async (_, nameString) => {
                 res.on('end', () => {
                     try {
                         if (res.statusCode !== 200) {
+                            console.error(`Failed to fetch ${namespace}/${name}: Status ${res.statusCode}`);
+                            console.error(`Response: ${data.substring(0, 200)}`);
                             resolve(null); // Not found
                             return;
                         }
+                        console.log(`Successfully fetched ${namespace}/${name}`);
                         resolve(JSON.parse(data));
                     }
                     catch (e) {
+                        console.error(`Error parsing response for ${namespace}/${name}:`, e);
                         reject(e);
                     }
                 });
-            }).on('error', reject);
+            }).on('error', (err) => {
+                console.error(`Network error fetching ${namespace}/${name}:`, err);
+                reject(err);
+            });
         });
     }
     catch (error) {
@@ -207,12 +297,14 @@ ipcMain.handle('import-profile', async (_, code) => {
                     return {
                         type: 'profile',
                         name: profileData.profileName,
+                        game: profileData.gameIdentifier || null,
                         mods: profileData.mods.map((m) => {
                             const versionStr = `${m.version.major}.${m.version.minor}.${m.version.patch}`;
                             let name = m.name;
-                            // Fix for bad exports: strip version from name if present
-                            if (name.endsWith(`-${versionStr}`)) {
-                                name = name.substring(0, name.length - versionStr.length - 1);
+                            // Fix for bad exports: strip version from name if present using Regex
+                            const versionMatch = name.match(/^(.*)-(\d+\.\d+\.\d+)$/);
+                            if (versionMatch) {
+                                name = versionMatch[1];
                             }
                             return {
                                 name: name,
@@ -296,13 +388,38 @@ ipcMain.handle('import-profile-from-file', async (_, filePath) => {
             return {
                 type: 'profile',
                 name: profileData.profileName,
+                game: profileData.gameIdentifier || null,
                 mods: profileData.mods.map((m) => {
                     const versionStr = `${m.version.major}.${m.version.minor}.${m.version.patch}`;
                     let name = m.name;
+                    console.log(`Processing import mod: "${name}", version: "${versionStr}"`);
                     // Fix for bad exports: strip version from name if present
-                    if (name.endsWith(`-${versionStr}`)) {
-                        name = name.substring(0, name.length - versionStr.length - 1);
+                    // Strategy 1: Regex match for "-X.Y.Z" at the end
+                    const versionMatch = name.match(/^(.*)-(\d+\.\d+\.\d+)$/);
+                    if (versionMatch) {
+                        const cleanName = versionMatch[1];
+                        const versionInName = versionMatch[2];
+                        console.log(`Regex matched: ${cleanName} | ${versionInName}`);
+                        // We trust the regex more than the metadata version for splitting
+                        name = cleanName;
                     }
+                    else if (name.endsWith(versionStr)) {
+                        // Strategy 2: Simple string suffix check
+                        // e.g. "ModName-1.0.0" ends with "1.0.0" -> "ModName-" -> "ModName"
+                        // We need to handle the hyphen
+                        console.log(`Suffix matched version ${versionStr}`);
+                        const withoutVersion = name.substring(0, name.length - versionStr.length);
+                        if (withoutVersion.endsWith('-')) {
+                            name = withoutVersion.substring(0, withoutVersion.length - 1);
+                        }
+                        else {
+                            name = withoutVersion;
+                        }
+                    }
+                    else {
+                        console.log(`No version suffix detected in "${name}"`);
+                    }
+                    console.log(`Final clean name: "${name}"`);
                     return {
                         name: name,
                         version: versionStr,
@@ -320,22 +437,40 @@ ipcMain.handle('import-profile-from-file', async (_, filePath) => {
         throw error;
     }
 });
-ipcMain.handle('open-mod-folder', async (_, { profileId, modName }) => {
+ipcMain.handle('delete-profile-folder', async (_, profileId) => {
     const profileDir = path.join(app.getPath('userData'), 'profiles', profileId);
-    const modPath = path.join(profileDir, 'BepInEx', 'plugins', modName);
-    if (fs.existsSync(modPath)) {
-        shell.showItemInFolder(modPath);
-        return true;
+    if (fs.existsSync(profileDir)) {
+        fs.rmSync(profileDir, { recursive: true, force: true });
     }
-    else {
-        // Try opening plugins folder if specific mod folder doesn't exist
-        const pluginsPath = path.join(profileDir, 'BepInEx', 'plugins');
-        if (fs.existsSync(pluginsPath)) {
-            shell.openPath(pluginsPath);
-            return true;
+    return true;
+});
+ipcMain.handle('open-mod-folder', async (_, { profileId, modName }) => {
+    const pluginsDir = path.join(app.getPath('userData'), 'profiles', profileId, 'BepInEx', 'plugins');
+    if (!fs.existsSync(pluginsDir)) {
+        const profileDir = path.join(app.getPath('userData'), 'profiles', profileId);
+        if (fs.existsSync(profileDir)) {
+            shell.openPath(profileDir);
+            return;
+        }
+        return;
+    }
+    try {
+        const files = fs.readdirSync(pluginsDir);
+        // Try to find a folder that includes the mod name (case insensitive)
+        const modFolder = files.find(f => f.toLowerCase().includes(modName.toLowerCase()));
+        if (modFolder) {
+            const fullPath = path.join(pluginsDir, modFolder);
+            shell.openPath(fullPath);
+        }
+        else {
+            // Fallback: open the plugins folder
+            shell.openPath(pluginsDir);
         }
     }
-    return false;
+    catch (e) {
+        console.error('Error opening mod folder:', e);
+        shell.openPath(pluginsDir);
+    }
 });
 ipcMain.handle('export-profile', async (_, profileId) => {
     try {
