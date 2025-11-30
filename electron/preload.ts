@@ -19,6 +19,17 @@ contextBridge.exposeInMainWorld('ipcRenderer', {
         return ipcRenderer.invoke(channel, ...omit)
     },
 
-    // You can expose other APTs you need here.
-    // ...
+    // Profile API
+    getProfiles: () => ipcRenderer.invoke('get-profiles'),
+    saveProfiles: (profiles: any) => ipcRenderer.invoke('save-profiles', profiles),
+
+    // File System API
+    selectFolder: () => ipcRenderer.invoke('select-folder'),
+    installMod: (downloadUrl: string, modName: string, gameDir: string) =>
+        ipcRenderer.invoke('install-mod', downloadUrl, modName, gameDir),
+    checkDirectoryExists: (dirPath: string) => ipcRenderer.invoke('check-directory-exists', dirPath),
+
+    // Thunderstore API
+    fetchCommunities: () => ipcRenderer.invoke('fetch-communities'),
+    fetchPackages: (communityIdentifier: string) => ipcRenderer.invoke('fetch-packages', communityIdentifier),
 })
