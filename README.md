@@ -2,9 +2,6 @@
 Questo progetto non è ancora pronto.<br>
 Se volete contribuire o "rubarlo", non chiedete: mi basta che mettiate i crediti (grazie alla licenza MIT)
 
-## LE STELLE SONO BELLE
-[![Star History Chart](https://api.star-history.com/svg?repos=Zard-Studios/r2modmac&type=date&legend=top-left)](https://www.star-history.com/#Zard-Studios/r2modmac&type=date&legend=top-left)
-
 ## Risoluzione Problemi
 
 ### "L'applicazione è danneggiata e non può essere aperta"
@@ -15,3 +12,6 @@ Per risolvere, apri il Terminale ed esegui:
 sudo find /Applications/r2modmac.app -exec xattr -c {} \;
 ```
 inserire la password (se necessario) e poi prova ad aprire l'app di nuovo.
+
+## LE STELLE SONO BELLE
+[![Star History Chart](https://api.star-history.com/svg?repos=Zard-Studios/r2modmac&type=date&legend=top-left)](https://www.star-history.com/#Zard-Studios/r2modmac&type=date&legend=top-left)
