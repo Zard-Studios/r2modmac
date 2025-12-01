@@ -10,13 +10,16 @@ export interface IElectronAPI {
     checkDirectoryExists: (dirPath: string) => Promise<boolean>;
     fetchCommunities: () => Promise<Community[]>;
     fetchCommunityImages: () => Promise<Record<string, string>>;
-    fetchPackages: (communityId: string) => Promise<Package[]>;
-    fetchPackageByName: (name: string) => Promise<Package | null>;
+    fetchPackages: (gameId: string) => Promise<number>;
+    getPackages: (gameId: string, page: number, pageSize: number, search: string) => Promise<any[]>;
+    fetchPackageByName: (name: string) => Promise<any>;
     importProfile: (code: string) => Promise<any>;
     importProfileFromFile: (path: string) => Promise<any>;
     openModFolder: (profileId: string, modName: string) => Promise<void>;
     exportProfile: (profileId: string) => Promise<any>;
     deleteProfileFolder: (profileId: string) => Promise<boolean>;
+    removeMod: (profileId: string, modName: string) => Promise<void>;
+    confirm: (title: string, message: string) => Promise<boolean>;
 }
 
 declare global {

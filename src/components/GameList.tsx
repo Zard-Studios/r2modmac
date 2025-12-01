@@ -50,8 +50,8 @@ export function GameSelector({ communities, selectedCommunity, onSelect, communi
     };
 
     return (
-        <div className="p-4 pt-0 space-y-4 h-full flex flex-col">
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 overflow-y-auto pr-2 pb-4 pt-2">
+        <div className="p-4 pt-0 space-y-4">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 pb-4 pt-2">
                 {communities.map(community => {
                     const isSelected = selectedCommunity === community.identifier;
                     const gradient = getGradient(community.name);

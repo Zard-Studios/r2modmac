@@ -7,7 +7,7 @@ interface LayoutProps {
 
 export function Layout({ sidebar, main }: LayoutProps) {
     return (
-        <div className="flex h-screen bg-gray-900 text-white">
+        <div className="flex h-full bg-gray-900 text-white">
             {/* Sidebar */}
             <div className="flex-shrink-0">
                 {sidebar}

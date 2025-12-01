@@ -1,5 +1,3 @@
-import React from 'react';
-
 interface ProgressModalProps {
     isOpen: boolean;
     title: string;

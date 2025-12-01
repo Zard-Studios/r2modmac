@@ -8,10 +8,10 @@ interface ProfileState {
     // Actions
     createProfile: (name: string, gameIdentifier: string) => string;
     selectProfile: (profileId: string) => void;
-    deleteProfile: (profileId: string) => void;
+    deleteProfile: (profileId: string) => Promise<void>;
     setProfiles: (profiles: Profile[]) => void;
     addMod: (profileId: string, mod: InstalledMod) => void;
-    removeMod: (profileId: string, modId: string) => void;
+    removeMod: (profileId: string, modId: string) => Promise<void>;
     toggleMod: (profileId: string, modId: string) => void;
     loadProfiles: () => Promise<void>;
 }
@@ -44,13 +44,19 @@ export const useProfileStore = create<ProfileState>((set) => ({
 
     selectProfile: (profileId) => set({ activeProfileId: profileId }),
 
-    deleteProfile: (profileId) => {
+    deleteProfile: async (profileId) => {
+        // First delete from disk, THEN update state
+        // This ensures if there's an error, we don't lose state
+        try {
+            await window.ipcRenderer.deleteProfileFolder(profileId);
+        } catch (e) {
+            console.error("Failed to delete profile folder:", e);
+            // Continue anyway to clean up state
+        }
+
         set((state) => {
             const updatedProfiles = state.profiles.filter(p => p.id !== profileId);
             window.ipcRenderer.saveProfiles(updatedProfiles);
-
-            // Delete the profile folder from disk
-            window.ipcRenderer.deleteProfileFolder(profileId);
 
             return {
                 profiles: updatedProfiles,
@@ -83,7 +89,25 @@ export const useProfileStore = create<ProfileState>((set) => ({
         });
     },
 
-    removeMod: (profileId, modId) => {
+    removeMod: async (profileId, modId) => {
+        // First get the mod info and delete files, THEN update state
+        const state = useProfileStore.getState();
+        const profileIndex = state.profiles.findIndex(p => p.id === profileId);
+        if (profileIndex === -1) return;
+
+        const profile = state.profiles[profileIndex];
+        const mod = profile.mods.find(m => m.uuid4 === modId);
+
+        if (mod) {
+            try {
+                const modName = mod.fullName.split('-').slice(0, 2).join('-');
+                await window.ipcRenderer.removeMod(profileId, modName);
+            } catch (e) {
+                console.error("Failed to remove mod files:", e);
+                // Continue to update state anyway
+            }
+        }
+
         set((state) => {
             const profileIndex = state.profiles.findIndex(p => p.id === profileId);
             if (profileIndex === -1) return state;

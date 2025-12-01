@@ -6,7 +6,6 @@ import { VirtualizedModGrid } from './components/VirtualizedModGrid'
 import { ModDetailModal } from './components/ModDetailModal'
 import { ProfileList } from './components/ProfileList'
 import { ProgressModal } from './components/ProgressModal'
-import { fetchPackages } from './api/thunderstore'
 import { useProfileStore } from './store/useProfileStore'
 import type { Community, Package, PackageVersion } from './types/thunderstore'
 import type { InstalledMod } from './types/profile'
@@ -18,6 +17,10 @@ function App() {
   const [loading, setLoading] = useState(true)
   const [loadingMods, setLoadingMods] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+  const [page, setPage] = useState(0)
+  const [hasMore, setHasMore] = useState(true)
+  const PAGE_SIZE = 50
+
   const [selectedMod, setSelectedMod] = useState<Package | null>(null)
   const [gameSearchQuery, setGameSearchQuery] = useState('')
   const [progressState, setProgressState] = useState({
@@ -48,13 +51,24 @@ function App() {
 
   useEffect(() => {
     if (selectedCommunity) {
-      loadPackages(selectedCommunity)
+      // Initial load for game
+      loadPackages(selectedCommunity, 0, true)
       // Reset profile selection when changing game
       if (activeProfileId) {
-        selectProfile('') // or null if store supports it, currently string
+        selectProfile('')
       }
     }
   }, [selectedCommunity])
+
+  // Search Effect
+  useEffect(() => {
+    if (selectedCommunity) {
+      const timer = setTimeout(() => {
+        loadPackages(selectedCommunity, 0, true)
+      }, 300) // Debounce search
+      return () => clearTimeout(timer)
+    }
+  }, [searchQuery])
 
   const loadData = async () => {
     setLoading(true)
@@ -72,15 +86,38 @@ function App() {
     setLoading(false)
   }
 
-  const loadPackages = async (communityId: string) => {
-    setLoadingMods(true)
+  const loadPackages = async (communityId: string, pageNum: number, reset: boolean = false) => {
+    if (reset) {
+      setLoadingMods(true)
+      setPage(0)
+      setPackages([])
+      setHasMore(true)
+    }
+
     try {
-      const data = await fetchPackages(communityId)
-      setPackages(data)
+      // First fetch ensures cache is populated (returns count)
+      if (pageNum === 0 && reset) {
+        await window.ipcRenderer.fetchPackages(communityId)
+      }
+
+      const newPackages = await window.ipcRenderer.getPackages(communityId, pageNum, PAGE_SIZE, searchQuery)
+
+      if (newPackages.length < PAGE_SIZE) {
+        setHasMore(false)
+      }
+
+      setPackages(prev => reset ? newPackages : [...prev, ...newPackages])
+      setPage(pageNum)
     } catch (err) {
       console.error('Failed to load packages', err)
     } finally {
       setLoadingMods(false)
+    }
+  }
+
+  const handleLoadMore = () => {
+    if (!loadingMods && hasMore && selectedCommunity) {
+      loadPackages(selectedCommunity, page + 1, false)
     }
   }
 
@@ -305,7 +342,7 @@ function App() {
   if (!selectedCommunity) {
     // STEP 1: GAME SELECTION
     content = (
-      <div className="flex flex-col h-full bg-gray-900 p-8">
+      <div className="flex flex-col h-full bg-gray-900 p-8 overflow-y-auto">
         <div className="max-w-4xl mx-auto w-full">
           <div className="text-center mb-12">
             <h1 className="text-4xl font-bold text-white mb-4">Welcome to r2modmac</h1>
@@ -343,8 +380,8 @@ function App() {
   } else if (!activeProfileId) {
     // STEP 2: PROFILE SELECTION
     content = (
-      <div className="flex flex-col h-full bg-gray-900">
-        <div className="p-4 border-b border-gray-800 flex items-center gap-4">
+      <div className="flex flex-col h-full bg-gray-900 overflow-y-auto">
+        <div className="p-4 border-b border-gray-800 flex items-center gap-4 sticky top-0 bg-gray-900 z-10">
           <button
             onClick={() => setSelectedCommunity(null)}
             className="text-gray-400 hover:text-white flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-gray-800 transition-colors"
@@ -537,10 +574,11 @@ function App() {
                     📂
                   </button>
                   <button
-                    onClick={(e) => {
+                    onClick={async (e) => {
                       e.stopPropagation();
-                      if (confirm(`Uninstall ${mod.fullName}?`)) {
-                        removeMod(activeProfile.id, mod.uuid4);
+                      const confirmed = await window.ipcRenderer.confirm('Uninstall Mod', `Uninstall ${mod.fullName}?`);
+                      if (confirmed) {
+                        await removeMod(activeProfile.id, mod.uuid4);
                       }
                     }}
                     className="p-1.5 text-gray-400 hover:text-red-400 hover:bg-red-400/10 rounded-md transition-colors"
@@ -586,6 +624,7 @@ function App() {
               packages={filteredPackages}
               onInstall={handleInstallMod}
               onModClick={setSelectedMod}
+              onLoadMore={handleLoadMore}
             />
           )}
         </div>
@@ -595,25 +634,43 @@ function App() {
     content = <Layout sidebar={sidebar} main={main} />;
   }
 
+  // WRAPPER
   return (
-    <>
-      {content}
+    <div className="h-screen w-screen flex flex-col bg-gray-900 overflow-hidden">
+      {/* Fixed TitleBar for dragging */}
+      <div data-tauri-drag-region className="h-8 w-full flex-shrink-0 bg-transparent z-50" />
+
+      {/* Scrollable Content Area */}
+      <div className="flex-1 overflow-hidden relative">
+        {content}
+      </div>
+
+      {/* Modals */}
       {selectedMod && (
         <ModDetailModal
           mod={selectedMod.versions[0]}
           isOpen={!!selectedMod}
           onClose={() => setSelectedMod(null)}
-          onInstall={() => handleInstallMod(selectedMod)}
-          isInstalled={activeProfileId ? profiles.find(p => p.id === activeProfileId)?.mods.some(m => m.uuid4 === selectedMod.versions[0].uuid4) ?? false : false}
+          onInstall={() => {
+            if (activeProfileId) {
+              handleInstallMod(selectedMod, activeProfileId);
+            }
+          }}
+          isInstalled={
+            activeProfileId
+              ? profiles.find(p => p.id === activeProfileId)?.mods.some(m => m.fullName.startsWith(selectedMod.full_name)) ?? false
+              : false
+          }
         />
       )}
+
       <ProgressModal
         isOpen={progressState.isOpen}
         title={progressState.title}
         progress={progressState.progress}
         currentTask={progressState.currentTask}
       />
-    </>
+    </div>
   )
 }
 

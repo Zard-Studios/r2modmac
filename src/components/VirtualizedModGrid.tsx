@@ -7,9 +7,10 @@ interface VirtualizedModGridProps {
     packages: Package[];
     onInstall: (pkg: Package) => void;
     onModClick: (pkg: Package) => void;
+    onLoadMore?: () => void;
 }
 
-export function VirtualizedModGrid({ packages, onInstall, onModClick }: VirtualizedModGridProps) {
+export function VirtualizedModGrid({ packages, onInstall, onModClick, onLoadMore }: VirtualizedModGridProps) {
     const parentRef = useRef<HTMLDivElement>(null);
     const [columnCount, setColumnCount] = useState(3);
 
@@ -47,6 +48,28 @@ export function VirtualizedModGrid({ packages, onInstall, onModClick }: Virtuali
         estimateSize: () => 280,
         overscan: 2,
     });
+
+    // Infinite scroll detection
+    useEffect(() => {
+        if (!onLoadMore || !parentRef.current) return;
+
+        const handleScroll = () => {
+            const element = parentRef.current;
+            if (!element) return;
+
+            const { scrollTop, scrollHeight, clientHeight } = element;
+            const scrollPercentage = (scrollTop + clientHeight) / scrollHeight;
+
+            // Trigger load more when 80% scrolled
+            if (scrollPercentage > 0.8) {
+                onLoadMore();
+            }
+        };
+
+        const element = parentRef.current;
+        element.addEventListener('scroll', handleScroll);
+        return () => element.removeEventListener('scroll', handleScroll);
+    }, [onLoadMore]);
 
     return (
         <div
