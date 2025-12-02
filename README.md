@@ -5,8 +5,8 @@ Se volete contribuire o "rubarlo", non chiedete: mi basta che mettiate i crediti
 ## Risoluzione Problemi
 
 ### "L'applicazione è danneggiata e non può essere aperta"
-Se vedi questo errore quando apri l'app, è perché non è ancora notarizzata da Apple.
-Per risolvere, apri il Terminale ed esegui:
+Se vedi questo errore quando apri l'app, è perché non è stata firmata.
+Per risolvere questo problema, apri il Terminale ed esegui:
 
 ```bash
 sudo find /Applications/r2modmac.app -exec xattr -c {} \;
