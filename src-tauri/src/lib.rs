@@ -132,6 +132,7 @@ pub fn run() {
             remove_mod,
             check_directory_exists,
             export_profile,
+            share_profile,
             confirm_dialog
         ])
         .run(tauri::generate_context!())
@@ -370,7 +371,7 @@ async fn get_packages(
 }
 
 #[command]
-async fn fetch_package_by_name(name: String) -> Result<Option<serde_json::Value>, String> {
+async fn fetch_package_by_name(state: tauri::State<'_, AppState>, name: String, game_id: Option<String>) -> Result<Option<serde_json::Value>, String> {
     // name might be "Namespace-Name" or "Namespace-Name-Version"
     
     // 1. Strip version if present (Regex: ^(.*)-(\d+\.\d+\.\d+)$)
@@ -381,7 +382,30 @@ async fn fetch_package_by_name(name: String) -> Result<Option<serde_json::Value>
         name.clone()
     };
 
-    // 2. Split Namespace and Name
+    // 2. Check Cache if game_id is provided
+    if let Some(gid) = game_id {
+        if let Ok(packages_lock) = state.packages.lock() {
+            if let Some(packages) = packages_lock.get(&gid) {
+                // Find package in cache
+                // Cache structure: Array of package objects
+                // We need to match full_name or name
+                // The cache stores objects with "full_name": "Namespace-Name"
+                
+                let target_name = clean_name.to_lowercase();
+                
+                if let Some(pkg) = packages.iter().find(|p| {
+                     p["full_name"].as_str().unwrap_or("").to_lowercase() == target_name
+                }) {
+                    eprintln!("[fetch_package_by_name] Found {} in cache for game {}", clean_name, gid);
+                    return Ok(Some(pkg.clone()));
+                }
+            }
+        }
+    }
+
+    eprintln!("[fetch_package_by_name] Cache miss for {}. Fetching from API...", clean_name);
+
+    // 3. Split Namespace and Name
     let parts: Vec<&str> = clean_name.splitn(2, '-').collect();
     if parts.len() != 2 {
         return Ok(None);
@@ -755,4 +779,91 @@ async fn export_profile(app: AppHandle, profile_id: String) -> Result<serde_json
     } else {
         Ok(serde_json::json!({ "success": false, "error": "Cancelled" }))
     }
+}
+
+#[command]
+async fn share_profile(app: AppHandle, profile_id: String) -> Result<String, String> {
+    // 1. Read profiles.json
+    let profiles_path = app.path().app_data_dir().unwrap().join("profiles.json");
+    if !profiles_path.exists() {
+        return Err("No profiles found".to_string());
+    }
+    let profiles_data = fs::read_to_string(&profiles_path).map_err(|e| e.to_string())?;
+    let profiles: Vec<serde_json::Value> = serde_json::from_str(&profiles_data).map_err(|e| e.to_string())?;
+    
+    let profile = profiles.iter().find(|p| p["id"] == profile_id).ok_or("Profile not found")?;
+    
+    // 2. Create export data (Same logic as export_profile)
+    let mods = profile["mods"].as_array().unwrap_or(&vec![]).iter().map(|m| {
+        let full_name = m["fullName"].as_str().unwrap_or("");
+        let version_number = m["versionNumber"].as_str().unwrap_or("0.0.0");
+        let enabled = m["enabled"].as_bool().unwrap_or(true);
+        
+        // Clean name logic (strip version suffix)
+        let clean_name = if full_name.ends_with(&format!("-{}", version_number)) {
+            &full_name[0..full_name.len() - version_number.len() - 1]
+        } else {
+            full_name
+        };
+        
+        let version_parts: Vec<&str> = version_number.split('.').collect();
+        let major = version_parts.get(0).unwrap_or(&"0").parse().unwrap_or(0);
+        let minor = version_parts.get(1).unwrap_or(&"0").parse().unwrap_or(0);
+        let patch = version_parts.get(2).unwrap_or(&"0").parse().unwrap_or(0);
+        
+        serde_json::json!({
+            "name": clean_name,
+            "version": {
+                "major": major,
+                "minor": minor,
+                "patch": patch
+            },
+            "enabled": enabled
+        })
+    }).collect::<Vec<_>>();
+    
+    let export_data = serde_json::json!({
+        "profileName": profile["name"],
+        "mods": mods
+    });
+    
+    // 3. Convert to YAML
+    let yaml_content = serde_yaml::to_string(&export_data).map_err(|e| e.to_string())?;
+    
+    // 4. Create Zip in Memory
+    let mut zip_buffer = Vec::new();
+    {
+        let cursor = std::io::Cursor::new(&mut zip_buffer);
+        let mut zip = zip::ZipWriter::new(cursor);
+        let options = zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Stored);
+        
+        zip.start_file("export.r2x", options).map_err(|e| e.to_string())?;
+        use std::io::Write;
+        zip.write_all(yaml_content.as_bytes()).map_err(|e| e.to_string())?;
+        
+        zip.finish().map_err(|e| e.to_string())?;
+    }
+    
+    // 5. Base64 Encode and Prepend Header
+    let base64_data = base64::engine::general_purpose::STANDARD.encode(&zip_buffer);
+    let payload = format!("#r2modman\n{}", base64_data);
+    
+    // 6. Upload to Thunderstore
+    let client = reqwest::Client::new();
+    let response = client.post("https://thunderstore.io/api/experimental/legacyprofile/create/")
+        .header("Content-Type", "application/octet-stream")
+        .body(payload)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+        
+    if !response.status().is_success() {
+        return Err(format!("Upload failed: {}", response.status()));
+    }
+    
+    let json: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
+    
+    // 7. Return Key
+    let key = json["key"].as_str().ok_or("Invalid response: missing key")?;
+    Ok(key.to_string())
 }

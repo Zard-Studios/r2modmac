@@ -12,9 +12,10 @@ export interface IElectronAPI {
     fetchCommunityImages: () => Promise<Record<string, string>>;
     fetchPackages: (gameId: string) => Promise<number>;
     getPackages: (gameId: string, page: number, pageSize: number, search: string) => Promise<any[]>;
-    fetchPackageByName: (name: string) => Promise<any>;
+    fetchPackageByName: (name: string, gameId?: string | null) => Promise<Package | null>;
     importProfile: (code: string) => Promise<any>;
     importProfileFromFile: (path: string) => Promise<any>;
+    shareProfile: (profileId: string) => Promise<string>;
     openModFolder: (profileId: string, modName: string) => Promise<void>;
     exportProfile: (profileId: string) => Promise<any>;
     deleteProfileFolder: (profileId: string) => Promise<boolean>;

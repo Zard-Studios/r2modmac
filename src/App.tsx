@@ -233,7 +233,13 @@ function App() {
   const processImportResult = async (result: any) => {
     if (result.type === 'profile') {
       // It's an r2modman profile export
-      const profileName = result.name;
+      let profileName = result.name;
+
+      // Remove "Imported: " prefix if present (compatibility with r2modman)
+      if (profileName.startsWith("Imported: ")) {
+        profileName = profileName.substring(10);
+      }
+
       const newProfileId = createProfile(profileName, selectedCommunity!);
 
       setProgressState({
@@ -245,70 +251,111 @@ function App() {
 
       // Wait for profile creation
       setTimeout(async () => {
-        // Install all mods from the profile
         let installedCount = 0;
         const totalMods = result.mods.length;
+        const BATCH_SIZE = 5;
+        const failedMods: string[] = [];
 
-        for (let i = 0; i < totalMods; i++) {
-          const mod = result.mods[i];
-          const progress = Math.round(((i + 1) / totalMods) * 100);
-
-          setProgressState(prev => ({
-            ...prev,
-            progress,
-            currentTask: `Installing ${mod.name} (${i + 1}/${totalMods})...`
-          }));
-
-          // mod.name is "Team-Name"
-          // Try to find in local list first
-          let pkg: Package | undefined | null = packages.find(p => p.full_name === mod.name);
-
-          // If not found, fetch from API
-          if (!pkg) {
+        // Helper for retrying fetches
+        const fetchWithRetry = async (name: string, retries = 3) => {
+          for (let i = 0; i < retries; i++) {
             try {
-              console.log(`Fetching missing package info for ${mod.name}...`);
-              pkg = await window.ipcRenderer.fetchPackageByName(mod.name);
+              // Pass selectedCommunity (gameId) to use cache
+              const pkg = await window.ipcRenderer.fetchPackageByName(name, selectedCommunity);
+              if (pkg) return pkg;
+              await new Promise(r => setTimeout(r, 1000)); // 1s delay
             } catch (e) {
-              console.error(`Failed to fetch info for ${mod.name}`, e);
+              if (i === retries - 1) throw e;
+              await new Promise(r => setTimeout(r, 1000 * (i + 1)));
             }
           }
+          return null;
+        };
 
-          if (pkg) {
-            const version = pkg.versions.find(v => v.version_number === mod.version) || pkg.versions[0];
+        // Process in batches
+        for (let i = 0; i < totalMods; i += BATCH_SIZE) {
+          const batch = result.mods.slice(i, i + BATCH_SIZE);
+
+          await Promise.all(batch.map(async (mod: any, batchIdx: number) => {
+            const globalIdx = i + batchIdx;
+
+            // Update progress
+            setProgressState(prev => ({
+              ...prev,
+              progress: Math.round(((globalIdx + 1) / totalMods) * 100),
+              currentTask: `Installing ${mod.name} (${globalIdx + 1}/${totalMods})...`
+            }));
+
             try {
-              // Install DIRECTLY without recursive dependency check
-              // The profile export already contains all dependencies
-              const installResult = await window.ipcRenderer.installMod(
-                newProfileId,
-                version.download_url,
-                version.full_name
-              );
+              // 1. Find package
+              let pkg: Package | undefined | null = packages.find(p => p.full_name === mod.name);
 
-              if (installResult.success) {
-                const installedMod: InstalledMod = {
-                  uuid4: version.uuid4,
-                  fullName: version.full_name,
-                  versionNumber: version.version_number,
-                  iconUrl: version.icon,
-                  enabled: mod.enabled
-                };
-                addMod(newProfileId, installedMod);
-                installedCount++;
+              if (!pkg) {
+                try {
+                  console.log(`Fetching missing package info for ${mod.name}...`);
+                  pkg = await fetchWithRetry(mod.name);
+                } catch (e) {
+                  console.error(`Failed to fetch info for ${mod.name}`, e);
+                }
+              }
+
+              if (pkg) {
+                const version = pkg.versions.find(v => v.version_number === mod.version) || pkg.versions[0];
+
+                // 2. Install with retry
+                let installed = false;
+                for (let attempt = 0; attempt < 3; attempt++) {
+                  try {
+                    const installResult = await window.ipcRenderer.installMod(
+                      newProfileId,
+                      version.download_url,
+                      version.full_name
+                    );
+
+                    if (installResult.success) {
+                      const installedMod: InstalledMod = {
+                        uuid4: version.uuid4,
+                        fullName: version.full_name,
+                        versionNumber: version.version_number,
+                        iconUrl: version.icon,
+                        enabled: mod.enabled
+                      };
+                      addMod(newProfileId, installedMod);
+                      installedCount++;
+                      installed = true;
+                      break; // Success
+                    } else {
+                      throw new Error(installResult.error);
+                    }
+                  } catch (e) {
+                    console.warn(`Install attempt ${attempt + 1} failed for ${mod.name}`, e);
+                    if (attempt < 2) await new Promise(r => setTimeout(r, 1000));
+                  }
+                }
+
+                if (!installed) {
+                  failedMods.push(mod.name);
+                  console.error(`Failed to install ${mod.name} after retries`);
+                }
               } else {
-                console.error(`Failed to install ${mod.name}: ${installResult.error}`);
+                failedMods.push(mod.name);
+                console.warn(`Mod ${mod.name} could not be found or fetched.`);
               }
             } catch (e) {
-              console.error(`Failed to install ${mod.name}`, e);
+              failedMods.push(mod.name);
+              console.error(`Error processing ${mod.name}`, e);
             }
-          } else {
-            console.warn(`Mod ${mod.name} could not be found or fetched.`);
-          }
+          }));
         }
 
         setProgressState(prev => ({ ...prev, progress: 100, currentTask: 'Import Complete!' }));
         setTimeout(() => {
           setProgressState(prev => ({ ...prev, isOpen: false }));
-          alert(`Imported profile "${result.name}" with ${installedCount} mods.`);
+          let msg = `Imported profile "${result.name}" with ${installedCount}/${totalMods} mods.`;
+          if (failedMods.length > 0) {
+            msg += `\n\nFailed mods:\n${failedMods.join('\n')}`;
+          }
+          alert(msg);
         }, 500);
 
       }, 500);
@@ -447,26 +494,36 @@ function App() {
               <span>📤</span> Export Profile
             </button>
             <button
-              onClick={() => {
-                // Copy profile code/UUID to clipboard
-                // Since we don't have a backend to generate codes yet, we can only share the UUID if it was imported via UUID?
-                // Or we can just explain that sharing via code requires uploading to Thunderstore/r2modman backend which we don't support yet.
-                // BUT, the user asked to share the UUID.
-                // If the profile was imported, it might have a code. But locally created profiles don't have a Thunderstore code.
-                // Let's just copy the Profile Name for now or show a message.
+              onClick={async () => {
+                if (!activeProfileId) return;
 
-                // Wait, "dobbiamo fare sharing della uuid".
-                // If the user means sharing the *local* profile UUID, that's useless for others.
-                // They probably mean "Export as Code".
-                // Since we can't generate codes (requires API key/backend), we can only support Export to File.
+                setProgressState({
+                  isOpen: true,
+                  title: 'Generating Share Code',
+                  progress: 50,
+                  currentTask: 'Uploading profile...'
+                });
 
-                // However, if they want to share the "Modpack UUID" (e.g. they are playing a modpack), we can try to find the modpack ID.
-                // But for custom profiles, "Export to File" is the way.
+                try {
+                  const code = await window.ipcRenderer.shareProfile(activeProfileId);
 
-                alert("To share this profile, please use the 'Export Profile' button to create a file you can send to your friends.\n\nGenerating share codes requires uploading to Thunderstore, which is not yet supported.");
+                  setProgressState(prev => ({ ...prev, progress: 100, currentTask: 'Done!' }));
+                  setTimeout(() => {
+                    setProgressState(prev => ({ ...prev, isOpen: false }));
+
+                    // Copy to clipboard
+                    navigator.clipboard.writeText(code);
+                    alert(`Profile Code Generated: ${code}\n\nCopied to clipboard!`);
+                  }, 500);
+
+                } catch (e: any) {
+                  console.error("Share failed:", e);
+                  setProgressState(prev => ({ ...prev, isOpen: false }));
+                  alert(`Failed to generate code: ${e}`);
+                }
               }}
               className="bg-gray-800 hover:bg-gray-700 text-white text-xs py-2 px-3 rounded-lg transition-colors border border-gray-700"
-              title="Share Code"
+              title="Get Share Code"
             >
               🔗
             </button>
@@ -546,7 +603,7 @@ function App() {
                       } else {
                         // Try to fetch package info
                         try {
-                          const fetchedPkg = await window.ipcRenderer.fetchPackageByName(mod.fullName);
+                          const fetchedPkg = await window.ipcRenderer.fetchPackageByName(mod.fullName, selectedCommunity);
                           if (fetchedPkg) {
                             setSelectedMod(fetchedPkg);
                           } else {

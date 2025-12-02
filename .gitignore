@@ -26,6 +26,7 @@ build
 
 # Editor directories and files
 .vscode/*
+.provvisorio/
 !.vscode/extensions.json
 !.vscode/settings.json
 .idea
