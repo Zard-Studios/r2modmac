@@ -1,4 +1,3 @@
-import { Fragment } from 'react';
 
 interface ExportModalProps {
     isOpen: boolean;
