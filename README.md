@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![r2modmac Banner](https://i.ibb.co/r2JkH8Px/Screenshot-2025-12-03-alle-11-24-00.png)
+![r2modmac Icon](https://i.ibb.co/60j664sL/i-OS-Default-1024x1024-1x.png)
 
 **Un mod manager moderno e nativo per macOS, ispirato a r2modman, riprogettato da 0**
 
