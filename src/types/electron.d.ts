@@ -25,7 +25,9 @@ export interface IElectronAPI {
     getGamePath: (gameIdentifier: string) => Promise<string | null>;
     removeMod: (profileId: string, modName: string) => Promise<void>;
     confirm: (title: string, message: string) => Promise<boolean>;
+    alert: (title: string, message: string) => Promise<void>;
     readImage: (path: string) => Promise<string | null>;
+    installToGame: (gameIdentifier: string, profileId: string) => Promise<void>;
 }
 
 declare global {

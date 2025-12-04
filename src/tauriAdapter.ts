@@ -53,7 +53,14 @@ export const tauriAPI: IElectronAPI = {
     confirm: async (title: string, message: string) => {
         return await invoke('confirm_dialog', { title, message });
     },
+    alert: async (title: string, message: string) => {
+        return await invoke('alert_dialog', { title, message });
+    },
     readImage: async (path: string) => {
         return await invoke('read_image', { path });
+    },
+    installToGame: async (gameIdentifier: string, profileId: string) => {
+        console.log('Installing profile to game:', { gameIdentifier, profileId });
+        return await invoke('install_to_game', { gameIdentifier, profileId });
     }
 };

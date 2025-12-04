@@ -8,6 +8,8 @@ import { ProfileList } from './components/ProfileList'
 import { ProgressModal } from './components/ProgressModal'
 import { SettingsModal } from './components/SettingsModal'
 import { ExportModal } from './components/ExportModal'
+import { CrossOverGuideModal } from './components/CrossOverGuideModal';
+import { ProfileSidebar } from './components/ProfileSidebar';
 import { useProfileStore } from './store/useProfileStore'
 import type { Community, Package, PackageVersion } from './types/thunderstore'
 import type { InstalledMod } from './types/profile'
@@ -31,8 +33,9 @@ function App() {
     progress: 0,
     currentTask: ''
   })
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false)
-  const [isExportModalOpen, setIsExportModalOpen] = useState(false)
+  const [showSettings, setShowSettings] = useState(false)
+  const [showExportModal, setShowExportModal] = useState(false)
+  const [showCrossOverGuide, setShowCrossOverGuide] = useState(false)
 
   const {
     profiles,
@@ -531,210 +534,35 @@ function App() {
     const currentCommunity = communities.find(c => c.identifier === selectedCommunity);
 
     const sidebar = (
-      <div className="h-full flex flex-col bg-gray-900 border-r border-gray-800 w-80">
-        <div className="p-5 border-b border-gray-800">
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => selectProfile('')}
-              className="text-gray-400 hover:text-white p-1.5 -ml-2 rounded-lg hover:bg-gray-800 transition-colors"
-              title="Change Profile"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-              </svg>
-            </button>
-            {activeProfile?.profileImageUrl ? (
-              <img
-                src={activeProfile.profileImageUrl}
-                alt={activeProfile.name}
-                className="w-12 h-12 rounded-xl shadow-lg object-cover bg-gray-800"
-              />
-            ) : (
-              <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-purple-600 rounded-xl shadow-lg flex items-center justify-center text-xl font-bold text-white">
-                {activeProfile?.name.charAt(0).toUpperCase()}
-              </div>
-            )}
-            <div className="min-w-0 flex-1">
-              <h2 className="font-bold text-white truncate text-lg">{activeProfile?.name}</h2>
-              <p className="text-xs text-gray-500 truncate">{activeProfile?.mods.length} mods installed</p>
-            </div>
-          </div>
-
-
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-2 space-y-1">
-          <div className="px-2 py-2 text-xs font-bold text-gray-500 uppercase tracking-wider flex justify-between items-center">
-            <span>Installed Mods</span>
-            <span className="bg-gray-800 text-gray-400 px-2 py-0.5 rounded-full text-[10px]">{activeProfile?.mods.length}</span>
-          </div>
-
-          {activeProfile?.mods.map(mod => {
-            // Strip version from mod.fullName for comparison with packages
-            const modNameWithoutVersion = mod.fullName.replace(/-\d+\.\d+\.\d+$/, '');
-
-            // Check for updates
-            const pkg = packages.find(p => p.full_name === modNameWithoutVersion);
-            const latestVersion = pkg?.versions[0].version_number;
-            const hasUpdate = latestVersion && latestVersion !== mod.versionNumber;
-
-            return (
-              <div
-                key={mod.uuid4}
-                className={`flex items-center gap-3 p-2 rounded-lg hover:bg-gray-800 group cursor-pointer transition-all border border-transparent hover:border-gray-700 relative pr-16 overflow-hidden ${!mod.enabled ? 'opacity-50' : ''}`}
-                onClick={() => {
-                  toggleMod(activeProfile.id, mod.uuid4);
-                }}
-              >
-                {/* Caution Tape Overlay for disabled mods */}
-                {!mod.enabled && (
-                  <div
-                    className="absolute inset-0 pointer-events-none z-10 opacity-30"
-                    style={{
-                      background: 'repeating-linear-gradient(45deg, #000 0px, #000 20px, #fbbf24 20px, #fbbf24 40px)',
-                      mixBlendMode: 'multiply'
-                    }}
-                  />
-                )}
-
-                {/* Mod Icon */}
-                <div className="w-10 h-10 bg-gray-800 rounded-lg overflow-hidden flex-shrink-0 border border-gray-700 relative">
-                  {mod.iconUrl ? (
-                    <img src={mod.iconUrl} alt="" className="w-full h-full object-cover" />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center text-gray-600 text-xs">?</div>
-                  )}
-                  {!mod.enabled && (
-                    <div className="absolute inset-0 flex items-center justify-center bg-black/50">
-                      <span className="text-xs font-bold text-white">OFF</span>
-                    </div>
-                  )}
-                </div>
-
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <div className={`text-sm font-medium truncate transition-colors ${mod.enabled ? 'text-gray-200 group-hover:text-white' : 'text-gray-500 line-through'}`}>
-                      {mod.fullName.split('-')[1] || mod.fullName}
-                    </div>
-                    {hasUpdate && mod.enabled && (
-                      <div className="text-amber-400 text-[10px] bg-amber-400/10 px-1.5 py-0.5 rounded border border-amber-400/20" title={`Update available: ${latestVersion}`}>
-                        UPDATE
-                      </div>
-                    )}
-                  </div>
-                  <div className="text-xs text-gray-500 flex items-center gap-2">
-                    <span>v{mod.versionNumber}</span>
-                  </div>
-                </div>
-
-                <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center opacity-0 group-hover:opacity-100 transition-opacity gap-1 bg-gray-800/90 rounded-lg p-1 shadow-sm backdrop-blur-sm">
-                  <button
-                    onClick={async (e) => {
-                      e.stopPropagation();
-                      if (pkg) {
-                        setSelectedMod(pkg);
-                      } else {
-                        // Try to fetch package info
-                        try {
-                          const fetchedPkg = await window.ipcRenderer.fetchPackageByName(mod.fullName, selectedCommunity);
-                          if (fetchedPkg) {
-                            setSelectedMod(fetchedPkg);
-                          } else {
-                            alert("Could not fetch details for this mod.");
-                          }
-                        } catch (err) {
-                          console.error("Failed to fetch mod details", err);
-                          alert("Failed to fetch mod details.");
-                        }
-                      }
-                    }}
-                    className="p-1.5 text-gray-400 hover:text-blue-400 hover:bg-blue-400/10 rounded-md transition-colors"
-                    title="View Details"
-                  >
-                    ℹ️
-                  </button>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      window.ipcRenderer.openModFolder(activeProfile.id, mod.fullName.split('-')[1]);
-                    }}
-                    className="p-1.5 text-gray-400 hover:text-blue-400 hover:bg-blue-400/10 rounded-md transition-colors"
-                    title="Locate in Finder"
-                  >
-                    📂
-                  </button>
-                  <button
-                    onClick={async (e) => {
-                      e.stopPropagation();
-                      const confirmed = await window.ipcRenderer.confirm('Uninstall Mod', `Uninstall ${mod.fullName}?`);
-                      if (confirmed) {
-                        await removeMod(activeProfile.id, mod.uuid4);
-                      }
-                    }}
-                    className="p-1.5 text-gray-400 hover:text-red-400 hover:bg-red-400/10 rounded-md transition-colors"
-                    title="Uninstall"
-                  >
-                    ✕
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-
-          {activeProfile?.mods.length === 0 && (
-            <div className="text-center py-12 px-4 flex flex-col items-center">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-16 w-16 mb-3 opacity-20 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
-              </svg>
-              <p className="text-gray-500 text-sm font-medium">No mods installed</p>
-              <p className="text-gray-600 text-xs mt-1">Search for mods to get started</p>
-            </div>
-          )}
-        </div>
-        <div className="p-4 border-t border-gray-800 space-y-2">
-          {/* Game Info */}
-          {currentCommunity && (
-            <div className="flex items-center gap-3 mb-4 px-2">
-              <div className="w-10 h-10 rounded-lg overflow-hidden bg-gray-800 flex-shrink-0 border border-gray-700">
-                {communityImages[currentCommunity.identifier] ? (
-                  <img
-                    src={communityImages[currentCommunity.identifier]}
-                    alt={currentCommunity.name}
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center text-gray-600">
-                    {currentCommunity.name.charAt(0)}
-                  </div>
-                )}
-              </div>
-              <div className="min-w-0">
-                <h3 className="text-sm font-bold text-white truncate">{currentCommunity.name}</h3>
-              </div>
-            </div>
-          )}
-
-          <button
-            onClick={() => setIsExportModalOpen(true)}
-            className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors w-full px-2 py-2 rounded-lg hover:bg-gray-800"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-            </svg>
-            <span>Export Profile</span>
-          </button>
-          <button
-            onClick={() => setIsSettingsOpen(true)}
-            className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors w-full px-2 py-2 rounded-lg hover:bg-gray-800"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-            </svg>
-            <span>Settings</span>
-          </button>
-        </div>
-      </div>
+      <ProfileSidebar
+        activeProfile={activeProfile}
+        currentCommunity={currentCommunity || null}
+        communityImage={currentCommunity ? communityImages[currentCommunity.identifier] : undefined}
+        packages={packages}
+        onSelectProfile={selectProfile}
+        onToggleMod={toggleMod}
+        onViewModDetails={(pkg) => setSelectedMod(pkg)}
+        onOpenModFolder={(profileId, modName) => window.ipcRenderer.openModFolder(profileId, modName)}
+        onUninstallMod={async (mod) => {
+          if (!activeProfile) return;
+          const confirmed = await window.ipcRenderer.confirm('Uninstall Mod', `Uninstall ${mod.fullName}?`);
+          if (confirmed) {
+            await removeMod(activeProfile.id, mod.uuid4);
+          }
+        }}
+        onInstallToGame={async () => {
+          try {
+            if (!activeProfile || !currentCommunity) return;
+            await window.ipcRenderer.installToGame(currentCommunity.identifier, activeProfile.id);
+            await window.ipcRenderer.alert('Success', 'Mods successfully installed to game directory!');
+            setShowCrossOverGuide(true);
+          } catch (e: any) {
+            alert('Error installing modpack: ' + e);
+          }
+        }}
+        onExportProfile={() => setShowExportModal(true)}
+        onOpenSettings={() => setShowSettings(true)}
+      />
     );
 
     const main = (
@@ -846,15 +674,20 @@ function App() {
       />
 
       <SettingsModal
-        isOpen={isSettingsOpen}
-        onClose={() => setIsSettingsOpen(false)}
+        isOpen={showSettings}
+        onClose={() => setShowSettings(false)}
       />
 
       <ExportModal
-        isOpen={isExportModalOpen}
-        onClose={() => setIsExportModalOpen(false)}
+        isOpen={showExportModal}
+        onClose={() => setShowExportModal(false)}
         onExportFile={handleExportFile}
         onExportCode={handleExportCode}
+      />
+
+      <CrossOverGuideModal
+        isOpen={showCrossOverGuide}
+        onClose={() => setShowCrossOverGuide(false)}
       />
     </div>
   )

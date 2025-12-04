@@ -150,65 +150,229 @@ async fn save_settings(app: AppHandle, settings: Settings) -> Result<(), String>
     Ok(())
 }
 
+/// Normalize a string for fuzzy matching: lowercase, remove non-alphanumeric
+fn normalize_for_matching(s: &str) -> String {
+    s.to_lowercase().chars().filter(|c| c.is_alphanumeric()).collect()
+}
+
+/// Get all Steam library folders
+fn get_steam_library_folders(steam_path: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut folders = vec![steam_path.to_path_buf()];
+    
+    let library_folders_path = steam_path.join("steamapps").join("libraryfolders.vdf");
+    if library_folders_path.exists() {
+        if let Ok(content) = fs::read_to_string(&library_folders_path) {
+            let re = regex::Regex::new(r#""path"\s+"([^"]+)""#).unwrap();
+            for cap in re.captures_iter(&content) {
+                folders.push(std::path::PathBuf::from(&cap[1]));
+            }
+        }
+    }
+    
+    folders
+}
+
 #[command]
 async fn get_game_path(app: AppHandle, game_identifier: String) -> Result<Option<String>, String> {
     let settings = load_settings_impl(&app);
     let steam_path_str = settings.steam_path.ok_or("Steam path not configured")?;
     let steam_path = std::path::Path::new(&steam_path_str);
 
-    // Map gameIdentifier to Steam AppID
-    // TODO: Move this to a better place or load from ecosystem.json
-    let app_id = match game_identifier.as_str() {
-        "lethal-company" => "1966720",
-        "risk-of-rain-2" => "632360",
-        _ => return Err(format!("Unknown game identifier: {}", game_identifier)),
-    };
+    let normalized_id = normalize_for_matching(&game_identifier);
+    eprintln!("[get_game_path] Looking for game: {} (normalized: {})", game_identifier, normalized_id);
 
-    // 1. Check default steamapps location
-    let default_manifest = steam_path.join("steamapps").join(format!("appmanifest_{}.acf", app_id));
-    if default_manifest.exists() {
-        return parse_manifest_for_path(&default_manifest);
-    }
+    // Scan all Steam library folders
+    for lib_folder in get_steam_library_folders(steam_path) {
+        let common_path = lib_folder.join("steamapps").join("common");
+        if !common_path.exists() {
+            continue;
+        }
 
-    // 2. Check libraryfolders.vdf
-    let library_folders_path = steam_path.join("steamapps").join("libraryfolders.vdf");
-    if library_folders_path.exists() {
-        let content = fs::read_to_string(&library_folders_path).map_err(|e| e.to_string())?;
-        
-        // Simple regex to find paths in libraryfolders.vdf
-        // "path"		"/Users/username/Library/Application Support/Steam"
-        let re = regex::Regex::new(r#""path"\s+"([^"]+)""#).unwrap();
-        
-        for cap in re.captures_iter(&content) {
-            let lib_path_str = &cap[1];
-            let lib_path = std::path::Path::new(lib_path_str);
-            let manifest_path = lib_path.join("steamapps").join(format!("appmanifest_{}.acf", app_id));
-            
-            if manifest_path.exists() {
-                return parse_manifest_for_path(&manifest_path);
+        if let Ok(entries) = fs::read_dir(&common_path) {
+            for entry in entries.filter_map(|e| e.ok()) {
+                let folder_name = entry.file_name().to_string_lossy().to_string();
+                let normalized_folder = normalize_for_matching(&folder_name);
+                
+                // Check for match (exact or high similarity)
+                if normalized_folder == normalized_id || 
+                   normalized_folder.contains(&normalized_id) || 
+                   normalized_id.contains(&normalized_folder) {
+                    let game_path = entry.path().to_string_lossy().to_string();
+                    eprintln!("[get_game_path] Found match: {} -> {}", folder_name, game_path);
+                    return Ok(Some(game_path));
+                }
             }
         }
     }
 
+    eprintln!("[get_game_path] No match found for: {}", game_identifier);
     Ok(None)
 }
 
-fn parse_manifest_for_path(manifest_path: &std::path::Path) -> Result<Option<String>, String> {
-    let content = fs::read_to_string(manifest_path).map_err(|e| e.to_string())?;
+#[command]
+async fn find_game_executable(game_path: String) -> Result<Option<String>, String> {
+    let path = std::path::Path::new(&game_path);
     
-    // Regex to find installdir
-    // "installdir"		"Lethal Company"
-    let re = regex::Regex::new(r#""installdir"\s+"([^"]+)""#).unwrap();
+    // On macOS, look for .app bundles first
+    if let Ok(entries) = fs::read_dir(path) {
+        for entry in entries.filter_map(|e| e.ok()) {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.ends_with(".app") {
+                return Ok(Some(entry.path().to_string_lossy().to_string()));
+            }
+        }
+    }
     
-    if let Some(cap) = re.captures(&content) {
-        let install_dir_name = &cap[1];
-        let full_path = manifest_path.parent().unwrap().join("common").join(install_dir_name);
-        if full_path.exists() {
-            return Ok(Some(full_path.to_string_lossy().to_string()));
+    // Fallback: look for .exe (for Wine/Proton)
+    if let Ok(entries) = fs::read_dir(path) {
+        for entry in entries.filter_map(|e| e.ok()) {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.ends_with(".exe") && !name.contains("UnityCrashHandler") {
+                return Ok(Some(entry.path().to_string_lossy().to_string()));
+            }
         }
     }
     
     Ok(None)
+}
+/// Find Steam App ID by matching the game folder name in appmanifest files
+fn find_steam_app_id(steam_path: &std::path::Path, game_folder: &str) -> Option<String> {
+    for lib_folder in get_steam_library_folders(steam_path) {
+        let steamapps = lib_folder.join("steamapps");
+        if let Ok(entries) = fs::read_dir(&steamapps) {
+            for entry in entries.filter_map(|e| e.ok()) {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name.starts_with("appmanifest_") && name.ends_with(".acf") {
+                    if let Ok(content) = fs::read_to_string(entry.path()) {
+                        // Parse installdir from manifest
+                        let re = regex::Regex::new(r#""installdir"\s+"([^"]+)""#).unwrap();
+                        if let Some(cap) = re.captures(&content) {
+                            if cap[1].to_lowercase() == game_folder.to_lowercase() {
+                                // Extract app_id from filename
+                                let app_id = name
+                                    .strip_prefix("appmanifest_")
+                                    .and_then(|s| s.strip_suffix(".acf"))
+                                    .unwrap_or("");
+                                return Some(app_id.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+#[command]
+async fn install_to_game(app: AppHandle, game_identifier: String, profile_id: String) -> Result<(), String> {
+    // 1. Find game path
+    let game_path_str = get_game_path(app.clone(), game_identifier.clone()).await?
+        .ok_or("Game not found in Steam library")?;
+    let game_path = std::path::Path::new(&game_path_str);
+
+    // 2. Get profile path
+    let profile_dir = app.path().app_data_dir().map_err(|e| e.to_string())?
+        .join("profiles").join(&profile_id);
+
+    if !profile_dir.exists() {
+        return Err("Profile not found".to_string());
+    }
+
+    // --- FIX BEPINEX STRUCTURE START ---
+    // Always check for BepInExPack in plugins and ensure it's properly installed at root
+    let plugins_dir = profile_dir.join("BepInEx").join("plugins");
+    if plugins_dir.exists() {
+        // Find BepInExPack folder
+        let mut found_pack = None;
+        if let Ok(entries) = fs::read_dir(&plugins_dir) {
+            for entry in entries.filter_map(|e| e.ok()) {
+                let path = entry.path();
+                if path.is_dir() {
+                    // Check for BepInExPack/winhttp.dll inside
+                    // Structure: plugins/ModName/BepInExPack/winhttp.dll
+                    let nested_pack = path.join("BepInExPack");
+                    if nested_pack.join("winhttp.dll").exists() {
+                        found_pack = Some(nested_pack);
+                        break;
+                    }
+                }
+            }
+        }
+
+        if let Some(pack_dir) = found_pack {
+            eprintln!("[install_to_game] Found BepInExPack at {:?}, verifying root installation...", pack_dir);
+            
+            // 1. Ensure winhttp.dll is at root
+            if !profile_dir.join("winhttp.dll").exists() {
+                eprintln!("[install_to_game] Copying winhttp.dll to root");
+                fs::copy(pack_dir.join("winhttp.dll"), profile_dir.join("winhttp.dll"))
+                    .map_err(|e| format!("Failed to copy winhttp.dll: {}", e))?;
+            }
+            
+            // 2. Ensure doorstop_config.ini is at root
+            if pack_dir.join("doorstop_config.ini").exists() && !profile_dir.join("doorstop_config.ini").exists() {
+                eprintln!("[install_to_game] Copying doorstop_config.ini to root");
+                fs::copy(pack_dir.join("doorstop_config.ini"), profile_dir.join("doorstop_config.ini"))
+                    .map_err(|e| format!("Failed to copy doorstop_config.ini: {}", e))?;
+            }
+
+            // 3. Merge BepInEx/core and BepInEx/config
+            let pack_bepinex = pack_dir.join("BepInEx");
+            if pack_bepinex.exists() {
+                eprintln!("[install_to_game] Merging BepInEx core/config from pack...");
+                let target_bepinex = profile_dir.join("BepInEx");
+                copy_dir_recursive(&pack_bepinex, &target_bepinex)
+                    .map_err(|e| format!("Failed to merge BepInEx folder: {}", e))?;
+            }
+        }
+    }
+    // --- FIX BEPINEX STRUCTURE END ---
+
+    eprintln!("[install_to_game] Installing profile {} to game {}", profile_id, game_path.display());
+
+    // 3. Copy files (BepInEx, doorstop_config.ini, winhttp.dll)
+    let files_to_copy = ["BepInEx", "doorstop_config.ini", "winhttp.dll"];
+    
+    for item_name in files_to_copy.iter() {
+        let source = profile_dir.join(item_name);
+        let dest = game_path.join(item_name);
+        
+        if source.exists() {
+            if source.is_dir() {
+                // Recursive copy for directories (like BepInEx)
+                copy_dir_recursive(&source, &dest).map_err(|e| format!("Failed to copy {}: {}", item_name, e))?;
+            } else {
+                // File copy
+                fs::copy(&source, &dest).map_err(|e| format!("Failed to copy {}: {}", item_name, e))?;
+            }
+            eprintln!("[install_to_game] Copied {} to game folder", item_name);
+        } else {
+            eprintln!("[install_to_game] Warning: {} not found in profile, skipping", item_name);
+        }
+    }
+
+    Ok(())
+}
+
+// Helper function for recursive directory copy
+fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
+    if !dst.exists() {
+        fs::create_dir_all(dst)?;
+    }
+    
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        let dest_path = dst.join(entry.file_name());
+        
+        if file_type.is_dir() {
+            copy_dir_recursive(&entry.path(), &dest_path)?;
+        } else {
+            fs::copy(&entry.path(), &dest_path)?;
+        }
+    }
+    Ok(())
 }
 
 
@@ -246,9 +410,9 @@ pub fn run() {
             get_settings,
             save_settings,
             get_game_path,
-            get_game_path,
+            install_to_game,
             confirm_dialog,
-            read_image
+            alert_dialog,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -266,6 +430,20 @@ async fn confirm_dialog(app: AppHandle, title: String, message: String) -> Resul
         .blocking_show();
         
     Ok(ans)
+}
+
+#[command]
+async fn alert_dialog(app: AppHandle, title: String, message: String) -> Result<(), String> {
+    use tauri_plugin_dialog::DialogExt;
+    use tauri_plugin_dialog::MessageDialogButtons;
+    
+    app.dialog()
+        .message(message)
+        .title(title)
+        .buttons(MessageDialogButtons::Ok)
+        .blocking_show();
+        
+    Ok(())
 }
 
 #[command]
@@ -331,9 +509,6 @@ async fn install_mod(app: AppHandle, profile_id: String, download_url: String, m
     let plugins_dir = profile_dir.join("BepInEx").join("plugins");
     let mod_dir = plugins_dir.join(&mod_name);
 
-    // Create directories
-    fs::create_dir_all(&mod_dir).map_err(|e| e.to_string())?;
-
     // Download
     let response = reqwest::get(&download_url).await.map_err(|e| e.to_string())?;
     let bytes = response.bytes().await.map_err(|e| e.to_string())?;
@@ -342,23 +517,60 @@ async fn install_mod(app: AppHandle, profile_id: String, download_url: String, m
     // Unzip
     let mut archive = zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
     
-    for i in 0..archive.len() {
-        let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
-        let outpath = match file.enclosed_name() {
-            Some(path) => mod_dir.join(path),
-            None => continue,
-        };
+    // Check if this is BepInExPack by looking for "BepInExPack" folder at root
+    let is_bepinex_pack = (0..archive.len()).any(|i| {
+        archive.by_index(i).ok().map(|f| f.name().starts_with("BepInExPack/")).unwrap_or(false)
+    });
 
-        if (*file.name()).ends_with('/') {
-            fs::create_dir_all(&outpath).map_err(|e| e.to_string())?;
-        } else {
-            if let Some(p) = outpath.parent() {
-                if !p.exists() {
-                    fs::create_dir_all(p).map_err(|e| e.to_string())?;
+    if is_bepinex_pack {
+        // Install BepInExPack to profile root
+        for i in 0..archive.len() {
+            let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
+            let name = file.name().to_string();
+            
+            if name.starts_with("BepInExPack/") {
+                // Strip "BepInExPack/" prefix
+                let relative_path = &name["BepInExPack/".len()..];
+                if relative_path.is_empty() { continue; }
+                
+                let outpath = profile_dir.join(relative_path);
+                
+                if name.ends_with('/') {
+                    fs::create_dir_all(&outpath).map_err(|e| e.to_string())?;
+                } else {
+                    if let Some(p) = outpath.parent() {
+                        if !p.exists() {
+                            fs::create_dir_all(p).map_err(|e| e.to_string())?;
+                        }
+                    }
+                    let mut outfile = fs::File::create(&outpath).map_err(|e| e.to_string())?;
+                    std::io::copy(&mut file, &mut outfile).map_err(|e| e.to_string())?;
                 }
             }
-            let mut outfile = fs::File::create(&outpath).map_err(|e| e.to_string())?;
-            std::io::copy(&mut file, &mut outfile).map_err(|e| e.to_string())?;
+        }
+    } else {
+        // Normal mod installation to plugins/{mod_name}
+        // Create directories
+        fs::create_dir_all(&mod_dir).map_err(|e| e.to_string())?;
+
+        for i in 0..archive.len() {
+            let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
+            let outpath = match file.enclosed_name() {
+                Some(path) => mod_dir.join(path),
+                None => continue,
+            };
+
+            if (*file.name()).ends_with('/') {
+                fs::create_dir_all(&outpath).map_err(|e| e.to_string())?;
+            } else {
+                if let Some(p) = outpath.parent() {
+                    if !p.exists() {
+                        fs::create_dir_all(p).map_err(|e| e.to_string())?;
+                    }
+                }
+                let mut outfile = fs::File::create(&outpath).map_err(|e| e.to_string())?;
+                std::io::copy(&mut file, &mut outfile).map_err(|e| e.to_string())?;
+            }
         }
     }
 
