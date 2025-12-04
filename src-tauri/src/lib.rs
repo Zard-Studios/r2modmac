@@ -1,5 +1,5 @@
 use tauri::{command, AppHandle, Manager};
-use std::{fs, sync::Mutex, collections::HashMap};
+use std::{fs, sync::{Arc, Mutex}, collections::HashMap};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -101,8 +101,8 @@ async fn fetch_community_images() -> Result<std::collections::HashMap<String, St
 
 // AppState to hold packages in memory
 struct AppState {
-    // Cache: GameID -> List of Packages
-    packages: Mutex<HashMap<String, Vec<serde_json::Value>>>,
+    // Cache: GameID -> List of Packages (wrapped in Arc for sharing across tasks)
+    packages: Arc<Mutex<HashMap<String, Vec<serde_json::Value>>>>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
@@ -220,20 +220,9 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())
         .manage(AppState {
-            packages: std::sync::Mutex::new(std::collections::HashMap::new()),
+            packages: Arc::new(Mutex::new(HashMap::new())),
         })
-        .setup(|app| {
-            // Clean cache on startup
-            if let Ok(cache_dir) = app.path().app_cache_dir() {
-                if cache_dir.exists() {
-                    eprintln!("[startup] Cleaning cache directory: {:?}", cache_dir);
-                    let _ = fs::remove_dir_all(&cache_dir);
-                    let _ = fs::create_dir_all(&cache_dir);
-                    eprintln!("[startup] Cache cleaned successfully");
-                }
-            }
-            Ok(())
-        })
+
         .invoke_handler(tauri::generate_handler![
             get_profiles,
             save_profiles,
@@ -408,97 +397,157 @@ async fn open_mod_folder(app: AppHandle, profile_id: String, mod_name: String) -
 
 #[command]
 async fn fetch_packages(app: AppHandle, state: tauri::State<'_, AppState>, game_id: String) -> Result<usize, String> {
-    use std::time::{SystemTime, Duration};
-    use std::io::BufReader;
+    use std::time::SystemTime;
 
-    // 0. Check In-Memory State First
+    let start_time = SystemTime::now();
+    
+    // 0. Check if we already have packages in memory (instant return)
     {
-        let packages_lock = state.packages.lock().map_err(|_| "Failed to lock state".to_string())?;
+        let packages_lock = state.packages.lock().unwrap();
         if let Some(packages) = packages_lock.get(&game_id) {
             if !packages.is_empty() {
-                eprintln!("[fetch_packages] Serving from AppState memory (Instant)");
+                eprintln!("[fetch_packages] Serving {} packages from memory (instant)", packages.len());
                 return Ok(packages.len());
             }
         }
     }
+    
+    // 1. Fetch the index (list of chunk URLs)
+    let index_url = format!("https://thunderstore.io/c/{}/api/v1/package-listing-index/", game_id);
+    eprintln!("[fetch_packages] Fetching index from: {}", index_url);
+    
+    let client = reqwest::Client::builder()
+        .gzip(true)
+        .build()
+        .map_err(|e| e.to_string())?;
+        
+    let resp = client.get(&index_url)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch index: {}", e))?;
+        
+    // The index is a GZIP compressed JSON array of strings (URLs)
+    let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
+    let mut gz = flate2::read::GzDecoder::new(&bytes[..]);
+    let mut s = String::new();
+    std::io::Read::read_to_string(&mut gz, &mut s).map_err(|e| format!("Failed to decompress index: {}", e))?;
+    
+    let chunk_urls: Vec<String> = serde_json::from_str(&s).map_err(|e| format!("Failed to parse index: {}", e))?;
+    let total_chunks = chunk_urls.len();
+    eprintln!("[fetch_packages] Found {} chunks", total_chunks);
 
-    // 1. Define Cache Path
-    let cache_dir = app.path().app_cache_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    // 2. Prepare Cache Directory
+    let cache_dir = app.path().app_cache_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")).join("chunks");
     if !cache_dir.exists() {
         let _ = fs::create_dir_all(&cache_dir);
     }
-    let cache_file = cache_dir.join(format!("{}_packages.json", game_id));
 
-    let mut packages_list = Vec::new();
-    let mut loaded_from_cache = false;
-
-    // 2. Check Cache Validity (1 hour)
-    if cache_file.exists() {
-        if let Ok(metadata) = fs::metadata(&cache_file) {
-            if let Ok(modified) = metadata.modified() {
-                if let Ok(elapsed) = SystemTime::now().duration_since(modified) {
-                    if elapsed < Duration::from_secs(3600) {
-                        eprintln!("[fetch_packages] Serving from cache: {:?}", cache_file);
-                        if let Ok(file) = fs::File::open(&cache_file) {
-                            let reader = BufReader::new(file);
-                            if let Ok(cached_data) = serde_json::from_reader(reader) {
-                                packages_list = cached_data;
-                                loaded_from_cache = true;
-                            }
-                        }
-                    }
+    // Helper function to load a single chunk
+    async fn load_chunk(client: &reqwest::Client, url: &str, cache_dir: &std::path::Path) -> Result<Vec<serde_json::Value>, String> {
+        // Extract hash from URL for cache key
+        let hash = url.split("/sha256/").nth(1)
+            .and_then(|s| s.split('.').next())
+            .ok_or_else(|| "Invalid URL format".to_string())?;
+            
+        let cache_file = cache_dir.join(format!("{}.json", hash));
+        
+        // Check cache
+        if cache_file.exists() {
+            if let Ok(file) = fs::File::open(&cache_file) {
+                let reader = std::io::BufReader::new(file);
+                if let Ok(packages) = serde_json::from_reader::<_, Vec<serde_json::Value>>(reader) {
+                    return Ok(packages);
                 }
             }
         }
+        
+        // Download and Decompress
+        let resp = client.get(url).send().await.map_err(|e| e.to_string())?;
+        let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
+        let mut gz = flate2::read::GzDecoder::new(&bytes[..]);
+        let mut json_str = String::new();
+        std::io::Read::read_to_string(&mut gz, &mut json_str).map_err(|e| e.to_string())?;
+        
+        // Parse
+        let packages: Vec<serde_json::Value> = serde_json::from_str(&json_str).map_err(|e| e.to_string())?;
+        
+        // Save to cache
+        if let Ok(file) = fs::File::create(&cache_file) {
+            let _ = serde_json::to_writer(file, &packages);
+        }
+        
+        Ok(packages)
     }
 
-    // 3. Fetch from API (if cache missing or stale)
-    if !loaded_from_cache {
-        eprintln!("[fetch_packages] Fetching from API (Cache miss/stale)");
-        let start_time = SystemTime::now();
-        
-        let url = format!("https://thunderstore.io/c/{}/api/v1/package/", game_id);
-        let client = reqwest::Client::builder()
-            .user_agent("r2modmac/0.0.1")
-            .build()
-            .map_err(|e| e.to_string())?;
-        let response = client.get(&url).send().await.map_err(|e| e.to_string())?;
-        
-        if !response.status().is_success() {
-            return Err(format!("Failed to fetch packages: {}", response.status()));
-        }
-
-        let fetch_time = SystemTime::now();
-        eprintln!("[fetch_packages] Download complete in {:?}. Parsing JSON...", fetch_time.duration_since(start_time).unwrap_or_default());
-
-        let json: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
-        
-        let parse_time = SystemTime::now();
-        eprintln!("[fetch_packages] Parse complete in {:?}. Total time: {:?}", 
-            parse_time.duration_since(fetch_time).unwrap_or_default(),
-            parse_time.duration_since(start_time).unwrap_or_default()
-        );
-        
-        if let Some(array) = json.as_array() {
-            packages_list = array.clone();
-        }
-
-        // 4. Save to Cache
-        if let Ok(file) = fs::File::create(&cache_file) {
-            let writer = std::io::BufWriter::new(file);
-            if let Err(e) = serde_json::to_writer(writer, &packages_list) {
-                eprintln!("[fetch_packages] Failed to write cache: {}", e);
-            } else {
-                eprintln!("[fetch_packages] Cache saved to {:?}", cache_file);
+    // 3. Load FIRST chunk immediately for instant UI
+    if let Some(first_url) = chunk_urls.first() {
+        match load_chunk(&client, first_url, &cache_dir).await {
+            Ok(first_packages) => {
+                let count = first_packages.len();
+                eprintln!("[fetch_packages] First chunk loaded: {} packages (instant display ready!)", count);
+                
+                // Update state immediately so UI can show something
+                let mut packages_lock = state.packages.lock().unwrap();
+                packages_lock.insert(game_id.clone(), first_packages);
+            }
+            Err(e) => {
+                eprintln!("[fetch_packages] Failed to load first chunk: {}", e);
             }
         }
     }
 
-    // 5. Update State
-    let count = packages_list.len();
-    let mut packages_lock = state.packages.lock().map_err(|_| "Failed to lock state".to_string())?;
-    packages_lock.insert(game_id, packages_list);
+    // 4. Load remaining chunks in parallel (streaming to state)
+    let remaining_urls: Vec<String> = chunk_urls.into_iter().skip(1).collect();
     
+    if !remaining_urls.is_empty() {
+        let packages_arc = state.packages.clone();  // Clone the Arc
+        let game_id_clone = game_id.clone();
+        let cache_dir_clone = cache_dir.clone();
+        
+        // Spawn background task for remaining chunks
+        tokio::spawn(async move {
+            let mut tasks = Vec::new();
+            
+            for url in remaining_urls {
+                let cache_dir = cache_dir_clone.clone();
+                let client = client.clone();
+                
+                tasks.push(tokio::spawn(async move {
+                    load_chunk(&client, &url, &cache_dir).await
+                }));
+            }
+
+            // Collect and add to state as they complete
+            for task in futures_util::future::join_all(tasks).await {
+                match task {
+                    Ok(Ok(packages)) => {
+                        let mut packages_lock = packages_arc.lock().unwrap();
+                        if let Some(existing) = packages_lock.get_mut(&game_id_clone) {
+                            existing.extend(packages);
+                        }
+                    }
+                    Ok(Err(e)) => eprintln!("[fetch_packages] Chunk error: {}", e),
+                    Err(e) => eprintln!("[fetch_packages] Task error: {}", e),
+                }
+            }
+            
+            // Log final count
+            let packages_lock = packages_arc.lock().unwrap();
+            if let Some(packages) = packages_lock.get(&game_id_clone) {
+                eprintln!("[fetch_packages] Background loading complete. Total: {} packages", packages.len());
+            }
+        });
+    }
+
+    // 5. Return immediately with first chunk count
+    let packages_lock = state.packages.lock().unwrap();
+    let count = packages_lock.get(&game_id).map(|p| p.len()).unwrap_or(0);
+    
+    if let Ok(elapsed) = start_time.elapsed() {
+        eprintln!("[fetch_packages] Initial load in {:.2?} ({} packages ready, {} chunks loading in background)", 
+            elapsed, count, total_chunks - 1);
+    }
+
     Ok(count)
 }
 
