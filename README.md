@@ -2,8 +2,7 @@
 
 <div align="center">
 
-![r2modmac Icon](https://i.ibb.co/60j664sL/i-OS-Default-1024x1024-1x.png)
-
+<img src="https://i.ibb.co/60j664sL/i-OS-Default-1024x1024-1x.png" alt="r2modmac-icon" width="200" height="200">
 **Un mod manager moderno e nativo per macOS, ispirato a r2modman, riprogettato da 0**
 
 [![GitHub release](https://img.shields.io/github/v/release/Zard-Studios/r2modmac)](https://github.com/Zard-Studios/r2modmac/releases)
