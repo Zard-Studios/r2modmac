@@ -101,14 +101,16 @@ export function ModDetailModal({ mod, isOpen, onClose, onInstall, onUpdate, onUn
                         {mod.website_url && (
                             <div>
                                 <h3 className="text-sm font-bold uppercase tracking-wider text-gray-400 mb-2">Website</h3>
-                                <a
-                                    href={mod.website_url}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className="text-blue-400 hover:text-blue-300 transition-colors text-sm"
+                                <button
+                                    onClick={() => {
+                                        import('@tauri-apps/plugin-shell').then(({ open }) => {
+                                            open(mod.website_url!);
+                                        });
+                                    }}
+                                    className="text-blue-400 hover:text-blue-300 transition-colors text-sm cursor-pointer"
                                 >
                                     Visit Website ↗
-                                </a>
+                                </button>
                             </div>
                         )}
                     </div>
@@ -140,10 +142,10 @@ export function ModDetailModal({ mod, isOpen, onClose, onInstall, onUpdate, onUn
                         }}
                         disabled={isInstalled && !hasUpdate}
                         className={`flex-1 px-4 py-2.5 rounded-lg font-semibold transition-colors ${hasUpdate
-                                ? 'bg-amber-500 hover:bg-amber-600 text-white'
-                                : isInstalled
-                                    ? 'bg-green-500/10 text-green-500 border border-green-500/20 cursor-default'
-                                    : 'bg-blue-600 hover:bg-blue-500 text-white'
+                            ? 'bg-amber-500 hover:bg-amber-600 text-white'
+                            : isInstalled
+                                ? 'bg-green-500/10 text-green-500 border border-green-500/20 cursor-default'
+                                : 'bg-blue-600 hover:bg-blue-500 text-white'
                             }`}
                     >
                         {hasUpdate ? 'Update' : isInstalled ? 'Installed' : 'Install Mod'}

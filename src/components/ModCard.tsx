@@ -38,15 +38,17 @@ export function ModCard({ mod, onInstall, onUninstall, onClick, installStatus }:
                     <div className="flex items-center gap-2 text-xs text-gray-400">
                         <span className="bg-gray-700/50 px-1.5 py-0.5 rounded">v{mod.version_number}</span>
                         {mod.website_url && (
-                            <a
-                                href={mod.website_url}
-                                target="_blank"
-                                rel="noreferrer"
-                                onClick={(e) => e.stopPropagation()}
-                                className="hover:text-blue-400 transition-colors"
+                            <button
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    import('@tauri-apps/plugin-shell').then(({ open }) => {
+                                        open(mod.website_url!);
+                                    });
+                                }}
+                                className="hover:text-blue-400 transition-colors cursor-pointer"
                             >
                                 Website ↗
-                            </a>
+                            </button>
                         )}
                     </div>
                 </div>
@@ -95,10 +97,10 @@ export function ModCard({ mod, onInstall, onUninstall, onClick, installStatus }:
                         }}
                         disabled={installStatus === 'installed'}
                         className={`px-4 py-1.5 rounded-lg text-sm font-semibold transition-all duration-200 ${installStatus === 'installed'
-                                ? 'bg-green-500/10 text-green-500 border border-green-500/20 cursor-default'
-                                : installStatus === 'update_available'
-                                    ? 'bg-yellow-600 hover:bg-yellow-500 text-white shadow-lg shadow-yellow-900/20 active:scale-95'
-                                    : 'bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-900/20 active:scale-95'
+                            ? 'bg-green-500/10 text-green-500 border border-green-500/20 cursor-default'
+                            : installStatus === 'update_available'
+                                ? 'bg-yellow-600 hover:bg-yellow-500 text-white shadow-lg shadow-yellow-900/20 active:scale-95'
+                                : 'bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-900/20 active:scale-95'
                             }`}
                     >
                         {installStatus === 'installed' ? 'Installed' : installStatus === 'update_available' ? 'Update' : 'Install'}
