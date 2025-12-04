@@ -1,15 +1,20 @@
 # r2modmac
 
-<div align="center">
-
-<img src="https://i.ibb.co/60j664sL/i-OS-Default-1024x1024-1x.png" alt="r2modmac-icon" width="200" height="200">
-**Un mod manager moderno e nativo per macOS, ispirato a r2modman, riprogettato da 0**
-
-[![GitHub release](https://img.shields.io/github/v/release/Zard-Studios/r2modmac)](https://github.com/Zard-Studios/r2modmac/releases)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Stars](https://img.shields.io/github/stars/Zard-Studios/r2modmac?style=social)](https://github.com/Zard-Studios/r2modmac/stargazers)
-
-</div>
+<p align="center">
+  <img src="https://i.ibb.co/60j664sL/i-OS-Default-1024x1024-1x.png" alt="r2modmac-icon" width="200" height="200">
+  <br>
+  <strong>Un mod manager moderno e nativo per macOS, ispirato a r2modman, riprogettato da 0</strong>
+  <br><br>
+  <a href="https://github.com/Zard-Studios/r2modmac/releases">
+    <img src="https://img.shields.io/github/v/release/Zard-Studios/r2modmac" alt="GitHub release">
+  </a>
+  <a href="https://opensource.org/licenses/MIT">
+    <img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT">
+  </a>
+  <a href="https://github.com/Zard-Studios/r2modmac/stargazers">
+    <img src="https://img.shields.io/github/stars/Zard-Studios/r2modmac?style=social" alt="Stars">
+  </a>
+</p>
 
 ## Descrizione
 
