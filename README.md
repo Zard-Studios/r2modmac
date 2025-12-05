@@ -3,7 +3,7 @@
 <p align="center">
   <img src="https://i.ibb.co/60j664sL/i-OS-Default-1024x1024-1x.png" alt="r2modmac-icon" width="200" height="200">
   <br>
-  <strong>Un mod manager moderno e nativo per macOS, ispirato a r2modman, riprogettato da 0</strong>
+  <strong>A modern and native mod manager for macOS, inspired by r2modman, redesigned from scratch</strong>
   <br><br>
   <a href="https://github.com/Zard-Studios/r2modmac/releases">
     <img src="https://img.shields.io/github/v/release/Zard-Studios/r2modmac" alt="GitHub release">
@@ -16,117 +16,117 @@
   </a>
 </p>
 
-## Descrizione
+## Description
 
-r2modmac è un mod manager nativo per macOS che permette di gestire facilmente le mod per giochi supportati da Thunderstore. Progettato con un'interfaccia moderna e intuitiva, offre un'esperienza fluida per installare, aggiornare e organizzare le tue mod preferite.
+r2modmac is a native mod manager for macOS that allows you to easily manage mods for Thunderstore supported games. Designed with a modern and intuitive interface, it offers a smooth experience to install, update, and organize your favorite mods.
 
-## Caratteristiche
+## Features
 
-- **Supporto Multi-Gioco**: Gestisci mod per tutti i giochi disponibili su Thunderstore
-- **Gestione Profili**: Crea e gestisci profili multipli per diversi setup di mod
-- **Import/Export**: Condividi i tuoi profili con amici tramite codici o file
-- **Immagini Profilo Personalizzate**: Aggiungi immagini personalizzate ai tuoi profili
-- **Ricerca Veloce**: Sistema di caching intelligente per ricerche istantanee
-- **Interfaccia Moderna**: Design pulito e intuitivo ottimizzato per macOS
-- **Gestione Dipendenze**: Installazione automatica delle dipendenze richieste
+- **Multi-Game Support**: Manage mods for all games available on Thunderstore
+- **Profile Management**: Create and manage multiple profiles for different mod setups
+- **Import/Export**: Share your profiles with friends via codes or files
+- **Custom Profile Images**: Add custom images to your profiles
+- **Fast Search**: Intelligent caching system for instant searches
+- **Modern Interface**: Clean and intuitive design optimized for macOS
+- **Dependency Management**: Automatic installation of required dependencies
 
 ## 📸 Screenshots
 
 <div align="center">
 
-### Selezione Gioco
-![Game Selection](https://i.ibb.co/r2JkH8Px/Screenshot-2025-12-03-alle-11-24-00.png)
+### Game Selection
+![Game Selection](https://i.ibb.co/N6VNg4VL/Screenshot-2025-12-05-alle-21-17-07.png)
 
-### Gestione Profili
+### Profile Management
 ![Profile Management](https://i.ibb.co/CshMpFDJ/Screenshot-2025-12-03-alle-11-24-57.png)
 
 ### Browse Mods
-![Mod Browser](https://i.ibb.co/n855t046/Screenshot-2025-12-03-alle-11-24-19.png)
+![Mod Browser](https://i.ibb.co/gZKTqBFV/Screenshot-2025-12-05-alle-21-17-59.png)
 
 </div>
 
-## 🛠️ Tecnologie Utilizzate
+## 🛠️ Technologies Used
 
 ### Frontend
-- **React 19** - Framework UI moderno con le ultime funzionalità
-- **TypeScript** - Type safety e migliore developer experience
-- **Tailwind CSS** - Styling utility-first per un design consistente
-- **Zustand** - State management leggero e performante
-- **Vite** - Build tool velocissimo per sviluppo e produzione
+- **React 19** - Modern UI framework with the latest features
+- **TypeScript** - Type safety and better developer experience
+- **Tailwind CSS** - Utility-first styling for consistent design
+- **Zustand** - Lightweight and performant state management
+- **Vite** - Lightning fast build tool for development and production
 
 ### Backend
-- **Tauri 2** - Framework per applicazioni desktop native usando Rust
-- **Rust** - Linguaggio sicuro e performante per la logica backend
-- **Reqwest** - HTTP client per comunicare con Thunderstore API
-- **Tokio** - Runtime asincrono per operazioni non-bloccanti
-- **Serde** - Serializzazione/deserializzazione JSON
+- **Tauri 2** - Framework for native desktop applications using Rust
+- **Rust** - Safe and performant language for backend logic
+- **Reqwest** - HTTP client for communicating with Thunderstore API
+- **Tokio** - Asynchronous runtime for non-blocking operations
+- **Serde** - JSON serialization/deserialization
 
-### Librerie Chiave
-- **@tanstack/react-virtual** - Virtualizzazione liste per performance ottimali
-- **adm-zip** - Gestione archivi ZIP per mod
-- **js-yaml** - Parsing file di configurazione profili
-- **regex** - Pattern matching per parsing e validazione
+### Key Libraries
+- **@tanstack/react-virtual** - List virtualization for optimal performance
+- **adm-zip** - ZIP archive management for mods
+- **js-yaml** - Profile configuration file parsing
+- **regex** - Pattern matching for parsing and validation
 
-## 📥 Installazione
+## 📥 Installation
 
 ### Download
-Scarica l'ultima versione dalla [pagina releases](https://github.com/Zard-Studios/r2modmac/releases).
+Download the latest version from the [releases page](https://github.com/Zard-Studios/r2modmac/releases).
 
-### Risoluzione Problemi
+### Troubleshooting
 
-#### "L'applicazione è danneggiata e non può essere aperta"
-Se vedi questo errore quando apri l'app, è perché non è stata firmata con un certificato Apple Developer.
+#### "The application is damaged and can't be opened"
+If you see this error when opening the app, it's because it hasn't been signed with an Apple Developer certificate.
 
-**Soluzione rapida:**
+**Quick fix:**
 ```bash
 sudo find /Applications/r2modmac.app -exec xattr -c {} \;
 ```
 
-Inserisci la password quando richiesto, poi prova ad aprire l'app di nuovo.
+Enter your password when prompted, then try opening the app again.
 
-## 🚀 Sviluppo
+## 🚀 Development
 
-### Prerequisiti
+### Prerequisites
 - Node.js 18+
 - Rust 1.77+
 - Xcode Command Line Tools
 
 ### Setup
 ```bash
-# Clone il repository
+# Clone the repository
 git clone https://github.com/Zard-Studios/r2modmac.git
 cd r2modmac
 
-# Installa dipendenze
+# Install dependencies
 npm install
 
-# Avvia in modalità sviluppo
+# Start in development mode
 npm run dev
 
-# Build per produzione
+# Build for production
 npm run build
 ```
 
-## 🤝 Contribuire
+## 🤝 Contributing
 
-I contributi sono benvenuti! Sentiti libero di:
-- 🐛 Segnalare bug
-- 💡 Proporre nuove funzionalità
-- 🔧 Inviare pull request
+Contributions are welcome! Feel free to:
+- 🐛 Report bugs
+- 💡 Propose new features
+- 🔧 Submit pull requests
 
-## 📝 Licenza
+## 📝 License
 
-Questo progetto è rilasciato sotto licenza MIT. Puoi usarlo, modificarlo e distribuirlo liberamente, basta che mantieni i crediti originali.
+This project is released under the MIT License. You can use, modify, and distribute it freely, as long as you maintain the original credits.
 
-## 🙏 Ringraziamenti
+## 🙏 Acknowledgments
 
-- [r2modman](https://github.com/ebkr/r2modmanPlus) - Ispirazione per il progetto
-- [Thunderstore](https://thunderstore.io/) - API per mod e community
-- [Tauri](https://tauri.app/) - Framework per applicazioni desktop
+- [r2modman](https://github.com/ebkr/r2modmanPlus) - Inspiration for the project
+- [Thunderstore](https://thunderstore.io/) - API for mods and community
+- [Tauri](https://tauri.app/) - Framework for desktop applications
 
 ## ⭐ Star History
 
-Se ti piace il progetto, lascia una stella! ⭐
+If you like the project, leave a star! ⭐
 
 [![Star History Chart](https://api.star-history.com/svg?repos=Zard-Studios/r2modmac&type=Date)](https://star-history.com/#Zard-Studios/r2modmac&Date)
 
@@ -134,7 +134,7 @@ Se ti piace il progetto, lascia una stella! ⭐
 
 <div align="center">
 
-**Fatto con ❤️ per la community di modding**
+**Made with ❤️ for the modding community**
 
 [Report Bug](https://github.com/Zard-Studios/r2modmac/issues) · [Request Feature](https://github.com/Zard-Studios/r2modmac/issues)
 
