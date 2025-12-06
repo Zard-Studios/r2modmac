@@ -13,6 +13,9 @@ import { ProfileSidebar } from './components/ProfileSidebar';
 import { useProfileStore } from './store/useProfileStore'
 import type { Community, Package, PackageVersion } from './types/thunderstore'
 import type { InstalledMod } from './types/profile'
+import { getVersion } from '@tauri-apps/api/app';
+import { UpdateModal } from './components/UpdateModal';
+import type { UpdateInfo } from './types/electron';
 
 function App() {
   const [communities, setCommunities] = useState<Community[]>([])
@@ -38,6 +41,8 @@ function App() {
   const [showExportModal, setShowExportModal] = useState(false)
   const [showCrossOverGuide, setShowCrossOverGuide] = useState(false)
   const [hideCrossOverGuide, setHideCrossOverGuide] = useState(false)
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null)
+  const [showUpdateModal, setShowUpdateModal] = useState(false)
 
   const {
     profiles,
@@ -57,7 +62,21 @@ function App() {
   useEffect(() => {
     loadData()
     loadProfiles()
+    checkForUpdates()
   }, [])
+
+  const checkForUpdates = async () => {
+    try {
+      const ver = await getVersion();
+      const info = await window.ipcRenderer.checkUpdate(ver);
+      if (info.available) {
+        setUpdateInfo(info);
+        setShowUpdateModal(true);
+      }
+    } catch (e) {
+      console.error("Update check failed", e);
+    }
+  };
 
   useEffect(() => {
     if (selectedCommunity) {
@@ -855,18 +874,51 @@ function App() {
         selectedGame={selectedCommunity || undefined}
       />
 
-      <ExportModal
-        isOpen={showExportModal}
-        onClose={() => setShowExportModal(false)}
-        onExportFile={handleExportFile}
-        onExportCode={handleExportCode}
-      />
+      {showExportModal && activeProfileId && (
+        <ExportModal
+          isOpen={showExportModal}
+          onClose={() => setShowExportModal(false)}
+          onExportCode={handleExportCode}
+          onExportFile={handleExportFile}
+        />
+      )}
 
-      <CrossOverGuideModal
-        isOpen={showCrossOverGuide && !hideCrossOverGuide}
-        onClose={() => setShowCrossOverGuide(false)}
-        onDontShowAgain={(hide) => setHideCrossOverGuide(hide)}
-      />
+      {showUpdateModal && updateInfo && (
+        <UpdateModal
+          updateInfo={updateInfo}
+          onClose={() => setShowUpdateModal(false)}
+          onUpdate={async () => {
+            if (updateInfo.download_url) {
+              setProgressState({
+                isOpen: true,
+                title: 'Updating r2modmac',
+                progress: 0,
+                currentTask: 'Downloading update...'
+              });
+
+              try {
+                await window.ipcRenderer.installUpdate(updateInfo.download_url);
+                // The script waits for PID exit.
+                window.close();
+              } catch (e) {
+                alert("Update failed: " + e);
+                setProgressState(prev => ({ ...prev, isOpen: false }));
+              }
+            }
+          }}
+        />
+      )}
+
+      {showCrossOverGuide && !hideCrossOverGuide && (
+        <CrossOverGuideModal
+          isOpen={showCrossOverGuide}
+          onClose={() => setShowCrossOverGuide(false)}
+          onDontShowAgain={() => {
+            setHideCrossOverGuide(true);
+            setShowCrossOverGuide(false);
+          }}
+        />
+      )}
     </div>
   )
 }

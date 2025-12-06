@@ -32,7 +32,16 @@ export interface IElectronAPI {
     readImage: (path: string) => Promise<string | null>;
     installToGame: (gameIdentifier: string, profileId: string, disabledMods: string[]) => Promise<void>;
     fetchTextContent: (url: string) => Promise<string>;
+    checkUpdate: (currentVersion: string) => Promise<UpdateInfo>;
+    installUpdate: (downloadUrl: string) => Promise<void>;
     lookupPackagesByNames: (gameId: string, names: string[]) => Promise<any>;
+}
+
+export interface UpdateInfo {
+    available: boolean;
+    version: string;
+    notes: string;
+    download_url?: string;
 }
 
 declare global {

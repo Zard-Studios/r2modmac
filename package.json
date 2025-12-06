@@ -1,7 +1,7 @@
 {
   "name": "r2modmac",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.2.7",
   "type": "module",
   "scripts": {
     "dev": "tauri dev",
@@ -16,9 +16,11 @@
     "@tauri-apps/api": "^2.9.1",
     "@tauri-apps/plugin-shell": "^2.3.3",
     "@types/dompurify": "^3.0.5",
+    "@types/marked": "^5.0.2",
     "adm-zip": "^0.5.16",
     "dompurify": "^3.3.0",
     "js-yaml": "^4.1.1",
+    "marked": "^17.0.1",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-virtualized-auto-sizer": "^1.0.26",

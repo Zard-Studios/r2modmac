@@ -702,10 +702,11 @@ pub fn run() {
             read_image,
             open_game_folder,
             install_to_game,
-            install_to_game,
             confirm_dialog,
             alert_dialog,
             fetch_text_content,
+            check_update,
+            install_update,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -1766,4 +1767,169 @@ async fn share_profile(app: AppHandle, profile_id: String) -> Result<String, Str
     // 7. Return Key
     let key = json["key"].as_str().ok_or("Invalid response: missing key")?;
     Ok(key.to_string())
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct GithubAsset {
+    browser_download_url: String,
+    name: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct GithubRelease {
+    tag_name: String,
+    body: String,
+    assets: Vec<GithubAsset>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct UpdateInfo {
+    available: bool,
+    version: String,
+    notes: String,
+    download_url: Option<String>,
+}
+
+#[command]
+async fn check_update(current_version: String) -> Result<UpdateInfo, String> {
+    let client = reqwest::Client::new();
+    // Use public GitHub API
+    let resp = client.get("https://api.github.com/repos/Zard-Studios/r2modmac/releases/latest")
+        .header("User-Agent", "r2modmac-updater")
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("GitHub API error: {}", resp.status()));
+    }
+
+    let release: GithubRelease = resp.json().await.map_err(|e| format!("Parse error: {}", e))?;
+    
+    // Simple version comparison (naive string compare for now, ideally use semver)
+    // Assume tag_name is "vX.X.X" and current_version is "X.X.X"
+    let clean_tag = release.tag_name.trim_start_matches('v');
+    
+    // Use semver crate if available, or simple split compare
+    let is_newer = compare_versions(clean_tag, &current_version);
+    
+    // Find DMG or App Zip
+    let asset = release.assets.iter()
+        .find(|a| a.name.ends_with(".dmg") || a.name.ends_with(".app.tar.gz") || a.name.ends_with(".zip")); // Prioritize logic as needed
+
+    Ok(UpdateInfo {
+        available: is_newer,
+        version: release.tag_name,
+        notes: release.body,
+        download_url: asset.map(|a| a.browser_download_url.clone()),
+    })
+}
+
+fn compare_versions(remote: &str, local: &str) -> bool {
+    let parse = |v: &str| -> Vec<u32> {
+        v.split('.')
+         .map(|s| s.parse().unwrap_or(0))
+         .collect()
+    };
+    let remote_parts = parse(remote);
+    let local_parts = parse(local);
+    
+    for i in 0..std::cmp::max(remote_parts.len(), local_parts.len()) {
+        let r = *remote_parts.get(i).unwrap_or(&0);
+        let l = *local_parts.get(i).unwrap_or(&0);
+        if r > l { return true; }
+        if r < l { return false; }
+    }
+    false
+}
+
+#[command]
+async fn install_update(app: AppHandle, download_url: String) -> Result<(), String> {
+    use std::os::unix::fs::PermissionsExt;
+    use std::process::Command;
+
+    // 1. Download
+    let temp_dir = app.path().temp_dir().map_err(|e| e.to_string())?.join("r2modmac_update");
+    if temp_dir.exists() {
+        fs::remove_dir_all(&temp_dir).map_err(|e| e.to_string())?;
+    }
+    fs::create_dir_all(&temp_dir).map_err(|e| e.to_string())?;
+
+    let filename = download_url.split('/').last().unwrap_or("update.bin");
+    let file_path = temp_dir.join(filename);
+
+    eprintln!("[install_update] Downloading to {:?}", file_path);
+    
+    let response = reqwest::get(&download_url).await.map_err(|e| e.to_string())?;
+    let content = response.bytes().await.map_err(|e| e.to_string())?;
+    fs::write(&file_path, &content).map_err(|e| e.to_string())?;
+
+    // 2. Prepare Update Script
+    let script_path = temp_dir.join("update.sh");
+    let needs_extract_command = if filename.ends_with(".tar.gz") {
+        format!("tar -xzf '{}' -C '{}'", file_path.to_string_lossy(), temp_dir.to_string_lossy())
+    } else if filename.ends_with(".zip") {
+         format!("unzip -o '{}' -d '{}'", file_path.to_string_lossy(), temp_dir.to_string_lossy())
+    } else if filename.ends_with(".dmg") {
+         // DMG handling is complex (hdiutil attach), user might prefer standard zip for auto-update
+         // For now let's assume we distribute a .tar.gz or .zip of the .app
+         return Err("Auto-update currently supports .tar.gz or .zip distributions of r2modmac.app".to_string());
+    } else {
+         return Err("Unknown update format".to_string());
+    };
+
+    let app_name = "r2modmac.app";
+    let target_app_path = "/Applications/r2modmac.app"; 
+    // Note: This assumes standard installation path. 
+    // Better: std::env::current_exe() -> get .app bundle path
+    
+    let current_exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    // Navigate up from Contents/MacOS/executable to .app
+    // bundle path usually ends in .app
+    let current_app_path = current_exe
+        .parent().and_then(|p| p.parent()).and_then(|p| p.parent())
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or("/Applications/r2modmac.app".to_string());
+
+    let script = format!(
+r#"#!/bin/bash
+PID={}
+APP_PATH="{}"
+UPDATE_DIR="{}"
+NEW_APP_DIR="$UPDATE_DIR/{}"
+
+echo "Waiting for PID $PID to exit..."
+while kill -0 $PID 2>/dev/null; do sleep 0.5; done
+
+echo "Extracting..."
+{}
+
+echo "Replacing app at $APP_PATH..."
+rm -rf "$APP_PATH"
+cp -R "$NEW_APP_DIR" "$APP_PATH"
+
+echo "Launching new app..."
+open "$APP_PATH"
+
+echo "Cleaning up..."
+rm -rf "$UPDATE_DIR"
+"#,
+        std::process::id(),
+        current_app_path,
+        temp_dir.to_string_lossy(),
+        app_name,
+        needs_extract_command
+    );
+
+    fs::write(&script_path, script).map_err(|e| e.to_string())?;
+    fs::set_permissions(&script_path, fs::Permissions::from_mode(0o755)).map_err(|e| e.to_string())?;
+
+    // 3. Launch Script detached
+    eprintln!("[install_update] Launching update script...");
+    Command::new("sh")
+        .arg(&script_path)
+        .spawn()
+        .map_err(|e| format!("Failed to launch script: {}", e))?;
+
+    Ok(())
 }

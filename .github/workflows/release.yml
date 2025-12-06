@@ -42,6 +42,19 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Sync version with tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          TAG_VERSION=${GITHUB_REF#refs/tags/v}
+          echo "Syncing version to $TAG_VERSION"
+          npm version $TAG_VERSION --no-git-tag-version
+          
+          # Update tauri.conf.json using jq (or sed if jq absent, but macos/ubuntu usually have it or we install)
+          # Using sed for simplicity across runners if jq isn't guaranteed, though ubuntu has it.
+          # We'll use a specific replacement or tauri cli if v2 has it?
+          # Easier: use sed.
+          sed -i.bak "s/\"version\": \".*\"/\"version\": \"$TAG_VERSION\"/" src-tauri/tauri.conf.json
+
       - name: Build Tauri app (${{ matrix.target.name }})
         run: npm run tauri build -- --target ${{ matrix.target.rust-target }}
 
