@@ -11,8 +11,8 @@
   <a href="https://opensource.org/licenses/MIT">
     <img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT">
   </a>
-  <a href="https://github.com/Zard-Studios/r2modmac/stargazers">
-    <img src="https://img.shields.io/github/stars/Zard-Studios/r2modmac?style=social" alt="Stars">
+  <a href="https://ko-fi.com/zardstudios">
+    <img src="https://img.shields.io/badge/Ko--fi-Support%20me-ff5f5f?logo=ko-fi&logoColor=white" alt="Ko-fi">
   </a>
 </p>
 
