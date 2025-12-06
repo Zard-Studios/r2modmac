@@ -711,6 +711,16 @@ pub fn run() {
         .setup(|app| {
             use chrono::Datelike;
             use tauri::menu::{MenuBuilder, SubmenuBuilder, MenuItemBuilder, PredefinedMenuItem};
+            use tauri::Manager; // Ensure Manager is imported for .path()
+
+            // Clear chunks cache on startup to keep app light
+            if let Ok(cache_dir) = app.path().app_cache_dir() {
+                let chunks_dir = cache_dir.join("chunks");
+                if chunks_dir.exists() {
+                    let _ = std::fs::remove_dir_all(&chunks_dir);
+                }
+            }
+
             let current_year = chrono::Local::now().year();
             let copyright_text = format!("Copyright © {} Zard Studios", current_year);
 
