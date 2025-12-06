@@ -6,7 +6,7 @@
   <strong>A modern and native mod manager for macOS, inspired by r2modman, redesigned from scratch</strong>
   <br><br>
   <a href="https://github.com/Zard-Studios/r2modmac/releases">
-    <img src="https://img.shields.io/github/v/release/Zard-studios/r2modmac" alt="GitHub release">
+    <img src="https://img.shields.io/github/v/release/Zard-studios/r2modmac?include_prereleases" alt="GitHub release">
   </a>
   <a href="https://opensource.org/licenses/MIT">
     <img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT">
