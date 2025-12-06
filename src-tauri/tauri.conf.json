@@ -35,9 +35,7 @@
     ],
     "macOS": {
       "dmg": {
-        "background": null,
-        "windowSize": null,
-        "windowPosition": null
+        "background": null
       }
     }
   }
