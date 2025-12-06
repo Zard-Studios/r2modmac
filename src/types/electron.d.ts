@@ -31,6 +31,8 @@ export interface IElectronAPI {
     alert: (title: string, message: string) => Promise<void>;
     readImage: (path: string) => Promise<string | null>;
     installToGame: (gameIdentifier: string, profileId: string, disabledMods: string[]) => Promise<void>;
+    fetchTextContent: (url: string) => Promise<string>;
+    lookupPackagesByNames: (gameId: string, names: string[]) => Promise<any>;
 }
 
 declare global {

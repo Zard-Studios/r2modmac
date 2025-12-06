@@ -355,62 +355,67 @@ async fn install_to_game(app: AppHandle, game_identifier: String, profile_id: St
     // Always check for BepInExPack in plugins and ensure it's properly installed at root
     let plugins_dir = profile_dir.join("BepInEx").join("plugins");
     if plugins_dir.exists() {
-        // Find BepInExPack folder - search for various naming patterns
-        let mut found_pack: Option<std::path::PathBuf> = None;
+        // Find BepInExPack folder - search for various naming patterns and PRIORITIZE content
+        // Score: 3 = Explicit BepInExPack folder structure, 2 = winhttp.dll present + name match, 1 = winhttp.dll present
+        let mut best_candidate: Option<(std::path::PathBuf, i32)> = None;
         
         if let Ok(entries) = fs::read_dir(&plugins_dir) {
             for entry in entries.filter_map(|e| e.ok()) {
                 let path = entry.path();
+                if !path.is_dir() { continue; }
+
                 let folder_name = path.file_name()
                     .and_then(|n| n.to_str())
                     .unwrap_or("")
                     .to_lowercase();
                 
-                if path.is_dir() {
-                    // Check if this folder contains BepInExPack files
-                    // Pattern 1: plugins/ModName/BepInExPack/winhttp.dll
-                    let nested_pack = path.join("BepInExPack");
-                    if nested_pack.join("winhttp.dll").exists() {
-                        eprintln!("[install_to_game] Found nested BepInExPack at {:?}", nested_pack);
-                        found_pack = Some(nested_pack);
-                        break;
+                // Pattern 1: Nested BepInExPack (Standard Thunderstore structure)
+                // plugins/ModName/BepInExPack/winhttp.dll
+                let nested_pack = path.join("BepInExPack");
+                if nested_pack.join("winhttp.dll").exists() {
+                    eprintln!("[install_to_game] Found nested BepInExPack candidate: {:?}", nested_pack);
+                    let score = 3;
+                    if best_candidate.as_ref().map_or(true, |(_, s)| score > *s) {
+                        best_candidate = Some((nested_pack, score));
                     }
+                    continue; 
+                }
+                
+                // Pattern 2: Direct or subdirectory check
+                // Check if this folder ITSELF is the pack
+                if path.join("winhttp.dll").exists() {
+                    let mut score = 1;
+                    if folder_name.contains("bepinex") { score += 1; }
                     
-                    // Pattern 2: plugins/BepInEx-BepInExPack_GAMENAME-X.X.X/winhttp.dll (direct)
-                    if folder_name.contains("bepinexpack") && path.join("winhttp.dll").exists() {
-                        eprintln!("[install_to_game] Found BepInExPack directly at {:?}", path);
-                        found_pack = Some(path.clone());
-                        break;
+                    eprintln!("[install_to_game] Found direct BepInExPack candidate: {:?} (score: {})", path, score);
+                    if best_candidate.as_ref().map_or(true, |(_, s)| score > *s) {
+                         best_candidate = Some((path.clone(), score));
                     }
-                    
-                    // Pattern 3: Search subdirectories for BepInExPack_* folders
-                    if let Ok(sub_entries) = fs::read_dir(&path) {
-                        for sub_entry in sub_entries.filter_map(|e| e.ok()) {
-                            let sub_path = sub_entry.path();
-                            let sub_name = sub_path.file_name()
-                                .and_then(|n| n.to_str())
-                                .unwrap_or("")
-                                .to_lowercase();
-                            
-                            // Match BepInExPack or BepInExPack_GAMENAME
-                            if sub_path.is_dir() && sub_name.starts_with("bepinexpack") {
-                                if sub_path.join("winhttp.dll").exists() {
-                                    eprintln!("[install_to_game] Found game-specific BepInExPack at {:?}", sub_path);
-                                    found_pack = Some(sub_path);
-                                    break;
-                                }
-                            }
-                        }
-                        if found_pack.is_some() {
-                            break;
+                    continue;
+                }
+
+                // Pattern 3: Search subdirectories (e.g. plugins/ModName/BepInExPack_GameName)
+                if let Ok(sub_entries) = fs::read_dir(&path) {
+                    for sub_entry in sub_entries.filter_map(|e| e.ok()) {
+                        let sub_path = sub_entry.path();
+                         if sub_path.is_dir() && sub_path.join("winhttp.dll").exists() {
+                             let sub_name = sub_path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_lowercase();
+                             let mut score = 1;
+                             if sub_name.contains("bepinex") { score += 1; }
+                             
+                             eprintln!("[install_to_game] Found subdirectory BepInExPack candidate: {:?} (score: {})", sub_path, score);
+                             
+                             if best_candidate.as_ref().map_or(true, |(_, s)| score > *s) {
+                                best_candidate = Some((sub_path, score));
+                             }
                         }
                     }
                 }
             }
         }
 
-        if let Some(pack_dir) = found_pack {
-            eprintln!("[install_to_game] Using BepInExPack from {:?}", pack_dir);
+        if let Some((pack_dir, score)) = best_candidate {
+            eprintln!("[install_to_game] Selected BepInExPack: {:?} (score: {})", pack_dir, score);
             
             // 1. Ensure winhttp.dll is at profile root
             let winhttp_src = pack_dir.join("winhttp.dll");
@@ -428,6 +433,19 @@ async fn install_to_game(app: AppHandle, game_identifier: String, profile_id: St
                 eprintln!("[install_to_game] Copying doorstop_config.ini to profile root");
                 fs::copy(&doorstop_src, &doorstop_dst)
                     .map_err(|e| format!("Failed to copy doorstop_config.ini: {}", e))?;
+                
+                // FORCE ENABLE DOORSTOP
+                // We read the file, verify 'enabled=true', and write it back if needed
+                 if let Ok(content) = fs::read_to_string(&doorstop_dst) {
+                    if !content.contains("enabled=true") && !content.contains("enabled = true") {
+                         eprintln!("[install_to_game] Enforcing enabled=true in doorstop_config.ini");
+                         // Simple replacement or append if missing. 
+                         // To be safe, let's just replace "enabled=false" with "enabled=true" or ensure it's there.
+                         let new_content = content.replace("enabled=false", "enabled=true")
+                                                  .replace("enabled = false", "enabled = true");
+                         let _ = fs::write(&doorstop_dst, new_content);
+                    }
+                 }
             }
 
             // 3. Merge BepInEx core/config from the pack (if present)
@@ -684,11 +702,20 @@ pub fn run() {
             read_image,
             open_game_folder,
             install_to_game,
+            install_to_game,
             confirm_dialog,
             alert_dialog,
+            fetch_text_content,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[command]
+async fn fetch_text_content(url: String) -> Result<String, String> {
+    let resp = reqwest::get(url).await.map_err(|e| e.to_string())?;
+    let text = resp.text().await.map_err(|e| e.to_string())?;
+    Ok(text)
 }
 
 #[command]

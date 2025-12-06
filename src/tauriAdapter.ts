@@ -67,5 +67,8 @@ export const tauriAPI: IElectronAPI = {
     installToGame: async (gameIdentifier: string, profileId: string, disabledMods: string[]) => {
         console.log('Installing profile to game:', { gameIdentifier, profileId, disabledMods });
         return await invoke('install_to_game', { gameIdentifier, profileId, disabledMods });
+    },
+    fetchTextContent: async (url: string) => {
+        return await invoke<string>('fetch_text_content', { url });
     }
 };

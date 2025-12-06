@@ -649,6 +649,61 @@ function App() {
           try {
             if (!activeProfile || !currentCommunity) return;
 
+            // --- BEPINEX AUTO-INSTALL LOGIC START ---
+            // 1. Check if BepInEx is already installed
+            const isBepInExInstalled = activeProfile.mods.some(m =>
+              m.fullName.toLowerCase().includes("bepinexpack")
+            );
+
+            if (!isBepInExInstalled) {
+              console.log("[Auto-Install] BepInEx not found, searching...");
+              setProgressState({
+                isOpen: true,
+                title: 'Checking Requirements',
+                progress: 0,
+                currentTask: 'Searching for BepInExPack...'
+              });
+
+              // 2. Search for the correct BepInExPack for this community
+              // Thunderstore usually names it "BepInExPack" or "{Game}_BepInExPack"
+              // Best bet: Search "BepInExPack" and find the one that is NOT deprecated or is most popular
+              const packages = await window.ipcRenderer.getPackages(
+                currentCommunity.identifier,
+                0,
+                20,
+                "BepInExPack", // Search query
+                "downloads" // Sort by downloads to get the main one
+              );
+
+              console.log("[Auto-Install] Search results:", packages);
+
+              // Filter for a good candidate (usually contains "BepInExPack" in name)
+              const bepInExPkg = Array.isArray(packages) ? packages.find((p: Package) =>
+                p.name.toLowerCase().includes("bepinexpack")
+              ) : null;
+
+              if (bepInExPkg) {
+                const version = bepInExPkg.versions[0]; // Latest version
+                console.log(`[Auto-Install] Found BepInExPack: ${bepInExPkg.name} v${version.version_number}`);
+
+                setProgressState(prev => ({
+                  ...prev,
+                  progress: 20,
+                  currentTask: `Installing missing requirement: ${bepInExPkg.name}...`
+                }));
+
+                await installModWithDependencies(bepInExPkg, version, new Set(), activeProfile.id);
+
+                console.log("[Auto-Install] BepInExPack installed successfully.");
+              } else {
+                console.warn("[Auto-Install] Could not find BepInExPack automatic candidate.");
+                // Optional: warn user? For now proceed, maybe they have a custom setup.
+              }
+
+              setProgressState(prev => ({ ...prev, isOpen: false }));
+            }
+            // --- BEPINEX AUTO-INSTALL LOGIC END ---
+
             // Get list of disabled mod names for filtering
             const disabledMods = activeProfile.mods
               .filter(m => !m.enabled)
@@ -663,6 +718,8 @@ function App() {
             await window.ipcRenderer.alert('Success', 'Mods applied! Launch the game via Steam to play.');
             setShowCrossOverGuide(true);
           } catch (e: any) {
+            console.error("Install to game failed:", e);
+            setProgressState(prev => ({ ...prev, isOpen: false }));
             alert('Error installing modpack: ' + e);
           }
         }}
@@ -743,6 +800,7 @@ function App() {
         <ModDetailModal
           mod={selectedMod.versions[0]}
           isOpen={!!selectedMod}
+          gameId={selectedCommunity || ''}
           onClose={() => setSelectedMod(null)}
           onInstall={() => {
             if (activeProfileId) {
