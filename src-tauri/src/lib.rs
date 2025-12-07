@@ -116,11 +116,9 @@ struct Settings {
 
 impl Settings {
     fn default() -> Self {
-        // Default Steam path on macOS
-        let home = dirs::home_dir().unwrap_or_default();
-        let steam_path = home.join("Library/Application Support/Steam");
+        // No default Steam path - user must set it manually to their CrossOver Steam path
         Self {
-            steam_path: if steam_path.exists() { Some(steam_path.to_string_lossy().to_string()) } else { None },
+            steam_path: None,
             favorite_games: Vec::new(),
             game_paths: HashMap::new(),
         }

@@ -115,7 +115,7 @@ export function SettingsModal({ isOpen, onClose, selectedGame }: SettingsModalPr
                             value={steamPath}
                             onChange={(e) => setSteamPath(e.target.value)}
                             className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
-                            placeholder="/Users/username/Library/Application Support/Steam"
+                            placeholder="(BottleName)/drive_c/Program Files (x86)/Steam"
                         />
                         <button
                             onClick={handleBrowse}
@@ -125,9 +125,7 @@ export function SettingsModal({ isOpen, onClose, selectedGame }: SettingsModalPr
                         </button>
                     </div>
                     <p className="text-xs text-gray-500 mt-2">
-                        The folder containing steamapps and userdata.
-                        <br />
-                        For CrossOver: Select the Steam folder inside your bottle (e.g., drive_c/Program Files (x86)/Steam).
+                        Select the Steam folder inside your bottle (e.g., drive_c/Program Files (x86)/Steam).
                     </p>
                 </div>
 
