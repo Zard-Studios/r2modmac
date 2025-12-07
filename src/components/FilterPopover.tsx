@@ -95,7 +95,7 @@ export function FilterPopover({ options, onChange, availableCategories }: Filter
                             <select
                                 value={options.sort}
                                 onChange={(e) => updateOption('sort', e.target.value)}
-                                className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2.5 text-white focus:outline-none focus:border-blue-500"
+                                className="w-full h-8 bg-gray-900 border border-gray-700 rounded-lg px-3 text-white focus:outline-none focus:border-blue-500"
                             >
                                 <option value="downloads">Most Downloaded</option>
                                 <option value="rating">Top Rated</option>
@@ -150,20 +150,6 @@ export function FilterPopover({ options, onChange, availableCategories }: Filter
                                         }
                                     }}
                                 />
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        const input = document.querySelector('input[placeholder="Add custom filter..."]') as HTMLInputElement;
-                                        const value = input?.value.trim();
-                                        if (value && !options.categories?.includes(value) && !SPECIAL_TAGS.includes(value)) {
-                                            updateOption('categories', [...(options.categories || []), value]);
-                                        }
-                                        if (input) input.value = '';
-                                    }}
-                                    className="px-3 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-medium transition-colors"
-                                >
-                                    +
-                                </button>
                             </div>
 
                             {/* Active Tags (Special + Custom) */}
