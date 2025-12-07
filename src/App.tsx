@@ -229,7 +229,13 @@ function App() {
     }
   }
 
-  const installModWithDependencies = async (pkg: Package, version: PackageVersion, installedCache: Set<string> = new Set(), targetProfileId?: string) => {
+  const installModWithDependencies = async (
+    pkg: Package,
+    version: PackageVersion,
+    installedCache: Set<string> = new Set(),
+    targetProfileId?: string,
+    progressCounter?: { installed: number; total: number }
+  ) => {
     if (installedCache.has(version.full_name)) return;
     installedCache.add(version.full_name);
 
@@ -272,15 +278,16 @@ function App() {
       try {
         const result = await window.ipcRenderer.lookupPackagesByNames(selectedCommunity, depsToInstall);
 
+        // Update total if we discovered more deps
+        if (progressCounter) {
+          progressCounter.total += result.found.length;
+        }
+
         // Install each found dependency recursively
         for (const depPkg of result.found) {
           const depVersion = depPkg.versions[0];
           if (depVersion) {
-            setProgressState(prev => ({
-              ...prev,
-              currentTask: `Installing dependency: ${depPkg.name}...`
-            }));
-            await installModWithDependencies(depPkg, depVersion, installedCache, profileIdToUse);
+            await installModWithDependencies(depPkg, depVersion, installedCache, profileIdToUse, progressCounter);
           }
         }
 
@@ -295,10 +302,21 @@ function App() {
 
     // 3. Install the mod itself
     try {
-      setProgressState(prev => ({
-        ...prev,
-        currentTask: `Installing ${pkg.name}...`
-      }));
+      // Update progress using shared counter if available
+      if (progressCounter) {
+        progressCounter.installed++;
+        const progress = Math.min(95, Math.round((progressCounter.installed / progressCounter.total) * 100));
+        setProgressState(prev => ({
+          ...prev,
+          progress,
+          currentTask: `Installing ${pkg.name}... (${progressCounter.installed}/${progressCounter.total})`
+        }));
+      } else {
+        setProgressState(prev => ({
+          ...prev,
+          currentTask: `Installing ${pkg.name}...`
+        }));
+      }
 
       const result = await window.ipcRenderer.installMod(
         profileIdToUse,
@@ -342,8 +360,10 @@ function App() {
     });
 
     try {
-      setProgressState(prev => ({ ...prev, progress: 10, currentTask: 'Checking dependencies...' }));
-      await installModWithDependencies(pkg, version, new Set(), profileIdToUse);
+      setProgressState(prev => ({ ...prev, progress: 5, currentTask: 'Checking dependencies...' }));
+      // Initialize progress counter - starts with 1 for the main mod, will grow as deps are discovered
+      const progressCounter = { installed: 0, total: 1 };
+      await installModWithDependencies(pkg, version, new Set(), profileIdToUse, progressCounter);
       setProgressState(prev => ({ ...prev, progress: 100, currentTask: 'Done!' }));
       setTimeout(() => setProgressState(prev => ({ ...prev, isOpen: false })), 500);
       // alert(`Successfully installed ${pkg.name} and dependencies`); // Removed alert
