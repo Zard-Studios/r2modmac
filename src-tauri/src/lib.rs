@@ -728,11 +728,15 @@ pub fn run() {
                 .build(app)?;
             let github = MenuItemBuilder::with_id("github", "GitHub Repository")
                 .build(app)?;
+            let kofi = MenuItemBuilder::with_id("kofi", "Support my project")
+                .build(app)?;
             
             // Build Help submenu
             let help_menu = SubmenuBuilder::new(app, "Help")
                 .item(&report_issue)
                 .item(&github)
+                .separator()
+                .item(&kofi)
                 .build()?;
             
             // Build the full menu bar (macOS needs app name submenu first)
@@ -788,6 +792,9 @@ pub fn run() {
                 }
                 "github" => {
                     let _ = open::that("https://github.com/Zard-Studios/r2modmac");
+                }
+                "kofi" => {
+                    let _ = open::that("https://ko-fi.com/zardstudios");
                 }
                 _ => {}
             }

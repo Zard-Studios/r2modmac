@@ -12,9 +12,11 @@ interface VirtualizedModGridProps {
     onUninstall: (pkg: Package) => void;
     onModClick: (pkg: Package) => void;
     onLoadMore?: () => void;
+    isLoadingMore?: boolean;
+    hasMore?: boolean;
 }
 
-export function VirtualizedModGrid({ packages, installedMods, onInstall, onUninstall, onModClick, onLoadMore }: VirtualizedModGridProps) {
+export function VirtualizedModGrid({ packages, installedMods, onInstall, onUninstall, onModClick, onLoadMore, isLoadingMore, hasMore }: VirtualizedModGridProps) {
     const parentRef = useRef<HTMLDivElement>(null);
     const [columnCount, setColumnCount] = useState(3);
 
@@ -70,27 +72,24 @@ export function VirtualizedModGrid({ packages, installedMods, onInstall, onUnins
         overscan: 2,
     });
 
-    // Infinite scroll detection
+    // Intersection Observer for infinite scroll - much more performant than scroll events
+    const loadMoreRef = useRef<HTMLDivElement>(null);
+
     useEffect(() => {
-        if (!onLoadMore || !parentRef.current) return;
+        if (!onLoadMore || !loadMoreRef.current || isLoadingMore || !hasMore) return;
 
-        const handleScroll = () => {
-            const element = parentRef.current;
-            if (!element) return;
+        const observer = new IntersectionObserver(
+            (entries) => {
+                if (entries[0].isIntersecting && !isLoadingMore && hasMore) {
+                    onLoadMore();
+                }
+            },
+            { threshold: 0.1 }
+        );
 
-            const { scrollTop, scrollHeight, clientHeight } = element;
-            const scrollPercentage = (scrollTop + clientHeight) / scrollHeight;
-
-            // Trigger load more when 80% scrolled
-            if (scrollPercentage > 0.8) {
-                onLoadMore();
-            }
-        };
-
-        const element = parentRef.current;
-        element.addEventListener('scroll', handleScroll);
-        return () => element.removeEventListener('scroll', handleScroll);
-    }, [onLoadMore]);
+        observer.observe(loadMoreRef.current);
+        return () => observer.disconnect();
+    }, [onLoadMore, isLoadingMore, hasMore]);
 
     return (
         <div
@@ -142,6 +141,22 @@ export function VirtualizedModGrid({ packages, installedMods, onInstall, onUnins
                     );
                 })}
             </div>
+
+            {/* Sentinel element for Intersection Observer - triggers load when visible */}
+            {hasMore && !isLoadingMore && (
+                <div ref={loadMoreRef} className="h-20" />
+            )}
+
+            {/* Loading More Indicator */}
+            {isLoadingMore && hasMore && (
+                <div className="flex items-center justify-center py-6 gap-3">
+                    <svg className="animate-spin h-5 w-5 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    <span className="text-gray-400 text-sm">Loading more mods...</span>
+                </div>
+            )}
         </div>
     );
 }

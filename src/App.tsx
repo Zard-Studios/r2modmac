@@ -91,12 +91,8 @@ function App() {
 
   useEffect(() => {
     if (selectedCommunity) {
-      // Initial load for game
+      // Initial load for game (categories now fetched inside loadPackages after cache is populated)
       loadPackages(selectedCommunity, 0, true)
-      // Fetch all available categories from backend cache
-      window.ipcRenderer.getAvailableCategories(selectedCommunity).then(cats => {
-        setAvailableCategories(cats)
-      }).catch(err => console.error('Failed to load categories', err))
       // Reset profile selection when changing game
       if (activeProfileId) {
         selectProfile('')
@@ -181,8 +177,11 @@ function App() {
     });
 
   const loadPackages = async (communityId: string, pageNum: number, reset: boolean = false) => {
+    // Prevent duplicate calls while loading
+    if (loadingMods) return;
+    setLoadingMods(true)
+
     if (reset) {
-      setLoadingMods(true)
       setPage(0)
       setPackages([])
       setHasMore(true)
@@ -192,6 +191,9 @@ function App() {
       // First fetch ensures cache is populated (returns count)
       if (pageNum === 0 && reset) {
         await window.ipcRenderer.fetchPackages(communityId)
+        // Now that cache is populated, fetch available categories
+        const cats = await window.ipcRenderer.getAvailableCategories(communityId)
+        setAvailableCategories(cats)
       }
 
       const newPackages = await window.ipcRenderer.getPackages(
@@ -791,8 +793,9 @@ function App() {
         </div>
 
         <div className="flex-1 overflow-hidden relative flex flex-col">
-          {loadingMods ? (
-            <div className="absolute inset-0 flex items-center justify-center">
+          {/* Show loading overlay only on initial load when no packages are displayed yet */}
+          {loadingMods && packages.length === 0 && (
+            <div className="absolute inset-0 flex items-center justify-center z-10">
               <div className="text-center flex flex-col items-center">
                 <svg className="animate-spin h-10 w-10 text-blue-500 mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
@@ -801,26 +804,29 @@ function App() {
                 <p className="text-gray-400">Fetching packages...</p>
               </div>
             </div>
-          ) : (
-            <VirtualizedModGrid
-              packages={packages}
-              installedMods={activeProfile?.mods || []}
-              onInstall={handleInstallMod}
-              onUninstall={async (pkg) => {
-                if (!activeProfileId) return;
-                const confirmed = await window.ipcRenderer.confirm('Uninstall Mod', `Uninstall ${pkg.name}?`);
-                if (confirmed) {
-                  // Find the installed mod UUID
-                  const installed = activeProfile?.mods.find(m => m.fullName.startsWith(pkg.full_name));
-                  if (installed) {
-                    await removeMod(activeProfileId, installed.uuid4);
-                  }
-                }
-              }}
-              onModClick={setSelectedMod}
-              onLoadMore={handleLoadMore}
-            />
           )}
+
+          {/* Always keep grid mounted to preserve scroll position */}
+          <VirtualizedModGrid
+            packages={packages}
+            installedMods={activeProfile?.mods || []}
+            onInstall={handleInstallMod}
+            onUninstall={async (pkg) => {
+              if (!activeProfileId) return;
+              const confirmed = await window.ipcRenderer.confirm('Uninstall Mod', `Uninstall ${pkg.name}?`);
+              if (confirmed) {
+                // Find the installed mod UUID
+                const installed = activeProfile?.mods.find(m => m.fullName.startsWith(pkg.full_name));
+                if (installed) {
+                  await removeMod(activeProfileId, installed.uuid4);
+                }
+              }
+            }}
+            onModClick={setSelectedMod}
+            onLoadMore={handleLoadMore}
+            isLoadingMore={loadingMods}
+            hasMore={hasMore}
+          />
         </div>
       </div>
     );
