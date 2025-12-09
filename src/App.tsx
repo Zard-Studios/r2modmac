@@ -932,7 +932,7 @@ function App() {
             <p className="text-xl text-gray-400">Select a game to begin managing your mods</p>
           </div>
 
-          <div className="flex gap-3 items-center max-w-2xl mx-auto mb-8">
+          <div className="flex gap-3 items-center w-full px-4 mb-8">
             <input
               className="flex-1 bg-gray-800 border border-gray-700 p-4 rounded-xl text-lg text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 transition-all shadow-lg"
               placeholder="Search for a game..."
