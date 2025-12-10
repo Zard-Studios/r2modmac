@@ -69,6 +69,7 @@ function App() {
     allInstalledDeps: [],
     profileId: null
   })
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
   const [showUpdateModal, setShowUpdateModal] = useState(false)
   const [showPreferences, setShowPreferences] = useState(false)
   const [legacyInstallMode, setLegacyInstallMode] = useState(false)
@@ -1197,6 +1198,31 @@ function App() {
         <div className="p-5 border-b border-gray-800 flex items-center justify-between gap-4 flex-shrink-0">
           <h1 className="text-2xl font-bold text-white">Browse Mods</h1>
           <div className="flex items-center gap-3">
+            <div className="relative flex bg-gray-800 rounded-lg p-1 border border-gray-700 overflow-hidden">
+              {/* Sliding Background */}
+              <div
+                className={`absolute top-1 bottom-1 w-[calc(50%-4px)] bg-gray-600 rounded-md transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${viewMode === 'grid' ? 'left-1' : 'left-1/2'
+                  }`}
+              />
+              <button
+                onClick={() => setViewMode('grid')}
+                className={`relative z-10 p-2 rounded w-10 flex items-center justify-center transition-colors ${viewMode === 'grid' ? 'text-white' : 'text-gray-400 hover:text-white'}`}
+                title="Grid View"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+                </svg>
+              </button>
+              <button
+                onClick={() => setViewMode('list')}
+                className={`relative z-10 p-2 rounded w-10 flex items-center justify-center transition-colors ${viewMode === 'list' ? 'text-white' : 'text-gray-400 hover:text-white'}`}
+                title="List View"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                </svg>
+              </button>
+            </div>
             <FilterPopover
               options={filterOptions}
               onChange={setFilterOptions}
@@ -1232,6 +1258,7 @@ function App() {
             onLoadMore={handleLoadMore}
             isLoadingMore={loadingMods}
             hasMore={hasMore}
+            viewMode={viewMode}
           />
         </div>
       </div>

@@ -1,8 +1,8 @@
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { useRef, useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect, useLayoutEffect } from 'react';
 import { ModCard } from './ModCard';
+import { ModListItem } from './ModListItem';
 import type { Package } from '../types/thunderstore';
-
 import type { InstalledMod } from '../types/profile';
 
 interface VirtualizedModGridProps {
@@ -14,14 +14,17 @@ interface VirtualizedModGridProps {
     onLoadMore?: () => void;
     isLoadingMore?: boolean;
     hasMore?: boolean;
+    viewMode?: 'grid' | 'list';
 }
 
-export function VirtualizedModGrid({ packages, installedMods, onInstall, onUninstall, onModClick, onLoadMore, isLoadingMore, hasMore }: VirtualizedModGridProps) {
+export function VirtualizedModGrid({ packages, installedMods, onInstall, onUninstall, onModClick, onLoadMore, isLoadingMore, hasMore, viewMode = 'grid' }: VirtualizedModGridProps) {
     const parentRef = useRef<HTMLDivElement>(null);
     const [columnCount, setColumnCount] = useState(3);
 
     const COLUMN_WIDTH = 320;
     const GAP = 16;
+    const GRID_ROW_HEIGHT = 280;
+    const LIST_ROW_HEIGHT = 80;
 
     // Helper to check install status
     const getInstallStatus = (pkg: Package): 'installed' | 'not_installed' | 'update_available' => {
@@ -29,10 +32,6 @@ export function VirtualizedModGrid({ packages, installedMods, onInstall, onUnins
         if (!installed) return 'not_installed';
 
         // Compare versions
-        // Simple string comparison might work if format is consistent, but semver is better.
-        // For now, assuming if strings are different and installed exists, it might be an update.
-        // But let's be safer: if installed version != latest version, show update.
-        // Actually, let's just check if they are different.
         if (installed.versionNumber !== pkg.versions[0].version_number) {
             return 'update_available';
         }
@@ -40,9 +39,52 @@ export function VirtualizedModGrid({ packages, installedMods, onInstall, onUnins
         return 'installed';
     };
 
+    // Scroll Synchronization
+    // We synchronize based on viewMode changes
+    const prevViewMode = useRef(viewMode);
+
+    // We capture/restore scroll synchronously in useLayoutEffect to avoid flicker
+    useLayoutEffect(() => {
+        if (prevViewMode.current !== viewMode && parentRef.current) {
+
+            const scrollTop = parentRef.current.scrollTop;
+            const oldMode = prevViewMode.current;
+            const newMode = viewMode;
+
+            let firstVisibleItemIndex = 0;
+
+            if (oldMode === 'grid') {
+                const rowIndex = Math.floor(scrollTop / GRID_ROW_HEIGHT);
+                firstVisibleItemIndex = rowIndex * columnCount;
+            } else {
+                const rowIndex = Math.floor(scrollTop / LIST_ROW_HEIGHT);
+                firstVisibleItemIndex = rowIndex;
+            }
+
+            let newScrollTop = 0;
+            if (newMode === 'grid') {
+                // Recalculate cols for safety
+                const width = parentRef.current.offsetWidth - 48;
+                const cols = Math.max(1, Math.min(3, Math.floor(width / (COLUMN_WIDTH + GAP))));
+
+                const rowIndex = Math.floor(firstVisibleItemIndex / cols);
+                newScrollTop = rowIndex * GRID_ROW_HEIGHT;
+            } else {
+                newScrollTop = firstVisibleItemIndex * LIST_ROW_HEIGHT;
+            }
+
+            parentRef.current.scrollTop = newScrollTop;
+            prevViewMode.current = newMode;
+        }
+    }, [viewMode, columnCount]);
+
     useEffect(() => {
         const updateColumnCount = () => {
             if (!parentRef.current) return;
+            if (viewMode === 'list') {
+                setColumnCount(1);
+                return;
+            }
             const width = parentRef.current.offsetWidth - 48;
             const cols = Math.max(1, Math.min(3, Math.floor(width / (COLUMN_WIDTH + GAP))));
             setColumnCount(cols);
@@ -61,18 +103,18 @@ export function VirtualizedModGrid({ packages, installedMods, onInstall, onUnins
         return () => {
             resizeObserver.disconnect();
         };
-    }, []);
+    }, [viewMode]);
 
     const rowCount = Math.ceil(packages.length / columnCount);
 
     const rowVirtualizer = useVirtualizer({
         count: rowCount,
         getScrollElement: () => parentRef.current,
-        estimateSize: () => 280,
-        overscan: 2,
+        estimateSize: () => viewMode === 'list' ? LIST_ROW_HEIGHT : GRID_ROW_HEIGHT,
+        overscan: 5,
     });
 
-    // Intersection Observer for infinite scroll - much more performant than scroll events
+    // Intersection Observer for infinite scroll
     const loadMoreRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
@@ -80,7 +122,6 @@ export function VirtualizedModGrid({ packages, installedMods, onInstall, onUnins
 
         const observer = new IntersectionObserver(
             (entries) => {
-                // Check isLoadingMore inside callback to use latest value
                 if (entries[0].isIntersecting && hasMore) {
                     onLoadMore();
                 }
@@ -122,20 +163,33 @@ export function VirtualizedModGrid({ packages, installedMods, onInstall, onUnins
                             }}
                         >
                             <div
-                                className="grid gap-4"
+                                className={`grid ${viewMode === 'grid' ? 'gap-4' : 'gap-2'}`}
                                 style={{
-                                    gridTemplateColumns: `repeat(${columnCount}, minmax(0, 1fr))`,
+                                    gridTemplateColumns: viewMode === 'grid'
+                                        ? `repeat(${columnCount}, minmax(0, 1fr))`
+                                        : 'minmax(0, 1fr)',
                                 }}
                             >
                                 {rowPackages.map((pkg) => (
-                                    <ModCard
-                                        key={pkg.uuid4}
-                                        mod={pkg.versions[0]}
-                                        onInstall={() => onInstall(pkg)}
-                                        onUninstall={() => onUninstall(pkg)}
-                                        onClick={() => onModClick(pkg)}
-                                        installStatus={getInstallStatus(pkg)}
-                                    />
+                                    viewMode === 'grid' ? (
+                                        <ModCard
+                                            key={pkg.uuid4}
+                                            mod={pkg.versions[0]}
+                                            onInstall={() => onInstall(pkg)}
+                                            onUninstall={() => onUninstall(pkg)}
+                                            onClick={() => onModClick(pkg)}
+                                            installStatus={getInstallStatus(pkg)}
+                                        />
+                                    ) : (
+                                        <ModListItem
+                                            key={pkg.uuid4}
+                                            mod={pkg.versions[0]}
+                                            onInstall={() => onInstall(pkg)}
+                                            onUninstall={() => onUninstall(pkg)}
+                                            onClick={() => onModClick(pkg)}
+                                            installStatus={getInstallStatus(pkg)}
+                                        />
+                                    )
                                 ))}
                             </div>
                         </div>
@@ -143,12 +197,10 @@ export function VirtualizedModGrid({ packages, installedMods, onInstall, onUnins
                 })}
             </div>
 
-            {/* Sentinel element for Intersection Observer - always visible when hasMore */}
             {hasMore && (
                 <div ref={loadMoreRef} className="h-20" />
             )}
 
-            {/* Loading More Indicator - only show when there are already packages (not on initial load) */}
             {isLoadingMore && hasMore && packages.length > 0 && (
                 <div className="flex items-center justify-center py-6 gap-3">
                     <svg className="animate-spin h-5 w-5 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
