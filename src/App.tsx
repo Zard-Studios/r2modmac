@@ -42,6 +42,7 @@ function App() {
   })
   const PAGE_SIZE = 50
   const [availableCategories, setAvailableCategories] = useState<string[]>([])
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true)
 
   const [selectedMod, setSelectedMod] = useState<Package | null>(null)
   const [gameSearchQuery, setGameSearchQuery] = useState('')
@@ -1264,7 +1265,12 @@ function App() {
       </div>
     );
 
-    content = <Layout sidebar={sidebar} main={main} />;
+    content = <Layout
+      sidebar={sidebar}
+      main={main}
+      isSidebarOpen={isSidebarOpen}
+      onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
+    />;
   }
 
   // WRAPPER
