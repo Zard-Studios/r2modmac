@@ -2570,9 +2570,29 @@ async fn install_update(app: AppHandle, download_url: String) -> Result<(), Stri
 
     eprintln!("[install_update] Downloading to {:?}", file_path);
     
+    // Stream download to calculate progress
+    use std::io::Write;
+    use futures_util::StreamExt;
+
     let response = reqwest::get(&download_url).await.map_err(|e| e.to_string())?;
-    let content = response.bytes().await.map_err(|e| e.to_string())?;
-    fs::write(&file_path, &content).map_err(|e| e.to_string())?;
+    let total_size = response.content_length().unwrap_or(0);
+    
+    let mut file = fs::File::create(&file_path).map_err(|e| e.to_string())?;
+    let mut downloaded: u64 = 0;
+    let mut stream = response.bytes_stream();
+
+    while let Some(item) = stream.next().await {
+        let chunk = item.map_err(|e| e.to_string())?;
+        file.write_all(&chunk).map_err(|e| e.to_string())?;
+        
+        downloaded += chunk.len() as u64;
+        
+        if total_size > 0 {
+            let percent = (downloaded as f64 / total_size as f64 * 100.0) as u8;
+            // Emit progress event
+            let _ = app.emit("update-progress", percent);
+        }
+    }
 
     // 2. Prepare Update Script
     let script_path = temp_dir.join("update.sh");
@@ -2680,6 +2700,10 @@ rm -rf "$UPDATE_DIR"
         .arg(&script_path)
         .spawn()
         .map_err(|e| format!("Failed to launch script: {}", e))?;
+
+    // 4. Exit App to allow script to proceed
+    eprintln!("[install_update] Exiting app to allow update...");
+    app.exit(0);
 
     Ok(())
 }

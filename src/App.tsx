@@ -1336,8 +1336,17 @@ function App() {
                 currentTask: 'Downloading update...'
               });
 
+              // Listen for progress
+              const unlisten = await listen<number>('update-progress', (event) => {
+                setProgressState(prev => ({
+                  ...prev,
+                  progress: event.payload
+                }));
+              });
+
               try {
                 await window.ipcRenderer.installUpdate(updateInfo.download_url);
+                unlisten(); // Clean up listener when done (or before closing)
                 // The script waits for PID exit.
                 window.close();
               } catch (e) {
