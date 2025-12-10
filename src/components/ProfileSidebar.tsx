@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import type { Community, Package } from '../types/thunderstore';
 import type { Profile, InstalledMod } from '../types/profile';
 
@@ -33,10 +33,16 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
     onExportProfile,
     onOpenSettings
 }) => {
+    const [searchQuery, setSearchQuery] = useState('');
+
+    const displayedMods = activeProfile?.mods.filter(mod =>
+        mod.fullName.toLowerCase().includes(searchQuery.toLowerCase())
+    ) || [];
+
     return (
         <div className="h-full flex flex-col bg-gray-900 border-r border-gray-800 w-80 flex-shrink-0">
             {/* Header */}
-            <div className="p-5 border-b border-gray-800">
+            <div className="px-5 py-[19px] border-b border-gray-800">
                 <div className="flex items-center gap-3">
                     <button
                         onClick={() => onSelectProfile('')}
@@ -65,14 +71,32 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                 </div>
             </div>
 
+            {/* Local Mod Search */}
+            <div className="px-4 pt-4 pb-2">
+                <div className="relative group">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                        <svg className={`w-4 h-4 transition-colors duration-200 ${searchQuery ? 'text-blue-500' : 'text-gray-500 group-focus-within:text-blue-500'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                        </svg>
+                    </div>
+                    <input
+                        type="text"
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        placeholder="search installed mods..."
+                        className="w-full pl-9 pr-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
+                    />
+                </div>
+            </div>
+
             {/* Mod List */}
             <div className="flex-1 overflow-y-auto p-2 space-y-1 scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-transparent">
                 <div className="px-2 py-2 text-xs font-bold text-gray-500 uppercase tracking-wider flex justify-between items-center">
                     <span>Installed Mods</span>
-                    <span className="bg-gray-800 text-gray-400 px-2 py-0.5 rounded-full text-[10px]">{activeProfile?.mods.length}</span>
+                    <span className="bg-gray-800 text-gray-400 px-2 py-0.5 rounded-full text-[10px]">{displayedMods.length}</span>
                 </div>
 
-                {activeProfile?.mods.map(mod => {
+                {displayedMods.map(mod => {
                     const modNameWithoutVersion = mod.fullName.replace(/-\d+\.\d+\.\d+$/, '');
                     const pkg = packages.find(p => p.full_name === modNameWithoutVersion);
                     const latestVersion = pkg?.versions[0].version_number;
@@ -82,7 +106,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                         <div
                             key={mod.uuid4}
                             className={`flex items-center gap-3 p-2 rounded-lg hover:bg-gray-800 group cursor-pointer transition-all border border-transparent hover:border-gray-700 relative pr-16 overflow-hidden ${!mod.enabled ? 'opacity-50' : ''}`}
-                            onClick={() => onToggleMod(activeProfile.id, mod.uuid4)}
+                            onClick={() => onToggleMod(activeProfile!.id, mod.uuid4)}
                         >
                             {!mod.enabled && (
                                 <div
@@ -151,7 +175,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                                 <button
                                     onClick={(e) => {
                                         e.stopPropagation();
-                                        onOpenModFolder(activeProfile.id, mod.fullName.split('-')[1]);
+                                        onOpenModFolder(activeProfile!.id, mod.fullName.split('-')[1]);
                                     }}
                                     className="p-1.5 text-gray-400 hover:text-blue-400 hover:bg-blue-400/10 rounded-md transition-colors"
                                     title="Locate in Finder"
