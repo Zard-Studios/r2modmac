@@ -31,8 +31,8 @@ r2modmac is a native mod manager for macOS that allows you to easily manage mods
 - **Modern Interface**: Clean and intuitive design optimized for macOS
 - **Dependency Management**: Automatic installation of required dependencies
 - **Smart Install Modes**:
-  - **New Mode (Default)**: Install adds mods to your profile list. Download only when you click "Apply to Game" — saves disk space
-  - **Legacy Mode**: Mods download immediately to a local cache when you click Install — faster but uses more storage
+  - **New Mode (Default)**: Install adds mods to your profile list. Download only when you click "Apply to Game" (saves disk space)
+  - **Legacy Mode**: Mods download immediately to a local cache when you click Install (faster but uses more storage)
 
 ## 📸 Screenshots
 
