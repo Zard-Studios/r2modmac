@@ -120,7 +120,9 @@ export function ProfileList({
                         onClick={() => setIsCreating(true)}
                     >
                         <div className="w-16 h-16 bg-gray-900 rounded-full flex items-center justify-center mb-4 group-hover:bg-blue-500/20 transition-colors">
-                            <span className="text-3xl text-gray-500 group-hover:text-blue-400">+</span>
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-gray-500 group-hover:text-blue-400 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                            </svg>
                         </div>
                         <h3 className="text-lg font-bold text-white mb-1">Create New</h3>
                         <p className="text-sm text-gray-500">Start fresh with a new profile</p>
@@ -132,7 +134,9 @@ export function ProfileList({
                         onClick={() => setIsImporting(true)}
                     >
                         <div className="w-16 h-16 bg-gray-900 rounded-full flex items-center justify-center mb-4 group-hover:bg-purple-500/20 transition-colors">
-                            <span className="text-3xl text-gray-500 group-hover:text-purple-400">↓</span>
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-gray-500 group-hover:text-purple-400 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+                            </svg>
                         </div>
                         <h3 className="text-lg font-bold text-white mb-1">Import Profile</h3>
                         <p className="text-sm text-gray-500">Use a code or file</p>
