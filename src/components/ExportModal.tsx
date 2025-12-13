@@ -30,7 +30,9 @@ export function ExportModal({ isOpen, onClose, onExportFile, onExportCode }: Exp
                         className="w-full bg-gray-800 border-2 border-dashed border-gray-600 rounded-xl p-6 flex flex-col items-center justify-center text-center hover:border-blue-500 hover:bg-gray-700/50 transition-all group"
                     >
                         <div className="w-12 h-12 bg-gray-700 rounded-full flex items-center justify-center mb-3 group-hover:bg-blue-500/20 transition-colors">
-                            <span className="text-2xl group-hover:text-blue-400">🔗</span>
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 group-hover:text-blue-400 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                            </svg>
                         </div>
                         <h3 className="text-lg font-bold text-white mb-1">Share Code</h3>
                         <p className="text-sm text-gray-400">Generate a code to share with friends</p>
@@ -53,7 +55,9 @@ export function ExportModal({ isOpen, onClose, onExportFile, onExportCode }: Exp
                         className="w-full bg-gray-800 border-2 border-dashed border-gray-600 rounded-xl p-6 flex flex-col items-center justify-center text-center hover:border-purple-500 hover:bg-gray-700/50 transition-all group"
                     >
                         <div className="w-12 h-12 bg-gray-700 rounded-full flex items-center justify-center mb-3 group-hover:bg-purple-500/20 transition-colors">
-                            <span className="text-2xl group-hover:text-purple-400">📄</span>
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 group-hover:text-purple-400 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                            </svg>
                         </div>
                         <h3 className="text-lg font-bold text-white mb-1">Export as File</h3>
                         <p className="text-sm text-gray-400">Save as .r2z file</p>
