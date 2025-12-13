@@ -1078,10 +1078,13 @@ async fn confirm_dialog(app: AppHandle, title: String, message: String) -> Resul
     use tauri_plugin_dialog::DialogExt;
     use tauri_plugin_dialog::MessageDialogButtons;
     
+    let window = app.get_webview_window("main").ok_or("Main window not found")?;
+
     let ans = app.dialog()
         .message(message)
         .title(title)
         .buttons(MessageDialogButtons::OkCancel)
+        .parent(&window)
         .blocking_show();
         
     Ok(ans)
@@ -1092,10 +1095,13 @@ async fn alert_dialog(app: AppHandle, title: String, message: String) -> Result<
     use tauri_plugin_dialog::DialogExt;
     use tauri_plugin_dialog::MessageDialogButtons;
     
+    let window = app.get_webview_window("main").ok_or("Main window not found")?;
+    
     app.dialog()
         .message(message)
         .title(title)
         .buttons(MessageDialogButtons::Ok)
+        .parent(&window)
         .blocking_show();
         
     Ok(())

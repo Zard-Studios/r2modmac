@@ -1022,7 +1022,17 @@ function App() {
         onSelectProfile={handleSelectProfile}
         onToggleMod={toggleMod}
         onViewModDetails={(pkg) => setSelectedMod(pkg)}
-        onOpenModFolder={(profileId, modName) => window.ipcRenderer.openModFolder(profileId, modName, selectedCommunity || '')}
+        onOpenModFolder={async (profileId, modName) => {
+          try {
+            await window.ipcRenderer.openModFolder(profileId, modName, selectedCommunity || '');
+          } catch (e: any) {
+            console.error("Failed to open mod folder:", e);
+            await window.ipcRenderer.alert(
+              "Directory Not Found",
+              `The "${modName}" folder could not be found.\n\nPlease make sure the game directory is set correctly in the Settings.`
+            );
+          }
+        }}
         onUninstallMod={async (mod) => {
           if (!activeProfile) return;
           const confirmed = await window.ipcRenderer.confirm('Uninstall Mod', `Uninstall ${mod.fullName}?`);
