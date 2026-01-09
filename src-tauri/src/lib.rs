@@ -1164,6 +1164,57 @@ async fn read_image(path: String) -> Result<Option<String>, String> {
     Ok(Some(format!("data:{};base64,{}", mime, base64_str)))
 }
 
+/// Detect if a ZIP archive contains BepInEx framework structure
+/// Returns (is_bepinex, Option<root_prefix_to_strip>)
+/// Uses content-based detection looking for signature files
+fn detect_bepinex_structure<R: std::io::Read + std::io::Seek>(archive: &mut zip::ZipArchive<R>) -> (bool, Option<String>) {
+    // Look for BepInEx signature patterns in file names
+    let mut found_bepinex_core = false;
+    let mut found_root_level_dll = false;
+    let mut root_prefix: Option<String> = None;
+    
+    // We need to scan without mutating, so we'll use file names directly
+    for i in 0..archive.len() {
+        if let Ok(file) = archive.by_index_raw(i) {
+            let name = file.name();
+            
+            // Pattern 1: Look for BepInEx/core/ structure
+            if name.contains("BepInEx/core/") {
+                found_bepinex_core = true;
+                // Extract prefix: everything before "BepInEx/"
+                if let Some(idx) = name.find("BepInEx/") {
+                    let prefix = &name[..idx];
+                    if !prefix.is_empty() && root_prefix.is_none() {
+                        root_prefix = Some(prefix.to_string());
+                    }
+                }
+            }
+            
+            // Pattern 2: Look for winhttp.dll (BepInEx loader)
+            if name.ends_with("winhttp.dll") || name.ends_with("doorstop_config.ini") {
+                found_root_level_dll = true;
+                // Extract prefix for root-level files
+                if let Some(idx) = name.rfind('/') {
+                    let prefix = &name[..idx + 1];
+                    if root_prefix.is_none() {
+                        root_prefix = Some(prefix.to_string());
+                    }
+                }
+            }
+        }
+    }
+    
+    let is_bepinex = found_bepinex_core || found_root_level_dll;
+    
+    // If no prefix found but it's BepInEx, files might be at root
+    if is_bepinex && root_prefix.is_none() {
+        root_prefix = Some(String::new());
+    }
+    
+    eprintln!("[detect_bepinex] is_bepinex={}, prefix={:?}", is_bepinex, root_prefix);
+    (is_bepinex, root_prefix)
+}
+
 #[command]
 async fn install_mod(app: AppHandle, profile_id: String, download_url: String, mod_name: String, game_path: String, use_profile_cache: Option<bool>) -> Result<serde_json::Value, String> {
     // Install DIRECTLY to game folder
@@ -1177,12 +1228,10 @@ async fn install_mod(app: AppHandle, profile_id: String, download_url: String, m
     let response = reqwest::get(&download_url).await.map_err(|e| e.to_string())?;
     let bytes = response.bytes().await.map_err(|e| e.to_string())?;
     
-    // Check if this is BepInExPack by looking for "BepInExPack" folder at root
+    // Smart detection: Check if this is BepInEx framework (not just "BepInExPack/" prefix)
     let cursor = std::io::Cursor::new(&bytes);
-    let mut archive = zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
-    let is_bepinex_pack = (0..archive.len()).any(|i| {
-        archive.by_index(i).ok().map(|f| f.name().starts_with("BepInExPack/")).unwrap_or(false)
-    });
+    let mut archive_for_detect = zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
+    let (is_bepinex_pack, bepinex_prefix) = detect_bepinex_structure(&mut archive_for_detect);
 
     // Install to game folder
     let cursor = std::io::Cursor::new(&bytes);
@@ -1190,29 +1239,35 @@ async fn install_mod(app: AppHandle, profile_id: String, download_url: String, m
 
     if is_bepinex_pack {
         // Install BepInExPack to GAME root (not profile!)
-        eprintln!("[install_mod] Detected BepInExPack - installing to game root");
+        let prefix = bepinex_prefix.clone().unwrap_or_default();
+        eprintln!("[install_mod] Detected BepInExPack - installing to game root (stripping prefix: '{}')", prefix);
+        
         for i in 0..archive.len() {
             let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
             let name = file.name().to_string();
             
-            if name.starts_with("BepInExPack/") {
-                // Strip "BepInExPack/" prefix
-                let relative_path = &name["BepInExPack/".len()..];
-                if relative_path.is_empty() { continue; }
-                
-                let outpath = game_dir.join(relative_path);
-                
-                if name.ends_with('/') {
-                    fs::create_dir_all(&outpath).map_err(|e| e.to_string())?;
-                } else {
-                    if let Some(p) = outpath.parent() {
-                        if !p.exists() {
-                            fs::create_dir_all(p).map_err(|e| e.to_string())?;
-                        }
+            // Strip detected prefix (e.g., "BepInExPack/", "BepInExPack_PEAK/", etc.)
+            let relative_path = if !prefix.is_empty() && name.starts_with(&prefix) {
+                &name[prefix.len()..]
+            } else {
+                &name
+            };
+            
+            if relative_path.is_empty() { continue; }
+            
+            let outpath = game_dir.join(relative_path);
+            
+            if name.ends_with('/') {
+                fs::create_dir_all(&outpath).map_err(|e| e.to_string())?;
+            } else {
+                if let Some(p) = outpath.parent() {
+                    if !p.exists() {
+                        fs::create_dir_all(p).map_err(|e| e.to_string())?;
                     }
-                    let mut outfile = fs::File::create(&outpath).map_err(|e| e.to_string())?;
-                    std::io::copy(&mut file, &mut outfile).map_err(|e| e.to_string())?;
                 }
+                let mut outfile = fs::File::create(&outpath).map_err(|e| e.to_string())?;
+                std::io::copy(&mut file, &mut outfile).map_err(|e| e.to_string())?;
+                eprintln!("[install_mod] Extracted: {}", relative_path);
             }
         }
     } else {
@@ -1253,26 +1308,31 @@ async fn install_mod(app: AppHandle, profile_id: String, download_url: String, m
         let mut archive = zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
 
         if is_bepinex_pack {
-            // Cache BepInExPack to profile root
+            // Cache BepInExPack to profile root using same dynamic prefix
+            let prefix = bepinex_prefix.clone().unwrap_or_default();
             for i in 0..archive.len() {
                 let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
                 let name = file.name().to_string();
                 
-                if name.starts_with("BepInExPack/") {
-                    let relative_path = &name["BepInExPack/".len()..];
-                    if relative_path.is_empty() { continue; }
-                    
-                    let outpath = profile_dir.join(relative_path);
-                    
-                    if name.ends_with('/') {
-                        let _ = fs::create_dir_all(&outpath);
-                    } else {
-                        if let Some(p) = outpath.parent() {
-                            let _ = fs::create_dir_all(p);
-                        }
-                        if let Ok(mut outfile) = fs::File::create(&outpath) {
-                            let _ = std::io::copy(&mut file, &mut outfile);
-                        }
+                // Strip detected prefix
+                let relative_path = if !prefix.is_empty() && name.starts_with(&prefix) {
+                    &name[prefix.len()..]
+                } else {
+                    &name
+                };
+                
+                if relative_path.is_empty() { continue; }
+                
+                let outpath = profile_dir.join(relative_path);
+                
+                if name.ends_with('/') {
+                    let _ = fs::create_dir_all(&outpath);
+                } else {
+                    if let Some(p) = outpath.parent() {
+                        let _ = fs::create_dir_all(p);
+                    }
+                    if let Ok(mut outfile) = fs::File::create(&outpath) {
+                        let _ = std::io::copy(&mut file, &mut outfile);
                     }
                 }
             }
