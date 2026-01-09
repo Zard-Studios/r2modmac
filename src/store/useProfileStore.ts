@@ -1,6 +1,15 @@
 import { create } from 'zustand';
 import type { Profile, InstalledMod } from '../types/profile';
 
+// Debounced save to prevent rapid-fire file writes causing race conditions
+let saveTimeout: ReturnType<typeof setTimeout> | null = null;
+const debouncedSaveProfiles = (profiles: Profile[]) => {
+    if (saveTimeout) clearTimeout(saveTimeout);
+    saveTimeout = setTimeout(() => {
+        window.ipcRenderer.saveProfiles(profiles);
+    }, 100); // 100ms debounce window
+};
+
 interface ProfileState {
     profiles: Profile[];
     activeProfileId: string | null;
@@ -33,7 +42,7 @@ export const useProfileStore = create<ProfileState>((set) => ({
 
         set((state) => {
             const updatedProfiles = [...state.profiles, newProfile];
-            window.ipcRenderer.saveProfiles(updatedProfiles);
+            debouncedSaveProfiles(updatedProfiles);
             return {
                 profiles: updatedProfiles,
                 activeProfileId: newProfile.id
@@ -57,7 +66,7 @@ export const useProfileStore = create<ProfileState>((set) => ({
 
         set((state) => {
             const updatedProfiles = state.profiles.filter(p => p.id !== profileId);
-            window.ipcRenderer.saveProfiles(updatedProfiles);
+            debouncedSaveProfiles(updatedProfiles);
 
             return {
                 profiles: updatedProfiles,
@@ -71,14 +80,14 @@ export const useProfileStore = create<ProfileState>((set) => ({
             const updatedProfiles = state.profiles.map(p =>
                 p.id === profileId ? { ...p, ...updates } : p
             );
-            window.ipcRenderer.saveProfiles(updatedProfiles);
+            debouncedSaveProfiles(updatedProfiles);
             return { profiles: updatedProfiles };
         });
     },
 
     setProfiles: (profiles) => {
         set({ profiles });
-        window.ipcRenderer.saveProfiles(profiles);
+        debouncedSaveProfiles(profiles);
     },
 
     addMod: (profileId, mod) => {
@@ -93,7 +102,7 @@ export const useProfileStore = create<ProfileState>((set) => ({
             if (!profile.mods.some(m => m.uuid4 === mod.uuid4)) {
                 profile.mods = [...profile.mods, mod];
                 updatedProfiles[profileIndex] = profile;
-                window.ipcRenderer.saveProfiles(updatedProfiles);
+                debouncedSaveProfiles(updatedProfiles);
             }
 
             return { profiles: updatedProfiles };
@@ -128,7 +137,7 @@ export const useProfileStore = create<ProfileState>((set) => ({
 
             profile.mods = profile.mods.filter(m => m.uuid4 !== modId);
             updatedProfiles[profileIndex] = profile;
-            window.ipcRenderer.saveProfiles(updatedProfiles);
+            debouncedSaveProfiles(updatedProfiles);
 
             return { profiles: updatedProfiles };
         });
@@ -169,7 +178,7 @@ export const useProfileStore = create<ProfileState>((set) => ({
                 });
 
                 updatedProfiles[profileIndex] = profile;
-                window.ipcRenderer.saveProfiles(updatedProfiles);
+                debouncedSaveProfiles(updatedProfiles);
 
                 return { profiles: updatedProfiles };
             });

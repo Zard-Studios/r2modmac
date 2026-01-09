@@ -14,7 +14,8 @@ import { ExportModal } from './components/ExportModal'
 import { CrossOverGuideModal } from './components/CrossOverGuideModal';
 import { ProfileSidebar } from './components/ProfileSidebar';
 import { useProfileStore } from './store/useProfileStore'
-import type { Community, Package, PackageVersion } from './types/thunderstore'
+import { useAppStore } from './store/useAppStore'
+import type { Package, PackageVersion } from './types/thunderstore'
 import type { InstalledMod } from './types/profile'
 import { getVersion } from '@tauri-apps/api/app';
 import { listen } from '@tauri-apps/api/event';
@@ -23,8 +24,7 @@ import PreferencesModal from './components/PreferencesModal';
 import type { UpdateInfo } from './types/electron';
 
 function App() {
-  const [communities, setCommunities] = useState<Community[]>([])
-  const [communityImages, setCommunityImages] = useState<Record<string, string>>({})
+
   const [packages, setPackages] = useState<Package[]>([])
   const [loading, setLoading] = useState(true)
   const [loadingMods, setLoadingMods] = useState(false)
@@ -88,6 +88,8 @@ function App() {
     removeMod,
     toggleMod
   } = useProfileStore()
+  // App State Store
+  const { communities, communityImages, setCommunities, setCommunityImages } = useAppStore();
 
   const [selectedCommunity, setSelectedCommunity] = useState<string | null>(null)
 
@@ -104,14 +106,28 @@ function App() {
     });
 
     // Listen for preferences menu event
-    const unlisten = listen('show-preferences', () => {
+    const unlistenPrefs = listen('show-preferences', () => {
       setShowPreferences(true);
     });
 
+    // Listen for packages loaded event (when background chunks complete)
+    const unlistenPackages = listen<{ game_id: string, total_count: number }>('packages-loaded', (event) => {
+      console.log(`[packages-loaded] Game ${event.payload.game_id} now has ${event.payload.total_count} packages`);
+
+      // If this is the currently selected game, we MUST refresh the list because
+      // the initial page might have been incomplete (e.g. only 53 items shown, while page 2 starts at 100).
+      // We reset to page 0 to ensure consistency.
+      if (event.payload.game_id === selectedCommunity) {
+        setHasMore(true);
+        loadPackages(selectedCommunity, 0, true);
+      }
+    });
+
     return () => {
-      unlisten.then(fn => fn());
+      unlistenPrefs.then(fn => fn());
+      unlistenPackages.then(fn => fn());
     };
-  }, [])
+  }, [selectedCommunity])
 
   const checkForUpdates = async () => {
     try {
@@ -139,9 +155,9 @@ function App() {
 
   // Search Effect
   useEffect(() => {
-    if (selectedCommunity) {
+    if (selectedCommunity) {  // Only search within a game
       const timer = setTimeout(() => {
-        loadPackages(selectedCommunity, 0, true)
+        loadPackages(selectedCommunity, 0, false)
       }, 300) // Debounce search
       return () => clearTimeout(timer)
     }
@@ -160,8 +176,24 @@ function App() {
   const [favoriteGames, setFavoriteGames] = useState<string[]>([])
 
   const loadData = async () => {
+    // If we already have communities, don't re-fetch them.
+    // We only fetch settings and images if needed (but images usually go with communities)
+    if (communities.length > 0) {
+      // Just load settings for favorites
+      try {
+        const settings = await window.ipcRenderer.getSettings();
+        if (settings.favorite_games) {
+          setFavoriteGames(settings.favorite_games)
+        }
+      } catch (err) {
+        console.error('Failed to load settings', err)
+      }
+      return;
+    }
+
     setLoading(true)
     try {
+      // Fetch everything initially
       const [data, images, settings] = await Promise.all([
         window.ipcRenderer.fetchCommunities(),
         window.ipcRenderer.fetchCommunityImages(),

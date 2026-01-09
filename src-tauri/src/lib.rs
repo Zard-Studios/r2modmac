@@ -1,5 +1,6 @@
 use tauri::{command, AppHandle, Manager, Emitter};
-use std::{fs, sync::{Arc, Mutex}, collections::HashMap};
+use std::{fs, sync::Arc, collections::HashMap};
+use tokio::sync::RwLock;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -30,14 +31,24 @@ fn get_profiles(app: AppHandle) -> Result<Vec<serde_json::Value>, String> {
 }
 
 #[command]
-fn save_profiles(app: AppHandle, profiles: Vec<serde_json::Value>) -> Result<bool, String> {
+async fn save_profiles(app: AppHandle, profiles: Vec<serde_json::Value>) -> Result<bool, String> {
     let profile_path = app.path().app_data_dir().unwrap().join("profiles.json");
-    // Ensure dir exists
-    if let Some(parent) = profile_path.parent() {
-        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
+    
+    // Serialize first (fast operation)
     let data = serde_json::to_string_pretty(&profiles).map_err(|e| e.to_string())?;
-    fs::write(profile_path, data).map_err(|e| e.to_string())?;
+    
+    // Write to disk in blocking thread pool to avoid blocking async runtime
+    tokio::task::spawn_blocking(move || {
+        // Ensure dir exists
+        if let Some(parent) = profile_path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        fs::write(&profile_path, &data)
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
+    .map_err(|e| e.to_string())?;
+    
     Ok(true)
 }
 
@@ -101,8 +112,8 @@ async fn fetch_community_images() -> Result<std::collections::HashMap<String, St
 
 // AppState to hold packages in memory
 struct AppState {
-    // Cache: GameID -> List of Packages (wrapped in Arc for sharing across tasks)
-    packages: Arc<Mutex<HashMap<String, Vec<serde_json::Value>>>>,
+    // Cache: GameID -> List of Packages (RwLock allows concurrent reads while chunks load)
+    packages: Arc<RwLock<HashMap<String, Vec<serde_json::Value>>>>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
@@ -869,7 +880,7 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())
         .manage(AppState {
-            packages: Arc::new(Mutex::new(HashMap::new())),
+            packages: Arc::new(RwLock::new(HashMap::new())),
         })
 
         .invoke_handler(tauri::generate_handler![
@@ -1458,7 +1469,7 @@ async fn fetch_packages(app: AppHandle, state: tauri::State<'_, AppState>, game_
     
     // 0. Check if we already have packages in memory (instant return)
     {
-        let packages_lock = state.packages.lock().unwrap();
+        let packages_lock = state.packages.read().await;
         if let Some(packages) = packages_lock.get(&game_id) {
             if !packages.is_empty() {
                 eprintln!("[fetch_packages] Serving {} packages from memory (instant)", packages.len());
@@ -1506,11 +1517,10 @@ async fn fetch_packages(app: AppHandle, state: tauri::State<'_, AppState>, game_
             
         let cache_file = cache_dir.join(format!("{}.json", hash));
         
-        // Check cache
+        // Check cache (Async)
         if cache_file.exists() {
-            if let Ok(file) = fs::File::open(&cache_file) {
-                let reader = std::io::BufReader::new(file);
-                if let Ok(mut packages) = serde_json::from_reader::<_, Vec<serde_json::Value>>(reader) {
+            if let Ok(bytes) = tokio::fs::read(&cache_file).await {
+                if let Ok(mut packages) = serde_json::from_slice::<Vec<serde_json::Value>>(&bytes) {
                     // Filter out Manager packages from cache too
                     packages.retain(|pkg| {
                         let full_name = pkg["full_name"].as_str().unwrap_or("");
@@ -1537,9 +1547,10 @@ async fn fetch_packages(app: AppHandle, state: tauri::State<'_, AppState>, game_
             !full_name.contains("ebkr-r2modman") && !full_name.contains("Tslat-ThunderstoreModManager")
         });
         
-        // Save to cache
-        if let Ok(file) = fs::File::create(&cache_file) {
-            let _ = serde_json::to_writer(file, &packages);
+        // Save to cache (Async)
+        // We re-serialize to save clean JSON
+        if let Ok(cache_data) = serde_json::to_vec(&packages) {
+            let _ = tokio::fs::write(&cache_file, cache_data).await;
         }
         
         Ok(packages)
@@ -1553,7 +1564,7 @@ async fn fetch_packages(app: AppHandle, state: tauri::State<'_, AppState>, game_
                 eprintln!("[fetch_packages] First chunk loaded: {} packages (instant display ready!)", count);
                 
                 // Update state immediately so UI can show something
-                let mut packages_lock = state.packages.lock().unwrap();
+                let mut packages_lock = state.packages.write().await;
                 packages_lock.insert(game_id.clone(), first_packages);
             }
             Err(e) => {
@@ -1566,9 +1577,10 @@ async fn fetch_packages(app: AppHandle, state: tauri::State<'_, AppState>, game_
     let remaining_urls: Vec<String> = chunk_urls.into_iter().skip(1).collect();
     
     if !remaining_urls.is_empty() {
-        let packages_arc = state.packages.clone();  // Clone the Arc
+        let packages_arc = state.packages.clone();
         let game_id_clone = game_id.clone();
         let cache_dir_clone = cache_dir.clone();
+        let app_handle = app.clone();
         
         // Spawn background task for remaining chunks
         tokio::spawn(async move {
@@ -1587,7 +1599,7 @@ async fn fetch_packages(app: AppHandle, state: tauri::State<'_, AppState>, game_
             for task in futures_util::future::join_all(tasks).await {
                 match task {
                     Ok(Ok(packages)) => {
-                        let mut packages_lock = packages_arc.lock().unwrap();
+                        let mut packages_lock = packages_arc.write().await;
                         if let Some(existing) = packages_lock.get_mut(&game_id_clone) {
                             existing.extend(packages);
                         }
@@ -1597,16 +1609,24 @@ async fn fetch_packages(app: AppHandle, state: tauri::State<'_, AppState>, game_
                 }
             }
             
-            // Log final count
-            let packages_lock = packages_arc.lock().unwrap();
-            if let Some(packages) = packages_lock.get(&game_id_clone) {
-                eprintln!("[fetch_packages] Background loading complete. Total: {} packages", packages.len());
-            }
+            // Get final count and emit event for frontend
+            let final_count = {
+                let packages_lock = packages_arc.read().await;
+                packages_lock.get(&game_id_clone).map(|p| p.len()).unwrap_or(0)
+            };
+            
+            eprintln!("[fetch_packages] Background loading complete. Total: {} packages", final_count);
+            
+            // Emit event so frontend knows more packages are available
+            let _ = app_handle.emit("packages-loaded", serde_json::json!({
+                "game_id": game_id_clone,
+                "total_count": final_count
+            }));
         });
     }
 
     // 5. Return immediately with first chunk count
-    let packages_lock = state.packages.lock().unwrap();
+    let packages_lock = state.packages.read().await;
     let count = packages_lock.get(&game_id).map(|p| p.len()).unwrap_or(0);
     
     if let Ok(elapsed) = start_time.elapsed() {
@@ -1622,7 +1642,7 @@ async fn get_available_categories(
     state: tauri::State<'_, AppState>,
     game_id: String
 ) -> Result<Vec<String>, String> {
-    let packages_lock = state.packages.lock().map_err(|_| "Failed to lock state".to_string())?;
+    let packages_lock = state.packages.read().await;
     
     if let Some(packages) = packages_lock.get(&game_id) {
         let mut categories: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -1660,7 +1680,7 @@ async fn get_packages(
     mods: Option<bool>,
     modpacks: Option<bool>
 ) -> Result<Vec<serde_json::Value>, String> {
-    let packages_lock = state.packages.lock().map_err(|_| "Failed to lock state".to_string())?;
+    let packages_lock = state.packages.read().await;
     
     if let Some(packages) = packages_lock.get(&game_id) {
         // Initial filtering
@@ -1817,7 +1837,7 @@ async fn lookup_packages_by_names(
     game_id: String,
     names: Vec<String>
 ) -> Result<serde_json::Value, String> {
-    let packages_lock = state.packages.lock().map_err(|_| "Failed to lock state".to_string())?;
+    let packages_lock = state.packages.read().await;
     
     if let Some(packages) = packages_lock.get(&game_id) {
         let mut found = Vec::new();
@@ -1865,21 +1885,20 @@ async fn fetch_package_by_name(state: tauri::State<'_, AppState>, name: String, 
 
     // 2. Check Cache if game_id is provided
     if let Some(gid) = game_id {
-        if let Ok(packages_lock) = state.packages.lock() {
-            if let Some(packages) = packages_lock.get(&gid) {
-                // Find package in cache
-                // Cache structure: Array of package objects
-                // We need to match full_name or name
-                // The cache stores objects with "full_name": "Namespace-Name"
-                
-                let target_name = clean_name.to_lowercase();
-                
-                if let Some(pkg) = packages.iter().find(|p| {
-                     p["full_name"].as_str().unwrap_or("").to_lowercase() == target_name
-                }) {
-                    eprintln!("[fetch_package_by_name] Found {} in cache for game {}", clean_name, gid);
-                    return Ok(Some(pkg.clone()));
-                }
+        let packages_lock = state.packages.read().await;
+        if let Some(packages) = packages_lock.get(&gid) {
+            // Find package in cache
+            // Cache structure: Array of package objects
+            // We need to match full_name or name
+            // The cache stores objects with "full_name": "Namespace-Name"
+            
+            let target_name = clean_name.to_lowercase();
+            
+            if let Some(pkg) = packages.iter().find(|p| {
+                 p["full_name"].as_str().unwrap_or("").to_lowercase() == target_name
+            }) {
+                eprintln!("[fetch_package_by_name] Found {} in cache for game {}", clean_name, gid);
+                return Ok(Some(pkg.clone()));
             }
         }
     }
