@@ -43,7 +43,7 @@ export interface IElectronAPI {
     confirm: (title: string, message: string) => Promise<boolean>;
     alert: (title: string, message: string) => Promise<void>;
     readImage: (path: string) => Promise<string | null>;
-    installToGame: (gameIdentifier: string, profileId: string, disabledMods: string[]) => Promise<void>;
+    installToGame: (gameIdentifier: string, profileId: string, disabledMods: string[], isVanillaOverride?: boolean) => Promise<void>;
     fetchTextContent: (url: string) => Promise<string>;
     checkUpdate: (currentVersion: string) => Promise<UpdateInfo>;
     installUpdate: (downloadUrl: string) => Promise<void>;
@@ -51,6 +51,7 @@ export interface IElectronAPI {
     syncProfileToGame: (profileId: string, gameIdentifier: string, useLegacyCache?: boolean) => Promise<{ removed: number; to_install: string[]; already_installed: number; cached: number }>;
     copyModFromCache: (profileId: string, modName: string, gamePath: string) => Promise<{ success: boolean; copied: boolean }>;
     clearProfileCache: () => Promise<{ cleared: number; bytes_freed: number }>;
+    openProfileFolder: (profileId: string) => Promise<void>;
 }
 
 export interface UpdateInfo {

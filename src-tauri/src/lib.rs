@@ -16,6 +16,8 @@ pub struct Profile {
     pub id: String,
     pub name: String,
     pub mods: Vec<Mod>,
+    #[serde(default)]
+    pub is_vanilla: bool,
     // Add other fields
 }
 
@@ -347,7 +349,7 @@ fn find_steam_app_id(steam_path: &std::path::Path, game_folder: &str) -> Option<
 }
 
 #[command]
-async fn install_to_game(app: AppHandle, game_identifier: String, profile_id: String, disabled_mods: Vec<String>) -> Result<(), String> {
+async fn install_to_game(app: AppHandle, game_identifier: String, profile_id: String, disabled_mods: Vec<String>, is_vanilla_override: Option<bool>) -> Result<(), String> {
     // 1. Find game path
     let game_path_str = get_game_path(app.clone(), game_identifier.clone()).await?
         .ok_or("Game not found in Steam library")?;
@@ -357,13 +359,39 @@ async fn install_to_game(app: AppHandle, game_identifier: String, profile_id: St
     let profile_dir = app.path().app_data_dir().map_err(|e| e.to_string())?
         .join("profiles").join(&profile_id);
 
-    if !profile_dir.exists() {
-        return Err("Profile not found".to_string());
+    // In non-legacy mode, profile dir might not exist - that's OK for vanilla mode
+    // if !profile_dir.exists() {
+    //     return Err("Profile not found".to_string());
+    // }
+
+    // Check is_vanilla - prefer override from frontend (for timing issues)
+    let is_vanilla = if let Some(override_val) = is_vanilla_override {
+        eprintln!("[install_to_game] Using is_vanilla override: {}", override_val);
+        override_val
+    } else {
+        // Fallback: Read from profiles.json
+        let profiles_path = app.path().app_data_dir().unwrap().join("profiles.json");
+        let mut vanilla = false;
+        if profiles_path.exists() {
+             if let Ok(data) = fs::read_to_string(&profiles_path) {
+                 if let Ok(profiles) = serde_json::from_str::<Vec<serde_json::Value>>(&data) {
+                     if let Some(p) = profiles.iter().find(|p| p["id"].as_str() == Some(&profile_id)) {
+                         vanilla = p["is_vanilla"].as_bool().unwrap_or(false);
+                     }
+                 }
+             }
+        }
+        vanilla
+    };
+
+    if is_vanilla {
+        eprintln!("[install_to_game] Profile is in VANILLA mode. Cleaning game folder.");
     }
 
     eprintln!("[install_to_game] Disabled mods: {:?}", disabled_mods);
 
     // --- FIX BEPINEX STRUCTURE START ---
+    if !is_vanilla {
     // Always check for BepInExPack in plugins and ensure it's properly installed at root
     let plugins_dir = profile_dir.join("BepInEx").join("plugins");
     if plugins_dir.exists() {
@@ -472,6 +500,7 @@ async fn install_to_game(app: AppHandle, game_identifier: String, profile_id: St
             eprintln!("[install_to_game] Warning: No BepInExPack found in plugins!");
         }
     }
+    } // End if !is_vanilla
     // --- FIX BEPINEX STRUCTURE END ---
 
     eprintln!("[install_to_game] Installing profile {} to game {}", profile_id, game_path.display());
@@ -485,7 +514,34 @@ async fn install_to_game(app: AppHandle, game_identifier: String, profile_id: St
         .map(|s| s.to_lowercase())
         .collect();
     
-    if profile_plugins.exists() && game_plugins.exists() {
+    if is_vanilla {
+        // Vanilla mode: RENAME BepInEx folder to BepInEx_DISABLED (preserves mods!)
+        let bepinex_folder = game_path.join("BepInEx");
+        let bepinex_disabled = game_path.join("BepInEx_DISABLED");
+        
+        if bepinex_folder.exists() {
+            // If disabled folder already exists, remove it first
+            if bepinex_disabled.exists() {
+                eprintln!("[install_to_game] Vanilla mode: Removing old disabled folder");
+                let _ = fs::remove_dir_all(&bepinex_disabled);
+            }
+            eprintln!("[install_to_game] Vanilla mode: Renaming BepInEx -> BepInEx_DISABLED");
+            fs::rename(&bepinex_folder, &bepinex_disabled)
+                .map_err(|e| format!("Failed to disable BepInEx: {}", e))?;
+        }
+    } else {
+        // Normal mode: Check if BepInEx_DISABLED exists and restore it
+        let bepinex_folder = game_path.join("BepInEx");
+        let bepinex_disabled = game_path.join("BepInEx_DISABLED");
+        
+        if bepinex_disabled.exists() && !bepinex_folder.exists() {
+            eprintln!("[install_to_game] Restoring BepInEx_DISABLED -> BepInEx");
+            fs::rename(&bepinex_disabled, &bepinex_folder)
+                .map_err(|e| format!("Failed to restore BepInEx: {}", e))?;
+        }
+    }
+    
+    if !is_vanilla && profile_plugins.exists() && game_plugins.exists() {
         // Get list of ENABLED mod folders in profile
         let enabled_profile_mods: std::collections::HashSet<String> = fs::read_dir(&profile_plugins)
             .map(|entries| {
@@ -528,6 +584,7 @@ async fn install_to_game(app: AppHandle, game_identifier: String, profile_id: St
     }
     // --- END SYNC ---
 
+    if !is_vanilla {
     // 3. Copy BepInEx structure with filtering for disabled mods
     let source_bepinex = profile_dir.join("BepInEx");
     let dest_bepinex = game_path.join("BepInEx");
@@ -638,18 +695,36 @@ async fn install_to_game(app: AppHandle, game_identifier: String, profile_id: St
         }
         eprintln!("[install_to_game] Synced BepInEx to game folder");
     }
+    } // End if !is_vanilla
 
-    // 4. Copy root files (doorstop_config.ini, winhttp.dll)
+    // 4. Rename (or restore) root files (doorstop_config.ini, winhttp.dll)
     for item_name in ["doorstop_config.ini", "winhttp.dll"].iter() {
-        let source = profile_dir.join(item_name);
         let dest = game_path.join(item_name);
+        let disabled_name = format!("{}_DISABLED", item_name);
+        let disabled_dest = game_path.join(&disabled_name);
         
-        if source.exists() {
+        if is_vanilla {
+            // Rename to _DISABLED instead of deleting
             if dest.exists() {
-                let _ = fs::remove_file(&dest);
+                if disabled_dest.exists() {
+                    let _ = fs::remove_file(&disabled_dest);
+                }
+                let _ = fs::rename(&dest, &disabled_dest);
+                eprintln!("[install_to_game] Vanilla mode: Renamed {} -> {}", item_name, disabled_name);
             }
-            fs::copy(&source, &dest).map_err(|e| format!("Failed to copy {}: {}", item_name, e))?;
-            eprintln!("[install_to_game] Synced {} to game folder", item_name);
+        } else {
+            // Restore from _DISABLED if it exists
+            if disabled_dest.exists() && !dest.exists() {
+                let _ = fs::rename(&disabled_dest, &dest);
+                eprintln!("[install_to_game] Restored {} from disabled", item_name);
+            }
+            
+            // Copy from profile if needed
+            let source = profile_dir.join(item_name);
+            if source.exists() && !dest.exists() {
+                fs::copy(&source, &dest).map_err(|e| format!("Failed to copy {}: {}", item_name, e))?;
+                eprintln!("[install_to_game] Synced {} to game folder", item_name);
+            }
         }
     }
 
@@ -750,10 +825,12 @@ async fn sync_profile_to_game(app: AppHandle, profile_id: String, game_identifie
     
     // Get list of mod names from profile (format: "Author-ModName-Version")
     // We keep the full name for matching
+    // IMPORTANT: Only include ENABLED mods (disabled mods should not be installed)
     let profile_mod_full_names: Vec<String> = profile["mods"]
         .as_array()
         .unwrap_or(&vec![])
         .iter()
+        .filter(|m| m["enabled"].as_bool().unwrap_or(true)) // Only enabled mods (default true for backwards compat)
         .filter_map(|m| m["fullName"].as_str().map(|s| s.to_string()))
         .collect();
     
@@ -872,6 +949,36 @@ async fn sync_profile_to_game(app: AppHandle, profile_id: String, game_identifie
     }))
 }
 
+#[command]
+async fn toggle_profile_vanilla_mode(app: AppHandle, profile_id: String) -> Result<bool, String> {
+    let profile_path = app.path().app_data_dir().unwrap().join("profiles.json");
+    if !profile_path.exists() {
+        return Err("No profiles found".to_string());
+    }
+    
+    let data = fs::read_to_string(&profile_path).map_err(|e| e.to_string())?;
+    let mut profiles: Vec<serde_json::Value> = serde_json::from_str(&data).map_err(|e| e.to_string())?;
+    
+    let mut new_state = false;
+    let mut found = false;
+    
+    for p in &mut profiles {
+        if p["id"].as_str() == Some(&profile_id) {
+            let current = p["is_vanilla"].as_bool().unwrap_or(false);
+            new_state = !current;
+            p["is_vanilla"] = serde_json::Value::Bool(new_state);
+            found = true;
+            break;
+        }
+    }
+    
+    if found {
+        save_profiles(app, profiles).await?;
+        Ok(new_state)
+    } else {
+        Err("Profile not found".to_string())
+    }
+}
 
 pub fn run() {
     tauri::Builder::default()
@@ -884,6 +991,7 @@ pub fn run() {
         })
 
         .invoke_handler(tauri::generate_handler![
+            toggle_profile_vanilla_mode,
             get_profiles,
             save_profiles,
             fetch_communities,
@@ -900,6 +1008,7 @@ pub fn run() {
             lookup_packages_by_names,
             fetch_package_by_name,
             delete_profile_folder,
+            open_profile_folder,
             remove_mod,
             toggle_mod,
             check_directory_exists,
@@ -2082,6 +2191,26 @@ async fn delete_profile_folder(app: AppHandle, profile_id: String, game_identifi
     } else {
         Ok(false)
     }
+}
+
+#[command]
+async fn open_profile_folder(app: AppHandle, profile_id: String) -> Result<(), String> {
+    let profile_dir = app.path().app_data_dir().unwrap().join("profiles").join(&profile_id);
+    eprintln!("[open_profile_folder] Attempting to open: {:?}", profile_dir);
+    
+    // Create the folder if it doesn't exist
+    if !profile_dir.exists() {
+        eprintln!("[open_profile_folder] Folder doesn't exist, creating it...");
+        fs::create_dir_all(&profile_dir).map_err(|e| e.to_string())?;
+    }
+    
+    eprintln!("[open_profile_folder] Opening folder in Finder...");
+    open::that(&profile_dir).map_err(|e| {
+        eprintln!("[open_profile_folder] Failed to open: {}", e);
+        e.to_string()
+    })?;
+    eprintln!("[open_profile_folder] Success!");
+    Ok(())
 }
 
 #[command]

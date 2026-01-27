@@ -91,9 +91,9 @@ export const tauriAPI: IElectronAPI = {
     readImage: async (path: string) => {
         return await invoke('read_image', { path });
     },
-    installToGame: async (gameIdentifier: string, profileId: string, disabledMods: string[]) => {
-        console.log('Installing profile to game:', { gameIdentifier, profileId, disabledMods });
-        return await invoke('install_to_game', { gameIdentifier, profileId, disabledMods });
+    installToGame: async (gameIdentifier: string, profileId: string, disabledMods: string[], isVanillaOverride?: boolean) => {
+        console.log('Installing profile to game:', { gameIdentifier, profileId, disabledMods, isVanillaOverride });
+        return await invoke('install_to_game', { gameIdentifier, profileId, disabledMods, isVanillaOverride });
     },
     fetchTextContent: async (url: string) => {
         return await invoke<string>('fetch_text_content', { url });
@@ -112,5 +112,8 @@ export const tauriAPI: IElectronAPI = {
     },
     clearProfileCache: async () => {
         return await invoke<{ cleared: number; bytes_freed: number }>('clear_profile_cache', {});
+    },
+    openProfileFolder: async (profileId: string) => {
+        return await invoke('open_profile_folder', { profileId });
     }
 };

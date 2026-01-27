@@ -14,4 +14,5 @@ export interface Profile {
     dateCreated: number;
     lastUsed: number;
     profileImageUrl?: string;
+    is_vanilla?: boolean;
 }

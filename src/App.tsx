@@ -1040,6 +1040,18 @@ function App() {
           onBrowseMods={() => setIsBrowsingMode(true)}
           onDeleteProfile={deleteProfile}
           onUpdateProfile={updateProfile}
+          onToggleVanilla={async (profileId, newVanillaState) => {
+            // Update profile state
+            updateProfile(profileId, { is_vanilla: newVanillaState });
+            // Find the profile to get its mods
+            const profile = profiles.find(p => p.id === profileId);
+            if (profile) {
+              const disabledMods = profile.mods.filter(m => !m.enabled).map(m => m.fullName);
+              // Apply directly to game with vanilla override
+              await window.ipcRenderer.installToGame(selectedCommunity, profileId, disabledMods, newVanillaState);
+              await window.ipcRenderer.alert('Success', newVanillaState ? 'Mods disabled! Game will run in vanilla mode.' : 'Mods restored!');
+            }
+          }}
         />
       </div>
     );
@@ -1087,9 +1099,18 @@ function App() {
           console.log("Resolving package for:", mod.fullName, "searching:", searchName);
           return await window.ipcRenderer.fetchPackageByName(searchName, selectedCommunity);
         }}
-        onInstallToGame={async () => {
+        onInstallToGame={async (isVanillaOverride?: boolean) => {
           try {
             if (!activeProfile || !currentCommunity) return;
+
+            // If we have a vanilla override, call install_to_game directly with it
+            if (isVanillaOverride !== undefined) {
+              console.log('[Apply] Vanilla override:', isVanillaOverride);
+              const disabledMods = activeProfile.mods.filter(m => !m.enabled).map(m => m.fullName);
+              await window.ipcRenderer.installToGame(currentCommunity.identifier, activeProfile.id, disabledMods, isVanillaOverride);
+              await window.ipcRenderer.alert('Success', isVanillaOverride ? 'Mods disabled! Game will run in vanilla mode.' : 'Mods restored!');
+              return;
+            }
 
             // Get game path FIRST - needed for all installs
             const gamePath = await window.ipcRenderer.getGamePath(currentCommunity.identifier);
@@ -1194,10 +1215,14 @@ function App() {
                   }
 
                   // Fallback: Download from Thunderstore
+                  console.log(`[Install] Downloading from Thunderstore: ${modInProfile.fullName}`);
                   const pkg = await window.ipcRenderer.fetchPackageByName(modInProfile.fullName, currentCommunity.identifier);
                   if (pkg) {
                     const version = pkg.versions.find((v: any) => v.version_number === modInProfile.versionNumber) || pkg.versions[0];
+                    console.log(`[Install] Found package, installing version ${version.version_number}`);
                     await window.ipcRenderer.installMod(activeProfile.id, version.download_url, version.full_name, gamePath, legacyInstallMode);
+                  } else {
+                    console.error(`[Install] FAILED to find package for: ${modInProfile.fullName}`);
                   }
                 }
                 installed++;
@@ -1236,6 +1261,7 @@ function App() {
         }}
         onExportProfile={() => setShowExportModal(true)}
         onOpenSettings={() => setShowSettings(true)}
+        onUpdateProfile={updateProfile}
       />
     );
 

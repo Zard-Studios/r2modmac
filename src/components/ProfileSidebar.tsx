@@ -12,10 +12,11 @@ interface ProfileSidebarProps {
     onViewModDetails: (pkg: Package) => void;
     onOpenModFolder: (profileId: string, modName: string) => void;
     onUninstallMod: (mod: InstalledMod) => void;
-    onInstallToGame: () => void;
+    onInstallToGame: (isVanillaOverride?: boolean) => void;
     onResolvePackage: (mod: InstalledMod) => Promise<Package | null>;
     onExportProfile: () => void;
     onOpenSettings: () => void;
+    onUpdateProfile: (profileId: string, updates: Partial<Profile>) => void;
 }
 
 export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
@@ -31,9 +32,51 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
     onInstallToGame,
     onResolvePackage,
     onExportProfile,
-    onOpenSettings
+    onOpenSettings,
+    onUpdateProfile
 }) => {
     const [searchQuery, setSearchQuery] = useState('');
+    const [isEditing, setIsEditing] = useState(false);
+    const [editName, setEditName] = useState('');
+
+    const handleEditClick = () => {
+        if (activeProfile) {
+            setEditName(activeProfile.name);
+            setIsEditing(true);
+        }
+    };
+
+    const handleUpdate = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (activeProfile && editName.trim()) {
+            onUpdateProfile(activeProfile.id, { name: editName.trim() });
+            setIsEditing(false);
+        }
+    };
+
+    const handleImageSelect = async () => {
+        if (!activeProfile) return;
+        try {
+            const filePath = await window.ipcRenderer.selectFile([
+                { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp'] }
+            ]);
+            if (filePath) {
+                const base64 = await window.ipcRenderer.readImage(filePath);
+                if (base64) {
+                    onUpdateProfile(activeProfile.id, { profileImageUrl: base64 });
+                    // No need to update local state as prop will update
+                }
+            }
+        } catch (e) {
+            console.error("Failed to select image:", e);
+        }
+    };
+
+    const handleRemoveImage = () => {
+        if (activeProfile) {
+            onUpdateProfile(activeProfile.id, { profileImageUrl: undefined });
+        }
+    };
 
     const displayedMods = activeProfile?.mods.filter(mod =>
         mod.fullName.toLowerCase().includes(searchQuery.toLowerCase())
@@ -57,16 +100,59 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                         <img
                             src={activeProfile.profileImageUrl}
                             alt={activeProfile.name}
-                            className="w-12 h-12 rounded-xl shadow-lg object-cover bg-gray-800"
+                            className={`w-12 h-12 rounded-xl shadow-lg object-cover bg-gray-800 ${activeProfile?.is_vanilla ? 'grayscale' : ''}`}
                         />
                     ) : (
-                        <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-purple-600 rounded-xl shadow-lg flex items-center justify-center text-xl font-bold text-white">
+                        <div className={`w-12 h-12 bg-gradient-to-br from-blue-500 to-purple-600 rounded-xl shadow-lg flex items-center justify-center text-xl font-bold text-white ${activeProfile?.is_vanilla ? 'grayscale' : ''}`}>
                             {activeProfile?.name.charAt(0).toUpperCase()}
                         </div>
                     )}
                     <div className="min-w-0 flex-1">
                         <h2 className="font-bold text-white truncate text-lg">{activeProfile?.name}</h2>
-                        <p className="text-xs text-gray-500 truncate">{activeProfile?.mods.length} mods installed</p>
+                        {activeProfile?.is_vanilla ? (
+                            <p className="text-xs text-gray-500 font-bold uppercase tracking-wider">DISABLED</p>
+                        ) : (
+                            <p className="text-xs text-gray-500 truncate">{activeProfile?.mods.length} mods installed</p>
+                        )}
+                    </div>
+                    {/* Header Actions */}
+                    <div className="flex gap-1">
+                        <button
+                            onClick={handleEditClick}
+                            className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-800 rounded-lg transition-colors"
+                            title="Edit Profile"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                            </svg>
+                        </button>
+                        <button
+                            onClick={async () => {
+                                if (activeProfile) {
+                                    if (activeProfile.mods.length === 0 && !activeProfile.is_vanilla) {
+                                        alert("No mods to disable!");
+                                        return;
+                                    }
+                                    // Calculate the NEW vanilla state
+                                    const newVanillaState = !activeProfile.is_vanilla;
+                                    // Toggle vanilla mode in store
+                                    onUpdateProfile(activeProfile.id, { is_vanilla: newVanillaState });
+                                    // Apply immediately with the NEW state (no timing issues!)
+                                    setTimeout(() => {
+                                        onInstallToGame(newVanillaState);
+                                    }, 100);
+                                }
+                            }}
+                            className={`p-1.5 rounded-lg transition-colors ${activeProfile?.is_vanilla
+                                ? 'text-yellow-500 bg-yellow-500/10 hover:bg-yellow-500/20'
+                                : 'text-gray-400 hover:text-yellow-500 hover:bg-yellow-500/10'
+                                }`}
+                            title={activeProfile?.is_vanilla ? "Enable Mods" : "Disable All Mods (Vanilla)"}
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                            </svg>
+                        </button>
                     </div>
                 </div>
             </div>
@@ -90,7 +176,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
             </div>
 
             {/* Mod List */}
-            <div className="flex-1 overflow-y-auto p-2 space-y-1 scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-transparent">
+            <div className={`flex-1 overflow-y-auto p-2 space-y-1 scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-transparent ${activeProfile?.is_vanilla ? 'grayscale opacity-75 pointer-events-none' : ''}`}>
                 <div className="px-2 py-2 text-xs font-bold text-gray-500 uppercase tracking-wider flex justify-between items-center">
                     <span>Installed Mods</span>
                     <span className="bg-gray-800 text-gray-400 px-2 py-0.5 rounded-full text-[10px]">{displayedMods.length}</span>
@@ -106,7 +192,16 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                         <div
                             key={mod.uuid4}
                             className={`flex items-center gap-3 p-2 rounded-lg hover:bg-gray-800 group cursor-pointer transition-all border border-transparent hover:border-gray-700 relative pr-16 overflow-hidden ${!mod.enabled ? 'opacity-50' : ''}`}
-                            onClick={() => onToggleMod(activeProfile!.id, mod.uuid4)}
+                            onClick={async () => {
+                                // Toggle the mod state
+                                onToggleMod(activeProfile!.id, mod.uuid4);
+                                // If we're ENABLING the mod, auto-apply after a short delay
+                                if (!mod.enabled) {
+                                    setTimeout(() => {
+                                        onInstallToGame();
+                                    }, 300);
+                                }
+                            }}
                         >
                             {/* ... existing mod item content ... */}
                             <div className="w-10 h-10 bg-gray-800 rounded-lg overflow-hidden flex-shrink-0 border border-gray-700 relative">
@@ -227,7 +322,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                 {/* Install Button - Only if profile active */}
                 {activeProfile && (
                     <button
-                        onClick={onInstallToGame}
+                        onClick={() => onInstallToGame()}
                         className="w-full group relative flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white shadow-lg shadow-blue-900/20 transition-all duration-200 hover:shadow-blue-900/40 hover:-translate-y-0.5 active:translate-y-0"
                     >
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -265,6 +360,72 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                     </button>
                 </div>
             </div>
+            {/* Edit Profile Modal (Local) */}
+            {isEditing && activeProfile && (
+                <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                    <div className="bg-gray-800 rounded-xl p-6 max-w-md w-full border border-gray-700 shadow-2xl">
+                        <h2 className="text-2xl font-bold text-white mb-4">Edit Profile</h2>
+
+                        <div className="flex justify-center mb-6">
+                            <div className="relative group cursor-pointer" onClick={handleImageSelect}>
+                                {activeProfile.profileImageUrl ? (
+                                    <img
+                                        src={activeProfile.profileImageUrl}
+                                        alt="Profile"
+                                        className="w-24 h-24 rounded-full object-cover border-4 border-gray-700 group-hover:border-blue-500 transition-colors"
+                                    />
+                                ) : (
+                                    <div className="w-24 h-24 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-4xl font-bold text-white border-4 border-gray-700 group-hover:border-blue-500 transition-colors">
+                                        {activeProfile.name.charAt(0).toUpperCase()}
+                                    </div>
+                                )}
+                                <div className="absolute inset-0 bg-black/50 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <span className="text-white font-medium text-xs">Change</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        {activeProfile.profileImageUrl && (
+                            <div className="text-center mb-4">
+                                <button
+                                    type="button"
+                                    onClick={handleRemoveImage}
+                                    className="text-xs text-red-400 hover:text-red-300 hover:underline"
+                                >
+                                    Remove Custom Image
+                                </button>
+                            </div>
+                        )}
+
+                        <form onSubmit={handleUpdate}>
+                            <input
+                                type="text"
+                                value={editName}
+                                onChange={(e) => setEditName(e.target.value)}
+                                placeholder="Profile Name"
+                                className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 mb-6"
+                                autoFocus
+                            />
+                            <div className="flex gap-3">
+                                <button
+                                    type="button"
+                                    onClick={() => setIsEditing(false)}
+                                    className="flex-1 px-4 py-2 rounded-lg bg-gray-700 text-white hover:bg-gray-600 font-semibold"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={!editName.trim()}
+                                    className="flex-1 px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-500 font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    Save
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
         </div >
     );
 };
