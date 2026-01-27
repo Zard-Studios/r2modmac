@@ -1,5 +1,6 @@
 
 import type { PackageVersion } from '../types/thunderstore';
+import { LazyImage } from './LazyImage';
 
 interface ModListItemProps {
     mod: PackageVersion;
@@ -29,13 +30,17 @@ export function ModListItem({ mod, onInstall, onUninstall, onClick, installStatu
             onClick={onClick}
         >
             {/* Icon */}
-            <div className="w-12 h-12 bg-gray-900 rounded flex-shrink-0 overflow-hidden border border-gray-700">
+            <div className="w-12 h-12 bg-gray-900 rounded flex-shrink-0 overflow-hidden border border-gray-700 relative">
                 {mod.icon ? (
-                    <img
+                    <LazyImage
                         src={mod.icon}
                         alt={mod.name}
-                        className="w-full h-full object-cover"
-                        loading="lazy"
+                        className="w-full h-full"
+                        fallback={
+                            <div className="w-full h-full flex items-center justify-center text-xl font-bold text-gray-600">
+                                {mod.name[0]}
+                            </div>
+                        }
                     />
                 ) : (
                     <div className="w-full h-full flex items-center justify-center text-xl font-bold text-gray-600">

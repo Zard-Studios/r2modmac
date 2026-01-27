@@ -322,13 +322,19 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                 {/* Install Button - Only if profile active */}
                 {activeProfile && (
                     <button
-                        onClick={() => onInstallToGame()}
-                        className="w-full group relative flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white shadow-lg shadow-blue-900/20 transition-all duration-200 hover:shadow-blue-900/40 hover:-translate-y-0.5 active:translate-y-0"
+                        onClick={() => !activeProfile.is_vanilla && onInstallToGame()}
+                        disabled={activeProfile.is_vanilla}
+                        className={`w-full group relative flex items-center justify-center gap-2 px-4 py-3 rounded-xl transition-all duration-200 ${activeProfile.is_vanilla
+                            ? 'bg-gray-700 text-gray-400 cursor-not-allowed grayscale'
+                            : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white shadow-lg shadow-blue-900/20 hover:shadow-blue-900/40 hover:-translate-y-0.5 active:translate-y-0'
+                            }`}
                     >
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                         </svg>
-                        <span className="font-bold text-sm tracking-wide">Apply to Game</span>
+                        <span className="font-bold text-sm tracking-wide">
+                            {activeProfile.is_vanilla ? 'Mods Disabled' : 'Apply to Game'}
+                        </span>
                     </button>
                 )}
 

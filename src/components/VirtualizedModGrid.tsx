@@ -11,16 +11,23 @@ interface VirtualizedModGridProps {
     onInstall: (pkg: Package) => void;
     onUninstall: (pkg: Package) => void;
     onModClick: (pkg: Package) => void;
-    onLoadMore?: () => void;
-    isLoadingMore?: boolean;
-    hasMore?: boolean;
     viewMode?: 'grid' | 'list';
     isBrowsing?: boolean;
+    searchQuery?: string; // For scroll-to-top on search
 }
 
-export function VirtualizedModGrid({ packages, installedMods, onInstall, onUninstall, onModClick, onLoadMore, isLoadingMore, hasMore, viewMode = 'grid', isBrowsing }: VirtualizedModGridProps) {
+export function VirtualizedModGrid({ packages, installedMods, onInstall, onUninstall, onModClick, viewMode = 'grid', isBrowsing, searchQuery }: VirtualizedModGridProps) {
     const parentRef = useRef<HTMLDivElement>(null);
     const [columnCount, setColumnCount] = useState(3);
+
+    // Scroll to top when search query changes
+    const prevSearchQuery = useRef(searchQuery);
+    useEffect(() => {
+        if (searchQuery !== prevSearchQuery.current && parentRef.current) {
+            parentRef.current.scrollTop = 0;
+        }
+        prevSearchQuery.current = searchQuery;
+    }, [searchQuery]);
 
     const COLUMN_WIDTH = 320;
     const GAP = 16;
@@ -115,29 +122,10 @@ export function VirtualizedModGrid({ packages, installedMods, onInstall, onUnins
         overscan: 5,
     });
 
-    // Intersection Observer for infinite scroll
-    const loadMoreRef = useRef<HTMLDivElement>(null);
-
-    useEffect(() => {
-        if (!onLoadMore || !loadMoreRef.current || !hasMore) return;
-
-        const observer = new IntersectionObserver(
-            (entries) => {
-                if (entries[0].isIntersecting && hasMore) {
-                    onLoadMore();
-                }
-            },
-            { threshold: 0.1, rootMargin: '1000px' }
-        );
-
-        observer.observe(loadMoreRef.current);
-        return () => observer.disconnect();
-    }, [onLoadMore, hasMore]);
-
     return (
         <div
             ref={parentRef}
-            className="flex-1 h-full overflow-y-auto p-6"
+            className="flex-1 h-full overflow-y-auto p-6 pb-0"
         >
             <div
                 style={{
@@ -198,23 +186,6 @@ export function VirtualizedModGrid({ packages, installedMods, onInstall, onUnins
                         </div>
                     );
                 })}
-            </div>
-
-            <div
-                ref={loadMoreRef}
-                className="h-10 w-full flex justify-center p-4 min-h-[50px]"
-            >
-                {isLoadingMore && hasMore && (
-                    <div className="flex items-center gap-2 text-zinc-400">
-                        <div className="w-4 h-4 border-2 border-zinc-600 border-t-zinc-400 rounded-full animate-spin" />
-                        <span>Loading more mods...</span>
-                    </div>
-                )}
-                {!hasMore && packages.length > 0 && (
-                    <div className="text-zinc-500 text-sm py-4">
-                        You've reached the end :O
-                    </div>
-                )}
             </div>
         </div>
     );

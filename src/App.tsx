@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Layout } from './components/Layout'
 import type { FilterOptions } from './components/FilterPopover'
 import { FilterPopover } from './components/FilterPopover'
@@ -25,7 +25,7 @@ import type { UpdateInfo } from './types/electron';
 
 function App() {
 
-  const [packages, setPackages] = useState<Package[]>([])
+  const [allPackages, setAllPackages] = useState<Package[]>([])
   const [loading, setLoading] = useState(true)
   const [loadingMods, setLoadingMods] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
@@ -40,7 +40,7 @@ function App() {
     modpacks: false,
     categories: []
   })
-  const PAGE_SIZE = 50
+  const PAGE_SIZE = 10000 // Load all mods at once for instant search
   const [availableCategories, setAvailableCategories] = useState<string[]>([])
   const [isSidebarOpen, setIsSidebarOpen] = useState(true)
 
@@ -153,15 +153,17 @@ function App() {
     }
   }, [selectedCommunity])
 
-  // Search Effect
-  useEffect(() => {
-    if (selectedCommunity) {  // Only search within a game
-      const timer = setTimeout(() => {
-        loadPackages(selectedCommunity, 0, false)
-      }, 300) // Debounce search
-      return () => clearTimeout(timer)
+  // Client-Side Search (derived state via useMemo - zero flicker!)
+  const packages = useMemo(() => {
+    if (!searchQuery.trim()) {
+      return allPackages
     }
-  }, [searchQuery])
+    const searchLower = searchQuery.toLowerCase()
+    return allPackages.filter(pkg =>
+      pkg.name.toLowerCase().includes(searchLower) ||
+      pkg.full_name.toLowerCase().includes(searchLower)
+    )
+  }, [searchQuery, allPackages])
 
   // Sort/Filter Effect
   useEffect(() => {
@@ -252,8 +254,8 @@ function App() {
 
     if (reset) {
       setPage(0)
-      setPackages([])
-      setHasMore(true)
+      setAllPackages([])
+      setHasMore(false) // We load everything at once, no more pages
     }
 
     try {
@@ -269,7 +271,7 @@ function App() {
         communityId,
         pageNum,
         PAGE_SIZE,
-        searchQuery,
+        '', // Empty search - filter client-side instead
         filterOptions.sort,
         filterOptions.nsfw,
         filterOptions.deprecated,
@@ -283,7 +285,9 @@ function App() {
         setHasMore(false)
       }
 
-      setPackages(prev => reset ? newPackages : [...prev, ...newPackages])
+      // Update allPackages (packages is derived via useMemo)
+      const updated = reset ? newPackages : [...allPackages, ...newPackages]
+      setAllPackages(updated)
       setPage(pageNum)
     } catch (err) {
       console.error('Failed to load packages', err)
@@ -1049,7 +1053,6 @@ function App() {
               const disabledMods = profile.mods.filter(m => !m.enabled).map(m => m.fullName);
               // Apply directly to game with vanilla override
               await window.ipcRenderer.installToGame(selectedCommunity, profileId, disabledMods, newVanillaState);
-              await window.ipcRenderer.alert('Success', newVanillaState ? 'Mods disabled! Game will run in vanilla mode.' : 'Mods restored!');
             }
           }}
         />
@@ -1108,7 +1111,6 @@ function App() {
               console.log('[Apply] Vanilla override:', isVanillaOverride);
               const disabledMods = activeProfile.mods.filter(m => !m.enabled).map(m => m.fullName);
               await window.ipcRenderer.installToGame(currentCommunity.identifier, activeProfile.id, disabledMods, isVanillaOverride);
-              await window.ipcRenderer.alert('Success', isVanillaOverride ? 'Mods disabled! Game will run in vanilla mode.' : 'Mods restored!');
               return;
             }
 
@@ -1337,11 +1339,9 @@ function App() {
             onInstall={handleInstallMod}
             onUninstall={handleUninstallWithDependencies}
             onModClick={setSelectedMod}
-            onLoadMore={handleLoadMore}
-            isLoadingMore={loadingMods}
-            hasMore={hasMore}
             viewMode={viewMode}
             isBrowsing={isBrowsingMode}
+            searchQuery={searchQuery}
           />
         </div>
       </div>
