@@ -1,3 +1,5 @@
+import { Button } from './ui';
+
 interface UninstallModalProps {
     isOpen: boolean;
     modName: string;
@@ -132,12 +134,9 @@ export function UninstallModal({
                 </div>
 
                 <div className="bg-[#1e293b] p-4 flex justify-end">
-                    <button
-                        onClick={onCancel}
-                        className="px-4 py-2 text-slate-400 hover:text-white transition-colors text-sm font-medium"
-                    >
+                    <Button variant="ghost" onClick={onCancel}>
                         Cancel
-                    </button>
+                    </Button>
                 </div>
             </div>
         </div>

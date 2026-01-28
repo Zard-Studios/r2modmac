@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import type { Community, Package } from '../types/thunderstore';
 import type { Profile, InstalledMod } from '../types/profile';
+import { Button } from './ui';
 
 interface ProfileSidebarProps {
     activeProfile: Profile | undefined;
@@ -413,20 +414,12 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                                 autoFocus
                             />
                             <div className="flex gap-3">
-                                <button
-                                    type="button"
-                                    onClick={() => setIsEditing(false)}
-                                    className="flex-1 px-4 py-2 rounded-lg bg-gray-700 text-white hover:bg-gray-600 font-semibold"
-                                >
+                                <Button variant="secondary" fullWidth onClick={() => setIsEditing(false)} type="button">
                                     Cancel
-                                </button>
-                                <button
-                                    type="submit"
-                                    disabled={!editName.trim()}
-                                    className="flex-1 px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-500 font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
-                                >
+                                </Button>
+                                <Button variant="primary" fullWidth type="submit" disabled={!editName.trim()}>
                                     Save
-                                </button>
+                                </Button>
                             </div>
                         </form>
                     </div>

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { Button } from './ui';
 
 interface SettingsModalProps {
     isOpen: boolean;
@@ -199,19 +200,12 @@ export function SettingsModal({ isOpen, onClose, selectedGame }: SettingsModalPr
                 )}
 
                 <div className="flex justify-end gap-3">
-                    <button
-                        onClick={onClose}
-                        className="px-4 py-2 text-gray-400 hover:text-white text-sm transition-colors"
-                    >
+                    <Button variant="ghost" onClick={onClose}>
                         Cancel
-                    </button>
-                    <button
-                        onClick={handleSave}
-                        disabled={loading}
-                        className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
-                    >
+                    </Button>
+                    <Button variant="primary" onClick={handleSave} disabled={loading}>
                         {loading ? 'Saving...' : 'Save'}
-                    </button>
+                    </Button>
                 </div>
             </div>
         </div>

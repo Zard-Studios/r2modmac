@@ -2,6 +2,7 @@
 import { useState } from 'react';
 import { Menu, MenuItem } from '@tauri-apps/api/menu';
 import type { Profile } from '../types/profile';
+import { Button } from './ui';
 
 interface ProfileListProps {
     profiles: Profile[];
@@ -288,20 +289,12 @@ export function ProfileList({
                                     autoFocus
                                 />
                                 <div className="flex gap-3">
-                                    <button
-                                        type="button"
-                                        onClick={() => setIsCreating(false)}
-                                        className="flex-1 px-4 py-2 rounded-lg bg-gray-700 text-white hover:bg-gray-600 font-semibold"
-                                    >
+                                    <Button variant="secondary" fullWidth onClick={() => setIsCreating(false)} type="button">
                                         Cancel
-                                    </button>
-                                    <button
-                                        type="submit"
-                                        disabled={!newProfileName.trim()}
-                                        className="flex-1 px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-500 font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
-                                    >
+                                    </Button>
+                                    <Button variant="primary" fullWidth type="submit" disabled={!newProfileName.trim()}>
                                         Create
-                                    </button>
+                                    </Button>
                                 </div>
                             </form>
                         </div>
@@ -328,13 +321,9 @@ export function ProfileList({
                                             className="flex-1 bg-gray-900 border border-gray-700 rounded-lg px-4 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-purple-500 font-mono text-sm"
                                             autoFocus
                                         />
-                                        <button
-                                            type="submit"
-                                            disabled={!importCode.trim()}
-                                            className="px-4 py-2 rounded-lg bg-purple-600 text-white hover:bg-purple-500 font-semibold disabled:opacity-50 disabled:cursor-not-allowed text-sm"
-                                        >
+                                        <Button variant="purple" size="sm" type="submit" disabled={!importCode.trim()}>
                                             Import
-                                        </button>
+                                        </Button>
                                     </form>
                                 </div>
 
@@ -385,13 +374,9 @@ export function ProfileList({
                             </div>
 
                             <div className="mt-6 flex justify-end">
-                                <button
-                                    type="button"
-                                    onClick={() => setIsImporting(false)}
-                                    className="px-4 py-2 rounded-lg text-gray-400 hover:text-white hover:bg-gray-700 font-semibold text-sm"
-                                >
+                                <Button variant="ghost" size="sm" onClick={() => setIsImporting(false)}>
                                     Cancel
-                                </button>
+                                </Button>
                             </div>
                         </div>
                     </div>
@@ -446,20 +431,12 @@ export function ProfileList({
                                     autoFocus
                                 />
                                 <div className="flex gap-3">
-                                    <button
-                                        type="button"
-                                        onClick={() => setEditingProfile(null)}
-                                        className="flex-1 px-4 py-2 rounded-lg bg-gray-700 text-white hover:bg-gray-600 font-semibold"
-                                    >
+                                    <Button variant="secondary" fullWidth onClick={() => setEditingProfile(null)} type="button">
                                         Cancel
-                                    </button>
-                                    <button
-                                        type="submit"
-                                        disabled={!editName.trim()}
-                                        className="flex-1 px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-500 font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
-                                    >
+                                    </Button>
+                                    <Button variant="primary" fullWidth type="submit" disabled={!editName.trim()}>
                                         Save
-                                    </button>
+                                    </Button>
                                 </div>
                             </form>
                         </div>

@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
+import { Button } from './components/ui'
 import { Layout } from './components/Layout'
 import type { FilterOptions } from './components/FilterPopover'
 import { FilterPopover } from './components/FilterPopover'
@@ -29,8 +30,6 @@ function App() {
   const [loading, setLoading] = useState(true)
   const [loadingMods, setLoadingMods] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
-  const [page, setPage] = useState(0)
-  const [hasMore, setHasMore] = useState(true)
   const [filterOptions, setFilterOptions] = useState<FilterOptions>({
     sort: 'downloads',
     sortDirection: 'desc',
@@ -118,7 +117,6 @@ function App() {
       // the initial page might have been incomplete (e.g. only 53 items shown, while page 2 starts at 100).
       // We reset to page 0 to ensure consistency.
       if (event.payload.game_id === selectedCommunity) {
-        setHasMore(true);
         loadPackages(selectedCommunity, 0, true);
       }
     });
@@ -253,9 +251,7 @@ function App() {
     setLoadingMods(true)
 
     if (reset) {
-      setPage(0)
       setAllPackages([])
-      setHasMore(false) // We load everything at once, no more pages
     }
 
     try {
@@ -281,14 +277,11 @@ function App() {
         filterOptions.modpacks
       )
 
-      if (newPackages.length < PAGE_SIZE) {
-        setHasMore(false)
-      }
+
 
       // Update allPackages (packages is derived via useMemo)
       const updated = reset ? newPackages : [...allPackages, ...newPackages]
       setAllPackages(updated)
-      setPage(pageNum)
     } catch (err) {
       console.error('Failed to load packages', err)
     } finally {
@@ -296,11 +289,7 @@ function App() {
     }
   }
 
-  const handleLoadMore = () => {
-    if (!loadingMods && hasMore && selectedCommunity) {
-      loadPackages(selectedCommunity, page + 1, false)
-    }
-  }
+
 
   const installModWithDependencies = async (
     pkg: Package,
@@ -1022,12 +1011,9 @@ function App() {
     content = (
       <div className="flex flex-col h-full bg-gray-900 overflow-y-auto">
         <div className="p-4 border-b border-gray-800 flex items-center gap-4 sticky top-0 bg-gray-900 z-10">
-          <button
-            onClick={() => setSelectedCommunity(null)}
-            className="text-gray-400 hover:text-white flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-gray-800 transition-colors"
-          >
+          <Button variant="outline" size="sm" onClick={() => setSelectedCommunity(null)}>
             ← Change Game
-          </button>
+          </Button>
           <div className="h-6 w-px bg-gray-800" />
           <h2 className="text-xl font-bold text-white">
             {communities.find(c => c.identifier === selectedCommunity)?.name}
@@ -1272,12 +1258,9 @@ function App() {
         <div className="p-5 border-b border-gray-800 flex items-center justify-between gap-4 flex-shrink-0">
           <div className="flex items-center gap-4">
             {isBrowsingMode && (
-              <button
-                onClick={() => setIsBrowsingMode(false)}
-                className="text-gray-400 hover:text-white flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-gray-800 transition-colors border border-gray-700 hover:border-gray-600"
-              >
+              <Button variant="outline" size="sm" onClick={() => setIsBrowsingMode(false)}>
                 ← Exit
-              </button>
+              </Button>
             )}
             <h1 className="text-2xl font-bold text-white">Browse Mods</h1>
           </div>
