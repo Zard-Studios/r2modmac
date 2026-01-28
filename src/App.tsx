@@ -1011,7 +1011,7 @@ function App() {
     content = (
       <div className="flex flex-col h-full bg-gray-900 overflow-y-auto">
         <div className="p-4 border-b border-gray-800 flex items-center gap-4 sticky top-0 bg-gray-900 z-10">
-          <Button variant="outline" size="sm" onClick={() => setSelectedCommunity(null)}>
+          <Button variant="ghost" size="sm" onClick={() => setSelectedCommunity(null)}>
             ← Change Game
           </Button>
           <div className="h-6 w-px bg-gray-800" />
@@ -1258,7 +1258,7 @@ function App() {
         <div className="p-5 border-b border-gray-800 flex items-center justify-between gap-4 flex-shrink-0">
           <div className="flex items-center gap-4">
             {isBrowsingMode && (
-              <Button variant="outline" size="sm" onClick={() => setIsBrowsingMode(false)}>
+              <Button variant="ghost" size="sm" onClick={() => setIsBrowsingMode(false)}>
                 ← Exit
               </Button>
             )}
