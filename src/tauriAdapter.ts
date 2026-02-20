@@ -115,5 +115,8 @@ export const tauriAPI: IElectronAPI = {
     },
     openProfileFolder: async (profileId: string) => {
         return await invoke('open_profile_folder', { profileId });
+    },
+    launchGameWithMods: async (gameIdentifier: string) => {
+        return await invoke('launch_game_with_mods', { gameIdentifier });
     }
 };

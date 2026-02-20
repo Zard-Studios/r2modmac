@@ -3,14 +3,15 @@ import { useState } from 'react';
 import { Menu, MenuItem } from '@tauri-apps/api/menu';
 import type { Profile } from '../types/profile';
 import { Button } from './ui';
+import { MAC_SUPPORTED_GAMES } from '../data/platforms';
 
 interface ProfileListProps {
     profiles: Profile[];
     selectedGameIdentifier: string;
     onSelectProfile: (profileId: string) => void;
-    onCreateProfile: (name: string) => void;
-    onImportProfile: (code: string) => void;
-    onImportFile: (path: string) => void;
+    onCreateProfile: (name: string, platform?: 'windows' | 'mac') => void;
+    onImportProfile: (code: string, platform: 'windows' | 'mac') => void;
+    onImportFile: (path: string, platform: 'windows' | 'mac') => void;
     onBrowseMods: () => void;
     onDeleteProfile: (profileId: string, gameIdentifier?: string) => void;
     onUpdateProfile: (profileId: string, updates: Partial<Profile>) => void;
@@ -35,24 +36,36 @@ export function ProfileList({
     const [newProfileName, setNewProfileName] = useState('');
     const [editName, setEditName] = useState('');
     const [importCode, setImportCode] = useState('');
+    const [selectedPlatform, setSelectedPlatform] = useState<'windows' | 'mac'>('windows');
+    // null = no pending import; string = code; { file: string } = file
+    const [pendingImport, setPendingImport] = useState<string | { file: string } | null>(null);
 
     const filteredProfiles = profiles.filter(p => p.gameIdentifier === selectedGameIdentifier);
+    const isMacCompatible = MAC_SUPPORTED_GAMES.includes(selectedGameIdentifier);
 
     const handleCreate = (e: React.FormEvent) => {
         e.preventDefault();
         if (newProfileName.trim()) {
-            onCreateProfile(newProfileName.trim());
+            onCreateProfile(newProfileName.trim(), isMacCompatible ? selectedPlatform : 'windows');
             setNewProfileName('');
             setIsCreating(false);
+            setSelectedPlatform('windows');
         }
     };
 
     const handleImport = (e: React.FormEvent) => {
         e.preventDefault();
         if (importCode.trim()) {
-            onImportProfile(importCode.trim());
-            setImportCode('');
-            setIsImporting(false);
+            if (isMacCompatible) {
+                // Show the platform picker before importing
+                setPendingImport(importCode.trim());
+                setSelectedPlatform('windows');
+                setIsImporting(false);
+            } else {
+                onImportProfile(importCode.trim(), 'windows');
+                setImportCode('');
+                setIsImporting(false);
+            }
         }
     };
 
@@ -247,7 +260,23 @@ export function ProfileList({
                                     </div>
                                 )}
 
-                                <h3 className="text-xl font-bold text-white mb-2 truncate">{profile.name}</h3>
+                                <div className="flex items-center gap-2 mb-2">
+                                    <h3 className="text-xl font-bold text-white truncate">{profile.name}</h3>
+                                    {/* Platform badge */}
+                                    {profile.platform === 'mac' ? (
+                                        <span title="macOS profile" className="flex flex-col justify-center items-center flex-shrink-0 text-gray-400 w-4 h-4 pb-0.5">
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="w-[12px] h-[14px]" viewBox="0 0 384 512" fill="currentColor">
+                                                <path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zm-56.6-164.2c27.3-32.4 24.8-61.9 24-72.5-24.1 1.4-52 16.4-67.9 34.9-17.5 19.8-27.8 44.3-25.6 71.9 26.1 2 49.9-11.4 69.5-34.3z" />
+                                            </svg>
+                                        </span>
+                                    ) : (
+                                        <span title="Windows (CrossOver) profile" className="flex flex-col justify-center items-center flex-shrink-0 text-gray-400 w-4 h-4">
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="w-[14px] h-[14px]" viewBox="0 0 24 24" fill="currentColor">
+                                                <path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.9-1.801" />
+                                            </svg>
+                                        </span>
+                                    )}
+                                </div>
 
                                 <div className="mt-auto space-y-2">
                                     <div className="flex items-center text-sm text-gray-400 gap-2">
@@ -288,6 +317,41 @@ export function ProfileList({
                                     className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 mb-6"
                                     autoFocus
                                 />
+
+                                {isMacCompatible && (
+                                    <div className="mb-6 space-y-2">
+                                        <label className="text-sm font-medium text-gray-400">Platform Compatibility</label>
+                                        <div className="grid grid-cols-2 gap-3">
+                                            <button
+                                                type="button"
+                                                onClick={() => setSelectedPlatform('windows')}
+                                                className={`flex items-center justify-center gap-2 p-3 rounded-xl border transition-all ${selectedPlatform === 'windows'
+                                                    ? 'bg-blue-500/20 border-blue-500 text-white'
+                                                    : 'bg-gray-900 border-gray-700 text-gray-500 hover:border-gray-600 hover:text-gray-300'
+                                                    }`}
+                                            >
+                                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                                                    <path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.9-1.801" />
+                                                </svg>
+                                                Windows
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => setSelectedPlatform('mac')}
+                                                className={`flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-xl border-2 transition-all ${selectedPlatform === 'mac'
+                                                    ? 'bg-blue-500/10 border-blue-500 text-blue-400'
+                                                    : 'bg-gray-800/50 border-gray-700 text-gray-400 hover:bg-gray-800 hover:border-gray-600'
+                                                    }`}
+                                            >
+                                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 384 512" fill="currentColor">
+                                                    <path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zm-56.6-164.2c27.3-32.4 24.8-61.9 24-72.5-24.1 1.4-52 16.4-67.9 34.9-17.5 19.8-27.8 44.3-25.6 71.9 26.1 2 49.9-11.4 69.5-34.3z" />
+                                                </svg>
+                                                <span className="font-semibold">MacOS</span>
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
+
                                 <div className="flex gap-3">
                                     <Button variant="secondary" fullWidth onClick={() => setIsCreating(false)} type="button">
                                         Cancel
@@ -345,16 +409,13 @@ export function ProfileList({
                                                     { name: 'r2modman Profile', extensions: ['r2z', 'zip'] }
                                                 ]);
                                                 if (filePath) {
-                                                    // We need to pass this up to App.tsx
-                                                    // For now, let's reuse onImportProfile but pass a special prefix or handle it in App.tsx
-                                                    // Better: Add onImportFile prop.
-                                                    // Since I can't easily change the interface in this step without breaking App.tsx, 
-                                                    // I'll emit a custom event or use a hack, BUT I should just update the interface.
-                                                    // Let's assume I will update App.tsx to pass this prop.
-                                                    // Actually, I can just call the prop if I add it.
-                                                    // Let's modify the component to accept onImportFile.
-                                                    if (onImportFile) {
-                                                        onImportFile(filePath);
+                                                    if (isMacCompatible) {
+                                                        // Show platform picker before importing file
+                                                        setPendingImport({ file: filePath });
+                                                        setSelectedPlatform('windows');
+                                                        setIsImporting(false);
+                                                    } else {
+                                                        onImportFile(filePath, 'windows');
                                                         setIsImporting(false);
                                                     }
                                                 }
@@ -376,6 +437,70 @@ export function ProfileList({
                             <div className="mt-6 flex justify-end">
                                 <Button variant="ghost" size="sm" onClick={() => setIsImporting(false)}>
                                     Cancel
+                                </Button>
+                            </div>
+                        </div>
+                    </div>
+                )
+            }
+
+            {/* Import Platform Picker - shown after code/file is ready, but only for Mac-compatible games */}
+            {
+                pendingImport !== null && (
+                    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                        <div className="bg-gray-800 rounded-xl p-6 max-w-md w-full border border-gray-700 shadow-2xl">
+                            <h2 className="text-2xl font-bold text-white mb-2">Choose Platform</h2>
+                            <p className="text-gray-400 text-sm mb-6">Select which platform you want to use this profile on.</p>
+
+                            <div className="mb-6 space-y-2">
+                                <label className="text-sm font-medium text-gray-400">Platform Compatibility</label>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <button
+                                        type="button"
+                                        onClick={() => setSelectedPlatform('windows')}
+                                        className={`flex items-center justify-center gap-2 p-3 rounded-xl border transition-all ${selectedPlatform === 'windows'
+                                                ? 'bg-blue-500/20 border-blue-500 text-white'
+                                                : 'bg-gray-900 border-gray-700 text-gray-500 hover:border-gray-600 hover:text-gray-300'
+                                            }`}
+                                    >
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                                            <path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.9-1.801" />
+                                        </svg>
+                                        Windows
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setSelectedPlatform('mac')}
+                                        className={`flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-xl border-2 transition-all ${selectedPlatform === 'mac'
+                                                ? 'bg-blue-500/10 border-blue-500 text-blue-400'
+                                                : 'bg-gray-800/50 border-gray-700 text-gray-400 hover:bg-gray-800 hover:border-gray-600'
+                                            }`}
+                                    >
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 384 512" fill="currentColor">
+                                            <path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zm-56.6-164.2c27.3-32.4 24.8-61.9 24-72.5-24.1 1.4-52 16.4-67.9 34.9-17.5 19.8-27.8 44.3-25.6 71.9 26.1 2 49.9-11.4 69.5-34.3z" />
+                                        </svg>
+                                        <span className="font-semibold">MacOS</span>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div className="flex gap-3">
+                                <Button variant="secondary" fullWidth type="button" onClick={() => {
+                                    setPendingImport(null);
+                                    setImportCode('');
+                                }}>
+                                    Cancel
+                                </Button>
+                                <Button variant="primary" fullWidth type="button" onClick={() => {
+                                    if (typeof pendingImport === 'string') {
+                                        onImportProfile(pendingImport, selectedPlatform);
+                                    } else if (pendingImport && 'file' in pendingImport) {
+                                        onImportFile(pendingImport.file, selectedPlatform);
+                                    }
+                                    setPendingImport(null);
+                                    setImportCode('');
+                                }}>
+                                    Import
                                 </Button>
                             </div>
                         </div>

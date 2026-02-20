@@ -15,7 +15,7 @@ interface ProfileState {
     activeProfileId: string | null;
 
     // Actions
-    createProfile: (name: string, gameIdentifier: string) => string;
+    createProfile: (name: string, gameIdentifier: string, platform?: 'windows' | 'mac') => string;
     selectProfile: (profileId: string) => void;
     deleteProfile: (profileId: string, gameIdentifier?: string) => Promise<void>;
     updateProfile: (profileId: string, updates: Partial<Profile>) => void;
@@ -30,11 +30,12 @@ export const useProfileStore = create<ProfileState>((set) => ({
     profiles: [],
     activeProfileId: null,
 
-    createProfile: (name, gameIdentifier) => {
+    createProfile: (name, gameIdentifier, platform) => {
         const newProfile: Profile = {
             id: crypto.randomUUID(),
             name,
             gameIdentifier,
+            platform: platform || 'windows',
             mods: [],
             dateCreated: Date.now(),
             lastUsed: Date.now(),

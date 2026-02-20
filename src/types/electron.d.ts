@@ -52,6 +52,7 @@ export interface IElectronAPI {
     copyModFromCache: (profileId: string, modName: string, gamePath: string) => Promise<{ success: boolean; copied: boolean }>;
     clearProfileCache: () => Promise<{ cleared: number; bytes_freed: number }>;
     openProfileFolder: (profileId: string) => Promise<void>;
+    launchGameWithMods: (gameIdentifier: string) => Promise<void>;
 }
 
 export interface UpdateInfo {

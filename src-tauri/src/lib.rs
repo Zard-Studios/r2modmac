@@ -197,8 +197,9 @@ fn get_steam_library_folders(steam_path: &std::path::Path) -> Vec<std::path::Pat
 }
 
 #[command]
-async fn get_game_path(app: AppHandle, game_identifier: String) -> Result<Option<String>, String> {
+async fn get_game_path(app: AppHandle, game_identifier: String, platform: Option<String>) -> Result<Option<String>, String> {
     let settings = load_settings_impl(&app);
+    let is_windows_profile = platform.as_deref() == Some("windows");
 
     // Check manual override first
     if let Some(path) = settings.game_paths.get(&game_identifier) {
@@ -208,31 +209,57 @@ async fn get_game_path(app: AppHandle, game_identifier: String) -> Result<Option
         }
     }
 
-    let steam_path_str = settings.steam_path.ok_or("Steam path not configured")?;
-    let steam_path = std::path::Path::new(&steam_path_str);
+    let mut steam_paths_to_check = Vec::new();
+    
+    // Only check native macOS Steam for mac profiles.
+    // Windows (CrossOver/Wine) profiles must NEVER use the macOS native Steam path.
+    if !is_windows_profile {
+        if let Some(home) = dirs::home_dir() {
+            let mac_steam = home.join("Library/Application Support/Steam");
+            if mac_steam.exists() {
+                steam_paths_to_check.push(mac_steam);
+            }
+        }
+    }
+
+    if let Some(steam_path_str) = &settings.steam_path {
+        let crossover_steam = std::path::PathBuf::from(steam_path_str);
+        if crossover_steam.exists() {
+            steam_paths_to_check.push(crossover_steam);
+        }
+    }
+
+    if steam_paths_to_check.is_empty() {
+        if is_windows_profile {
+            return Err("No CrossOver/Wine Steam path configured. Go to Settings and set your Steam directory inside the CrossOver bottle.".to_string());
+        }
+        return Err("No Steam installation found (Native macOS or CrossOver)".to_string());
+    }
 
     let normalized_id = normalize_for_matching(&game_identifier);
-    eprintln!("[get_game_path] Looking for game: {} (normalized: {})", game_identifier, normalized_id);
+    eprintln!("[get_game_path] platform={:?} Looking for game: {} (normalized: {})", platform, game_identifier, normalized_id);
 
     // Scan all Steam library folders
-    for lib_folder in get_steam_library_folders(steam_path) {
-        let common_path = lib_folder.join("steamapps").join("common");
-        if !common_path.exists() {
-            continue;
-        }
+    for base_steam in steam_paths_to_check {
+        for lib_folder in get_steam_library_folders(&base_steam) {
+            let common_path = lib_folder.join("steamapps").join("common");
+            if !common_path.exists() {
+                continue;
+            }
 
-        if let Ok(entries) = fs::read_dir(&common_path) {
-            for entry in entries.filter_map(|e| e.ok()) {
-                let folder_name = entry.file_name().to_string_lossy().to_string();
-                let normalized_folder = normalize_for_matching(&folder_name);
-                
-                // Check for match (exact or high similarity)
-                if normalized_folder == normalized_id || 
-                   normalized_folder.contains(&normalized_id) || 
-                   normalized_id.contains(&normalized_folder) {
-                    let game_path = entry.path().to_string_lossy().to_string();
-                    eprintln!("[get_game_path] Found match: {} -> {}", folder_name, game_path);
-                    return Ok(Some(game_path));
+            if let Ok(entries) = fs::read_dir(&common_path) {
+                for entry in entries.filter_map(|e| e.ok()) {
+                    let folder_name = entry.file_name().to_string_lossy().to_string();
+                    let normalized_folder = normalize_for_matching(&folder_name);
+                    
+                    // Check for match (exact or high similarity)
+                    if normalized_folder == normalized_id || 
+                       normalized_folder.contains(&normalized_id) || 
+                       normalized_id.contains(&normalized_folder) {
+                        let game_path = entry.path().to_string_lossy().to_string();
+                        eprintln!("[get_game_path] Found match: {} -> {}", folder_name, game_path);
+                        return Ok(Some(game_path));
+                    }
                 }
             }
         }
@@ -251,8 +278,9 @@ async fn set_game_path(app: AppHandle, game_identifier: String, path: String) ->
 }
 
 #[command]
-async fn open_game_folder(app: AppHandle, game_identifier: String) -> Result<(), String> {
+async fn open_game_folder(app: AppHandle, game_identifier: String, platform: Option<String>) -> Result<(), String> {
     let settings = load_settings_impl(&app);
+    let is_windows_profile = platform.as_deref() == Some("windows");
     
     // Check manual override first
     if let Some(path) = settings.game_paths.get(&game_identifier) {
@@ -263,10 +291,30 @@ async fn open_game_folder(app: AppHandle, game_identifier: String) -> Result<(),
         }
     }
 
-    if let Some(steam_path_str) = settings.steam_path {
-        let steam_path = std::path::Path::new(&steam_path_str);
-        
-        for lib_folder in get_steam_library_folders(steam_path) {
+    let mut steam_paths_to_check = Vec::new();
+    
+    if !is_windows_profile {
+        if let Some(home) = dirs::home_dir() {
+            let mac_steam = home.join("Library/Application Support/Steam");
+            if mac_steam.exists() {
+                steam_paths_to_check.push(mac_steam);
+            }
+        }
+    }
+
+    if let Some(steam_path_str) = &settings.steam_path {
+        let crossover_steam = std::path::PathBuf::from(steam_path_str);
+        if crossover_steam.exists() {
+            steam_paths_to_check.push(crossover_steam);
+        }
+    }
+
+    if steam_paths_to_check.is_empty() {
+        return Err("No Steam installation found (Native macOS or CrossOver)".to_string());
+    }
+
+    for base_steam in steam_paths_to_check {
+        for lib_folder in get_steam_library_folders(&base_steam) {
             let common = lib_folder.join("steamapps").join("common");
             if !common.exists() {
                 continue;
@@ -285,11 +333,9 @@ async fn open_game_folder(app: AppHandle, game_identifier: String) -> Result<(),
                 }
             }
         }
-        
-        return Err("Game directory not found".to_string());
     }
     
-    Err("Steam path not configured".to_string())
+    Err("Game directory not found".to_string())
 }
 
 
@@ -351,7 +397,7 @@ fn find_steam_app_id(steam_path: &std::path::Path, game_folder: &str) -> Option<
 #[command]
 async fn install_to_game(app: AppHandle, game_identifier: String, profile_id: String, disabled_mods: Vec<String>, is_vanilla_override: Option<bool>) -> Result<(), String> {
     // 1. Find game path
-    let game_path_str = get_game_path(app.clone(), game_identifier.clone()).await?
+    let game_path_str = get_game_path(app.clone(), game_identifier.clone(), None).await?
         .ok_or("Game not found in Steam library")?;
     let game_path = std::path::Path::new(&game_path_str);
 
@@ -384,6 +430,23 @@ async fn install_to_game(app: AppHandle, game_identifier: String, profile_id: St
         vanilla
     };
 
+    // Detect profile platform (mac or windows) from profiles.json
+    let is_mac_profile = {
+        let profiles_path = app.path().app_data_dir().unwrap().join("profiles.json");
+        let mut mac = false;
+        if profiles_path.exists() {
+            if let Ok(data) = fs::read_to_string(&profiles_path) {
+                if let Ok(profiles) = serde_json::from_str::<Vec<serde_json::Value>>(&data) {
+                    if let Some(p) = profiles.iter().find(|p| p["id"].as_str() == Some(&profile_id)) {
+                        mac = p["platform"].as_str() == Some("mac");
+                    }
+                }
+            }
+        }
+        mac
+    };
+    eprintln!("[install_to_game] Profile is_mac_profile: {}", is_mac_profile);
+
     if is_vanilla {
         eprintln!("[install_to_game] Profile is in VANILLA mode. Cleaning game folder.");
     }
@@ -395,8 +458,9 @@ async fn install_to_game(app: AppHandle, game_identifier: String, profile_id: St
     // Always check for BepInExPack in plugins and ensure it's properly installed at root
     let plugins_dir = profile_dir.join("BepInEx").join("plugins");
     if plugins_dir.exists() {
-        // Find BepInExPack folder - search for various naming patterns and PRIORITIZE content
-        // Score: 3 = Explicit BepInExPack folder structure, 2 = winhttp.dll present + name match, 1 = winhttp.dll present
+        let bepinex_sentinel_file = if is_mac_profile { "doorstop_libs" } else { "winhttp.dll" };
+        let sentinel_is_dir = is_mac_profile; // doorstop_libs is a directory, winhttp.dll is a file
+        
         let mut best_candidate: Option<(std::path::PathBuf, i32)> = None;
         
         if let Ok(entries) = fs::read_dir(&plugins_dir) {
@@ -410,9 +474,13 @@ async fn install_to_game(app: AppHandle, game_identifier: String, profile_id: St
                     .to_lowercase();
                 
                 // Pattern 1: Nested BepInExPack (Standard Thunderstore structure)
-                // plugins/ModName/BepInExPack/winhttp.dll
                 let nested_pack = path.join("BepInExPack");
-                if nested_pack.join("winhttp.dll").exists() {
+                let sentinel_exists = if sentinel_is_dir {
+                    nested_pack.join(bepinex_sentinel_file).is_dir()
+                } else {
+                    nested_pack.join(bepinex_sentinel_file).exists()
+                };
+                if sentinel_exists {
                     eprintln!("[install_to_game] Found nested BepInExPack candidate: {:?}", nested_pack);
                     let score = 3;
                     if best_candidate.as_ref().map_or(true, |(_, s)| score > *s) {
@@ -421,12 +489,15 @@ async fn install_to_game(app: AppHandle, game_identifier: String, profile_id: St
                     continue; 
                 }
                 
-                // Pattern 2: Direct or subdirectory check
-                // Check if this folder ITSELF is the pack
-                if path.join("winhttp.dll").exists() {
+                // Pattern 2: Direct folder
+                let direct_sentinel_exists = if sentinel_is_dir {
+                    path.join(bepinex_sentinel_file).is_dir()
+                } else {
+                    path.join(bepinex_sentinel_file).exists()
+                };
+                if direct_sentinel_exists {
                     let mut score = 1;
                     if folder_name.contains("bepinex") { score += 1; }
-                    
                     eprintln!("[install_to_game] Found direct BepInExPack candidate: {:?} (score: {})", path, score);
                     if best_candidate.as_ref().map_or(true, |(_, s)| score > *s) {
                          best_candidate = Some((path.clone(), score));
@@ -434,17 +505,19 @@ async fn install_to_game(app: AppHandle, game_identifier: String, profile_id: St
                     continue;
                 }
 
-                // Pattern 3: Search subdirectories (e.g. plugins/ModName/BepInExPack_GameName)
+                // Pattern 3: Search subdirectories
                 if let Ok(sub_entries) = fs::read_dir(&path) {
                     for sub_entry in sub_entries.filter_map(|e| e.ok()) {
                         let sub_path = sub_entry.path();
-                         if sub_path.is_dir() && sub_path.join("winhttp.dll").exists() {
+                        let sub_sentinel_exists = if sentinel_is_dir {
+                            sub_path.is_dir() && sub_path.join(bepinex_sentinel_file).is_dir()
+                        } else {
+                            sub_path.is_dir() && sub_path.join(bepinex_sentinel_file).exists()
+                        };
+                        if sub_sentinel_exists {
                              let sub_name = sub_path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_lowercase();
                              let mut score = 1;
                              if sub_name.contains("bepinex") { score += 1; }
-                             
-                             eprintln!("[install_to_game] Found subdirectory BepInExPack candidate: {:?} (score: {})", sub_path, score);
-                             
                              if best_candidate.as_ref().map_or(true, |(_, s)| score > *s) {
                                 best_candidate = Some((sub_path, score));
                              }
@@ -457,38 +530,72 @@ async fn install_to_game(app: AppHandle, game_identifier: String, profile_id: St
         if let Some((pack_dir, score)) = best_candidate {
             eprintln!("[install_to_game] Selected BepInExPack: {:?} (score: {})", pack_dir, score);
             
-            // 1. Ensure winhttp.dll is at profile root
-            let winhttp_src = pack_dir.join("winhttp.dll");
-            let winhttp_dst = profile_dir.join("winhttp.dll");
-            if winhttp_src.exists() && !winhttp_dst.exists() {
-                eprintln!("[install_to_game] Copying winhttp.dll to profile root");
-                fs::copy(&winhttp_src, &winhttp_dst)
-                    .map_err(|e| format!("Failed to copy winhttp.dll: {}", e))?;
-            }
-            
-            // 2. Ensure doorstop_config.ini is at profile root
-            let doorstop_src = pack_dir.join("doorstop_config.ini");
-            let doorstop_dst = profile_dir.join("doorstop_config.ini");
-            if doorstop_src.exists() && !doorstop_dst.exists() {
-                eprintln!("[install_to_game] Copying doorstop_config.ini to profile root");
-                fs::copy(&doorstop_src, &doorstop_dst)
-                    .map_err(|e| format!("Failed to copy doorstop_config.ini: {}", e))?;
+            if is_mac_profile {
+                // === macOS: copy doorstop_libs/ + run_bepinex.sh + doorstop_config.ini ===
+                // The actual BepInEx Unix pack structure:
+                // - doorstop_libs/ (folder with all dylib/so files)
+                // - run_bepinex.sh
+                // - doorstop_config.ini
+                let doorstop_libs_src = pack_dir.join("doorstop_libs");
+                let doorstop_libs_dst = profile_dir.join("doorstop_libs");
+                if doorstop_libs_src.exists() && !doorstop_libs_dst.exists() {
+                    eprintln!("[install_to_game] Copying doorstop_libs/ to profile root");
+                    copy_dir_recursive(&doorstop_libs_src, &doorstop_libs_dst)
+                        .map_err(|e| format!("Failed to copy doorstop_libs: {}", e))?;
+                }
                 
-                // FORCE ENABLE DOORSTOP
-                // We read the file, verify 'enabled=true', and write it back if needed
-                 if let Ok(content) = fs::read_to_string(&doorstop_dst) {
-                    if !content.contains("enabled=true") && !content.contains("enabled = true") {
-                         eprintln!("[install_to_game] Enforcing enabled=true in doorstop_config.ini");
-                         // Simple replacement or append if missing. 
-                         // To be safe, let's just replace "enabled=false" with "enabled=true" or ensure it's there.
-                         let new_content = content.replace("enabled=false", "enabled=true")
-                                                  .replace("enabled = false", "enabled = true");
-                         let _ = fs::write(&doorstop_dst, new_content);
+                let run_script_src = pack_dir.join("run_bepinex.sh");
+                let run_script_dst = profile_dir.join("run_bepinex.sh");
+                if run_script_src.exists() && !run_script_dst.exists() {
+                    eprintln!("[install_to_game] Copying run_bepinex.sh to profile root");
+                    fs::copy(&run_script_src, &run_script_dst)
+                        .map_err(|e| format!("Failed to copy run_bepinex.sh: {}", e))?;
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::PermissionsExt;
+                        let mut perms = fs::metadata(&run_script_dst).map_err(|e| e.to_string())?.permissions();
+                        perms.set_mode(0o755);
+                        let _ = fs::set_permissions(&run_script_dst, perms);
                     }
-                 }
+                }
+
+                // Also copy doorstop_config.ini for macOS
+                let doorstop_cfg_src = pack_dir.join("doorstop_config.ini");
+                let doorstop_cfg_dst = profile_dir.join("doorstop_config.ini");
+                if doorstop_cfg_src.exists() && !doorstop_cfg_dst.exists() {
+                    eprintln!("[install_to_game] Copying doorstop_config.ini (macOS) to profile root");
+                    fs::copy(&doorstop_cfg_src, &doorstop_cfg_dst)
+                        .map_err(|e| format!("Failed to copy doorstop_config.ini: {}", e))?;
+                }
+            } else {
+                // === Windows: copy winhttp.dll + doorstop_config.ini ===
+                let winhttp_src = pack_dir.join("winhttp.dll");
+                let winhttp_dst = profile_dir.join("winhttp.dll");
+                if winhttp_src.exists() && !winhttp_dst.exists() {
+                    eprintln!("[install_to_game] Copying winhttp.dll to profile root");
+                    fs::copy(&winhttp_src, &winhttp_dst)
+                        .map_err(|e| format!("Failed to copy winhttp.dll: {}", e))?;
+                }
+                
+                let doorstop_src = pack_dir.join("doorstop_config.ini");
+                let doorstop_dst = profile_dir.join("doorstop_config.ini");
+                if doorstop_src.exists() && !doorstop_dst.exists() {
+                    eprintln!("[install_to_game] Copying doorstop_config.ini to profile root");
+                    fs::copy(&doorstop_src, &doorstop_dst)
+                        .map_err(|e| format!("Failed to copy doorstop_config.ini: {}", e))?;
+                    // FORCE ENABLE DOORSTOP
+                    if let Ok(content) = fs::read_to_string(&doorstop_dst) {
+                        if !content.contains("enabled=true") && !content.contains("enabled = true") {
+                             eprintln!("[install_to_game] Enforcing enabled=true in doorstop_config.ini");
+                             let new_content = content.replace("enabled=false", "enabled=true")
+                                                      .replace("enabled = false", "enabled = true");
+                             let _ = fs::write(&doorstop_dst, new_content);
+                        }
+                    }
+                }
             }
 
-            // 3. Merge BepInEx core/config from the pack (if present)
+            // Merge BepInEx core/config from the pack (shared for both platforms)
             let pack_bepinex = pack_dir.join("BepInEx");
             if pack_bepinex.exists() {
                 eprintln!("[install_to_game] Merging BepInEx core/config from pack...");
@@ -497,7 +604,8 @@ async fn install_to_game(app: AppHandle, game_identifier: String, profile_id: St
                     .map_err(|e| format!("Failed to merge BepInEx folder: {}", e))?;
             }
         } else {
-            eprintln!("[install_to_game] Warning: No BepInExPack found in plugins!");
+            eprintln!("[install_to_game] Warning: No BepInExPack found in plugins for {}!",
+                if is_mac_profile { "macOS (looking for libdoorstop.dylib)" } else { "Windows (looking for winhttp.dll)" });
         }
     }
     } // End if !is_vanilla
@@ -697,8 +805,14 @@ async fn install_to_game(app: AppHandle, game_identifier: String, profile_id: St
     }
     } // End if !is_vanilla
 
-    // 4. Rename (or restore) root files (doorstop_config.ini, winhttp.dll)
-    for item_name in ["doorstop_config.ini", "winhttp.dll"].iter() {
+    // 4. Rename (or restore) root files based on platform
+    let root_files: &[&str] = if is_mac_profile {
+        &["libdoorstop.dylib", "run_bepinex.sh"]
+    } else {
+        &["doorstop_config.ini", "winhttp.dll"]
+    };
+    
+    for item_name in root_files {
         let dest = game_path.join(item_name);
         let disabled_name = format!("{}_DISABLED", item_name);
         let disabled_dest = game_path.join(&disabled_name);
@@ -724,12 +838,112 @@ async fn install_to_game(app: AppHandle, game_identifier: String, profile_id: St
             if source.exists() && !dest.exists() {
                 fs::copy(&source, &dest).map_err(|e| format!("Failed to copy {}: {}", item_name, e))?;
                 eprintln!("[install_to_game] Synced {} to game folder", item_name);
+                
+                // For run_bepinex.sh: make executable and patch executable_name
+                if *item_name == "run_bepinex.sh" {
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::PermissionsExt;
+                        let mut perms = fs::metadata(&dest).map_err(|e| e.to_string())?.permissions();
+                        perms.set_mode(0o755);
+                        let _ = fs::set_permissions(&dest, perms);
+                    }
+                    // Patch executable_name in the script to match the .app in game dir
+                    if let Ok(script_content) = fs::read_to_string(&dest) {
+                        // Find .app bundle in game directory
+                        let app_name = fs::read_dir(game_path)
+                            .ok()
+                            .and_then(|entries| {
+                                entries.filter_map(|e| e.ok())
+                                    .find(|e| e.file_name().to_string_lossy().ends_with(".app"))
+                                    .map(|e| e.file_name().to_string_lossy().to_string())
+                            });
+                        if let Some(app) = app_name {
+                            eprintln!("[install_to_game] Patching run_bepinex.sh with executable: {}", app);
+                            let patched = script_content
+                                .replace("executable_name=\"\"", &format!("executable_name=\"{}\"", app))
+                                .replace("executable_name=", &format!("executable_name=\"{}\"", app));
+                            // Only write if not already patched
+                            if patched != script_content {
+                                let _ = fs::write(&dest, patched);
+                            }
+                        }
+                    }
+                }
             }
         }
     }
 
     eprintln!("[install_to_game] Sync complete!");
     Ok(())
+}
+
+/// Launch the game with mods (macOS: via run_bepinex.sh, Windows: open via Steam protocol)
+#[command]
+async fn launch_game_with_mods(app: AppHandle, game_identifier: String) -> Result<(), String> {
+    let game_path_str = get_game_path(app.clone(), game_identifier.clone(), None)
+        .await?
+        .ok_or_else(|| "Game path not found".to_string())?;
+    let game_path = std::path::PathBuf::from(&game_path_str);
+    let run_script = game_path.join("run_bepinex.sh");
+    
+    if run_script.exists() {
+        // Make sure it's executable
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = fs::metadata(&run_script).map_err(|e| e.to_string())?.permissions();
+            perms.set_mode(0o755);
+            let _ = fs::set_permissions(&run_script, perms);
+        }
+        
+        // Patch executable_name if needed
+        if let Ok(script_content) = fs::read_to_string(&run_script) {
+            if script_content.contains("executable_name=\"\"")
+                || script_content.contains("executable_name= ") {
+                // Find .app in game directory
+                let app_name = fs::read_dir(&game_path)
+                    .ok()
+                    .and_then(|entries| {
+                        entries.filter_map(|e| e.ok())
+                            .find(|e| e.file_name().to_string_lossy().ends_with(".app"))
+                            .map(|e| e.file_name().to_string_lossy().to_string())
+                    });
+                if let Some(app_bundle) = app_name {
+                    let patched = script_content
+                        .replace("executable_name=\"\"", &format!("executable_name=\"{}\"", app_bundle));
+                    if patched != script_content {
+                        eprintln!("[launch_game_with_mods] Patching run_bepinex.sh: executable_name={}", app_bundle);
+                        let _ = fs::write(&run_script, &patched);
+                    }
+                }
+            }
+        }
+        
+        eprintln!("[launch_game_with_mods] Launching via run_bepinex.sh at {:?}", run_script);
+        
+        std::process::Command::new(&run_script)
+            .current_dir(&game_path)
+            .spawn()
+            .map_err(|e| format!("Failed to launch run_bepinex.sh: {}", e))?;
+        
+        Ok(())
+    } else {
+        // Fallback: open the .app directly
+        let app_bundle = fs::read_dir(&game_path)
+            .ok()
+            .and_then(|entries| {
+                entries.filter_map(|e| e.ok())
+                    .find(|e| e.file_name().to_string_lossy().ends_with(".app"))
+                    .map(|e| e.path())
+            });
+        if let Some(bundle) = app_bundle {
+            let _ = open::that(&bundle);
+            Ok(())
+        } else {
+            Err("run_bepinex.sh not found and no .app bundle found either".to_string())
+        }
+    }
 }
 
 // Helper function for recursive directory copy with forced overwrite
@@ -802,7 +1016,7 @@ async fn sync_profile_to_game(app: AppHandle, profile_id: String, game_identifie
     let use_cache = use_legacy_cache.unwrap_or(false);
     
     // 1. Get game path
-    let game_path_str = get_game_path(app.clone(), game_identifier.clone()).await?
+    let game_path_str = get_game_path(app.clone(), game_identifier.clone(), None).await?
         .ok_or("Game path not configured. Please set it in Settings.")?;
     let game_path = std::path::Path::new(&game_path_str);
     let game_plugins = game_path.join("BepInEx").join("plugins");
@@ -1029,6 +1243,7 @@ pub fn run() {
             sync_profile_to_game,
             copy_mod_from_cache,
             clear_profile_cache,
+            launch_game_with_mods,
         ])
         .setup(|app| {
             use chrono::Datelike;
@@ -1539,7 +1754,7 @@ async fn copy_mod_from_cache(app: AppHandle, profile_id: String, mod_name: Strin
 #[command]
 async fn open_mod_folder(app: AppHandle, _profile_id: String, mod_name: String, game_identifier: String) -> Result<(), String> {
     // Open mod folder in GAME directory (not cache!)
-    let game_path_str = get_game_path(app.clone(), game_identifier).await?
+    let game_path_str = get_game_path(app.clone(), game_identifier, None).await?
         .ok_or("Game path not configured. Please set it in Settings.")?;
     
     let game_path = std::path::Path::new(&game_path_str);
@@ -2107,7 +2322,8 @@ fn process_zip_archive(mut archive: zip::ZipArchive<std::io::Cursor<Vec<u8>>>) -
 
     // Map to expected format
     let profile_name = parsed["profileName"].as_str().unwrap_or("Imported Profile");
-    eprintln!("[process_zip_archive] Profile name: {}", profile_name);
+    let platform_val = parsed["platform"].as_str();
+    eprintln!("[process_zip_archive] Profile name: {}, Platform: {:?}", profile_name, platform_val);
     
     let empty_vec = vec![];
     let mods_array = parsed["mods"].as_array().unwrap_or(&empty_vec);
@@ -2140,11 +2356,15 @@ fn process_zip_archive(mut archive: zip::ZipArchive<std::io::Cursor<Vec<u8>>>) -
         })
     }).collect::<Vec<_>>();
 
-    let result = serde_json::json!({
+    let mut result = serde_json::json!({
         "type": "profile",
         "name": profile_name,
         "mods": mods
     });
+
+    if let Some(p) = platform_val {
+        result["platform"] = serde_json::json!(p);
+    }
     
     eprintln!("[process_zip_archive] Final result: {:?}", result);
     Ok(result)
@@ -2156,7 +2376,7 @@ async fn delete_profile_folder(app: AppHandle, profile_id: String, game_identifi
     
     // If game_identifier is provided, clean up ALL BepInEx-related files from the game folder
     if let Some(game_id) = game_identifier {
-        if let Ok(Some(game_path_str)) = get_game_path(app.clone(), game_id).await {
+        if let Ok(Some(game_path_str)) = get_game_path(app.clone(), game_id, None).await {
             let game_path = std::path::Path::new(&game_path_str);
             
             // Remove BepInEx folder
@@ -2219,7 +2439,7 @@ async fn toggle_mod(app: AppHandle, profile_id: String, mod_name: String, enable
     
     // Get game path for sync (optional - toggle still works without it)
     let game_plugins = if let Some(ref game_id) = game_identifier {
-        if let Ok(Some(game_path_str)) = get_game_path(app.clone(), game_id.clone()).await {
+        if let Ok(Some(game_path_str)) = get_game_path(app.clone(), game_id.clone(), None).await {
             Some(std::path::Path::new(&game_path_str).to_path_buf().join("BepInEx").join("plugins"))
         } else {
             None
@@ -2544,10 +2764,14 @@ async fn export_profile(app: AppHandle, profile_id: String) -> Result<serde_json
         })
     }).collect::<Vec<_>>();
     
-    let export_data = serde_json::json!({
+    let mut export_data = serde_json::json!({
         "profileName": profile["name"],
         "mods": mods
     });
+    
+    if let Some(plat) = profile.get("platform") {
+        export_data["platform"] = plat.clone();
+    }
     
     // 3. Convert to YAML
     let yaml_content = serde_yaml::to_string(&export_data).map_err(|e| e.to_string())?;
@@ -2622,10 +2846,14 @@ async fn share_profile(app: AppHandle, profile_id: String) -> Result<String, Str
         })
     }).collect::<Vec<_>>();
     
-    let export_data = serde_json::json!({
+    let mut export_data = serde_json::json!({
         "profileName": profile["name"],
         "mods": mods
     });
+    
+    if let Some(plat) = profile.get("platform") {
+        export_data["platform"] = plat.clone();
+    }
     
     // 3. Convert to YAML
     let yaml_content = serde_yaml::to_string(&export_data).map_err(|e| e.to_string())?;

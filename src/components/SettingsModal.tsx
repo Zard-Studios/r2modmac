@@ -5,9 +5,10 @@ interface SettingsModalProps {
     isOpen: boolean;
     onClose: () => void;
     selectedGame?: string;
+    activeProfilePlatform?: string;
 }
 
-export function SettingsModal({ isOpen, onClose, selectedGame }: SettingsModalProps) {
+export function SettingsModal({ isOpen, onClose, selectedGame, activeProfilePlatform }: SettingsModalProps) {
     const [steamPath, setSteamPath] = useState<string>('');
     const [loading, setLoading] = useState(false);
     const [gamePath, setGamePath] = useState<string | null>(null);
@@ -116,7 +117,9 @@ export function SettingsModal({ isOpen, onClose, selectedGame }: SettingsModalPr
                             value={steamPath}
                             onChange={(e) => setSteamPath(e.target.value)}
                             className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
-                            placeholder="(BottleName)/drive_c/Program Files (x86)/Steam"
+                            placeholder={activeProfilePlatform === 'mac'
+                                ? "~/Library/Application Support/Steam"
+                                : "(BottleName)/drive_c/Program Files (x86)/Steam"}
                         />
                         <button
                             onClick={handleBrowse}
@@ -126,7 +129,9 @@ export function SettingsModal({ isOpen, onClose, selectedGame }: SettingsModalPr
                         </button>
                     </div>
                     <p className="text-xs text-gray-500 mt-2">
-                        Select the Steam folder inside your bottle (e.g., drive_c/Program Files (x86)/Steam).
+                        {activeProfilePlatform === 'mac'
+                            ? "Select your native macOS Steam folder (e.g., ~/Library/Application Support/Steam)."
+                            : "Select the Steam folder inside your bottle (e.g., drive_c/Program Files (x86)/Steam)."}
                     </p>
                 </div>
 

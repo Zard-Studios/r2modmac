@@ -15,4 +15,5 @@ export interface Profile {
     lastUsed: number;
     profileImageUrl?: string;
     is_vanilla?: boolean;
+    platform?: 'windows' | 'mac';
 }
