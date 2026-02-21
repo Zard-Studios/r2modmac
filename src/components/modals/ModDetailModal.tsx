@@ -1,14 +1,14 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { PackageVersion, Package } from '../../types/thunderstore';
 import type { InstalledMod } from '../../types/profile';
 import DOMPurify from 'dompurify';
 
 interface ModDetailModalProps {
-    mod: PackageVersion;
+    pkg: Package;
     isOpen: boolean;
     onClose: () => void;
-    onInstall: () => void;
-    onUpdate?: () => void;
+    onInstall: (version: PackageVersion) => void;
+    onUpdate?: (version: PackageVersion) => void;
     onUninstall?: () => void;
     isInstalled: boolean;
     hasUpdate?: boolean;
@@ -19,7 +19,8 @@ interface ModDetailModalProps {
 
 type Tab = 'description' | 'changelog' | 'dependencies';
 
-export function ModDetailModal({ mod, isOpen, onClose, onInstall, onUpdate, onUninstall, isInstalled, hasUpdate = false, gameId, installedMods = [], isBrowsing }: ModDetailModalProps) {
+export function ModDetailModal({ pkg, isOpen, onClose, onInstall, onUpdate, onUninstall, isInstalled, hasUpdate = false, gameId, installedMods = [], isBrowsing }: ModDetailModalProps) {
+    const [selectedVersionNumber, setSelectedVersionNumber] = useState<string>(pkg.versions[0]?.version_number || '');
     const [activeTab, setActiveTab] = useState<Tab>('description');
     const [readmeContent, setReadmeContent] = useState<string | null>(null);
     const [changelogContent, setChangelogContent] = useState<string | null>(null);
@@ -27,6 +28,21 @@ export function ModDetailModal({ mod, isOpen, onClose, onInstall, onUpdate, onUn
     const [dependencies, setDependencies] = useState<Package[]>([]);
     const [loadingKey, setLoadingKey] = useState<string>('');
     const [showImageLightbox, setShowImageLightbox] = useState(false);
+    const selectedVersion = useMemo(
+        () => pkg.versions.find(v => v.version_number === selectedVersionNumber) || pkg.versions[0],
+        [pkg, selectedVersionNumber]
+    );
+    const mod = selectedVersion;
+    const installedVersionNumber = useMemo(
+        () => installedMods.find(m => m.fullName.startsWith(pkg.full_name))?.versionNumber || null,
+        [installedMods, pkg.full_name]
+    );
+    const isSelectedInstalled = !!installedVersionNumber && installedVersionNumber === mod.version_number;
+    const isSelectedLatest = pkg.versions[0]?.version_number === mod.version_number;
+
+    useEffect(() => {
+        setSelectedVersionNumber(pkg.versions[0]?.version_number || '');
+    }, [pkg.uuid4]);
 
     useEffect(() => {
         if (isOpen && mod && loadingKey !== mod.full_name) {
@@ -194,6 +210,39 @@ export function ModDetailModal({ mod, isOpen, onClose, onInstall, onUpdate, onUn
                         </button>
                     </div>
 
+                    {/* Version picker */}
+                    <div className="px-6 py-3 border-b border-gray-700 bg-gray-900/30 flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-2">
+                            <span className="text-xs uppercase tracking-wider text-gray-500 font-bold">Version</span>
+                            <select
+                                value={selectedVersionNumber}
+                                onChange={(e) => setSelectedVersionNumber(e.target.value)}
+                                className="bg-gray-800 border border-gray-700 text-gray-200 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:border-blue-500"
+                            >
+                                {pkg.versions.map((v) => (
+                                    <option key={v.uuid4} value={v.version_number}>
+                                        v{v.version_number}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+                        <div className="flex items-center gap-2 text-xs">
+                            {isSelectedInstalled ? (
+                                <span className="px-2 py-1 rounded-full bg-green-500/15 text-green-400 border border-green-500/30">
+                                    Installed
+                                </span>
+                            ) : isSelectedLatest ? (
+                                <span className="px-2 py-1 rounded-full bg-blue-500/15 text-blue-300 border border-blue-500/30">
+                                    Latest version
+                                </span>
+                            ) : (
+                                <span className="px-2 py-1 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/30">
+                                    Outdated version
+                                </span>
+                            )}
+                        </div>
+                    </div>
+
                     {/* Tabs */}
                     <div className="flex border-b border-gray-700 bg-gray-900/30 px-6 gap-6">
                         {(['description', 'changelog', 'dependencies'] as const).map(tab => (
@@ -350,21 +399,21 @@ export function ModDetailModal({ mod, isOpen, onClose, onInstall, onUpdate, onUn
                             <button
                                 onClick={() => {
                                     if (hasUpdate && onUpdate) {
-                                        onUpdate();
+                                        onUpdate(mod);
                                     } else {
-                                        onInstall();
+                                        onInstall(mod);
                                     }
                                     onClose();
                                 }}
-                                disabled={isInstalled && !hasUpdate}
-                                className={`flex-1 px-4 py-2.5 rounded-lg font-semibold transition-colors ${hasUpdate
+                                disabled={isSelectedInstalled}
+                                className={`flex-1 px-4 py-2.5 rounded-lg font-semibold transition-colors ${isSelectedInstalled
+                                    ? 'bg-green-500/10 text-green-500 border border-green-500/20 cursor-default'
+                                    : hasUpdate || isInstalled
                                     ? 'bg-amber-500 hover:bg-amber-600 text-white'
-                                    : isInstalled
-                                        ? 'bg-green-500/10 text-green-500 border border-green-500/20 cursor-default'
-                                        : 'bg-blue-600 hover:bg-blue-500 text-white'
+                                    : 'bg-blue-600 hover:bg-blue-500 text-white'
                                     }`}
                             >
-                                {hasUpdate ? 'Update' : isInstalled ? 'Installed' : 'Install Mod'}
+                                {isSelectedInstalled ? 'Installed' : isInstalled ? `Update to v${mod.version_number}` : `Install v${mod.version_number}`}
                             </button>
                         </div>
                     )}

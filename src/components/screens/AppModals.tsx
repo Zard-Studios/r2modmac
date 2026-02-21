@@ -8,7 +8,7 @@ import { CrossOverGuideModal } from '../modals/CrossOverGuideModal';
 import { MacOSGuideModal } from '../modals/MacOSGuideModal';
 import { UpdateModal } from '../modals/UpdateModal';
 import PreferencesModal from '../modals/PreferencesModal';
-import type { Package } from '../../types/thunderstore'
+import type { Package, PackageVersion } from '../../types/thunderstore'
 import type { UpdateInfo } from '../../types/electron';
 
 export interface AppModalsProps {
@@ -17,8 +17,8 @@ export interface AppModalsProps {
     activeProfileId: string | null;
     profiles: any[];
     selectedCommunity: string | null;
-    handleInstallMod: (pkg: Package, profileId: string) => void;
-    handleUpdateMod: (pkg: Package, profileId: string) => void;
+    handleInstallMod: (pkg: Package, profileId: string, version?: PackageVersion) => void;
+    handleUpdateMod: (pkg: Package, profileId: string, version?: PackageVersion) => void;
     handleUninstallWithDependencies: (pkg: Package, profileId: string) => void;
     isBrowsingMode: boolean;
     progressState: any;
@@ -68,21 +68,21 @@ export function AppModals({
         <>
             {selectedMod && (
                 <ModDetailModal
-                    mod={selectedMod.versions[0]}
+                    pkg={selectedMod}
                     isOpen={!!selectedMod}
                     gameId={selectedCommunity || ''}
                     installedMods={activeProfileId ? profiles.find(p => p.id === activeProfileId)?.mods || [] : []}
                     onClose={() => setSelectedMod(null)}
-                    onInstall={() => {
+                    onInstall={(version) => {
                         if (activeProfileId) {
-                            handleInstallMod(selectedMod, activeProfileId);
+                            handleInstallMod(selectedMod, activeProfileId, version);
                         } else {
                             alert('Please select or create a profile to install mods.');
                         }
                     }}
-                    onUpdate={() => {
+                    onUpdate={(version) => {
                         if (activeProfileId) {
-                            handleUpdateMod(selectedMod, activeProfileId);
+                            handleUpdateMod(selectedMod, activeProfileId, version);
                         }
                     }}
                     onUninstall={async () => {

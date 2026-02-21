@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import type { Community, Package } from '../../types/thunderstore';
 import type { Profile, InstalledMod } from '../../types/profile';
 import { Button } from '../ui';
@@ -82,6 +82,26 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
     const displayedMods = activeProfile?.mods.filter(mod =>
         mod.fullName.toLowerCase().includes(searchQuery.toLowerCase())
     ) || [];
+
+    const latestVersionByPackage = useMemo(() => {
+        const map = new Map<string, string>();
+        for (const pkg of packages) {
+            const latest = pkg.versions?.[0]?.version_number;
+            if (latest) {
+                map.set(pkg.full_name, latest);
+            }
+        }
+        return map;
+    }, [packages]);
+
+    const updatesInView = useMemo(() => {
+        return displayedMods.reduce((count, mod) => {
+            const modNameWithoutVersion = mod.fullName.replace(/-\d+\.\d+\.\d+$/, '');
+            const latestVersion = latestVersionByPackage.get(modNameWithoutVersion);
+            const hasUpdate = !!(latestVersion && latestVersion !== mod.versionNumber);
+            return hasUpdate && mod.enabled ? count + 1 : count;
+        }, 0);
+    }, [displayedMods, latestVersionByPackage]);
 
     return (
         <div className="h-full flex flex-col bg-gray-900 border-r border-gray-800 w-80 flex-shrink-0">
@@ -192,7 +212,20 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
             {/* Mod List */}
             <div className={`flex-1 overflow-y-auto p-2 space-y-1 scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-transparent ${activeProfile?.is_vanilla ? 'grayscale opacity-75 pointer-events-none' : ''}`}>
                 <div className="px-2 py-2 text-xs font-bold text-gray-500 uppercase tracking-wider flex justify-between items-center">
-                    <span>Installed Mods</span>
+                    <div className="flex items-center gap-2">
+                        <span>Installed Mods</span>
+                        {updatesInView > 0 && (
+                            <span
+                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] bg-amber-500/10 text-amber-400 border border-amber-500/20"
+                                title={`${updatesInView} mod${updatesInView === 1 ? '' : 's'} have updates available`}
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
+                                    <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l6.518 11.597c.75 1.334-.213 2.98-1.742 2.98H3.48c-1.53 0-2.493-1.646-1.743-2.98L8.257 3.1zM11 14a1 1 0 10-2 0 1 1 0 002 0zm-1-6a1 1 0 00-1 1v3a1 1 0 102 0V9a1 1 0 00-1-1z" clipRule="evenodd" />
+                                </svg>
+                                <span>{updatesInView}</span>
+                            </span>
+                        )}
+                    </div>
                     <span className="bg-gray-800 text-gray-400 px-2 py-0.5 rounded-full text-[10px]">{displayedMods.length}</span>
                 </div>
 
@@ -236,14 +269,20 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                                     <div className={`text-sm font-medium truncate transition-colors ${mod.enabled ? 'text-gray-200 group-hover:text-white' : 'text-gray-500 line-through'}`}>
                                         {mod.fullName.split('-')[1] || mod.fullName}
                                     </div>
-                                    {hasUpdate && mod.enabled && (
-                                        <div className="text-amber-400 text-[10px] bg-amber-400/10 px-1.5 py-0.5 rounded border border-amber-400/20" title={`Update available: ${latestVersion}`}>
-                                            UPDATE
-                                        </div>
-                                    )}
                                 </div>
                                 <div className="text-xs text-gray-500 flex items-center gap-2">
                                     <span>v{mod.versionNumber}</span>
+                                    {hasUpdate && mod.enabled && (
+                                        <span
+                                            className="inline-flex items-center text-amber-400"
+                                            title={`Update available: v${latestVersion}. Open details to update.`}
+                                        >
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+                                                <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l6.518 11.597c.75 1.334-.213 2.98-1.742 2.98H3.48c-1.53 0-2.493-1.646-1.743-2.98L8.257 3.1zM11 14a1 1 0 10-2 0 1 1 0 002 0zm-1-6a1 1 0 00-1 1v3a1 1 0 102 0V9a1 1 0 00-1-1z" clipRule="evenodd" />
+                                            </svg>
+                                            <span className="sr-only">Update available</span>
+                                        </span>
+                                    )}
                                 </div>
                             </div>
 
@@ -442,4 +481,3 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
         </div >
     );
 };
-

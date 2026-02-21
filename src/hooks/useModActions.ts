@@ -131,11 +131,15 @@ export function useModActions({
     };
 
     // ── Install mod (legacy = download now, new = metadata only) ─────────────────
-    const handleInstallMod = async (pkg: Package, targetProfileId?: string): Promise<void> => {
+    const handleInstallMod = async (
+        pkg: Package,
+        targetProfileId?: string,
+        selectedVersion?: PackageVersion
+    ): Promise<void> => {
         const profileIdToUse = targetProfileId || activeProfileId;
         if (!profileIdToUse) { alert('Please select a profile first'); return; }
 
-        const version = pkg.versions[0];
+        const version = selectedVersion || pkg.versions[0];
 
         if (legacyInstallMode) {
             const gamePath = await window.ipcRenderer.getGamePath(selectedCommunity || '');
@@ -297,9 +301,14 @@ export function useModActions({
     };
 
     // ── Update mod ───────────────────────────────────────────────────────────────
-    const handleUpdateMod = async (pkg: Package, targetProfileId?: string): Promise<void> => {
+    const handleUpdateMod = async (
+        pkg: Package,
+        targetProfileId?: string,
+        selectedVersion?: PackageVersion
+    ): Promise<void> => {
         const profileIdToUse = targetProfileId || activeProfileId;
         if (!profileIdToUse) { alert('Please select a profile first'); return; }
+        const targetVersion = selectedVersion || pkg.versions[0];
 
         setProgressState({ isOpen: true, title: `Updating ${pkg.name}`, progress: 0, currentTask: 'Removing old version...' });
         try {
@@ -309,8 +318,24 @@ export function useModActions({
                 setProgressState(prev => ({ ...prev, progress: 20, currentTask: 'Uninstalling old version...' }));
                 await removeMod(profileIdToUse, oldMod.uuid4);
             }
-            setProgressState(prev => ({ ...prev, progress: 40, currentTask: 'Installing new version...' }));
-            await installModWithDependencies(pkg, pkg.versions[0], new Set(), profileIdToUse);
+            setProgressState(prev => ({ ...prev, progress: 40, currentTask: `Installing v${targetVersion.version_number}...` }));
+
+            if (legacyInstallMode) {
+                const gamePath = await window.ipcRenderer.getGamePath(selectedCommunity || '');
+                if (!gamePath) {
+                    throw new Error('Game path not configured. Open Settings and set the game directory.');
+                }
+                await installModWithDependencies(pkg, targetVersion, new Set(), profileIdToUse, undefined, gamePath);
+            } else {
+                addMod(profileIdToUse, {
+                    uuid4: targetVersion.uuid4,
+                    fullName: targetVersion.full_name,
+                    versionNumber: targetVersion.version_number,
+                    iconUrl: targetVersion.icon,
+                    enabled: true,
+                });
+            }
+
             setProgressState(prev => ({ ...prev, progress: 100, currentTask: 'Update complete!' }));
             setTimeout(() => setProgressState(prev => ({ ...prev, isOpen: false })), 500);
         } catch (err: any) {

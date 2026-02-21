@@ -73,6 +73,9 @@ export function useGameSync({
             // ── Profile sync ──────────────────────────────────────────────────────
             const syncResult = await window.ipcRenderer.syncProfileToGame(activeProfile.id, community, legacyInstallMode);
 
+            const skippedVersionMismatch: string[] = [];
+            let actuallyInstalled = 0;
+
             if (syncResult.to_install.length > 0) {
                 setProgressState({ isOpen: true, title: 'Syncing to Game', progress: 0, currentTask: `Installing ${syncResult.to_install.length} missing mods...` });
 
@@ -89,6 +92,7 @@ export function useGameSync({
                             const cacheResult = await window.ipcRenderer.copyModFromCache(activeProfile.id, modInProfile.fullName, gamePath);
                             if (cacheResult.copied) {
                                 installed++;
+                                actuallyInstalled++;
                                 setProgressState(prev => ({
                                     ...prev,
                                     progress: Math.round((installed / syncResult.to_install.length) * 100),
@@ -100,8 +104,19 @@ export function useGameSync({
 
                         const pkg = await window.ipcRenderer.fetchPackageByName(modInProfile.fullName, community);
                         if (pkg) {
-                            const version = pkg.versions.find((v: any) => v.version_number === modInProfile.versionNumber) || pkg.versions[0];
+                            const version = pkg.versions.find((v: any) => v.version_number === modInProfile.versionNumber);
+                            if (!version) {
+                                skippedVersionMismatch.push(`${modKey} (requested v${modInProfile.versionNumber})`);
+                                installed++;
+                                setProgressState(prev => ({
+                                    ...prev,
+                                    progress: Math.round((installed / syncResult.to_install.length) * 100),
+                                    currentTask: `Skipped ${installed}/${syncResult.to_install.length}: ${modKey} (version not found)`
+                                }));
+                                continue;
+                            }
                             await window.ipcRenderer.installMod(activeProfile.id, version.download_url, version.full_name, gamePath, legacyInstallMode);
+                            actuallyInstalled++;
                         }
                     }
                     installed++;
@@ -122,9 +137,17 @@ export function useGameSync({
             } else {
                 const parts: string[] = [];
                 if (removed > 0) parts.push(`${removed} removed`);
-                if (toInstall.length > 0) parts.push(`${toInstall.length} installed`);
+                if (toInstall.length > 0) parts.push(`${actuallyInstalled} installed`);
                 if (cached > 0) parts.push(`${cached} cached`);
                 message = `Sync complete! ${parts.join(', ')}.`;
+            }
+
+            // Extra safety notice: never auto-upgrade to latest when a pinned version is missing.
+            // We skip instead, so users can explicitly choose a new version.
+            if (skippedVersionMismatch.length > 0) {
+                const preview = skippedVersionMismatch.slice(0, 5).join('\n');
+                const more = skippedVersionMismatch.length > 5 ? `\n...and ${skippedVersionMismatch.length - 5} more` : '';
+                message += `\n\nSkipped ${skippedVersionMismatch.length} mod(s) because the exact pinned version is unavailable:\n${preview}${more}`;
             }
 
             await window.ipcRenderer.alert('Success', message);
