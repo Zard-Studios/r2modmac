@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import type { Community, Package } from '../types/thunderstore';
-import type { Profile, InstalledMod } from '../types/profile';
-import { Button } from './ui';
+import type { Community, Package } from '../../types/thunderstore';
+import type { Profile, InstalledMod } from '../../types/profile';
+import { Button } from '../ui';
 
 interface ProfileSidebarProps {
     activeProfile: Profile | undefined;

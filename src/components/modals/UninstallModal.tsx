@@ -1,4 +1,4 @@
-import { Button } from './ui';
+import { Button } from '../ui';
 
 interface UninstallModalProps {
     isOpen: boolean;

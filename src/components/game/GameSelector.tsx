@@ -1,6 +1,6 @@
 
-import type { Community } from '../types/thunderstore';
-import { MAC_SUPPORTED_GAMES } from '../data/platforms';
+import type { Community } from '../../types/thunderstore';
+import { MAC_SUPPORTED_GAMES } from '../../data/platforms';
 
 interface GameSelectorProps {
     communities: Community[];

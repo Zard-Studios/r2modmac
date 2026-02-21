@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import type { PackageVersion, Package } from '../types/thunderstore';
-import type { InstalledMod } from '../types/profile';
+import type { PackageVersion, Package } from '../../types/thunderstore';
+import type { InstalledMod } from '../../types/profile';
 import DOMPurify from 'dompurify';
 
 interface ModDetailModalProps {

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Button } from './ui';
+import { Button } from '../ui';
 
 interface PreferencesModalProps {
     isOpen: boolean;

@@ -1,5 +1,5 @@
 import React from 'react';
-import type { UpdateInfo } from '../types/electron';
+import type { UpdateInfo } from '../../types/electron';
 import DOMPurify from 'dompurify';
 import { marked } from 'marked';
 
