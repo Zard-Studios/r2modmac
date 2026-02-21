@@ -2,13 +2,14 @@
 import { useState } from 'react';
 import { Menu, MenuItem } from '@tauri-apps/api/menu';
 import type { Profile } from '../../types/profile';
+import type { CommunityPlatformInfo } from '../../types/thunderstore';
 import { Button } from '../ui';
-import { MAC_SUPPORTED_GAMES } from '../../data/platforms';
 import { PlatformPicker } from './PlatformPicker';
 
 interface ProfileListProps {
     profiles: Profile[];
     selectedGameIdentifier: string;
+    selectedGamePlatform?: CommunityPlatformInfo;
     onSelectProfile: (profileId: string) => void;
     onCreateProfile: (name: string, platform?: 'windows' | 'mac') => void;
     onImportProfile: (code: string, platform: 'windows' | 'mac') => void;
@@ -22,6 +23,7 @@ interface ProfileListProps {
 export function ProfileList({
     profiles,
     selectedGameIdentifier,
+    selectedGamePlatform,
     onSelectProfile,
     onCreateProfile,
     onImportProfile,
@@ -42,7 +44,7 @@ export function ProfileList({
     const [pendingImport, setPendingImport] = useState<string | { file: string } | null>(null);
 
     const filteredProfiles = profiles.filter(p => p.gameIdentifier === selectedGameIdentifier);
-    const isMacCompatible = MAC_SUPPORTED_GAMES.includes(selectedGameIdentifier);
+    const isMacCompatible = selectedGamePlatform?.mac ?? false;
 
     const handleCreate = (e: React.FormEvent) => {
         e.preventDefault();

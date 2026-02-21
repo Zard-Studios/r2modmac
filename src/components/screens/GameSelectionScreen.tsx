@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
 import { GameSelector } from '../game/GameSelector';
-import { MAC_SUPPORTED_GAMES } from '../../data/platforms';
+import type { CommunityPlatformInfo } from '../../types/thunderstore';
 
 export interface GameSelectionScreenProps {
     communities: any[];
     communityImages: Record<string, string>;
+    communityPlatforms: Record<string, CommunityPlatformInfo>;
     loading: boolean;
     selectedCommunity: string | null;
     onSelectCommunity: (id: string) => void;
@@ -14,6 +15,7 @@ export interface GameSelectionScreenProps {
 export function GameSelectionScreen({
     communities,
     communityImages,
+    communityPlatforms,
     loading,
     selectedCommunity,
     onSelectCommunity,
@@ -55,9 +57,11 @@ export function GameSelectionScreen({
             c.identifier.toLowerCase().includes(gameSearchQuery.toLowerCase())
         )
         .filter(c => {
-            const isMac = MAC_SUPPORTED_GAMES.includes(c.identifier);
+            const platform = communityPlatforms[c.identifier];
+            const isMac = platform?.mac ?? false;
+            const isWindows = platform?.windows ?? true;
             if (!showWindowsGame && !showMacGame) return false;
-            if (showWindowsGame && !showMacGame) return !isMac;
+            if (showWindowsGame && !showMacGame) return isWindows;
             if (!showWindowsGame && showMacGame) return isMac;
             return true;
         })
@@ -152,6 +156,7 @@ export function GameSelectionScreen({
                             selectedCommunity={selectedCommunity}
                             onSelect={onSelectCommunity}
                             communityImages={communityImages}
+                            communityPlatforms={communityPlatforms}
                             favoriteGames={favoriteGames}
                             onToggleFavorite={toggleFavorite}
                         />

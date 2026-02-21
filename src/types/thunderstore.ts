@@ -53,3 +53,11 @@ export interface PackageListing {
     categories: string[];
     versions: PackageVersion[];
 }
+
+export interface CommunityPlatformInfo {
+    windows: boolean;
+    mac: boolean;
+    linux: boolean;
+    confidence: number;
+    source: string;
+}

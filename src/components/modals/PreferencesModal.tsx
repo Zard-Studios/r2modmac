@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Button } from '../ui';
+import { MAC_IMAGE_CACHE_KEY, MAC_PLATFORM_CACHE_KEY } from '../../constants/cacheKeys';
 
 interface PreferencesModalProps {
     isOpen: boolean;
@@ -89,24 +90,28 @@ export default function PreferencesModal({ isOpen, onClose, settings, onSave }: 
                     <div className="p-4 rounded-lg bg-red-900/20 border border-red-800">
                         <div className="flex items-center justify-between gap-4">
                             <div className="flex-1">
-                                <h4 className="text-red-200 font-medium text-sm mb-1">Clear Profile Cache</h4>
+                                <h4 className="text-red-200 font-medium text-sm mb-1">Clear App Cache</h4>
                                 <p className="text-red-300/70 text-xs">
-                                    Remove all downloaded mods from local cache to free up disk space.
+                                    Remove downloaded profile cache and game detection cache. The app will reload.
                                 </p>
                             </div>
                             <button
                                 onClick={async () => {
                                     const confirmed = await window.ipcRenderer.confirm(
-                                        'Clear Profile Cache?',
-                                        'This will delete all cached mods. You will need to re-download them when applying to game. Continue?'
+                                        'Clear App Cache?',
+                                        'This will delete profile cache and game detection cache. You may need to re-download mods and re-fetch game compatibility. Continue?'
                                     );
                                     if (confirmed) {
                                         const result = await window.ipcRenderer.clearProfileCache();
+                                        localStorage.removeItem(MAC_PLATFORM_CACHE_KEY);
+                                        localStorage.removeItem(MAC_IMAGE_CACHE_KEY);
                                         const sizeMB = (result.bytes_freed / 1024 / 1024).toFixed(1);
+                                        const chunksInfo = result.chunks_cleared ? `\nThunderstore chunks cleared: ${result.chunks_cleared}` : '';
                                         await window.ipcRenderer.alert(
                                             'Cache Cleared',
-                                            `Cleared ${result.cleared} profile(s), freed ${sizeMB} MB.`
+                                            `Cleared ${result.cleared} profile cache(s), freed ${sizeMB} MB.${chunksInfo}\n\nGame cache cleared. Reloading app now...`
                                         );
+                                        window.location.reload();
                                     }
                                 }}
                                 className="px-3 py-1.5 rounded-lg bg-red-600/20 hover:bg-red-600/40 text-red-400 hover:text-red-300 text-sm font-medium border border-red-700 transition-colors flex-shrink-0"

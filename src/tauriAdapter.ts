@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import type { IElectronAPI } from './types/electron';
 import type { Profile } from './types/profile';
-import type { Community, Package } from './types/thunderstore';
+import type { Community, Package, CommunityPlatformInfo } from './types/thunderstore';
 
 export const tauriAPI: IElectronAPI = {
     getProfiles: () => invoke<Profile[]>('get_profiles'),
@@ -21,6 +21,8 @@ export const tauriAPI: IElectronAPI = {
     checkDirectoryExists: async (path) => invoke<boolean>('check_directory_exists', { path }),
     fetchCommunities: () => invoke<Community[]>('fetch_communities'),
     fetchCommunityImages: () => invoke<Record<string, string>>('fetch_community_images'),
+    resolveCommunityPlatforms: (games: { identifier: string; name: string }[]) =>
+        invoke<Record<string, CommunityPlatformInfo>>('resolve_community_platforms', { games }),
     async fetchPackages(gameId: string) {
         return await invoke('fetch_packages', { gameId });
     },
@@ -111,7 +113,7 @@ export const tauriAPI: IElectronAPI = {
         return await invoke<{ success: boolean; copied: boolean }>('copy_mod_from_cache', { profileId, modName, gamePath });
     },
     clearProfileCache: async () => {
-        return await invoke<{ cleared: number; bytes_freed: number }>('clear_profile_cache', {});
+        return await invoke<{ cleared: number; chunks_cleared?: number; bytes_freed: number }>('clear_profile_cache', {});
     },
     openProfileFolder: async (profileId: string) => {
         return await invoke('open_profile_folder', { profileId });

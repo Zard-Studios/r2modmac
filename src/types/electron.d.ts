@@ -1,5 +1,5 @@
 import type { Profile } from './profile';
-import type { Community, Package } from './thunderstore';
+import type { Community, Package, CommunityPlatformInfo } from './thunderstore';
 
 export interface IElectronAPI {
     getProfiles: () => Promise<Profile[]>;
@@ -10,6 +10,7 @@ export interface IElectronAPI {
     checkDirectoryExists: (dirPath: string) => Promise<boolean>;
     fetchCommunities: () => Promise<Community[]>;
     fetchCommunityImages: () => Promise<Record<string, string>>;
+    resolveCommunityPlatforms: (games: { identifier: string; name: string }[]) => Promise<Record<string, CommunityPlatformInfo>>;
     fetchPackages: (gameId: string) => Promise<number>;
     getAvailableCategories: (gameId: string) => Promise<string[]>;
     getPackages(
@@ -50,7 +51,7 @@ export interface IElectronAPI {
     lookupPackagesByNames: (gameId: string, names: string[]) => Promise<any>;
     syncProfileToGame: (profileId: string, gameIdentifier: string, useLegacyCache?: boolean) => Promise<{ removed: number; to_install: string[]; already_installed: number; cached: number }>;
     copyModFromCache: (profileId: string, modName: string, gamePath: string) => Promise<{ success: boolean; copied: boolean }>;
-    clearProfileCache: () => Promise<{ cleared: number; bytes_freed: number }>;
+    clearProfileCache: () => Promise<{ cleared: number; chunks_cleared?: number; bytes_freed: number }>;
     openProfileFolder: (profileId: string) => Promise<void>;
     launchGameWithMods: (gameIdentifier: string) => Promise<void>;
 }

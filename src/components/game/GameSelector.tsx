@@ -1,17 +1,17 @@
 
-import type { Community } from '../../types/thunderstore';
-import { MAC_SUPPORTED_GAMES } from '../../data/platforms';
+import type { Community, CommunityPlatformInfo } from '../../types/thunderstore';
 
 interface GameSelectorProps {
     communities: Community[];
     selectedCommunity: string | null;
     onSelect: (identifier: string) => void;
     communityImages: Record<string, string>;
+    communityPlatforms: Record<string, CommunityPlatformInfo>;
     favoriteGames: string[];
     onToggleFavorite: (identifier: string, e: React.MouseEvent) => void;
 }
 
-export function GameSelector({ communities, selectedCommunity, onSelect, communityImages, favoriteGames, onToggleFavorite }: GameSelectorProps) {
+export function GameSelector({ communities, selectedCommunity, onSelect, communityImages, communityPlatforms, favoriteGames, onToggleFavorite }: GameSelectorProps) {
 
     // Function to get initials from game name
     const getInitials = (name: string) => {
@@ -58,7 +58,9 @@ export function GameSelector({ communities, selectedCommunity, onSelect, communi
         const isFavorite = favoriteGames.includes(community.identifier);
         const gradient = getGradient(community.name);
         const imageUrl = communityImages[community.identifier];
-        const isMacCompatible = MAC_SUPPORTED_GAMES.includes(community.identifier);
+        const platform = communityPlatforms[community.identifier];
+        const isWindowsCompatible = platform?.windows ?? true;
+        const isMacCompatible = platform?.mac ?? false;
 
         return (
             <button
@@ -98,14 +100,16 @@ export function GameSelector({ communities, selectedCommunity, onSelect, communi
                     {/* Platform Indicators */}
                     <div className="absolute top-2 right-2 flex flex-col gap-1 z-30 pointer-events-none items-end">
                         <div className={`bg-black/60 backdrop-blur-md text-white p-1 rounded-full shadow-lg border border-white/10 flex items-center justify-center gap-2 h-7 ${isMacCompatible ? 'px-2' : 'w-7 px-0'}`}>
+                            {isWindowsCompatible && (
                             <span title="Windows Compatible" className="flex items-center justify-center w-3.5 h-3.5">
                                 <svg xmlns="http://www.w3.org/2000/svg" className="w-[14px] h-[14px]" viewBox="0 0 24 24" fill="currentColor">
                                     <path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.9-1.801" />
                                 </svg>
                             </span>
+                            )}
                             {isMacCompatible && (
                                 <>
-                                    <div className="w-[1px] h-3.5 bg-white/20"></div>
+                                    {isWindowsCompatible && <div className="w-[1px] h-3.5 bg-white/20"></div>}
                                     <span title="MacOS Compatible" className="flex items-center justify-center w-3 h-3.5">
                                         <svg xmlns="http://www.w3.org/2000/svg" className="w-[12px] h-[14px]" viewBox="0 0 384 512" fill="currentColor">
                                             <path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zm-56.6-164.2c27.3-32.4 24.8-61.9 24-72.5-24.1 1.4-52 16.4-67.9 34.9-17.5 19.8-27.8 44.3-25.6 71.9 26.1 2 49.9-11.4 69.5-34.3z" />

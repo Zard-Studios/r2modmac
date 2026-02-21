@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { Button } from './components/ui'
 import { Layout } from './components/Layout'
 import type { FilterOptions } from './components/FilterPopover'
@@ -10,15 +10,173 @@ import { ProfileList } from './components/profiles/ProfileList';
 import { ProfileSidebar } from './components/profiles/ProfileSidebar';
 import { useProfileStore } from './store/useProfileStore';
 import { useAppStore } from './store/useAppStore';
-import type { Package } from './types/thunderstore';
+import type { CommunityPlatformInfo, Package } from './types/thunderstore';
 import { getVersion } from '@tauri-apps/api/app';
 import { listen } from '@tauri-apps/api/event';
 import { AppModals } from './components/screens/AppModals';
 import type { UpdateInfo } from './types/electron';
+import { MAC_IMAGE_CACHE_KEY, MAC_PLATFORM_CACHE_KEY } from './constants/cacheKeys';
 
 import { useModActions } from './hooks/useModActions';
 import { useProfileActions } from './hooks/useProfileActions';
 import { useGameSync } from './hooks/useGameSync';
+
+const QUICK_MAC_HINTS = new Set([
+  'btd6',
+  'valheim',
+  'slimerancher',
+  'stardewvalley',
+  'subnautica',
+  'subnauticabelowzero',
+  'hollowknight',
+  'celeste',
+  'kerbalspaceprogram',
+  'outward',
+  'inscryption',
+  'cities_skylines',
+  '20minutes-till-dawn',
+  'stacklands',
+  'timberborn',
+  'dontstarvetogether',
+  'factorio',
+  'garrysmod',
+  'oxygennotincluded',
+  'projectzomboid',
+  'rimworld',
+  'terraria',
+  'hytale',
+]);
+
+interface StoredMacPlatformCache {
+  version: number;
+  known_games: string[];
+  mac_platforms: Record<string, CommunityPlatformInfo>;
+  updated_at: number;
+}
+
+interface StoredMacImageCache {
+  version: number;
+  mac_images: Record<string, string>;
+  missing_ids: string[];
+  updated_at: number;
+}
+
+const emptyPlatformCache = (): StoredMacPlatformCache => ({
+  version: 1,
+  known_games: [],
+  mac_platforms: {},
+  updated_at: 0,
+});
+
+const emptyImageCache = (): StoredMacImageCache => ({
+  version: 1,
+  mac_images: {},
+  missing_ids: [],
+  updated_at: 0,
+});
+
+const normalizePlatformInfo = (value: Partial<CommunityPlatformInfo> | undefined): CommunityPlatformInfo => ({
+  windows: value?.windows ?? true,
+  mac: value?.mac ?? false,
+  linux: value?.linux ?? false,
+  confidence: typeof value?.confidence === 'number' ? value.confidence : 0,
+  source: typeof value?.source === 'string' ? value.source : 'bootstrap:unknown',
+});
+
+const readMacPlatformCache = (): StoredMacPlatformCache => {
+  try {
+    const raw = localStorage.getItem(MAC_PLATFORM_CACHE_KEY);
+    if (!raw) return emptyPlatformCache();
+    const parsed = JSON.parse(raw) as Partial<StoredMacPlatformCache>;
+    const knownGames = Array.isArray(parsed?.known_games)
+      ? parsed.known_games.filter((id): id is string => typeof id === 'string')
+      : [];
+    const macPlatformsRaw = parsed?.mac_platforms ?? {};
+    const macPlatforms: Record<string, CommunityPlatformInfo> = {};
+    for (const [id, info] of Object.entries(macPlatformsRaw)) {
+      const normalized = normalizePlatformInfo(info as Partial<CommunityPlatformInfo>);
+      if (normalized.mac) {
+        macPlatforms[id] = normalized;
+      }
+    }
+
+    return {
+      version: 1,
+      known_games: knownGames,
+      mac_platforms: macPlatforms,
+      updated_at: typeof parsed?.updated_at === 'number' ? parsed.updated_at : 0,
+    };
+  } catch {
+    return emptyPlatformCache();
+  }
+};
+
+const writeMacPlatformCache = (cache: StoredMacPlatformCache) => {
+  localStorage.setItem(MAC_PLATFORM_CACHE_KEY, JSON.stringify(cache));
+};
+
+const readMacImageCache = (): StoredMacImageCache => {
+  try {
+    const raw = localStorage.getItem(MAC_IMAGE_CACHE_KEY);
+    if (!raw) return emptyImageCache();
+    const parsed = JSON.parse(raw) as Partial<StoredMacImageCache>;
+    const imagesRaw = parsed?.mac_images ?? {};
+    const images: Record<string, string> = {};
+    for (const [id, url] of Object.entries(imagesRaw)) {
+      if (typeof url === 'string' && url.length > 0) {
+        images[id] = url;
+      }
+    }
+    const missingIds = Array.isArray(parsed?.missing_ids)
+      ? parsed.missing_ids.filter((id): id is string => typeof id === 'string')
+      : [];
+
+    return {
+      version: 1,
+      mac_images: images,
+      missing_ids: missingIds,
+      updated_at: typeof parsed?.updated_at === 'number' ? parsed.updated_at : 0,
+    };
+  } catch {
+    return emptyImageCache();
+  }
+};
+
+const writeMacImageCache = (cache: StoredMacImageCache) => {
+  localStorage.setItem(MAC_IMAGE_CACHE_KEY, JSON.stringify(cache));
+};
+
+const mergePlatformInfo = (existing: CommunityPlatformInfo, incoming: CommunityPlatformInfo): CommunityPlatformInfo => {
+  const existingConfidence = typeof existing.confidence === 'number' ? existing.confidence : 0;
+  const incomingConfidence = typeof incoming.confidence === 'number' ? incoming.confidence : 0;
+  const incomingIsAuthoritativeSteam =
+    typeof incoming.source === 'string' &&
+    incoming.source.startsWith('steam_store:') &&
+    incomingConfidence >= 0.85;
+  const incomingAddsPlatformSignal =
+    (!!incoming.windows && !existing.windows) ||
+    (!!incoming.mac && !existing.mac) ||
+    (!!incoming.linux && !existing.linux);
+
+  if (incomingIsAuthoritativeSteam || incomingConfidence >= existingConfidence + 0.05) {
+    return incoming;
+  }
+
+  if (!incomingAddsPlatformSignal) {
+    return existing;
+  }
+
+  return {
+    windows: !!existing.windows || !!incoming.windows,
+    mac: !!existing.mac || !!incoming.mac,
+    linux: !!existing.linux || !!incoming.linux,
+    confidence: Math.max(existingConfidence, incomingConfidence),
+    source:
+      existing.source === incoming.source
+        ? existing.source
+        : `merge:${existing.source}|${incoming.source}`,
+  };
+};
 
 function App() {
 
@@ -72,6 +230,7 @@ function App() {
   const [showPreferences, setShowPreferences] = useState(false)
   const [legacyInstallMode, setLegacyInstallMode] = useState(false)
   const [isBrowsingMode, setIsBrowsingMode] = useState(false)
+  const isInitialLoadRunningRef = useRef(false)
 
   const {
     profiles,
@@ -85,7 +244,7 @@ function App() {
     toggleMod
   } = useProfileStore()
   // App State Store
-  const { communities, communityImages, setCommunities, setCommunityImages } = useAppStore();
+  const { communities, communityImages, communityPlatforms, setCommunities, setCommunityImages, setCommunityPlatforms } = useAppStore();
 
   const [selectedCommunity, setSelectedCommunity] = useState<string | null>(null)
 
@@ -187,21 +346,151 @@ function App() {
   // loadData fetches the communities
 
   const loadData = async () => {
+    if (isInitialLoadRunningRef.current) return;
+
     // If we already have communities, don't re-fetch them.
     if (communities.length > 0) return;
 
+    isInitialLoadRunningRef.current = true;
     setLoading(true)
     try {
-      const [data, images] = await Promise.all([
-        window.ipcRenderer.fetchCommunities(),
-        window.ipcRenderer.fetchCommunityImages()
-      ])
+      const data = await window.ipcRenderer.fetchCommunities();
       setCommunities(data)
-      setCommunityImages(images)
+      console.log(`[communities] loaded ${data.length} communities`);
+
+      const storedPlatformCache = readMacPlatformCache();
+      const storedImageCache = readMacImageCache();
+      const knownGamesSet = new Set(storedPlatformCache.known_games);
+      let sessionImages: Record<string, string> = {};
+
+      try {
+        sessionImages = await window.ipcRenderer.fetchCommunityImages();
+        setCommunityImages(sessionImages);
+      } catch (imgErr) {
+        console.warn('[community-images] failed to fetch image map, using cached mac images', imgErr);
+      }
+
+      const defaultPlatforms: Record<string, CommunityPlatformInfo> = Object.fromEntries(
+        data.map((c: any) => {
+          const cachedMacPlatform = storedPlatformCache.mac_platforms[c.identifier];
+          const wasKnownBefore = knownGamesSet.has(c.identifier);
+          const useQuickHint = !wasKnownBefore && QUICK_MAC_HINTS.has(c.identifier);
+
+          if (cachedMacPlatform?.mac) {
+            return [c.identifier, normalizePlatformInfo(cachedMacPlatform)];
+          }
+
+          return [c.identifier, {
+            windows: true,
+            mac: useQuickHint,
+            linux: false,
+            confidence: useQuickHint ? 0.55 : 0,
+            source: useQuickHint ? 'bootstrap:quick_mac_hint' : 'bootstrap:unknown',
+          }];
+        })
+      );
+
+      let mergedPlatforms: Record<string, CommunityPlatformInfo> = { ...defaultPlatforms };
+      setCommunityPlatforms(mergedPlatforms);
+
+      const initialMacImages: Record<string, string> = { ...sessionImages };
+      for (const [communityId, imageUrl] of Object.entries(storedImageCache.mac_images)) {
+        if (!initialMacImages[communityId] && mergedPlatforms[communityId]?.mac) {
+          initialMacImages[communityId] = imageUrl;
+        }
+      }
+      setCommunityImages(initialMacImages);
+      setLoading(false)
+
+      const newCommunities = data.filter((c: any) => !knownGamesSet.has(c.identifier));
+      if (newCommunities.length > 0) {
+        console.log(`[platform-resolver] resolving ${newCommunities.length} new communities`);
+      }
+
+      const batchSize = 18;
+      for (let i = 0; i < newCommunities.length; i += batchSize) {
+        const batch = newCommunities.slice(i, i + batchSize).map((c: any) => ({
+          identifier: c.identifier,
+          name: c.name,
+        }));
+        try {
+          const resolved = await window.ipcRenderer.resolveCommunityPlatforms(batch) as Record<string, CommunityPlatformInfo>;
+          const nextMerged: Record<string, CommunityPlatformInfo> = { ...mergedPlatforms };
+          for (const [communityId, incoming] of Object.entries(resolved)) {
+            const normalizedIncoming = normalizePlatformInfo(incoming);
+            const existing = nextMerged[communityId];
+            nextMerged[communityId] = existing
+              ? mergePlatformInfo(existing, normalizedIncoming)
+              : normalizedIncoming;
+            knownGamesSet.add(communityId);
+          }
+
+          mergedPlatforms = nextMerged;
+          setCommunityPlatforms(mergedPlatforms);
+          const macCount = Object.values(mergedPlatforms).filter((p: any) => p.mac).length;
+          console.log(`[platform-resolver] processed ${Math.min(i + batchSize, newCommunities.length)}/${newCommunities.length} new, mac-compatible total: ${macCount}`);
+        } catch (e) {
+          console.warn('[platform-resolver] batch failed', e);
+        }
+      }
+
+      const currentGameIds = data.map((c: any) => c.identifier as string);
+      const macPlatformsToPersist: Record<string, CommunityPlatformInfo> = {};
+      for (const gameId of currentGameIds) {
+        const platform = mergedPlatforms[gameId];
+        if (platform?.mac) {
+          macPlatformsToPersist[gameId] = normalizePlatformInfo(platform);
+        }
+      }
+      writeMacPlatformCache({
+        version: 1,
+        known_games: currentGameIds.filter((id) => knownGamesSet.has(id)),
+        mac_platforms: macPlatformsToPersist,
+        updated_at: Date.now(),
+      });
+
+      const macIds = currentGameIds.filter((id) => mergedPlatforms[id]?.mac);
+      const missingSet = new Set(storedImageCache.missing_ids);
+      const macImages: Record<string, string> = {};
+      for (const id of macIds) {
+        const cachedImage = storedImageCache.mac_images[id];
+        if (cachedImage) {
+          macImages[id] = cachedImage;
+        }
+      }
+
+      for (const id of macIds) {
+        const liveImage = sessionImages[id];
+        if (liveImage) {
+          macImages[id] = liveImage;
+          missingSet.delete(id);
+          continue;
+        }
+        if (!macImages[id]) {
+          missingSet.add(id);
+        }
+      }
+      console.log(`[community-images] stored ${Object.keys(macImages).length}/${macIds.length} mac images`);
+
+      const persistedMissingIds = macIds.filter((id) => !macImages[id] && missingSet.has(id));
+      writeMacImageCache({
+        version: 1,
+        mac_images: macImages,
+        missing_ids: persistedMissingIds,
+        updated_at: Date.now(),
+      });
+      if (Object.keys(sessionImages).length > 0) {
+        setCommunityImages(sessionImages);
+      } else {
+        setCommunityImages(initialMacImages);
+      }
+      return;
     } catch (err) {
       console.error('Failed to load data', err)
+    } finally {
+      isInitialLoadRunningRef.current = false;
+      setLoading(false)
     }
-    setLoading(false)
   }
 
   const handleSelectProfile = (profileId: string) => {
@@ -306,6 +595,7 @@ function App() {
       <GameSelectionScreen
         communities={communities}
         communityImages={communityImages}
+        communityPlatforms={communityPlatforms}
         loading={loading}
         selectedCommunity={selectedCommunity}
         onSelectCommunity={setSelectedCommunity}
@@ -329,6 +619,7 @@ function App() {
         <ProfileList
           profiles={profiles}
           selectedGameIdentifier={selectedCommunity}
+          selectedGamePlatform={selectedCommunity ? communityPlatforms[selectedCommunity] : undefined}
           onSelectProfile={handleSelectProfile}
           onCreateProfile={(name, platform) => createProfile(name, selectedCommunity!, platform)}
           onImportProfile={handleImportProfile}

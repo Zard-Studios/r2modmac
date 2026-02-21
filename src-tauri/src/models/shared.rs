@@ -5,14 +5,31 @@ use tokio::sync::RwLock;
 
 pub struct AppState {
     pub packages: Arc<RwLock<HashMap<String, Vec<serde_json::Value>>>>,
+    pub platform_cache: Arc<RwLock<HashMap<String, CachedPlatform>>>,
 }
 
 impl Default for AppState {
     fn default() -> Self {
         Self {
             packages: Arc::new(RwLock::new(HashMap::new())),
+            platform_cache: Arc::new(RwLock::new(HashMap::new())),
         }
     }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct PlatformInfo {
+    pub windows: bool,
+    pub mac: bool,
+    pub linux: bool,
+    pub confidence: f32,
+    pub source: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct CachedPlatform {
+    pub info: PlatformInfo,
+    pub fetched_at: i64,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

@@ -1,7 +1,8 @@
 use std::fs;
-use tauri::{command, AppHandle, Manager};
+use tauri::{command, AppHandle, Manager, State};
 use crate::utils::file_ops::*;
 use crate::commands::game_commands::get_game_path;
+use crate::models::shared::AppState;
 
 #[command]
 pub fn get_profiles(app: AppHandle) -> Result<Vec<serde_json::Value>, String> {
@@ -100,12 +101,13 @@ pub async fn open_profile_folder(app: AppHandle, profile_id: String) -> Result<(
 }
 
 #[command]
-pub async fn clear_profile_cache(app: AppHandle) -> Result<serde_json::Value, String> {
+pub async fn clear_profile_cache(app: AppHandle, state: State<'_, AppState>) -> Result<serde_json::Value, String> {
     let profiles_dir = app.path().app_data_dir().map_err(|e| e.to_string())?
         .join("profiles");
     
     let mut cleared = 0;
     let mut size_freed: u64 = 0;
+    let mut chunk_files_removed = 0;
     
     if profiles_dir.exists() {
         if let Ok(entries) = fs::read_dir(&profiles_dir) {
@@ -125,11 +127,36 @@ pub async fn clear_profile_cache(app: AppHandle) -> Result<serde_json::Value, St
             }
         }
     }
+
+    if let Ok(cache_dir) = app.path().app_cache_dir() {
+        let chunks_dir = cache_dir.join("chunks");
+        if chunks_dir.exists() {
+            if let Ok(size) = calculate_dir_size(&chunks_dir) {
+                size_freed += size;
+            }
+            if let Ok(entries) = fs::read_dir(&chunks_dir) {
+                chunk_files_removed = entries.filter_map(|e| e.ok()).count() as i32;
+            }
+            let _ = fs::remove_dir_all(&chunks_dir);
+            let _ = fs::create_dir_all(&chunks_dir);
+        }
+    }
+
+    {
+        let mut platform_cache = state.platform_cache.write().await;
+        platform_cache.clear();
+    }
     
-    eprintln!("[clear_profile_cache] Cleared {} profile caches, freed {} bytes", cleared, size_freed);
+    eprintln!(
+        "[clear_profile_cache] Cleared {} profile caches, removed {} chunk files, freed {} bytes",
+        cleared,
+        chunk_files_removed,
+        size_freed
+    );
     
     Ok(serde_json::json!({
         "cleared": cleared,
+        "chunks_cleared": chunk_files_removed,
         "bytes_freed": size_freed
     }))
 }

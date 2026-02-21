@@ -1,6 +1,9 @@
 use std::fs;
-use tauri::{command, AppHandle, Emitter, Manager};
+use std::collections::HashMap;
+use futures_util::stream::{self, StreamExt};
+use tauri::{command, AppHandle, Emitter, Manager, State};
 use crate::models::shared::*;
+use serde::{Deserialize, Serialize};
 
 #[command]
 pub async fn fetch_communities() -> Result<Vec<serde_json::Value>, String> {
@@ -65,6 +68,677 @@ pub async fn fetch_text_content(url: String) -> Result<String, String> {
     let resp = reqwest::get(url).await.map_err(|e| e.to_string())?;
     let text = resp.text().await.map_err(|e| e.to_string())?;
     Ok(text)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlatformLookupInput {
+    pub identifier: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct SteamSearchItem {
+    id: u32,
+    name: String,
+    #[serde(default)]
+    platforms: Option<SteamPlatforms>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct SteamPlatforms {
+    windows: bool,
+    mac: bool,
+    linux: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct SteamAppData {
+    platforms: SteamPlatforms,
+}
+
+#[derive(Debug, Deserialize)]
+struct SteamAppDetailsEntry {
+    success: bool,
+    data: Option<SteamAppData>,
+}
+
+fn normalize_for_match(s: &str) -> String {
+    s.to_lowercase()
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { ' ' })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn similarity_score(query: &str, candidate: &str) -> f32 {
+    let q = normalize_for_match(query);
+    let c = normalize_for_match(candidate);
+    if q.is_empty() || c.is_empty() {
+        return 0.0;
+    }
+    if q == c {
+        return 1.0;
+    }
+    if c.contains(&q) || q.contains(&c) {
+        return 0.85;
+    }
+
+    let q_tokens: Vec<&str> = q.split_whitespace().collect();
+    let c_tokens: Vec<&str> = c.split_whitespace().collect();
+    if q_tokens.is_empty() || c_tokens.is_empty() {
+        return 0.0;
+    }
+
+    let overlap = q_tokens
+        .iter()
+        .filter(|t| c_tokens.contains(t))
+        .count() as f32;
+    overlap / (q_tokens.len().max(c_tokens.len()) as f32)
+}
+
+async fn fetch_steam_platforms(client: &reqwest::Client, app_id: u32) -> Option<PlatformInfo> {
+    let url = format!(
+        "https://store.steampowered.com/api/appdetails?appids={}&cc=us&l=en&filters=platforms",
+        app_id
+    );
+    let resp = client
+        .get(&url)
+        .header("User-Agent", "r2modmac-platform-resolver/1.0")
+        .send()
+        .await
+        .ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+
+    let json: serde_json::Value = resp.json().await.ok()?;
+    let entry = json.get(app_id.to_string())?;
+    let parsed: SteamAppDetailsEntry = serde_json::from_value(entry.clone()).ok()?;
+    if !parsed.success {
+        return None;
+    }
+
+    let data = parsed.data?;
+    Some(PlatformInfo {
+        windows: data.platforms.windows,
+        mac: data.platforms.mac,
+        linux: data.platforms.linux,
+        confidence: 0.9,
+        source: "steam_store".to_string(),
+    })
+}
+
+async fn resolve_from_steam(client: &reqwest::Client, input: &PlatformLookupInput) -> Option<PlatformInfo> {
+    let mut best: Option<(SteamSearchItem, f32)> = None;
+    let mut search_terms = vec![input.name.clone(), input.identifier.replace('-', " ")];
+    search_terms.sort();
+    search_terms.dedup();
+    for term in search_terms {
+        let search_url = format!(
+            "https://store.steampowered.com/api/storesearch/?term={}&l=en&cc=us",
+            urlencoding::encode(&term)
+        );
+        let resp = client
+            .get(&search_url)
+            .header("User-Agent", "r2modmac-platform-resolver/1.0")
+            .send()
+            .await
+            .ok();
+        let Some(resp) = resp else {
+            continue;
+        };
+        if !resp.status().is_success() {
+            continue;
+        }
+        let json: serde_json::Value = match resp.json().await {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let items = match json.get("items").and_then(|v| v.as_array()) {
+            Some(v) => v,
+            None => continue,
+        };
+        for item in items.iter().take(8) {
+            let id = match item.get("id").and_then(|v| v.as_u64()) {
+                Some(v) => v as u32,
+                None => continue,
+            };
+            let item_name = match item.get("name").and_then(|v| v.as_str()) {
+                Some(v) => v.to_string(),
+                None => continue,
+            };
+            let platforms = item.get("platforms").and_then(|p| {
+                Some(SteamPlatforms {
+                    windows: p.get("windows")?.as_bool()?,
+                    mac: p.get("mac")?.as_bool()?,
+                    linux: p.get("linux")?.as_bool()?,
+                })
+            });
+            let parsed_item = SteamSearchItem {
+                id,
+                name: item_name,
+                platforms,
+            };
+            let score_by_name = similarity_score(&input.name, &parsed_item.name);
+            let score_by_id = similarity_score(&input.identifier, &parsed_item.name);
+            let score = score_by_name.max(score_by_id);
+            if score > best.as_ref().map(|(_, s)| *s).unwrap_or(0.0) {
+                best = Some((parsed_item, score));
+            }
+        }
+    }
+
+    let (best_item, score) = best?;
+    if score < 0.55 {
+        return None;
+    }
+
+    // Prefer platforms from storesearch itself (already public Steam Store API data),
+    // fallback to appdetails if missing.
+    let mut info = if let Some(p) = best_item.platforms {
+        PlatformInfo {
+            windows: p.windows,
+            mac: p.mac,
+            linux: p.linux,
+            confidence: 0.0,
+            source: String::new(),
+        }
+    } else {
+        fetch_steam_platforms(client, best_item.id).await?
+    };
+
+    info.confidence = (0.45 + score * 0.5).min(0.98);
+    info.source = format!("steam_store:{}:{}", best_item.id, best_item.name);
+    Some(info)
+}
+
+async fn resolve_from_wikipedia(client: &reqwest::Client, input: &PlatformLookupInput) -> Option<PlatformInfo> {
+    let query = format!("{} {}", input.name, input.identifier.replace('-', " "));
+    for lang in ["en", "it"] {
+        let search_url = format!(
+            "https://{}.wikipedia.org/w/api.php?action=query&list=search&srsearch={}&format=json&srlimit=1",
+            lang,
+            urlencoding::encode(&query)
+        );
+
+        let search_resp = match client
+            .get(&search_url)
+            .header("User-Agent", "r2modmac-platform-resolver/1.0")
+            .send()
+            .await
+        {
+            Ok(resp) => resp,
+            Err(_) => continue,
+        };
+        if !search_resp.status().is_success() {
+            continue;
+        }
+
+        let search_json: serde_json::Value = match search_resp.json().await {
+            Ok(json) => json,
+            Err(_) => continue,
+        };
+        let first = match search_json
+            .get("query")
+            .and_then(|q| q.get("search"))
+            .and_then(|s| s.as_array())
+            .and_then(|arr| arr.first())
+        {
+            Some(v) => v,
+            None => continue,
+        };
+        let page_title = match first.get("title").and_then(|t| t.as_str()) {
+            Some(v) => v,
+            None => continue,
+        };
+
+        let page_title_lower = page_title.to_lowercase();
+        if page_title_lower.contains("disambiguation")
+            || page_title_lower.starts_with("list of ")
+            || page_title_lower.starts_with("lista di ")
+        {
+            continue;
+        }
+        let title_score = similarity_score(&input.name, page_title)
+            .max(similarity_score(&input.identifier, page_title));
+        if title_score < 0.55 {
+            continue;
+        }
+        let snippet = first
+            .get("snippet")
+            .and_then(|s| s.as_str())
+            .unwrap_or_default()
+            .to_lowercase();
+        let mentions_video_game = snippet.contains("video game")
+            || snippet.contains("videogame")
+            || snippet.contains("videogioco")
+            || snippet.contains("game");
+        if !mentions_video_game && title_score < 0.7 {
+            continue;
+        }
+
+        // Full plaintext extract is slower than exintro but catches platform data in body/infobox text.
+        let extract_url = format!(
+            "https://{}.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles={}&format=json",
+            lang,
+            urlencoding::encode(page_title)
+        );
+
+        let extract_resp = match client
+            .get(&extract_url)
+            .header("User-Agent", "r2modmac-platform-resolver/1.0")
+            .send()
+            .await
+        {
+            Ok(resp) => resp,
+            Err(_) => continue,
+        };
+        if !extract_resp.status().is_success() {
+            continue;
+        }
+
+        let extract_json: serde_json::Value = match extract_resp.json().await {
+            Ok(json) => json,
+            Err(_) => continue,
+        };
+        let pages = match extract_json
+            .get("query")
+            .and_then(|q| q.get("pages"))
+            .and_then(|p| p.as_object())
+        {
+            Some(v) => v,
+            None => continue,
+        };
+        let page = match pages.values().next() {
+            Some(v) => v,
+            None => continue,
+        };
+        let extract = match page.get("extract").and_then(|e| e.as_str()) {
+            Some(v) => v.to_lowercase(),
+            None => continue,
+        };
+
+        let windows = extract.contains("windows") || extract.contains("microsoft windows");
+        let mac = extract.contains("macos")
+            || extract.contains("mac os")
+            || extract.contains("mac os x")
+            || extract.contains("os x");
+        let linux = extract.contains("linux");
+
+        if !windows && !mac && !linux {
+            continue;
+        }
+
+        let mut confidence = 0.42 + title_score * 0.33;
+        if mentions_video_game {
+            confidence += 0.08;
+        }
+
+        return Some(PlatformInfo {
+            windows,
+            mac,
+            linux,
+            confidence: confidence.min(0.84),
+            source: format!("wikipedia:{}:{}", lang, page_title),
+        });
+    }
+
+    None
+}
+
+async fn resolve_from_wikidata(client: &reqwest::Client, input: &PlatformLookupInput) -> Option<PlatformInfo> {
+    let mut best_qid: Option<(String, f32, bool)> = None;
+    for term in [input.name.as_str(), input.identifier.as_str()] {
+        let search_url = format!(
+            "https://www.wikidata.org/w/api.php?action=wbsearchentities&search={}&language=en&format=json&limit=5&type=item",
+            urlencoding::encode(term)
+        );
+        let resp = match client
+            .get(&search_url)
+            .header("User-Agent", "r2modmac-platform-resolver/1.0")
+            .send()
+            .await
+        {
+            Ok(resp) => resp,
+            Err(_) => continue,
+        };
+        if !resp.status().is_success() {
+            continue;
+        }
+        let json: serde_json::Value = match resp.json().await {
+            Ok(json) => json,
+            Err(_) => continue,
+        };
+        let items = match json.get("search").and_then(|s| s.as_array()) {
+            Some(v) => v,
+            None => continue,
+        };
+        for item in items {
+            let qid = match item.get("id").and_then(|v| v.as_str()) {
+                Some(v) => v.to_string(),
+                None => continue,
+            };
+            let label = item.get("label").and_then(|v| v.as_str()).unwrap_or_default();
+            let description = item.get("description").and_then(|v| v.as_str()).unwrap_or_default();
+            let description_lc = description.to_lowercase();
+            let is_video_game = description_lc.contains("video game") || description_lc.contains("videogame");
+            let mut score = similarity_score(&input.name, label).max(similarity_score(&input.identifier, label));
+            if is_video_game {
+                score += 0.12;
+            }
+            if !is_video_game && score < 0.72 {
+                continue;
+            }
+            if score > best_qid.as_ref().map(|(_, s, _)| *s).unwrap_or(0.0) {
+                best_qid = Some((qid, score, is_video_game));
+            }
+        }
+    }
+
+    let (qid, score, is_video_game) = best_qid?;
+    if score < 0.5 {
+        return None;
+    }
+
+    let entity_url = format!(
+        "https://www.wikidata.org/w/api.php?action=wbgetentities&ids={}&props=claims|labels&languages=en&format=json",
+        qid
+    );
+    let resp = client
+        .get(&entity_url)
+        .header("User-Agent", "r2modmac-platform-resolver/1.0")
+        .send()
+        .await
+        .ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let json: serde_json::Value = resp.json().await.ok()?;
+    let claims = json
+        .get("entities")
+        .and_then(|e| e.get(&qid))
+        .and_then(|ent| ent.get("claims"))
+        .and_then(|c| c.get("P400"))
+        .and_then(|arr| arr.as_array())?;
+
+    let mut platform_qids: Vec<String> = Vec::new();
+    for claim in claims {
+        if let Some(pid) = claim
+            .get("mainsnak")
+            .and_then(|m| m.get("datavalue"))
+            .and_then(|d| d.get("value"))
+            .and_then(|v| v.get("id"))
+            .and_then(|id| id.as_str())
+        {
+            platform_qids.push(pid.to_string());
+        }
+    }
+    if platform_qids.is_empty() {
+        return None;
+    }
+
+    let labels_url = format!(
+        "https://www.wikidata.org/w/api.php?action=wbgetentities&ids={}&props=labels&languages=en&format=json",
+        platform_qids.join("|")
+    );
+    let labels_resp = client
+        .get(&labels_url)
+        .header("User-Agent", "r2modmac-platform-resolver/1.0")
+        .send()
+        .await
+        .ok()?;
+    if !labels_resp.status().is_success() {
+        return None;
+    }
+    let labels_json: serde_json::Value = labels_resp.json().await.ok()?;
+    let entities = labels_json.get("entities").and_then(|e| e.as_object())?;
+
+    let mut windows = false;
+    let mut mac = false;
+    let mut linux = false;
+
+    for ent in entities.values() {
+        let lbl = ent
+            .get("labels")
+            .and_then(|l| l.get("en"))
+            .and_then(|en| en.get("value"))
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_lowercase();
+        if lbl.contains("windows") {
+            windows = true;
+        }
+        if lbl.contains("macos") || lbl.contains("mac os") || lbl.contains("os x") || lbl.contains("macintosh") {
+            mac = true;
+        }
+        if lbl.contains("linux") {
+            linux = true;
+        }
+    }
+
+    if !windows && !mac && !linux {
+        return None;
+    }
+
+    let mut confidence = 0.5 + score * 0.3;
+    if is_video_game {
+        confidence += 0.08;
+    }
+
+    Some(PlatformInfo {
+        windows,
+        mac,
+        linux,
+        confidence: confidence.min(0.9),
+        source: format!("wikidata:{}", qid),
+    })
+}
+
+fn heuristic_platform(input: &PlatformLookupInput) -> PlatformInfo {
+    let combined = format!("{} {}", input.identifier, input.name).to_lowercase();
+    let legacy_mac_hints = [
+        "btd6",
+        "valheim",
+        "slimerancher",
+        "stardewvalley",
+        "subnautica",
+        "subnauticabelowzero",
+        "hollowknight",
+        "celeste",
+        "kerbalspaceprogram",
+        "outward",
+        "inscryption",
+        "cities_skylines",
+        "20minutes-till-dawn",
+        "stacklands",
+        "timberborn",
+        "dontstarvetogether",
+        "factorio",
+        "garrysmod",
+        "oxygennotincluded",
+        "projectzomboid",
+        "rimworld",
+        "terraria",
+    ];
+    if legacy_mac_hints.contains(&input.identifier.as_str()) {
+        return PlatformInfo {
+            windows: true,
+            mac: true,
+            linux: false,
+            confidence: 0.7,
+            source: "heuristic:legacy_mac_hint".to_string(),
+        };
+    }
+    let java_like = combined.contains("minecraft")
+        || combined.contains("hypixel")
+        || combined.contains("hytale")
+        || combined.contains("java");
+    if java_like {
+        return PlatformInfo {
+            windows: true,
+            mac: true,
+            linux: true,
+            confidence: 0.6,
+            source: "heuristic:java_crossplatform".to_string(),
+        };
+    }
+
+    // Fallback: unknown game -> conservative default (Windows only)
+    // until a public source confirms macOS support.
+    PlatformInfo {
+        windows: true,
+        mac: false,
+        linux: false,
+        confidence: 0.35,
+        source: "heuristic:unknown".to_string(),
+    }
+}
+
+fn merge_platform_candidates(input: &PlatformLookupInput, candidates: Vec<PlatformInfo>) -> PlatformInfo {
+    if candidates.is_empty() {
+        return heuristic_platform(input);
+    }
+
+    let is_steam_source = |source: &str| source.starts_with("steam_store:");
+    if let Some(authoritative_steam) = candidates
+        .iter()
+        .filter(|c| is_steam_source(&c.source))
+        .max_by(|a, b| a.confidence.partial_cmp(&b.confidence).unwrap_or(std::cmp::Ordering::Equal))
+        .cloned()
+    {
+        if authoritative_steam.confidence >= 0.9 {
+            return authoritative_steam;
+        }
+    }
+
+    let mut ordered = candidates;
+    ordered.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap_or(std::cmp::Ordering::Equal));
+    let best_confidence = ordered.first().map(|c| c.confidence).unwrap_or(0.0);
+
+    let mut considered: Vec<PlatformInfo> = Vec::new();
+    for candidate in ordered {
+        let close_to_best = candidate.confidence + 0.12 >= best_confidence;
+        let has_useful_signal = candidate.confidence >= 0.56;
+        if close_to_best || has_useful_signal || is_steam_source(&candidate.source) {
+            considered.push(candidate);
+        }
+    }
+
+    if considered.is_empty() {
+        return heuristic_platform(input);
+    }
+
+    let mut merged = considered[0].clone();
+    for candidate in considered.iter().skip(1) {
+        merged.windows = merged.windows || candidate.windows;
+        merged.mac = merged.mac || candidate.mac;
+        merged.linux = merged.linux || candidate.linux;
+        merged.confidence = merged.confidence.max(candidate.confidence);
+    }
+
+    let mut sources: Vec<String> = Vec::new();
+    for c in &considered {
+        if !sources.contains(&c.source) {
+            sources.push(c.source.clone());
+        }
+    }
+    merged.source = if sources.len() == 1 {
+        sources[0].clone()
+    } else {
+        format!("merge:{}", sources.join("|"))
+    };
+
+    // If every provider returned no usable platform signal, fallback heuristic.
+    if !merged.windows && !merged.mac && !merged.linux {
+        heuristic_platform(input)
+    } else {
+        merged
+    }
+}
+
+#[command]
+pub async fn resolve_community_platforms(
+    state: State<'_, AppState>,
+    games: Vec<PlatformLookupInput>,
+) -> Result<HashMap<String, PlatformInfo>, String> {
+    let now = chrono::Utc::now().timestamp();
+    let ttl_seconds: i64 = 24 * 60 * 60;
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(6))
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+    let mut result: HashMap<String, PlatformInfo> = HashMap::new();
+
+    let mut unresolved: Vec<PlatformLookupInput> = Vec::new();
+    for game in games {
+        let cache_key = game.identifier.to_lowercase();
+        if let Some(cached) = state.platform_cache.read().await.get(&cache_key).cloned() {
+            let entry_ttl = if cached.info.source.starts_with("heuristic:unknown") {
+                15 * 60
+            } else if cached.info.source.starts_with("heuristic:") {
+                6 * 60 * 60
+            } else {
+                ttl_seconds
+            };
+            if now - cached.fetched_at < entry_ttl {
+                result.insert(cache_key.clone(), cached.info);
+                continue;
+            }
+        }
+        unresolved.push(game);
+    }
+
+    let resolved_pairs: Vec<(String, PlatformInfo)> = stream::iter(unresolved.into_iter().map(|game| {
+        let client = client.clone();
+        async move {
+            let key = game.identifier.to_lowercase();
+            let steam = resolve_from_steam(&client, &game).await;
+            if let Some(steam_info) = steam.clone() {
+                if steam_info.confidence >= 0.9 {
+                    return (key, steam_info);
+                }
+            }
+
+            let (wikidata, wiki) = tokio::join!(
+                resolve_from_wikidata(&client, &game),
+                resolve_from_wikipedia(&client, &game)
+            );
+            let mut candidates: Vec<PlatformInfo> = Vec::new();
+            if let Some(s) = steam {
+                candidates.push(s);
+            }
+            if let Some(wd) = wikidata {
+                candidates.push(wd);
+            }
+            if let Some(w) = wiki {
+                candidates.push(w);
+            }
+
+            let resolved = merge_platform_candidates(&game, candidates);
+            (key, resolved)
+        }
+    }))
+    .buffer_unordered(10)
+    .collect()
+    .await;
+
+    {
+        let mut cache = state.platform_cache.write().await;
+        for (key, resolved) in resolved_pairs {
+            cache.insert(
+                key.clone(),
+                CachedPlatform {
+                    info: resolved.clone(),
+                    fetched_at: now,
+                },
+            );
+            result.insert(key, resolved);
+        }
+    }
+
+    Ok(result)
 }
 
 #[command]

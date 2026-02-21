@@ -176,6 +176,7 @@ pub fn run() {
             commands::system_commands::fetch_communities,
             commands::system_commands::fetch_community_images,
             commands::system_commands::fetch_text_content,
+            commands::system_commands::resolve_community_platforms,
             commands::system_commands::confirm_dialog,
             commands::system_commands::alert_dialog,
             commands::system_commands::select_folder,
