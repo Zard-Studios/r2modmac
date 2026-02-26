@@ -173,6 +173,20 @@ async fn fetch_steam_platforms(client: &reqwest::Client, app_id: u32) -> Option<
 async fn resolve_from_steam(client: &reqwest::Client, input: &PlatformLookupInput) -> Option<PlatformInfo> {
     let mut best: Option<(SteamSearchItem, f32)> = None;
     let mut search_terms = vec![input.name.clone(), input.identifier.replace('-', " ")];
+    // Composite community names like "Titanfall 2: Northstar" should also try base game title.
+    // This avoids weak matches on the mod framework name.
+    if let Some((base, _)) = input.name.split_once(':') {
+        let trimmed = base.trim();
+        if !trimmed.is_empty() {
+            search_terms.push(trimmed.to_string());
+        }
+    }
+    if let Some((base, _)) = input.name.split_once(" - ") {
+        let trimmed = base.trim();
+        if !trimmed.is_empty() {
+            search_terms.push(trimmed.to_string());
+        }
+    }
     search_terms.sort();
     search_terms.dedup();
     for term in search_terms {
@@ -249,7 +263,12 @@ async fn resolve_from_steam(client: &reqwest::Client, input: &PlatformLookupInpu
         fetch_steam_platforms(client, best_item.id).await?
     };
 
-    info.confidence = (0.45 + score * 0.5).min(0.98);
+    info.confidence = if score >= 0.8 {
+        // High-confidence Steam match is authoritative for platform support.
+        (0.9 + (score - 0.8) * 0.45).min(0.99)
+    } else {
+        (0.45 + score * 0.5).min(0.89)
+    };
     info.source = format!("steam_store:{}:{}", best_item.id, best_item.name);
     Some(info)
 }
@@ -602,6 +621,25 @@ fn merge_platform_candidates(input: &PlatformLookupInput, candidates: Vec<Platfo
     }
 
     let is_steam_source = |source: &str| source.starts_with("steam_store:");
+    let steam_candidate = candidates
+        .iter()
+        .filter(|c| is_steam_source(&c.source))
+        .max_by(|a, b| a.confidence.partial_cmp(&b.confidence).unwrap_or(std::cmp::Ordering::Equal))
+        .cloned();
+
+    // Strong Steam match is authoritative for platform flags.
+    if let Some(authoritative_steam) = steam_candidate.clone() {
+        if authoritative_steam.confidence >= 0.9 {
+            return authoritative_steam;
+        }
+    }
+
+    // If Steam confidently says macOS is not supported, avoid false positives from weaker sources.
+    let steam_blocks_mac = steam_candidate
+        .as_ref()
+        .map(|s| s.confidence >= 0.8 && !s.mac)
+        .unwrap_or(false);
+
     if let Some(authoritative_steam) = candidates
         .iter()
         .filter(|c| is_steam_source(&c.source))
@@ -633,9 +671,14 @@ fn merge_platform_candidates(input: &PlatformLookupInput, candidates: Vec<Platfo
     let mut merged = considered[0].clone();
     for candidate in considered.iter().skip(1) {
         merged.windows = merged.windows || candidate.windows;
-        merged.mac = merged.mac || candidate.mac;
+        if !steam_blocks_mac {
+            merged.mac = merged.mac || candidate.mac;
+        }
         merged.linux = merged.linux || candidate.linux;
         merged.confidence = merged.confidence.max(candidate.confidence);
+    }
+    if steam_blocks_mac {
+        merged.mac = false;
     }
 
     let mut sources: Vec<String> = Vec::new();

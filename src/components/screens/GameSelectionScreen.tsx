@@ -25,6 +25,7 @@ export function GameSelectionScreen({
     const [showWindowsGame, setShowWindowsGame] = useState(true);
     const [showMacGame, setShowMacGame] = useState(true);
     const [favoriteGames, setFavoriteGames] = useState<string[]>([]);
+    const currentYear = new Date().getFullYear();
 
     // Load favorites
     useEffect(() => {
@@ -75,7 +76,7 @@ export function GameSelectionScreen({
 
     return (
         <div className="flex flex-col h-full bg-gray-900 p-8 overflow-y-auto w-full">
-            <div className="max-w-4xl mx-auto w-full">
+            <div className="max-w-4xl mx-auto w-full flex-1">
                 <div className="text-center mb-12">
                     <h1 className="text-4xl font-bold text-white mb-4">Welcome to r2modmac</h1>
                     <p className="text-xl text-gray-400">Select a game to begin managing your mods</p>
@@ -163,6 +164,37 @@ export function GameSelectionScreen({
                     </div>
                 )}
             </div>
+            <footer className="max-w-4xl mx-auto w-full pt-8 pb-2">
+                <div className="border-t border-gray-800 pt-4">
+                    <div className="text-center text-xs text-gray-500 flex flex-wrap items-center justify-center gap-2">
+                        <span className="inline-flex items-center">Copyright © {currentYear} Zard Studios</span>
+                        <span className="text-gray-700">·</span>
+                    <a
+                        href="https://ko-fi.com/zardstudios"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 leading-none text-gray-400 hover:text-white transition-colors"
+                    >
+                        <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                            <path d="M23.881 8.948c-.773-4.085-4.859-4.593-4.859-4.593H.723c-.604 0-.679.798-.679.798s-.082 7.324-.022 11.822c.164 2.424 2.586 2.672 2.586 2.672s8.267-.023 11.966-.049c2.438-.426 2.683-2.566 2.658-3.734 4.352.24 7.422-2.831 6.649-6.916zm-11.062 3.511c-1.246 1.453-4.011 3.976-4.011 3.976s-.121.119-.31.023c-.076-.057-.108-.09-.108-.09-.443-.441-3.368-3.049-4.034-3.954-.709-.965-1.041-2.7-.091-3.71.951-1.01 3.005-1.086 4.363.407 0 0 1.565-1.782 3.468-.963 1.904.82 1.832 3.011.723 4.311zm6.173.478c-.928.116-1.682.028-1.682.028V7.284h1.77s1.971.551 1.971 2.638c0 1.913-.985 2.667-2.059 3.015z" />
+                        </svg>
+                        support me
+                    </a>
+                    <span className="text-gray-700">·</span>
+                    <a
+                        href="https://github.com/Zard-Studios"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 leading-none text-gray-400 hover:text-white transition-colors"
+                    >
+                        <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                            <path d="M12 .5A12 12 0 0 0 8.2 23.9c.6.1.8-.2.8-.6v-2c-3.3.7-4-1.4-4-1.4-.6-1.4-1.3-1.8-1.3-1.8-1.1-.8.1-.8.1-.8 1.2.1 1.9 1.2 1.9 1.2 1.1 1.9 2.9 1.3 3.6 1 .1-.8.4-1.3.8-1.6-2.6-.3-5.3-1.3-5.3-5.7 0-1.2.4-2.2 1.2-3-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.2 1.2a11.1 11.1 0 0 1 5.8 0c2.2-1.5 3.2-1.2 3.2-1.2.6 1.6.2 2.8.1 3.1.8.8 1.2 1.8 1.2 3 0 4.4-2.7 5.4-5.3 5.7.4.3.8 1 .8 2.1v3.1c0 .4.2.7.8.6A12 12 0 0 0 12 .5Z" />
+                        </svg>
+                        projects
+                    </a>
+                    </div>
+                </div>
+            </footer>
         </div>
     );
 }

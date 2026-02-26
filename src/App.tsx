@@ -321,7 +321,7 @@ function App() {
 
   // Client-Side Search (derived state via useMemo - zero flicker!)
   const packages = useMemo(() => {
-    let filtered = allPackages;
+    const filtered = allPackages;
 
     if (!searchQuery.trim()) {
       return filtered;
