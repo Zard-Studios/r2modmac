@@ -14,15 +14,6 @@ export function SettingsModal({ isOpen, onClose, selectedGame, activeProfilePlat
     const [gamePath, setGamePath] = useState<string | null>(null);
     const [checkingGamePath, setCheckingGamePath] = useState(false);
 
-    useEffect(() => {
-        if (isOpen) {
-            loadSettings();
-            if (selectedGame) {
-                checkGamePath();
-            }
-        }
-    }, [isOpen, selectedGame]);
-
     const loadSettings = async () => {
         try {
             const settings = await window.ipcRenderer.getSettings();
@@ -45,6 +36,18 @@ export function SettingsModal({ isOpen, onClose, selectedGame, activeProfilePlat
         }
         setCheckingGamePath(false);
     };
+
+    useEffect(() => {
+        const init = async () => {
+            if (isOpen) {
+                await loadSettings();
+                if (selectedGame) {
+                    await checkGamePath();
+                }
+            }
+        };
+        init();
+    }, [isOpen, selectedGame]);
 
     const handleSave = async () => {
         setLoading(true);
