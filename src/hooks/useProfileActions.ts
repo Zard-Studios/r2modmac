@@ -28,7 +28,7 @@ export function useProfileActions({
         if (result.type === 'profile') {
             let profileName: string = result.name;
 
-            const gamePath = await window.ipcRenderer.getGamePath(selectedCommunity || '');
+            const gamePath = await window.ipcRenderer.getGamePath(selectedCommunity || '', chosenPlatform);
             if (!gamePath) {
                 await window.ipcRenderer.alert(
                     'Game Path Required',

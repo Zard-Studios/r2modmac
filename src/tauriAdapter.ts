@@ -72,17 +72,17 @@ export const tauriAPI: IElectronAPI = {
             throw e;
         }
     },
-    deleteProfileFolder: async (profileId, gameIdentifier?) => invoke<boolean>('delete_profile_folder', { profileId, gameIdentifier }),
+    deleteProfileFolder: async (profileId, gameIdentifier?, platform?) => invoke<boolean>('delete_profile_folder', { profileId, gameIdentifier, platform }),
     getSettings: async () => invoke('get_settings'),
     saveSettings: async (settings) => invoke('save_settings', { settings }),
-    getGamePath: async (gameIdentifier) => invoke('get_game_path', { gameIdentifier }),
-    setGamePath: async (gameIdentifier, path) => invoke('set_game_path', { gameIdentifier, path }),
-    openGameFolder: async (gameIdentifier) => invoke('open_game_folder', { gameIdentifier }),
+    getGamePath: async (gameIdentifier, platform?) => invoke('get_game_path', { gameIdentifier, platform }),
+    setGamePath: async (gameIdentifier, path, platform?) => invoke('set_game_path', { gameIdentifier, path, platform }),
+    openGameFolder: async (gameIdentifier, platform?) => invoke('open_game_folder', { gameIdentifier, platform }),
     removeMod: async (profileId: string, modName: string) => {
         await invoke('remove_mod', { profileId, modName });
     },
-    toggleMod: async (profileId: string, modName: string, enabled: boolean, gameIdentifier?: string) => {
-        await invoke('toggle_mod', { profileId, modName, enabled, gameIdentifier });
+    toggleMod: async (profileId: string, modName: string, enabled: boolean, gameIdentifier?: string, platform?: 'windows' | 'mac') => {
+        await invoke('toggle_mod', { profileId, modName, enabled, gameIdentifier, platform });
     },
     confirm: async (title: string, message: string) => {
         return await invoke('confirm_dialog', { title, message });
@@ -118,7 +118,7 @@ export const tauriAPI: IElectronAPI = {
     openProfileFolder: async (profileId: string) => {
         return await invoke('open_profile_folder', { profileId });
     },
-    launchGameWithMods: async (gameIdentifier: string) => {
-        return await invoke('launch_game_with_mods', { gameIdentifier });
+    launchGameWithMods: async (gameIdentifier: string, platform?: 'windows' | 'mac') => {
+        return await invoke('launch_game_with_mods', { gameIdentifier, platform });
     }
 };

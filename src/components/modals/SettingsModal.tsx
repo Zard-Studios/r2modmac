@@ -5,7 +5,7 @@ interface SettingsModalProps {
     isOpen: boolean;
     onClose: () => void;
     selectedGame?: string;
-    activeProfilePlatform?: string;
+    activeProfilePlatform?: 'windows' | 'mac';
 }
 
 export function SettingsModal({ isOpen, onClose, selectedGame, activeProfilePlatform }: SettingsModalProps) {
@@ -28,7 +28,7 @@ export function SettingsModal({ isOpen, onClose, selectedGame, activeProfilePlat
 
         setCheckingGamePath(true);
         try {
-            const path = await window.ipcRenderer.getGamePath(selectedGame);
+            const path = await window.ipcRenderer.getGamePath(selectedGame, activeProfilePlatform);
             setGamePath(path);
         } catch (e) {
             console.error("Failed to get game path", e);
@@ -47,7 +47,7 @@ export function SettingsModal({ isOpen, onClose, selectedGame, activeProfilePlat
             }
         };
         init();
-    }, [isOpen, selectedGame]);
+    }, [isOpen, selectedGame, activeProfilePlatform]);
 
     const handleSave = async () => {
         setLoading(true);
@@ -84,7 +84,7 @@ export function SettingsModal({ isOpen, onClose, selectedGame, activeProfilePlat
         if (!selectedGame) return;
 
         try {
-            await window.ipcRenderer.openGameFolder(selectedGame);
+            await window.ipcRenderer.openGameFolder(selectedGame, activeProfilePlatform);
         } catch (e: any) {
             alert(e.message || "Failed to open game directory");
         }
@@ -95,7 +95,7 @@ export function SettingsModal({ isOpen, onClose, selectedGame, activeProfilePlat
         try {
             const path = await window.ipcRenderer.selectFolder();
             if (path) {
-                await window.ipcRenderer.setGamePath(selectedGame, path);
+                await window.ipcRenderer.setGamePath(selectedGame, path, activeProfilePlatform);
                 await checkGamePath(); // Refresh
             }
         } catch (e) {

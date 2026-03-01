@@ -56,10 +56,11 @@ export const useProfileStore = create<ProfileState>((set) => ({
     selectProfile: (profileId) => set({ activeProfileId: profileId }),
 
     deleteProfile: async (profileId, gameIdentifier?) => {
+        const existingProfile = useProfileStore.getState().profiles.find((p) => p.id === profileId);
         // First delete from disk, THEN update state
         // This ensures if there's an error, we don't lose state
         try {
-            await window.ipcRenderer.deleteProfileFolder(profileId, gameIdentifier);
+            await window.ipcRenderer.deleteProfileFolder(profileId, gameIdentifier, existingProfile?.platform);
         } catch (e) {
             console.error("Failed to delete profile folder:", e);
             // Continue anyway to clean up state
@@ -161,7 +162,7 @@ export const useProfileStore = create<ProfileState>((set) => ({
 
         try {
             // Call backend to actually rename the DLL files and sync to game if applicable
-            await window.ipcRenderer.toggleMod(profileId, modName, newEnabled, profile.gameIdentifier);
+            await window.ipcRenderer.toggleMod(profileId, modName, newEnabled, profile.gameIdentifier, profile.platform);
 
             // Update store state after successful backend call
             set((state) => {

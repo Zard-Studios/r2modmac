@@ -38,12 +38,12 @@ pub async fn save_profiles(app: AppHandle, profiles: Vec<serde_json::Value>) -> 
 }
 
 #[command]
-pub async fn delete_profile_folder(app: AppHandle, profile_id: String, game_identifier: Option<String>) -> Result<bool, String> {
+pub async fn delete_profile_folder(app: AppHandle, profile_id: String, game_identifier: Option<String>, platform: Option<String>) -> Result<bool, String> {
     let profile_dir = app.path().app_data_dir().unwrap().join("profiles").join(&profile_id);
     
     // If game_identifier is provided, clean up ALL BepInEx-related files from the game folder
     if let Some(game_id) = game_identifier {
-        if let Ok(Some(game_path_str)) = get_game_path(app.clone(), game_id, None).await {
+        if let Ok(Some(game_path_str)) = get_game_path(app.clone(), game_id, platform).await {
             let game_path = std::path::Path::new(&game_path_str);
             
             // Remove BepInEx folder

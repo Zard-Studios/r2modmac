@@ -3,15 +3,85 @@ use tauri::{command, AppHandle, Manager};
 use crate::models::shared::*;
 use crate::utils::file_ops::*;
 
+fn normalized_platform(platform: Option<&str>) -> Option<&'static str> {
+    match platform {
+        Some("windows") => Some("windows"),
+        Some("mac") => Some("mac"),
+        _ => None,
+    }
+}
+
+fn manual_override_keys(game_identifier: &str, platform: Option<&str>) -> Vec<String> {
+    if let Some(p) = normalized_platform(platform) {
+        vec![format!("{}::{}", game_identifier, p), game_identifier.to_string()]
+    } else {
+        vec![game_identifier.to_string()]
+    }
+}
+
+fn manual_path_matches_platform(path: &std::path::Path, is_windows_profile: bool) -> bool {
+    if !path.exists() || !path.is_dir() {
+        return false;
+    }
+
+    let mut has_app_bundle = false;
+    let mut has_windows_exe = false;
+
+    if let Ok(entries) = fs::read_dir(path) {
+        for entry in entries.filter_map(|e| e.ok()) {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.ends_with(".app") {
+                has_app_bundle = true;
+            }
+            if name.ends_with(".exe") && !name.contains("UnityCrashHandler") {
+                has_windows_exe = true;
+            }
+        }
+    }
+
+    if is_windows_profile {
+        has_windows_exe || !has_app_bundle
+    } else {
+        has_app_bundle || !has_windows_exe
+    }
+}
+
+fn get_profile_platform(app: &AppHandle, profile_id: &str) -> String {
+    let profiles_path = app.path().app_data_dir().unwrap_or_default().join("profiles.json");
+    if profiles_path.exists() {
+        if let Ok(data) = fs::read_to_string(&profiles_path) {
+            if let Ok(profiles) = serde_json::from_str::<Vec<serde_json::Value>>(&data) {
+                if let Some(profile) = profiles.iter().find(|p| p["id"].as_str() == Some(profile_id)) {
+                    if let Some(platform) = profile["platform"].as_str() {
+                        if platform == "mac" || platform == "windows" {
+                            return platform.to_string();
+                        }
+                    }
+                }
+            }
+        }
+    }
+    "windows".to_string()
+}
+
 #[command]
 pub async fn get_game_path(app: AppHandle, game_identifier: String, platform: Option<String>) -> Result<Option<String>, String> {
     let settings = load_settings_impl(&app);
-    let is_windows_profile = platform.as_deref() == Some("windows");
+    let platform = normalized_platform(platform.as_deref());
+    let is_windows_profile = platform == Some("windows");
 
     // Check manual override first
-    if let Some(path) = settings.game_paths.get(&game_identifier) {
-        if std::path::Path::new(path).exists() {
-            eprintln!("[get_game_path] Found manual override: {}", path);
+    for key in manual_override_keys(&game_identifier, platform) {
+        if let Some(path) = settings.game_paths.get(&key) {
+            let path_obj = std::path::Path::new(path);
+            if !path_obj.exists() {
+                continue;
+            }
+            if platform.is_some() && key == game_identifier && !manual_path_matches_platform(path_obj, is_windows_profile) {
+                eprintln!("[get_game_path] Ignoring legacy manual path due to platform mismatch: {}", path);
+                continue;
+            }
+            eprintln!("[get_game_path] Found manual override (key={}): {}", key, path);
             return Ok(Some(path.clone()));
         }
     }
@@ -77,9 +147,14 @@ pub async fn get_game_path(app: AppHandle, game_identifier: String, platform: Op
 }
 
 #[command]
-pub async fn set_game_path(app: AppHandle, game_identifier: String, path: String) -> Result<(), String> {
+pub async fn set_game_path(app: AppHandle, game_identifier: String, path: String, platform: Option<String>) -> Result<(), String> {
     let mut settings = load_settings_impl(&app);
-    settings.game_paths.insert(game_identifier, path);
+    let key = if let Some(p) = normalized_platform(platform.as_deref()) {
+        format!("{}::{}", game_identifier, p)
+    } else {
+        game_identifier
+    };
+    settings.game_paths.insert(key, path);
     save_settings_impl(&app, &settings)?;
     Ok(())
 }
@@ -87,14 +162,21 @@ pub async fn set_game_path(app: AppHandle, game_identifier: String, path: String
 #[command]
 pub async fn open_game_folder(app: AppHandle, game_identifier: String, platform: Option<String>) -> Result<(), String> {
     let settings = load_settings_impl(&app);
-    let is_windows_profile = platform.as_deref() == Some("windows");
+    let platform = normalized_platform(platform.as_deref());
+    let is_windows_profile = platform == Some("windows");
     
     // Check manual override first
-    if let Some(path) = settings.game_paths.get(&game_identifier) {
-        let path_obj = std::path::Path::new(path);
-        if path_obj.exists() {
-             let _ = open::that(path_obj);
-             return Ok(());
+    for key in manual_override_keys(&game_identifier, platform) {
+        if let Some(path) = settings.game_paths.get(&key) {
+            let path_obj = std::path::Path::new(path);
+            if !path_obj.exists() {
+                continue;
+            }
+            if platform.is_some() && key == game_identifier && !manual_path_matches_platform(path_obj, is_windows_profile) {
+                continue;
+            }
+            let _ = open::that(path_obj);
+            return Ok(());
         }
     }
 
@@ -174,8 +256,11 @@ pub async fn find_game_executable(game_path: String) -> Result<Option<String>, S
 
 #[command]
 pub async fn install_to_game(app: AppHandle, game_identifier: String, profile_id: String, disabled_mods: Vec<String>, is_vanilla_override: Option<bool>) -> Result<(), String> {
+    let profile_platform = get_profile_platform(&app, &profile_id);
+    let is_mac_profile = profile_platform == "mac";
+
     // 1. Find game path
-    let game_path_str = get_game_path(app.clone(), game_identifier.clone(), None).await?
+    let game_path_str = get_game_path(app.clone(), game_identifier.clone(), Some(profile_platform)).await?
         .ok_or("Game not found in Steam library")?;
     let game_path = std::path::Path::new(&game_path_str);
 
@@ -208,21 +293,6 @@ pub async fn install_to_game(app: AppHandle, game_identifier: String, profile_id
         vanilla
     };
 
-    // Detect profile platform (mac or windows) from profiles.json
-    let is_mac_profile = {
-        let profiles_path = app.path().app_data_dir().unwrap().join("profiles.json");
-        let mut mac = false;
-        if profiles_path.exists() {
-            if let Ok(data) = fs::read_to_string(&profiles_path) {
-                if let Ok(profiles) = serde_json::from_str::<Vec<serde_json::Value>>(&data) {
-                    if let Some(p) = profiles.iter().find(|p| p["id"].as_str() == Some(&profile_id)) {
-                        mac = p["platform"].as_str() == Some("mac");
-                    }
-                }
-            }
-        }
-        mac
-    };
     eprintln!("[install_to_game] Profile is_mac_profile: {}", is_mac_profile);
 
     if is_vanilla {
@@ -657,8 +727,8 @@ pub async fn install_to_game(app: AppHandle, game_identifier: String, profile_id
 }
 
 #[command]
-pub async fn launch_game_with_mods(app: AppHandle, game_identifier: String) -> Result<(), String> {
-    let game_path_str = get_game_path(app.clone(), game_identifier.clone(), None)
+pub async fn launch_game_with_mods(app: AppHandle, game_identifier: String, platform: Option<String>) -> Result<(), String> {
+    let game_path_str = get_game_path(app.clone(), game_identifier.clone(), platform)
         .await?
         .ok_or_else(|| "Game path not found".to_string())?;
     let game_path = std::path::PathBuf::from(&game_path_str);
@@ -726,9 +796,19 @@ pub async fn launch_game_with_mods(app: AppHandle, game_identifier: String) -> R
 #[command]
 pub async fn sync_profile_to_game(app: AppHandle, profile_id: String, game_identifier: String, use_legacy_cache: Option<bool>) -> Result<serde_json::Value, String> {
     let use_cache = use_legacy_cache.unwrap_or(false);
+
+    // 1. Read profile mods and platform from profiles.json
+    let profiles_path = app.path().app_data_dir().unwrap().join("profiles.json");
+    let profiles_data = fs::read_to_string(&profiles_path).map_err(|e| e.to_string())?;
+    let profiles: Vec<serde_json::Value> = serde_json::from_str(&profiles_data).map_err(|e| e.to_string())?;
     
-    // 1. Get game path
-    let game_path_str = get_game_path(app.clone(), game_identifier.clone(), None).await?
+    let profile = profiles.iter()
+        .find(|p| p["id"].as_str() == Some(&profile_id))
+        .ok_or("Profile not found")?;
+    let profile_platform = profile["platform"].as_str().unwrap_or("windows").to_string();
+
+    // 2. Get game path for this specific profile platform
+    let game_path_str = get_game_path(app.clone(), game_identifier.clone(), Some(profile_platform)).await?
         .ok_or("Game path not configured. Please set it in Settings.")?;
     let game_path = std::path::Path::new(&game_path_str);
     let game_plugins = game_path.join("BepInEx").join("plugins");
@@ -739,15 +819,6 @@ pub async fn sync_profile_to_game(app: AppHandle, profile_id: String, game_ident
     let profile_plugins = profile_dir.join("BepInEx").join("plugins");
 
     eprintln!("[sync_profile_to_game] Syncing profile {} to game {:?} (legacy_cache: {})", profile_id, game_path, use_cache);
-
-    // 2. Read profile mods from profiles.json
-    let profiles_path = app.path().app_data_dir().unwrap().join("profiles.json");
-    let profiles_data = fs::read_to_string(&profiles_path).map_err(|e| e.to_string())?;
-    let profiles: Vec<serde_json::Value> = serde_json::from_str(&profiles_data).map_err(|e| e.to_string())?;
-    
-    let profile = profiles.iter()
-        .find(|p| p["id"].as_str() == Some(&profile_id))
-        .ok_or("Profile not found")?;
     
     // Get list of mod names from profile (format: "Author-ModName-Version")
     // We keep the full name for matching

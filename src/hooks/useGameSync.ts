@@ -49,7 +49,7 @@ export function useGameSync({
                 return;
             }
 
-            const gamePath = await window.ipcRenderer.getGamePath(community);
+            const gamePath = await window.ipcRenderer.getGamePath(community, activeProfile.platform);
             if (!gamePath) {
                 await window.ipcRenderer.alert('Game Path Required', 'Please set the game directory in Settings first.');
                 return;

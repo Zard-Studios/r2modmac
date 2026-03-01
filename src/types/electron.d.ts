@@ -33,14 +33,14 @@ export interface IElectronAPI {
     shareProfile: (profileId: string) => Promise<string>;
     openModFolder: (profileId: string, modName: string, gameIdentifier: string) => Promise<void>;
     exportProfile: (profileId: string) => Promise<any>;
-    deleteProfileFolder: (profileId: string, gameIdentifier?: string) => Promise<boolean>;
+    deleteProfileFolder: (profileId: string, gameIdentifier?: string, platform?: 'windows' | 'mac') => Promise<boolean>;
     getSettings: () => Promise<{ steam_path: string | null; favorite_games: string[]; game_paths: Record<string, string>; legacy_install_mode?: boolean }>;
     saveSettings: (settings: { steam_path: string | null; favorite_games: string[]; game_paths: Record<string, string>; legacy_install_mode?: boolean }) => Promise<void>;
-    getGamePath: (gameIdentifier: string) => Promise<string | null>;
-    setGamePath: (gameIdentifier: string, path: string) => Promise<void>;
-    openGameFolder: (gameIdentifier: string) => Promise<void>;
+    getGamePath: (gameIdentifier: string, platform?: 'windows' | 'mac') => Promise<string | null>;
+    setGamePath: (gameIdentifier: string, path: string, platform?: 'windows' | 'mac') => Promise<void>;
+    openGameFolder: (gameIdentifier: string, platform?: 'windows' | 'mac') => Promise<void>;
     removeMod: (profileId: string, modName: string) => Promise<void>;
-    toggleMod: (profileId: string, modName: string, enabled: boolean, gameIdentifier?: string) => Promise<void>;
+    toggleMod: (profileId: string, modName: string, enabled: boolean, gameIdentifier?: string, platform?: 'windows' | 'mac') => Promise<void>;
     confirm: (title: string, message: string) => Promise<boolean>;
     alert: (title: string, message: string) => Promise<void>;
     readImage: (path: string) => Promise<string | null>;
@@ -53,7 +53,7 @@ export interface IElectronAPI {
     copyModFromCache: (profileId: string, modName: string, gamePath: string) => Promise<{ success: boolean; copied: boolean }>;
     clearProfileCache: () => Promise<{ cleared: number; chunks_cleared?: number; bytes_freed: number }>;
     openProfileFolder: (profileId: string) => Promise<void>;
-    launchGameWithMods: (gameIdentifier: string) => Promise<void>;
+    launchGameWithMods: (gameIdentifier: string, platform?: 'windows' | 'mac') => Promise<void>;
 }
 
 export interface UpdateInfo {

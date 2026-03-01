@@ -140,9 +140,10 @@ export function useModActions({
         if (!profileIdToUse) { alert('Please select a profile first'); return; }
 
         const version = selectedVersion || pkg.versions[0];
+        const targetProfile = profiles.find(p => p.id === profileIdToUse);
 
         if (legacyInstallMode) {
-            const gamePath = await window.ipcRenderer.getGamePath(selectedCommunity || '');
+            const gamePath = await window.ipcRenderer.getGamePath(selectedCommunity || '', targetProfile?.platform);
             if (!gamePath) {
                 await window.ipcRenderer.alert('Game Path Required', 'Please configure the game directory in Settings before installing mods.');
                 return;
@@ -309,6 +310,7 @@ export function useModActions({
         const profileIdToUse = targetProfileId || activeProfileId;
         if (!profileIdToUse) { alert('Please select a profile first'); return; }
         const targetVersion = selectedVersion || pkg.versions[0];
+        const targetProfile = profiles.find(p => p.id === profileIdToUse);
 
         setProgressState({ isOpen: true, title: `Updating ${pkg.name}`, progress: 0, currentTask: 'Removing old version...' });
         try {
@@ -321,7 +323,7 @@ export function useModActions({
             setProgressState(prev => ({ ...prev, progress: 40, currentTask: `Installing v${targetVersion.version_number}...` }));
 
             if (legacyInstallMode) {
-                const gamePath = await window.ipcRenderer.getGamePath(selectedCommunity || '');
+                const gamePath = await window.ipcRenderer.getGamePath(selectedCommunity || '', targetProfile?.platform);
                 if (!gamePath) {
                     throw new Error('Game path not configured. Open Settings and set the game directory.');
                 }

@@ -200,12 +200,12 @@ pub async fn remove_mod(app: AppHandle, profile_id: String, mod_name: String) ->
 }
 
 #[command]
-pub async fn toggle_mod(app: AppHandle, profile_id: String, mod_name: String, enabled: bool, game_identifier: Option<String>) -> Result<(), String> {
+pub async fn toggle_mod(app: AppHandle, profile_id: String, mod_name: String, enabled: bool, game_identifier: Option<String>, platform: Option<String>) -> Result<(), String> {
     eprintln!("[toggle_mod] Toggle mod: {} enabled: {} in profile: {}", mod_name, enabled, profile_id);
     
     // Get game path for sync (optional - toggle still works without it)
     let game_plugins = if let Some(ref game_id) = game_identifier {
-        if let Ok(Some(game_path_str)) = get_game_path(app.clone(), game_id.clone(), None).await {
+        if let Ok(Some(game_path_str)) = get_game_path(app.clone(), game_id.clone(), platform.clone()).await {
             Some(std::path::Path::new(&game_path_str).to_path_buf().join("BepInEx").join("plugins"))
         } else {
             None
