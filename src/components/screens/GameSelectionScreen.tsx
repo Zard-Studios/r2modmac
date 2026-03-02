@@ -91,24 +91,24 @@ export function GameSelectionScreen({
                                 </svg>
                             </div>
                             <input
-                                className="w-full h-full bg-gray-800 border border-gray-700 pl-12 pr-28 py-4 rounded-xl text-lg text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 transition-all shadow-lg"
+                                className="w-full h-full bg-gray-800 border border-gray-700 pl-12 pr-32 py-4 rounded-xl text-lg text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 transition-all shadow-lg"
                                 placeholder="Search for a game..."
                                 value={gameSearchQuery}
                                 onChange={e => setGameSearchQuery(e.target.value)}
                                 autoFocus
                             />
 
-                            <div className="absolute right-2 top-1/2 -translate-y-1/2 flex bg-gray-900/40 rounded-lg p-1 border border-gray-700 overflow-hidden" title="Platform Filter">
+                            <div className="absolute right-1 top-1/2 -translate-y-1/2 flex bg-gray-800 rounded-lg p-1 border border-gray-700 overflow-hidden" title="Platform Filter">
                                 {/* Sliding Background */}
                                 <div
-                                    className={`absolute top-1 bottom-1 w-[calc(50%-4px)] bg-gray-600 rounded-md transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${showWindowsGame && !showMacGame ? 'left-1' : 'left-1/2'}`}
+                                    className={`absolute top-1 left-1 w-10 h-10 bg-gray-600 rounded-md transition-transform duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${showWindowsGame && !showMacGame ? 'translate-x-0' : 'translate-x-10'}`}
                                 />
                                 <button
                                     onClick={() => {
                                         setShowWindowsGame(true);
                                         setShowMacGame(false);
                                     }}
-                                    className={`relative z-10 p-1.5 rounded items-center justify-center flex transition-colors w-10 ${showWindowsGame && !showMacGame ? 'text-white' : 'text-gray-400 hover:text-white'}`}
+                                    className={`relative z-10 w-10 h-10 rounded-md items-center justify-center flex transition-colors ${showWindowsGame && !showMacGame ? 'text-white' : 'text-gray-400 hover:text-white'}`}
                                     title="Windows Games Only"
                                 >
                                     <svg xmlns="http://www.w3.org/2000/svg" className="w-[14px] h-[14px]" viewBox="0 0 24 24" fill="currentColor">
@@ -120,7 +120,7 @@ export function GameSelectionScreen({
                                         setShowMacGame(true);
                                         setShowWindowsGame(false);
                                     }}
-                                    className={`relative z-10 p-1.5 rounded items-center justify-center flex transition-colors w-10 ${!showWindowsGame && showMacGame ? 'text-white' : 'text-gray-400 hover:text-white'}`}
+                                    className={`relative z-10 w-10 h-10 rounded-md items-center justify-center flex transition-colors ${!showWindowsGame && showMacGame ? 'text-white' : 'text-gray-400 hover:text-white'}`}
                                     title="macOS Games Only"
                                 >
                                     <svg xmlns="http://www.w3.org/2000/svg" className="w-[12px] h-[14px]" viewBox="0 0 384 512" fill="currentColor">
