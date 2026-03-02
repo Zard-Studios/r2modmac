@@ -656,10 +656,26 @@ function App() {
         onToggleMod={toggleMod}
         onViewModDetails={(pkg) => setSelectedMod(pkg)}
         onOpenModFolder={async (profileId, modName) => {
+          const activeProfilePlatform = activeProfile?.platform;
           try {
-            await window.ipcRenderer.openModFolder(profileId, modName, selectedCommunity || '');
+            await window.ipcRenderer.openModFolder(profileId, modName, selectedCommunity || '', activeProfilePlatform);
           } catch (e: any) {
             console.error("Failed to open mod folder:", e);
+            const message = String(e?.message || e || '');
+            if (message.includes('MODS_NOT_APPLIED') || message.includes('MOD_NOT_INSTALLED')) {
+              await window.ipcRenderer.alert(
+                "Mod Not Applied Yet",
+                `The "${modName}" folder is not available in the game directory yet.\n\nApply your profile to the game first, then try again.`
+              );
+              return;
+            }
+            if (message.includes('GAME_PATH_NOT_CONFIGURED')) {
+              await window.ipcRenderer.alert(
+                "Game Path Required",
+                "Please configure the game directory in Settings, then apply your profile to the game."
+              );
+              return;
+            }
             await window.ipcRenderer.alert(
               "Directory Not Found",
               `The "${modName}" folder could not be found.\n\nPlease make sure the game directory is set correctly in the Settings.`

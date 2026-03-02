@@ -4,6 +4,58 @@ use crate::models::shared::*;
 use crate::utils::file_ops::*;
 use crate::commands::game_commands::get_game_path;
 
+fn extract_mod_key(input: &str) -> String {
+    let parts: Vec<&str> = input.split('-').collect();
+    if parts.len() >= 2 {
+        format!("{}-{}", parts[0].to_lowercase(), parts[1].to_lowercase())
+    } else {
+        input.to_lowercase()
+    }
+}
+
+fn folder_matches_mod(folder_name: &str, mod_query: &str, mod_key: &str) -> bool {
+    let folder_lower = folder_name.to_lowercase();
+    if folder_lower.contains(mod_query) || mod_query.contains(&folder_lower) {
+        return true;
+    }
+    extract_mod_key(folder_name) == mod_key
+}
+
+fn find_mod_folder_in(base: &std::path::Path, mod_name: &str) -> Option<String> {
+    if !base.exists() {
+        return None;
+    }
+
+    let mod_query = mod_name.to_lowercase();
+    let mod_key = extract_mod_key(&mod_query);
+    let mut fallback: Option<String> = None;
+
+    if let Ok(entries) = fs::read_dir(base) {
+        for entry in entries.filter_map(|e| e.ok()) {
+            let folder_name = entry.file_name().to_string_lossy().to_string();
+            let file_type = entry.file_type().ok();
+            let is_container = file_type
+                .as_ref()
+                .map(|t| t.is_dir() || t.is_symlink())
+                .unwrap_or(false);
+            if !is_container {
+                continue;
+            }
+
+            let folder_key = extract_mod_key(&folder_name);
+            if folder_key == mod_key {
+                return Some(folder_name);
+            }
+
+            if fallback.is_none() && folder_matches_mod(&folder_name, &mod_query, &mod_key) {
+                fallback = Some(folder_name);
+            }
+        }
+    }
+
+    fallback
+}
+
 #[command]
 pub async fn install_mod(app: AppHandle, profile_id: String, download_url: String, mod_name: String, game_path: String, use_profile_cache: Option<bool>) -> Result<serde_json::Value, String> {
     // Install DIRECTLY to game folder
@@ -200,6 +252,59 @@ pub async fn remove_mod(app: AppHandle, profile_id: String, mod_name: String) ->
 }
 
 #[command]
+pub async fn open_mod_folder(
+    app: AppHandle,
+    _profile_id: String,
+    mod_name: String,
+    game_identifier: String,
+    platform: Option<String>,
+) -> Result<(), String> {
+    let game_path = get_game_path(app.clone(), game_identifier, platform)
+        .await?
+        .ok_or_else(|| "GAME_PATH_NOT_CONFIGURED".to_string())?;
+    let game_root = std::path::Path::new(&game_path);
+    let mod_key = extract_mod_key(&mod_name);
+
+    // BepInExPack is installed to game root (BepInEx/, doorstop files), not under plugins/.
+    if mod_key.contains("bepinexpack") {
+        let bepinex_root = game_root.join("BepInEx");
+        if bepinex_root.exists() {
+            open::that(&bepinex_root).map_err(|e| format!("Failed to open BepInEx folder: {}", e))?;
+            return Ok(());
+        }
+
+        let has_root_injection_files = [
+            game_root.join("run_bepinex.sh"),
+            game_root.join("doorstop_libs"),
+            game_root.join("doorstop_config.ini"),
+            game_root.join("winhttp.dll"),
+        ]
+        .iter()
+        .any(|p| p.exists());
+
+        if has_root_injection_files {
+            open::that(game_root).map_err(|e| format!("Failed to open game root folder: {}", e))?;
+            return Ok(());
+        }
+
+        return Err("MODS_NOT_APPLIED".to_string());
+    }
+
+    let game_plugins_dir = game_root.join("BepInEx").join("plugins");
+    if !game_plugins_dir.exists() {
+        return Err("MODS_NOT_APPLIED".to_string());
+    }
+
+    if let Some(folder_name) = find_mod_folder_in(&game_plugins_dir, &mod_name) {
+        let target = game_plugins_dir.join(folder_name);
+        open::that(&target).map_err(|e| format!("Failed to open mod folder: {}", e))?;
+        return Ok(());
+    }
+
+    Err("MOD_NOT_INSTALLED".to_string())
+}
+
+#[command]
 pub async fn toggle_mod(app: AppHandle, profile_id: String, mod_name: String, enabled: bool, game_identifier: Option<String>, platform: Option<String>) -> Result<(), String> {
     eprintln!("[toggle_mod] Toggle mod: {} enabled: {} in profile: {}", mod_name, enabled, profile_id);
     
@@ -220,36 +325,13 @@ pub async fn toggle_mod(app: AppHandle, profile_id: String, mod_name: String, en
     let profile_plugins_dir = profile_dir.join("BepInEx").join("plugins");
     
     // Find mod in profile cache OR game folder
-    let mod_name_lower = mod_name.to_lowercase();
-    let mut found_folder_name: Option<String> = None;
-    
     // Try profile cache first
-    if profile_plugins_dir.exists() {
-        if let Ok(entries) = fs::read_dir(&profile_plugins_dir) {
-            for entry in entries.filter_map(|e| e.ok()) {
-                let folder_name = entry.file_name().to_string_lossy().to_string();
-                if folder_name.to_lowercase().contains(&mod_name_lower) && entry.path().is_dir() {
-                    found_folder_name = Some(folder_name);
-                    break;
-                }
-            }
-        }
-    }
+    let mut found_folder_name = find_mod_folder_in(&profile_plugins_dir, &mod_name);
     
     // If not found in profile cache, try game folder
     if found_folder_name.is_none() {
         if let Some(ref game_plugins_path) = game_plugins {
-            if game_plugins_path.exists() {
-                if let Ok(entries) = fs::read_dir(game_plugins_path) {
-                    for entry in entries.filter_map(|e| e.ok()) {
-                        let folder_name = entry.file_name().to_string_lossy().to_string();
-                        if folder_name.to_lowercase().contains(&mod_name_lower) && entry.path().is_dir() {
-                            found_folder_name = Some(folder_name);
-                            break;
-                        }
-                    }
-                }
-            }
+            found_folder_name = find_mod_folder_in(game_plugins_path, &mod_name);
         }
     }
     
@@ -268,10 +350,15 @@ pub async fn toggle_mod(app: AppHandle, profile_id: String, mod_name: String, en
                 }
             } else {
                 // Remove mod from game folder (keep in cache)
-                if game_mod_path.exists() {
+                if game_mod_path.exists() || game_mod_path.is_symlink() {
                     eprintln!("[toggle_mod] Disabling mod - removing from game: {}", folder_name);
-                    fs::remove_dir_all(&game_mod_path)
-                        .map_err(|e| format!("Failed to remove mod from game: {}", e))?;
+                    if game_mod_path.is_symlink() || game_mod_path.is_file() {
+                        fs::remove_file(&game_mod_path)
+                            .map_err(|e| format!("Failed to remove mod symlink/file from game: {}", e))?;
+                    } else {
+                        fs::remove_dir_all(&game_mod_path)
+                            .map_err(|e| format!("Failed to remove mod directory from game: {}", e))?;
+                    }
                 }
             }
         }

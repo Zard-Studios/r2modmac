@@ -197,6 +197,7 @@ pub fn run() {
             commands::game_commands::sync_profile_to_game,
             
             commands::mod_commands::install_mod,
+            commands::mod_commands::open_mod_folder,
             commands::mod_commands::remove_mod,
             commands::mod_commands::toggle_mod,
             commands::mod_commands::copy_mod_from_cache,

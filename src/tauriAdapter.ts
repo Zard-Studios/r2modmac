@@ -63,7 +63,8 @@ export const tauriAPI: IElectronAPI = {
     importProfile: async (code) => invoke<any>('import_profile', { code }),
     importProfileFromFile: async (path) => invoke<any>('import_profile_from_file', { path }),
     shareProfile: async (profileId) => invoke<string>('share_profile', { profileId }),
-    openModFolder: async (profileId, modName, gameIdentifier) => invoke('open_mod_folder', { profileId, modName, gameIdentifier }),
+    openModFolder: async (profileId, modName, gameIdentifier, platform?) =>
+        invoke('open_mod_folder', { profileId, modName, gameIdentifier, platform }),
     exportProfile: async (profileId) => {
         try {
             return await invoke<any>('export_profile', { profileId });

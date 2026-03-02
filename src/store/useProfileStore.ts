@@ -156,9 +156,9 @@ export const useProfileStore = create<ProfileState>((set) => ({
 
         const newEnabled = !mod.enabled;
 
-        // Extract mod name from fullName (format: "Author-ModName-Version")
+        // Use "Author-ModName" for reliable backend matching.
         const parts = mod.fullName.split('-');
-        const modName = parts.length >= 2 ? parts[1] : mod.fullName;
+        const modName = parts.length >= 2 ? `${parts[0]}-${parts[1]}` : mod.fullName;
 
         try {
             // Call backend to actually rename the DLL files and sync to game if applicable

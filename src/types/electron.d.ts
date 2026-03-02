@@ -31,7 +31,7 @@ export interface IElectronAPI {
     importProfile: (code: string) => Promise<any>;
     importProfileFromFile: (path: string) => Promise<any>;
     shareProfile: (profileId: string) => Promise<string>;
-    openModFolder: (profileId: string, modName: string, gameIdentifier: string) => Promise<void>;
+    openModFolder: (profileId: string, modName: string, gameIdentifier: string, platform?: 'windows' | 'mac') => Promise<void>;
     exportProfile: (profileId: string) => Promise<any>;
     deleteProfileFolder: (profileId: string, gameIdentifier?: string, platform?: 'windows' | 'mac') => Promise<boolean>;
     getSettings: () => Promise<{ steam_path: string | null; favorite_games: string[]; game_paths: Record<string, string>; legacy_install_mode?: boolean }>;

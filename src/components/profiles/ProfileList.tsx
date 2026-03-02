@@ -215,13 +215,19 @@ export function ProfileList({
                                     </svg>
                                 </button>
                                 <button
-                                    onClick={(e) => {
+                                    onClick={async (e) => {
                                         e.stopPropagation();
                                         if (profile.mods.length === 0 && !profile.is_vanilla) {
                                             alert("No mods to disable!");
                                             return;
                                         }
                                         const newVanillaState = !profile.is_vanilla;
+                                        if (newVanillaState && profile.platform === 'mac') {
+                                            await window.ipcRenderer.alert(
+                                                'Vanilla Mode Notice',
+                                                'Before launching in vanilla mode on macOS, remove the Steam Launch Option argument:\n\n/usr/bin/arch -x86_64 /bin/sh "run_bepinex.sh" %command%\n\nKeeping this argument in vanilla mode can cause instability or immediate crashes.'
+                                            );
+                                        }
                                         onToggleVanilla(profile.id, newVanillaState);
                                     }}
                                     className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${profile.is_vanilla
