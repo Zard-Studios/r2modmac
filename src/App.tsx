@@ -604,16 +604,35 @@ function App() {
     );
   } else if (!activeProfileId && !isBrowsingMode) {
     // STEP 2: PROFILE SELECTION
+    const selectedGame = communities.find(c => c.identifier === selectedCommunity);
+    const selectedGameCover = selectedGame ? communityImages[selectedGame.identifier] : undefined;
+
     content = (
       <div className="flex flex-col h-full bg-gray-900 overflow-y-auto">
-        <div className="p-4 border-b border-gray-800 flex items-center gap-4 sticky top-0 bg-gray-900 z-10">
-          <Button variant="ghost" size="sm" onClick={() => setSelectedCommunity(null)}>
-            ← Change Game
-          </Button>
-          <div className="h-6 w-px bg-gray-800" />
-          <h2 className="text-xl font-bold text-white">
-            {communities.find(c => c.identifier === selectedCommunity)?.name}
-          </h2>
+        <div className="p-4 border-b border-gray-800 sticky top-0 bg-gray-900 z-10 relative overflow-hidden">
+          <div className="absolute inset-0 bg-gray-900" />
+          {selectedGameCover && (
+            <>
+              <div
+                className="absolute inset-0 bg-cover bg-center scale-110 opacity-70 pointer-events-none"
+                style={{
+                  backgroundImage: `url(${selectedGameCover})`,
+                  filter: 'blur(10px) saturate(0.95)',
+                }}
+              />
+              <div className="absolute inset-0 bg-gray-900/45 pointer-events-none" />
+              <div className="absolute inset-y-0 left-0 w-80 bg-gradient-to-r from-gray-900 via-gray-900/95 to-transparent pointer-events-none" />
+            </>
+          )}
+          <div className="relative z-10 flex items-center gap-4">
+            <Button variant="ghost" size="sm" onClick={() => setSelectedCommunity(null)}>
+              ← Change Game
+            </Button>
+            <div className="h-6 w-px bg-gray-700/90" />
+            <h2 className="text-xl font-bold text-white">
+              {selectedGame?.name}
+            </h2>
+          </div>
         </div>
 
         <ProfileList
