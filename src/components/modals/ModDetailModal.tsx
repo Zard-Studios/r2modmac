@@ -415,7 +415,9 @@ export function ModDetailModal({
                             )}
                             <button
                                 onClick={() => {
-                                    if (hasUpdate && onUpdate) {
+                                    // If the mod is already in profile and user selected a different version,
+                                    // always run update flow (also handles downgrades and non-latest switches).
+                                    if (isInstalled && !isSelectedInstalled && onUpdate) {
                                         onUpdate(mod);
                                     } else {
                                         onInstall(mod);

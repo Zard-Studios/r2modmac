@@ -1,6 +1,8 @@
 import type { Package } from '../types/thunderstore';
 import { useProfileStore } from '../store/useProfileStore';
 
+const MAX_PARALLEL_OPS = 10;
+
 interface ProgressSetter {
     (state: { isOpen: boolean; title: string; progress: number; currentTask: string }): void;
     (updater: (prev: { isOpen: boolean; title: string; progress: number; currentTask: string }) => { isOpen: boolean; title: string; progress: number; currentTask: string }): void;
@@ -10,6 +12,7 @@ interface UseGameSyncProps {
     activeProfileId: string | null;
     selectedCommunity: string | null;
     legacyInstallMode: boolean;
+    installInParallel: boolean;
     hideMacOSGuide: boolean;
     setProgressState: ProgressSetter;
     setShowCrossOverGuide: (v: boolean) => void;
@@ -28,6 +31,7 @@ export function useGameSync({
     activeProfileId,
     selectedCommunity,
     legacyInstallMode,
+    installInParallel,
     hideMacOSGuide,
     setProgressState,
     setShowCrossOverGuide,
@@ -82,14 +86,33 @@ export function useGameSync({
             const syncResult = await window.ipcRenderer.syncProfileToGame(activeProfile.id, community, legacyInstallMode);
 
             const skippedVersionMismatch: string[] = [];
+            const failedInstalls: string[] = [];
             let actuallyInstalled = 0;
 
             if (syncResult.to_install.length > 0) {
-                setProgressState({ isOpen: true, title: 'Syncing to Game', progress: 0, currentTask: `Installing ${syncResult.to_install.length} missing mods...` });
+                const concurrency = installInParallel ? MAX_PARALLEL_OPS : 1;
+                setProgressState({
+                    isOpen: true,
+                    title: 'Syncing to Game',
+                    progress: 0,
+                    currentTask: `Installing ${syncResult.to_install.length} missing mods...`,
+                });
 
-                let installed = 0;
-                for (const modKey of syncResult.to_install) {
+                let completed = 0;
+                const total = syncResult.to_install.length;
+                const updateProgress = (task: string) => {
+                    setProgressState(prev => ({
+                        ...prev,
+                        progress: Math.round((completed / total) * 100),
+                        currentTask: task,
+                    }));
+                };
+
+                const processMod = async (modKey: string) => {
+                    let status = 'Installed';
+                    try {
                     const modInProfile = activeProfile.mods.find(m => {
+                        if (!m.enabled) return false;
                         const parts = m.fullName.split('-');
                         const key = parts.length >= 2 ? `${parts[0]}-${parts[1]}` : m.fullName;
                         return key.toLowerCase() === modKey.toLowerCase();
@@ -99,14 +122,9 @@ export function useGameSync({
                         if (legacyInstallMode) {
                             const cacheResult = await window.ipcRenderer.copyModFromCache(activeProfile.id, modInProfile.fullName, gamePath);
                             if (cacheResult.copied) {
-                                installed++;
                                 actuallyInstalled++;
-                                setProgressState(prev => ({
-                                    ...prev,
-                                    progress: Math.round((installed / syncResult.to_install.length) * 100),
-                                    currentTask: `Copied from cache ${installed}/${syncResult.to_install.length}: ${modKey}`
-                                }));
-                                continue;
+                                status = 'Copied from cache';
+                                return;
                             }
                         }
 
@@ -115,24 +133,31 @@ export function useGameSync({
                             const version = pkg.versions.find((v: any) => v.version_number === modInProfile.versionNumber);
                             if (!version) {
                                 skippedVersionMismatch.push(`${modKey} (requested v${modInProfile.versionNumber})`);
-                                installed++;
-                                setProgressState(prev => ({
-                                    ...prev,
-                                    progress: Math.round((installed / syncResult.to_install.length) * 100),
-                                    currentTask: `Skipped ${installed}/${syncResult.to_install.length}: ${modKey} (version not found)`
-                                }));
-                                continue;
+                                status = 'Skipped (version not found)';
+                                return;
                             }
                             await window.ipcRenderer.installMod(activeProfile.id, version.download_url, version.full_name, gamePath, legacyInstallMode);
                             actuallyInstalled++;
+                            status = 'Installed';
                         }
                     }
-                    installed++;
-                    setProgressState(prev => ({
-                        ...prev,
-                        progress: Math.round((installed / syncResult.to_install.length) * 100),
-                        currentTask: `Installed ${installed}/${syncResult.to_install.length}: ${modKey}`
-                    }));
+
+                    } catch (err: any) {
+                        failedInstalls.push(`${modKey} (${String(err?.message || err || 'unknown error')})`);
+                        status = 'Failed';
+                    } finally {
+                        completed++;
+                        updateProgress(`${status} ${completed}/${total}: ${modKey}`);
+                    }
+                };
+
+                for (let i = 0; i < syncResult.to_install.length; i += concurrency) {
+                    const batch = syncResult.to_install.slice(i, i + concurrency);
+                    if (concurrency === 1) {
+                        await processMod(batch[0]);
+                    } else {
+                        await Promise.all(batch.map((modKey) => processMod(modKey)));
+                    }
                 }
                 setProgressState(prev => ({ ...prev, isOpen: false }));
             }
@@ -165,6 +190,11 @@ export function useGameSync({
                 const preview = skippedVersionMismatch.slice(0, 5).join('\n');
                 const more = skippedVersionMismatch.length > 5 ? `\n...and ${skippedVersionMismatch.length - 5} more` : '';
                 message += `\n\nSkipped ${skippedVersionMismatch.length} mod(s) because the exact pinned version is unavailable:\n${preview}${more}`;
+            }
+            if (failedInstalls.length > 0) {
+                const preview = failedInstalls.slice(0, 5).join('\n');
+                const more = failedInstalls.length > 5 ? `\n...and ${failedInstalls.length - 5} more` : '';
+                message += `\n\nFailed ${failedInstalls.length} mod(s) during sync:\n${preview}${more}`;
             }
 
             await window.ipcRenderer.alert('Success', message);

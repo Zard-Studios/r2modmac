@@ -2,6 +2,8 @@ import type { Package, PackageVersion } from '../types/thunderstore';
 import type { InstalledMod } from '../types/profile';
 import { useProfileStore } from '../store/useProfileStore';
 
+const MAX_PARALLEL_OPS = 10;
+
 interface ProgressSetter {
     (state: { isOpen: boolean; title: string; progress: number; currentTask: string }): void;
     (updater: (prev: { isOpen: boolean; title: string; progress: number; currentTask: string }) => { isOpen: boolean; title: string; progress: number; currentTask: string }): void;
@@ -57,6 +59,17 @@ export function useModActions({
 }: UseModActionsProps) {
     const { profiles, addMod, removeMod, updateProfile } = useProfileStore();
 
+    const runWithConcurrency = async (tasks: Array<() => Promise<void>>, maxConcurrency: number) => {
+        for (let i = 0; i < tasks.length; i += maxConcurrency) {
+            const batch = tasks.slice(i, i + maxConcurrency);
+            if (maxConcurrency === 1) {
+                await batch[0]();
+            } else {
+                await Promise.all(batch.map((task) => task()));
+            }
+        }
+    };
+
     // ── Core recursive installer (handles dependencies) ──────────────────────────
     const installModWithDependencies = async (
         pkg: Package,
@@ -99,12 +112,9 @@ export function useModActions({
                     })
                     .filter((task): task is () => Promise<void> => !!task);
 
-                if (installInParallel && dependencyTasks.length > 1) {
-                    await Promise.all(dependencyTasks.map((task) => task()));
-                } else {
-                    for (const task of dependencyTasks) {
-                        await task();
-                    }
+                const concurrency = installInParallel ? MAX_PARALLEL_OPS : 1;
+                if (dependencyTasks.length > 0) {
+                    await runWithConcurrency(dependencyTasks, concurrency);
                 }
             } catch (err) {
                 console.error('[Dependencies] Failed to lookup:', err);
@@ -212,12 +222,9 @@ export function useModActions({
                     })
                     .filter((task): task is () => Promise<void> => !!task);
 
-                if (installInParallel && dependencyTasks.length > 1) {
-                    await Promise.all(dependencyTasks.map((task) => task()));
-                } else {
-                    for (const task of dependencyTasks) {
-                        await task();
-                    }
+                const concurrency = installInParallel ? MAX_PARALLEL_OPS : 1;
+                if (dependencyTasks.length > 0) {
+                    await runWithConcurrency(dependencyTasks, concurrency);
                 }
             };
 
@@ -349,14 +356,16 @@ export function useModActions({
             });
             try {
                 const profile = profiles.find(p => p.id === profileIdToUse);
-                const oldMod = profile?.mods.find(m => m.fullName.startsWith(pkg.full_name));
-                if (oldMod) {
+                const oldMods = profile?.mods.filter(m => m.fullName.startsWith(pkg.full_name)) || [];
+                if (oldMods.length > 0) {
                     setProgressState(prev => ({
                         ...prev,
                         progress: 20,
                         currentTask: 'Uninstalling old version...',
                     }));
-                    await removeMod(profileIdToUse, oldMod.uuid4);
+                    for (const oldMod of oldMods) {
+                        await removeMod(profileIdToUse, oldMod.uuid4);
+                    }
                 }
                 setProgressState(prev => ({
                     ...prev,
@@ -386,8 +395,9 @@ export function useModActions({
         // New mode update: metadata-only change, no progress modal
         try {
             const profile = profiles.find(p => p.id === profileIdToUse);
-            const oldMod = profile?.mods.find(m => m.fullName.startsWith(pkg.full_name));
-            if (oldMod) {
+            const oldMods = profile?.mods.filter(m => m.fullName.startsWith(pkg.full_name)) || [];
+            const wasEnabled = oldMods.some(m => m.enabled) || oldMods.length === 0;
+            for (const oldMod of oldMods) {
                 await removeMod(profileIdToUse, oldMod.uuid4);
             }
 
@@ -396,7 +406,7 @@ export function useModActions({
                 fullName: targetVersion.full_name,
                 versionNumber: targetVersion.version_number,
                 iconUrl: targetVersion.icon,
-                enabled: true,
+                enabled: wasEnabled,
                 pending_sync: true,
             });
             updateProfile(profileIdToUse, { needs_sync: true });

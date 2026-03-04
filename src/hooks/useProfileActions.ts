@@ -2,6 +2,8 @@ import type { Package } from '../types/thunderstore';
 import type { InstalledMod } from '../types/profile';
 import { useProfileStore } from '../store/useProfileStore';
 
+const MAX_PARALLEL_OPS = 10;
+
 interface ProgressSetter {
     (state: { isOpen: boolean; title: string; progress: number; currentTask: string }): void;
     (updater: (prev: { isOpen: boolean; title: string; progress: number; currentTask: string }) => { isOpen: boolean; title: string; progress: number; currentTask: string }): void;
@@ -11,6 +13,7 @@ interface UseProfileActionsProps {
     selectedCommunity: string | null;
     activeProfileId: string | null;
     legacyInstallMode: boolean;
+    installInParallel: boolean;
     setProgressState: ProgressSetter;
     onInstallMod: (pkg: Package, profileId: string) => Promise<void>;
 }
@@ -19,6 +22,7 @@ export function useProfileActions({
     selectedCommunity,
     activeProfileId,
     legacyInstallMode,
+    installInParallel,
     setProgressState,
     onInstallMod,
 }: UseProfileActionsProps) {
@@ -52,45 +56,69 @@ export function useProfileActions({
 
             const newProfileId = createProfile(profileName, selectedCommunity!, chosenPlatform);
 
-            setProgressState({ isOpen: true, title: 'Importing Profile', progress: 0, currentTask: 'Starting import...' });
+            const concurrency = installInParallel ? MAX_PARALLEL_OPS : 1;
+            setProgressState({
+                isOpen: true,
+                title: 'Importing Profile',
+                progress: 0,
+                currentTask: 'Starting import...',
+            });
 
             setTimeout(async () => {
                 const modsToInstall = result.mods.filter((m: any) => !lookup.unknown.includes(m.name));
                 let installedCount = 0;
+                let completedCount = 0;
                 const totalMods = modsToInstall.length;
-                const BATCH_SIZE = 5;
                 const failedMods: string[] = [];
 
-                for (let i = 0; i < totalMods; i += BATCH_SIZE) {
-                    const batch = modsToInstall.slice(i, i + BATCH_SIZE);
-                    await Promise.all(batch.map(async (mod: any, batchIdx: number) => {
-                        const globalIdx = i + batchIdx;
+                const processMod = async (mod: any) => {
+                    try {
                         setProgressState(prev => ({
                             ...prev,
-                            progress: Math.round(((globalIdx + 1) / totalMods) * 100),
-                            currentTask: `Installing ${mod.name} (${globalIdx + 1}/${totalMods})...`
+                            currentTask: `Installing ${mod.name} (${Math.min(completedCount + 1, totalMods)}/${totalMods})...`
                         }));
-                        try {
-                            const pkg = lookup.found.find((p: Package) => p.full_name === mod.name);
-                            if (pkg) {
-                                const version = pkg.versions.find((v: any) => v.version_number === mod.version) || pkg.versions[0];
-                                const installResult = await window.ipcRenderer.installMod(
-                                    newProfileId, version.download_url, version.full_name, gamePath, legacyInstallMode
-                                );
-                                if (installResult.success) {
-                                    const installedMod: InstalledMod = {
-                                        uuid4: version.uuid4, fullName: version.full_name,
-                                        versionNumber: version.version_number, iconUrl: version.icon, enabled: mod.enabled
-                                    };
-                                    addMod(newProfileId, installedMod);
-                                    installedCount++;
-                                } else throw new Error(installResult.error);
+
+                        const pkg = lookup.found.find((p: Package) => p.full_name === mod.name);
+                        if (pkg) {
+                            const version = pkg.versions.find((v: any) => v.version_number === mod.version) || pkg.versions[0];
+                            const installResult = await window.ipcRenderer.installMod(
+                                newProfileId, version.download_url, version.full_name, gamePath, legacyInstallMode
+                            );
+                            if (installResult.success) {
+                                const installedMod: InstalledMod = {
+                                    uuid4: version.uuid4, fullName: version.full_name,
+                                    versionNumber: version.version_number, iconUrl: version.icon, enabled: mod.enabled
+                                };
+                                addMod(newProfileId, installedMod);
+                                installedCount++;
+                            } else {
+                                throw new Error(installResult.error);
                             }
-                        } catch (e) {
-                            failedMods.push(mod.name);
-                            console.error(`Error installing ${mod.name}`, e);
                         }
-                    }));
+                    } catch (e) {
+                        failedMods.push(mod.name);
+                        console.error(`Error installing ${mod.name}`, e);
+                    } finally {
+                        completedCount++;
+                        setProgressState(prev => ({
+                            ...prev,
+                            progress: Math.round((completedCount / Math.max(totalMods, 1)) * 100),
+                            currentTask: `Processed ${completedCount}/${totalMods}...`
+                        }));
+                    }
+                };
+
+                if (totalMods > 0) {
+                    for (let i = 0; i < totalMods; i += concurrency) {
+                        const batch = modsToInstall.slice(i, i + concurrency);
+                        if (concurrency === 1) {
+                            await processMod(batch[0]);
+                        } else {
+                            await Promise.all(batch.map((mod: any) => processMod(mod)));
+                        }
+                    }
+                } else {
+                    setProgressState(prev => ({ ...prev, progress: 100, currentTask: 'No mods found to import.' }));
                 }
 
                 setProgressState(prev => ({ ...prev, progress: 100, currentTask: 'Import Complete!' }));

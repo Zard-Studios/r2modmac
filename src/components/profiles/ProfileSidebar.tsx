@@ -3,17 +3,20 @@ import type { Community, Package } from '../../types/thunderstore';
 import type { Profile, InstalledMod } from '../../types/profile';
 import { Button } from '../ui';
 
+const MAX_PARALLEL_TOGGLES = 10;
+
 interface ProfileSidebarProps {
     activeProfile: Profile | undefined;
     currentCommunity: Community | null;
     communityImage: string | undefined;
     packages: Package[];
     legacyInstallMode: boolean;
+    installInParallel: boolean;
     onSelectProfile: (profileId: string) => void;
-    onToggleMod: (profileId: string, modUuid: string) => void;
+    onToggleMod: (profileId: string, modUuid: string) => Promise<void> | void;
     onViewModDetails: (pkg: Package) => void;
     onOpenModFolder: (profileId: string, modName: string) => void;
-    onUninstallMod: (mod: InstalledMod) => void;
+    onUninstallMod: (mod: InstalledMod) => Promise<void> | void;
     onInstallToGame: (isVanillaOverride?: boolean) => void;
     onResolvePackage: (mod: InstalledMod) => Promise<Package | null>;
     onExportProfile: () => void;
@@ -27,6 +30,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
     communityImage,
     packages,
     legacyInstallMode,
+    installInParallel,
     onSelectProfile,
     onToggleMod,
     onViewModDetails,
@@ -41,6 +45,8 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
     const [searchQuery, setSearchQuery] = useState('');
     const [isEditing, setIsEditing] = useState(false);
     const [editName, setEditName] = useState('');
+    const [selectedModIds, setSelectedModIds] = useState<string[]>([]);
+    const [selectionAnchorId, setSelectionAnchorId] = useState<string | null>(null);
 
     const handleEditClick = () => {
         if (activeProfile) {
@@ -84,6 +90,17 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
     const displayedMods = activeProfile?.mods.filter(mod =>
         mod.fullName.toLowerCase().includes(searchQuery.toLowerCase())
     ) || [];
+    const visibleModIds = useMemo(() => new Set(displayedMods.map((m) => m.uuid4)), [displayedMods]);
+    const effectiveSelectedModIds = useMemo(
+        () => selectedModIds.filter((id) => visibleModIds.has(id)),
+        [selectedModIds, visibleModIds]
+    );
+    const selectedModIdSet = useMemo(() => new Set(effectiveSelectedModIds), [effectiveSelectedModIds]);
+    const selectedMods = useMemo(() => {
+        if (!activeProfile) return [] as InstalledMod[];
+        return activeProfile.mods.filter((m) => selectedModIdSet.has(m.uuid4));
+    }, [activeProfile, selectedModIdSet]);
+    const selectionMode = effectiveSelectedModIds.length > 0;
 
     const latestVersionByPackage = useMemo(() => {
         const map = new Map<string, string>();
@@ -111,6 +128,130 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
         if (markedMods > 0) return markedMods;
         return activeProfile.needs_sync ? 1 : 0;
     }, [activeProfile, legacyInstallMode]);
+
+    const resolveAndOpenModDetails = async (mod: InstalledMod, pkg?: Package) => {
+        if (pkg) {
+            onViewModDetails(pkg);
+            return;
+        }
+
+        try {
+            const resolved = await onResolvePackage(mod);
+            if (resolved) onViewModDetails(resolved);
+        } catch (err) {
+            console.error(err);
+        }
+    };
+
+    const handleSelectRow = (e: React.MouseEvent, modId: string) => {
+        if (!activeProfile) return;
+
+        const currentIndex = displayedMods.findIndex((m) => m.uuid4 === modId);
+        if (currentIndex === -1) return;
+
+        if (e.shiftKey && selectionAnchorId) {
+            const anchorIndex = displayedMods.findIndex((m) => m.uuid4 === selectionAnchorId);
+            if (anchorIndex !== -1) {
+                const start = Math.min(anchorIndex, currentIndex);
+                const end = Math.max(anchorIndex, currentIndex);
+                const rangeIds = displayedMods.slice(start, end + 1).map((m) => m.uuid4);
+                setSelectedModIds(rangeIds);
+                setSelectionAnchorId(modId);
+                return;
+            }
+            setSelectedModIds([modId]);
+            setSelectionAnchorId(modId);
+            return;
+        }
+
+        if (e.metaKey || e.ctrlKey) {
+            setSelectedModIds((prev) =>
+                prev.includes(modId) ? prev.filter((id) => id !== modId) : [...prev, modId]
+            );
+            setSelectionAnchorId(modId);
+            return;
+        }
+    };
+
+    const handleToggleSingleMod = async (mod: InstalledMod) => {
+        if (!activeProfile) return;
+        await onToggleMod(activeProfile.id, mod.uuid4);
+        if (!mod.enabled && legacyInstallMode) {
+            setTimeout(() => {
+                onInstallToGame();
+            }, 300);
+        }
+    };
+
+    const handleBulkDisableSelected = async () => {
+        if (!activeProfile || selectedMods.length === 0) return;
+        const enabledCount = selectedMods.filter((m) => m.enabled).length;
+        const disabledCount = selectedMods.length - enabledCount;
+        const bulkMode: 'disable' | 'enable' | 'toggle' =
+            disabledCount === 0 ? 'disable' : enabledCount === 0 ? 'enable' : 'toggle';
+
+        const targets = bulkMode === 'disable'
+            ? selectedMods.filter((m) => m.enabled)
+            : bulkMode === 'enable'
+                ? selectedMods.filter((m) => !m.enabled)
+                : selectedMods;
+
+        const enablesAny = targets.some((m) => !m.enabled);
+        if (targets.length === 0) return;
+
+        const concurrency = installInParallel ? MAX_PARALLEL_TOGGLES : 1;
+        for (let i = 0; i < targets.length; i += concurrency) {
+            const batch = targets.slice(i, i + concurrency);
+            if (concurrency === 1) {
+                await onToggleMod(activeProfile.id, batch[0].uuid4);
+            } else {
+                await Promise.all(batch.map((mod) => onToggleMod(activeProfile.id, mod.uuid4)));
+            }
+        }
+
+        if (legacyInstallMode && enablesAny) {
+            setTimeout(() => {
+                onInstallToGame();
+            }, 300);
+        }
+    };
+
+    const handleBulkDeleteSelected = async () => {
+        if (selectedMods.length === 0) return;
+        const confirmed = await window.ipcRenderer.confirm(
+            'Remove Selected Mods',
+            `Remove ${selectedMods.length} selected mod(s) from this profile?`
+        );
+        if (!confirmed) return;
+        for (const mod of selectedMods) {
+            await onUninstallMod(mod);
+        }
+        setSelectedModIds([]);
+        setSelectionAnchorId(null);
+    };
+
+    const handleModRowClick = (e: React.MouseEvent, mod: InstalledMod, pkg?: Package) => {
+        if (e.shiftKey || e.metaKey || e.ctrlKey) {
+            handleSelectRow(e, mod.uuid4);
+            return;
+        }
+
+        if (selectionMode) {
+            setSelectedModIds([]);
+            setSelectionAnchorId(null);
+        }
+
+        void resolveAndOpenModDetails(mod, pkg);
+    };
+
+    const bulkActionLabel = useMemo(() => {
+        const enabledCount = selectedMods.filter((m) => m.enabled).length;
+        const disabledCount = selectedMods.length - enabledCount;
+        if (selectedMods.length === 0) return 'Disable';
+        if (disabledCount === 0) return 'Disable';
+        if (enabledCount === 0) return 'Enable';
+        return 'Toggle';
+    }, [selectedMods]);
 
     return (
         <div className="h-full flex flex-col bg-gray-900 border-r border-gray-800 w-80 flex-shrink-0">
@@ -261,21 +402,16 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                     const pkg = packages.find(p => p.full_name === modNameWithoutVersion);
                     const latestVersion = pkg?.versions[0].version_number;
                     const hasUpdate = latestVersion && latestVersion !== mod.versionNumber;
+                    const isSelected = selectedModIdSet.has(mod.uuid4);
 
                     return (
                         <div
                             key={mod.uuid4}
-                            className={`flex items-center gap-3 p-2 rounded-lg hover:bg-gray-800 group cursor-pointer transition-all border border-transparent hover:border-gray-700 relative pr-16 overflow-hidden ${!mod.enabled ? 'opacity-50' : ''}`}
-                            onClick={async () => {
-                                // Toggle the mod state
-                                onToggleMod(activeProfile!.id, mod.uuid4);
-                                // Auto-apply on toggle only in legacy mode.
-                                if (!mod.enabled && legacyInstallMode) {
-                                    setTimeout(() => {
-                                        onInstallToGame();
-                                    }, 300);
-                                }
-                            }}
+                            className={`flex items-center gap-3 p-2 rounded-lg group cursor-pointer transition-all border relative pr-16 overflow-hidden ${isSelected
+                                ? 'bg-blue-500/12 border-blue-500/35'
+                                : 'border-transparent hover:border-gray-700 hover:bg-gray-800'
+                                } ${!mod.enabled ? 'opacity-50' : ''}`}
+                            onClick={(e) => handleModRowClick(e, mod, pkg)}
                         >
                             {/* ... existing mod item content ... */}
                             <div className="w-10 h-10 bg-gray-800 rounded-lg overflow-hidden flex-shrink-0 border border-gray-700 relative">
@@ -327,25 +463,18 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
 
                             <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center opacity-0 group-hover:opacity-100 transition-opacity gap-1 bg-gray-800/90 rounded-lg p-1 shadow-sm backdrop-blur-sm z-20">
                                 <button
-                                    onClick={async (e) => {
+                                    onClick={(e) => {
                                         e.stopPropagation();
-                                        if (pkg) {
-                                            onViewModDetails(pkg);
-                                        } else {
-                                            // Fallback
-                                            try {
-                                                const resolved = await onResolvePackage(mod);
-                                                if (resolved) onViewModDetails(resolved);
-                                            } catch (err) {
-                                                console.error(err);
-                                            }
-                                        }
+                                        void handleToggleSingleMod(mod);
                                     }}
-                                    className="p-1.5 text-gray-400 hover:text-blue-400 hover:bg-blue-400/10 rounded-md transition-colors"
-                                    title="View Details"
+                                    className={`p-1.5 rounded-md transition-colors ${mod.enabled
+                                        ? 'text-gray-400 hover:text-yellow-400 hover:bg-yellow-400/10'
+                                        : 'text-yellow-500 bg-yellow-500/10 hover:bg-yellow-500/20'
+                                        }`}
+                                    title={mod.enabled ? 'Disable Mod' : 'Enable Mod'}
                                 >
                                     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
                                     </svg>
                                 </button>
                                 <button
@@ -361,8 +490,13 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                                     </svg>
                                 </button>
                                 <button
-                                    onClick={(e) => {
+                                    onClick={async (e) => {
                                         e.stopPropagation();
+                                        const confirmed = await window.ipcRenderer.confirm(
+                                            'Uninstall Mod',
+                                            `Uninstall ${mod.fullName}?`
+                                        );
+                                        if (!confirmed) return;
                                         onUninstallMod(mod);
                                     }}
                                     className="p-1.5 text-gray-400 hover:text-red-400 hover:bg-red-400/10 rounded-md transition-colors"
@@ -432,32 +566,56 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
 
 
                 {/* Secondary Actions */}
-                <div className="grid grid-cols-2 gap-2">
-                    {activeProfile ? (
+                {selectionMode ? (
+                    <div className="grid grid-cols-2 gap-2">
                         <button
-                            onClick={onExportProfile}
-                            className="flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white transition-colors text-xs font-medium border border-gray-700 hover:border-gray-600"
+                            onClick={() => { void handleBulkDisableSelected(); }}
+                            className="flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-yellow-500/10 hover:bg-yellow-500/20 text-yellow-300 transition-colors text-xs font-medium border border-yellow-500/30"
+                            title={`${bulkActionLabel} ${selectedMods.length} selected mod(s)`}
                         >
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
                             </svg>
-                            Export
+                            {bulkActionLabel} ({selectedMods.length})
                         </button>
-                    ) : (
-                        // Placeholder for layout balance if needed, or just remove
-                        <div />
-                    )}
-                    <button
-                        onClick={onOpenSettings}
-                        className={`flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white transition-colors text-xs font-medium border border-gray-700 hover:border-gray-600 ${!activeProfile ? 'col-span-2' : ''}`}
-                    >
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                        </svg>
-                        Settings
-                    </button>
-                </div>
+                        <button
+                            onClick={() => { void handleBulkDeleteSelected(); }}
+                            className="flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-300 transition-colors text-xs font-medium border border-red-500/30"
+                            title={`Delete ${selectedMods.length} selected mod(s)`}
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                            Delete ({selectedMods.length})
+                        </button>
+                    </div>
+                ) : (
+                    <div className="grid grid-cols-2 gap-2">
+                        {activeProfile ? (
+                            <button
+                                onClick={onExportProfile}
+                                className="flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white transition-colors text-xs font-medium border border-gray-700 hover:border-gray-600"
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+                                </svg>
+                                Export
+                            </button>
+                        ) : (
+                            <div />
+                        )}
+                        <button
+                            onClick={onOpenSettings}
+                            className={`flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white transition-colors text-xs font-medium border border-gray-700 hover:border-gray-600 ${!activeProfile ? 'col-span-2' : ''}`}
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                            </svg>
+                            Settings
+                        </button>
+                    </div>
+                )}
             </div>
             {/* Edit Profile Modal (Local) */}
             {isEditing && activeProfile && (

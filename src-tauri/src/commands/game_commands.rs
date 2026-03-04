@@ -831,17 +831,36 @@ pub async fn sync_profile_to_game(app: AppHandle, profile_id: String, game_ident
         .filter_map(|m| m["fullName"].as_str().map(|s| s.to_string()))
         .collect();
     
-    // Also create a set of "Author-ModName" keys for fuzzy matching
-    let profile_mod_keys: Vec<String> = profile_mod_full_names.iter()
-        .map(|s| {
-            let parts: Vec<&str> = s.split('-').collect();
-            if parts.len() >= 2 {
-                format!("{}-{}", parts[0], parts[1])
+    let extract_mod_key = |name: &str| -> String {
+        let parts: Vec<&str> = name.split('-').collect();
+        if parts.len() >= 2 {
+            format!("{}-{}", parts[0], parts[1]).to_lowercase()
+        } else {
+            name.to_lowercase()
+        }
+    };
+    let extract_version_suffix = |name: &str| -> Option<String> {
+        name.rsplit('-').next().and_then(|tail| {
+            if tail.contains('.') && tail.chars().all(|c| c.is_ascii_digit() || c == '.') {
+                Some(tail.to_lowercase())
             } else {
-                s.clone()
+                None
             }
         })
-        .collect();
+    };
+
+    // Desired profile state indexed by key (Author-ModName).
+    let mut desired_key_set: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut desired_full_by_key: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let mut desired_version_by_key: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    for full_name in &profile_mod_full_names {
+        let key = extract_mod_key(full_name);
+        desired_key_set.insert(key.clone());
+        desired_full_by_key.insert(key.clone(), full_name.to_lowercase());
+        if let Some(version) = extract_version_suffix(full_name) {
+            desired_version_by_key.insert(key, version);
+        }
+    }
 
     eprintln!("[sync_profile_to_game] Profile has {} mods", profile_mod_full_names.len());
 
@@ -853,13 +872,7 @@ pub async fn sync_profile_to_game(app: AppHandle, profile_id: String, game_ident
             for entry in entries.filter_map(|e| e.ok()) {
                 if entry.path().is_dir() {
                     let folder_name = entry.file_name().to_string_lossy().to_string();
-                    // Extract "Author-ModName" from folder (format: Author-ModName-Version)
-                    let parts: Vec<&str> = folder_name.split('-').collect();
-                    let mod_key = if parts.len() >= 2 {
-                        format!("{}-{}", parts[0], parts[1])
-                    } else {
-                        folder_name.clone()
-                    };
+                    let mod_key = extract_mod_key(&folder_name);
                     game_mod_folders.push((folder_name, mod_key));
                 }
             }
@@ -868,33 +881,79 @@ pub async fn sync_profile_to_game(app: AppHandle, profile_id: String, game_ident
 
     eprintln!("[sync_profile_to_game] Game has {} mods installed", game_mod_folders.len());
 
-    // 4. Calculate diff using the Author-ModName keys for comparison
-    
-    // to_remove: in game but not in profile (by key)
-    let to_remove: Vec<&(String, String)> = game_mod_folders.iter()
-        .filter(|(_, gm_key)| !profile_mod_keys.iter().any(|pm_key| pm_key.to_lowercase() == gm_key.to_lowercase()))
-        .collect();
+    // 4. Calculate diff using Author-ModName key + version awareness.
+    // Remove entries not present in profile OR with a mismatched pinned version.
+    let mut to_remove: Vec<String> = Vec::new();
+    for (folder_name, gm_key) in &game_mod_folders {
+        if !desired_key_set.contains(gm_key) {
+            to_remove.push(folder_name.clone());
+            continue;
+        }
 
-    // to_install: in profile but not in game (by key)
+        let desired_version = desired_version_by_key.get(gm_key);
+        let desired_full = desired_full_by_key.get(gm_key);
+        let game_version = extract_version_suffix(folder_name);
+        let full_mismatch = desired_full
+            .map(|full| folder_name.to_lowercase() != *full)
+            .unwrap_or(false);
+        let needs_replacement = match desired_version {
+            Some(dv) => match game_version.as_ref() {
+                Some(gv) => gv != dv,
+                None => full_mismatch,
+            },
+            None => false,
+        };
+
+        if needs_replacement && full_mismatch {
+            to_remove.push(folder_name.clone());
+        }
+    }
+
+    // to_install: any profile key not present at the desired version in game
     // Special case: BepInExPack installs to game root, not plugins - check if BepInEx folder exists
     let bepinex_installed = game_path.join("BepInEx").join("core").exists();
-    
-    let to_install: Vec<&String> = profile_mod_keys.iter()
+
+    let mut to_install: Vec<String> = desired_key_set
+        .iter()
         .filter(|pm_key| {
             // Skip BepInExPack if BepInEx is already installed
-            if pm_key.to_lowercase().contains("bepinex") && bepinex_installed {
+            if pm_key.contains("bepinex") && bepinex_installed {
                 return false;
             }
-            // Check if not already in game plugins
-            !game_mod_folders.iter().any(|(_, gm_key)| gm_key.to_lowercase() == pm_key.to_lowercase())
+
+            let desired_full = desired_full_by_key
+                .get(*pm_key)
+                .cloned()
+                .unwrap_or_default();
+            let desired_version = desired_version_by_key.get(*pm_key);
+
+            let has_exact_version = game_mod_folders.iter().any(|(folder_name, gm_key)| {
+                if gm_key != *pm_key {
+                    return false;
+                }
+
+                if let Some(dv) = desired_version {
+                    if let Some(gv) = extract_version_suffix(folder_name) {
+                        return gv == *dv;
+                    }
+                    // Fallback for unusual folder naming: compare full folder name.
+                    return folder_name.to_lowercase() == desired_full;
+                }
+
+                true
+            });
+
+            !has_exact_version
         })
+        .map(|k| k.to_string())
         .collect();
+    to_install.sort();
 
     eprintln!("[sync_profile_to_game] To remove: {:?}, To install: {:?}", to_remove.len(), to_install.len());
 
     // 5. Remove mods not in profile (we have the exact folder names from the tuple)
     let mut removed = 0;
-    for (folder_name, _key) in &to_remove {
+    for folder_name in &to_remove {
         let folder_path = game_plugins.join(folder_name);
         if folder_path.exists() {
             eprintln!("[sync_profile_to_game] Removing: {}", folder_name);
@@ -935,8 +994,8 @@ pub async fn sync_profile_to_game(app: AppHandle, profile_id: String, game_ident
     }
 
     // 7. Return info about what needs to be installed (frontend will handle download)
-    let to_install_names: Vec<String> = to_install.iter().map(|s| s.to_string()).collect();
-    let already_installed = game_mod_folders.len() - removed;
+    let to_install_names: Vec<String> = to_install;
+    let already_installed = game_mod_folders.len().saturating_sub(removed);
 
     Ok(serde_json::json!({
         "removed": removed,

@@ -182,8 +182,8 @@ export default function PreferencesModal({
                                         <RowIcon kind="parallel" />
                                     </div>
                                     <div>
-                                        <p className="text-sm text-white font-medium">Install Dependencies in Parallel</p>
-                                        <p className="text-xs text-gray-400 mt-1">Install dependency mods concurrently for faster total install time.</p>
+                                        <p className="text-sm text-white font-medium">Run Mod Operations in Parallel</p>
+                                        <p className="text-xs text-gray-400 mt-1">Speeds up dependencies, profile import, bulk toggle, and Apply to Game sync.</p>
                                     </div>
                                 </div>
                                 <Toggle value={installInParallel} onChange={setInstallInParallel} />

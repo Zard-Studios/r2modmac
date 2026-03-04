@@ -10,6 +10,22 @@ const debouncedSaveProfiles = (profiles: Profile[]) => {
     }, 100); // 100ms debounce window
 };
 
+const getModKey = (fullName: string): string => {
+    const parts = fullName.split('-');
+    if (parts.length >= 2) {
+        return `${parts[0]}-${parts[1]}`.toLowerCase();
+    }
+    return fullName.toLowerCase();
+};
+
+const dedupeModsByKey = (mods: InstalledMod[]): InstalledMod[] => {
+    const byKey = new Map<string, InstalledMod>();
+    for (const mod of mods) {
+        byKey.set(getModKey(mod.fullName), mod);
+    }
+    return Array.from(byKey.values());
+};
+
 interface ProfileState {
     profiles: Profile[];
     activeProfileId: string | null;
@@ -107,13 +123,26 @@ export const useProfileStore = create<ProfileState>((set) => ({
                 synced_enabled: mod.synced_enabled ?? (mod.pending_sync ? undefined : mod.enabled),
             };
 
-            // Check if mod is already installed
-            if (!profile.mods.some(m => m.uuid4 === normalizedMod.uuid4)) {
+            const incomingKey = getModKey(normalizedMod.fullName);
+            const existingIndex = profile.mods.findIndex((m) =>
+                m.uuid4 === normalizedMod.uuid4 || getModKey(m.fullName) === incomingKey
+            );
+
+            if (existingIndex >= 0) {
+                const existing = profile.mods[existingIndex];
+                const merged: InstalledMod = {
+                    ...existing,
+                    ...normalizedMod,
+                };
+                profile.mods = profile.mods.map((m, idx) => (idx === existingIndex ? merged : m));
+            } else {
                 profile.mods = [...profile.mods, normalizedMod];
-                profile.needs_sync = !!profile.needs_sync || profile.mods.some(m => m.pending_sync);
-                updatedProfiles[profileIndex] = profile;
-                debouncedSaveProfiles(updatedProfiles);
             }
+
+            profile.mods = dedupeModsByKey(profile.mods);
+            profile.needs_sync = !!profile.needs_sync || profile.mods.some(m => m.pending_sync);
+            updatedProfiles[profileIndex] = profile;
+            debouncedSaveProfiles(updatedProfiles);
 
             return { profiles: updatedProfiles };
         });
@@ -188,10 +217,17 @@ export const useProfileStore = create<ProfileState>((set) => ({
                 profile.mods = profile.mods.map(m => {
                     if (m.uuid4 === modId) {
                         const pendingSync =
-                            m.synced_enabled === undefined
-                                ? true
-                                : newEnabled !== m.synced_enabled;
-                        return { ...m, enabled: newEnabled, pending_sync: pendingSync };
+                            syncFiles
+                                ? false
+                                : (m.synced_enabled === undefined
+                                    ? true
+                                    : newEnabled !== m.synced_enabled);
+                        return {
+                            ...m,
+                            enabled: newEnabled,
+                            pending_sync: pendingSync,
+                            synced_enabled: syncFiles ? newEnabled : m.synced_enabled,
+                        };
                     }
                     return m;
                 });
@@ -210,14 +246,15 @@ export const useProfileStore = create<ProfileState>((set) => ({
     loadProfiles: async () => {
         const rawProfiles = await window.ipcRenderer.getProfiles();
         const profiles = rawProfiles.map((profile) => {
-            const mods = (profile.mods || []).map((mod) => {
+            const normalizedMods = (profile.mods || []).map((mod) => {
                 const pendingSync = !!mod.pending_sync;
                 return {
                     ...mod,
                     pending_sync: pendingSync,
                     synced_enabled: mod.synced_enabled ?? (pendingSync ? undefined : mod.enabled),
-                };
+                } as InstalledMod;
             });
+            const mods = dedupeModsByKey(normalizedMods);
             return {
                 ...profile,
                 mods,

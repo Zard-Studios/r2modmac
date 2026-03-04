@@ -22,15 +22,12 @@ export function Layout({ sidebar, main, isSidebarOpen, onToggleSidebar }: Layout
                         </div>
                     </div>
 
-                    {/* Toggle Handle - Positioned absolutely relative to the flex container or wrapper */}
-                    {/* We place it in a zero-width container between sections so it moves with the expansion */}
-                    <div className="relative z-50 h-full w-0 flex flex-col justify-center items-center">
-                        {/* Hover Zone - Center on border (-left-4 = -16px, w-8 = 32px) */}
-                        <div className="absolute w-8 h-full -left-4 flex items-center justify-center group cursor-pointer">
-                            {/* Button - Positioned to the RIGHT of the border (left-1/2 of 32px zone = 16px start point = 0px relative to container) */}
+                    {/* Collapse toggle with a small hover zone (not full-height) to avoid wheel interception */}
+                    <div className="relative z-50 h-full w-0 pointer-events-none">
+                        <div className="pointer-events-auto absolute top-1/2 left-0 -translate-y-1/2 w-10 h-20 flex items-center justify-start group">
                             <button
                                 onClick={onToggleSidebar}
-                                className="absolute left-1/2 w-6 h-12 bg-gray-800 border-y border-r border-gray-700 rounded-r-lg flex items-center justify-center text-gray-400 hover:text-white transition-all duration-300 shadow-lg opacity-0 group-hover:opacity-100 translate-x-[-10px] group-hover:translate-x-0"
+                                className="w-6 h-12 bg-gray-800 border-y border-r border-gray-700 rounded-r-lg flex items-center justify-center text-gray-400 hover:text-white transition-all duration-300 shadow-lg opacity-0 -translate-x-2 group-hover:opacity-100 group-hover:translate-x-0 focus:opacity-100 focus:translate-x-0"
                                 title={isSidebarOpen ? "Close Sidebar" : "Open Sidebar"}
                             >
                                 <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -41,7 +38,6 @@ export function Layout({ sidebar, main, isSidebarOpen, onToggleSidebar }: Layout
                                     )}
                                 </svg>
                             </button>
-                            {/* Visual hint for the zone when button is hidden (optional, but requested to be invisible 'sparire') */}
                         </div>
                     </div>
                 </>

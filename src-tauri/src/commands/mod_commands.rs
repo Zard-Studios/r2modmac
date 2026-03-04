@@ -13,12 +13,81 @@ fn extract_mod_key(input: &str) -> String {
     }
 }
 
+fn normalize_alnum(input: &str) -> String {
+    input
+        .to_lowercase()
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .collect()
+}
+
+fn tokenize(input: &str) -> Vec<String> {
+    input
+        .to_lowercase()
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|t| t.len() >= 3)
+        .map(|t| t.to_string())
+        .collect()
+}
+
 fn folder_matches_mod(folder_name: &str, mod_query: &str, mod_key: &str) -> bool {
     let folder_lower = folder_name.to_lowercase();
     if folder_lower.contains(mod_query) || mod_query.contains(&folder_lower) {
         return true;
     }
+
+    let folder_norm = normalize_alnum(folder_name);
+    let query_norm = normalize_alnum(mod_query);
+    if !folder_norm.is_empty()
+        && !query_norm.is_empty()
+        && (folder_norm.contains(&query_norm) || query_norm.contains(&folder_norm))
+    {
+        return true;
+    }
+
+    let folder_tokens = tokenize(folder_name);
+    let query_tokens = tokenize(mod_query);
+    let overlap = folder_tokens
+        .iter()
+        .filter(|token| query_tokens.iter().any(|q| q == *token))
+        .count();
+    if overlap >= 2 {
+        return true;
+    }
+
     extract_mod_key(folder_name) == mod_key
+}
+
+fn find_mod_entry_recursive(base: &std::path::Path, mod_name: &str, depth: usize) -> Option<std::path::PathBuf> {
+    if depth == 0 || !base.exists() {
+        return None;
+    }
+
+    let mod_query = mod_name.to_lowercase();
+    let mod_key = extract_mod_key(&mod_query);
+
+    if let Ok(entries) = fs::read_dir(base) {
+        for entry in entries.filter_map(|e| e.ok()) {
+            let name = entry.file_name().to_string_lossy().to_string();
+            let path = entry.path();
+            if folder_matches_mod(&name, &mod_query, &mod_key) {
+                return Some(path);
+            }
+
+            let file_type = entry.file_type().ok();
+            let is_dir_like = file_type
+                .as_ref()
+                .map(|t| t.is_dir() || t.is_symlink())
+                .unwrap_or(false);
+            if is_dir_like {
+                if let Some(found) = find_mod_entry_recursive(&path, mod_name, depth - 1) {
+                    return Some(found);
+                }
+            }
+        }
+    }
+
+    None
 }
 
 fn find_mod_folder_in(base: &std::path::Path, mod_name: &str) -> Option<String> {
@@ -290,15 +359,44 @@ pub async fn open_mod_folder(
         return Err("MODS_NOT_APPLIED".to_string());
     }
 
-    let game_plugins_dir = game_root.join("BepInEx").join("plugins");
-    if !game_plugins_dir.exists() {
+    let bepinex_root = game_root.join("BepInEx");
+    if !bepinex_root.exists() {
         return Err("MODS_NOT_APPLIED".to_string());
     }
 
-    if let Some(folder_name) = find_mod_folder_in(&game_plugins_dir, &mod_name) {
-        let target = game_plugins_dir.join(folder_name);
+    // First check common mod locations.
+    let common_dirs = [
+        bepinex_root.join("plugins"),
+        bepinex_root.join("patchers"),
+        bepinex_root.join("core"),
+    ];
+
+    for dir in common_dirs {
+        if let Some(entry_name) = find_mod_folder_in(&dir, &mod_name) {
+            let target = dir.join(entry_name);
+            open::that(&target).map_err(|e| format!("Failed to open mod folder: {}", e))?;
+            return Ok(());
+        }
+    }
+
+    // Recursive fallback for packages that place files in non-standard nested paths.
+    if let Some(found_path) = find_mod_entry_recursive(&bepinex_root, &mod_name, 4) {
+        let target = if found_path.is_file() {
+            found_path.parent().map(|p| p.to_path_buf()).unwrap_or(found_path)
+        } else {
+            found_path
+        };
         open::that(&target).map_err(|e| format!("Failed to open mod folder: {}", e))?;
         return Ok(());
+    }
+
+    // MonoMod-based packs may resolve under patchers without a clear folder match.
+    if mod_name.to_lowercase().contains("monomod") {
+        let patchers_dir = bepinex_root.join("patchers");
+        if patchers_dir.exists() {
+            open::that(&patchers_dir).map_err(|e| format!("Failed to open patchers folder: {}", e))?;
+            return Ok(());
+        }
     }
 
     Err("MOD_NOT_INSTALLED".to_string())

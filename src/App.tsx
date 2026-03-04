@@ -581,6 +581,7 @@ function App() {
     selectedCommunity,
     activeProfileId,
     legacyInstallMode,
+    installInParallel,
     setProgressState,
     onInstallMod: handleInstallMod,
   });
@@ -590,6 +591,7 @@ function App() {
     activeProfileId,
     selectedCommunity,
     legacyInstallMode,
+    installInParallel,
     hideMacOSGuide,
     setProgressState,
     setShowCrossOverGuide,
@@ -766,11 +768,13 @@ function App() {
 
     const sidebar = (
       <ProfileSidebar
+        key={activeProfile?.id || 'no-profile'}
         activeProfile={activeProfile}
         currentCommunity={currentCommunity || null}
         communityImage={currentCommunity ? communityImages[currentCommunity.identifier] : undefined}
         packages={packages}
         legacyInstallMode={legacyInstallMode}
+        installInParallel={installInParallel}
         onSelectProfile={handleSelectProfile}
         onToggleMod={(profileId, modUuid) => toggleMod(profileId, modUuid, legacyInstallMode)}
         onViewModDetails={(pkg) => setSelectedMod(pkg)}
@@ -803,10 +807,7 @@ function App() {
         }}
         onUninstallMod={async (mod) => {
           if (!activeProfile) return;
-          const confirmed = await window.ipcRenderer.confirm('Uninstall Mod', `Uninstall ${mod.fullName}?`);
-          if (confirmed) {
-            await removeMod(activeProfile.id, mod.uuid4);
-          }
+          await removeMod(activeProfile.id, mod.uuid4);
         }}
         onResolvePackage={async (mod) => {
           // Extract mod name from fullName (format: "Author-ModName-Version")
