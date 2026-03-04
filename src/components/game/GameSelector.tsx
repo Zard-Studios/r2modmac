@@ -1,5 +1,7 @@
-
 import type { Community, CommunityPlatformInfo } from '../../types/thunderstore';
+import { useEffect } from 'react';
+
+const preloadedCommunityCovers = new Set<string>();
 
 interface GameSelectorProps {
     communities: Community[];
@@ -12,6 +14,21 @@ interface GameSelectorProps {
 }
 
 export function GameSelector({ communities, selectedCommunity, onSelect, communityImages, communityPlatforms, favoriteGames, onToggleFavorite }: GameSelectorProps) {
+    useEffect(() => {
+        const urls = communities
+            .map((community) => communityImages[community.identifier])
+            .filter((url): url is string => typeof url === 'string' && url.length > 0);
+
+        for (const url of urls) {
+            if (preloadedCommunityCovers.has(url)) continue;
+            preloadedCommunityCovers.add(url);
+
+            const img = new Image();
+            img.decoding = 'async';
+            img.src = url;
+        }
+    }, [communities, communityImages]);
+
 
     // Function to get initials from game name
     const getInitials = (name: string) => {
@@ -81,8 +98,10 @@ export function GameSelector({ communities, selectedCommunity, onSelect, communi
                         <img
                             src={imageUrl}
                             alt={community.name}
-                            className="absolute inset-0 w-full h-full object-cover opacity-0 transition-opacity duration-500 z-10"
-                            onLoad={(e) => e.currentTarget.classList.remove('opacity-0')}
+                            loading="eager"
+                            decoding="async"
+                            fetchPriority="auto"
+                            className="absolute inset-0 w-full h-full object-cover z-10"
                             onError={(e) => { e.currentTarget.style.display = 'none'; }}
                         />
                     ) : null}
