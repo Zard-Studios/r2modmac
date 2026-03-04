@@ -1,7 +1,7 @@
 {
   "name": "r2modmac",
   "private": true,
-  "version": "0.4.5",
+  "version": "0.5.2",
   "type": "module",
   "scripts": {
     "dev": "tauri dev",

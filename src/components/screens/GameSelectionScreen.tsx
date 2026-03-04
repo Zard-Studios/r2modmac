@@ -82,16 +82,16 @@ export function GameSelectionScreen({
                     <p className="text-xl text-gray-400">Select a game to begin managing your mods</p>
                 </div>
 
-                <div className="w-full px-4 mb-8 space-y-3">
-                    <div className="flex flex-col sm:flex-row gap-3 items-stretch">
-                        <div className="relative flex-1">
+                <div className="w-full px-4 mb-8 space-y-5">
+                    <div className="flex items-stretch gap-3 min-w-0">
+                        <div className="relative flex-1 min-w-0">
                             <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-gray-500">
                                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                                 </svg>
                             </div>
                             <input
-                                className="w-full h-full bg-gray-800 border border-gray-700 pl-12 pr-32 py-4 rounded-xl text-lg text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 transition-all shadow-lg"
+                                className="w-full h-full min-h-[56px] bg-gray-800 border border-gray-700 pl-12 pr-24 py-3 sm:py-4 rounded-xl text-base sm:text-lg text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 transition-all shadow-lg"
                                 placeholder="Search for a game..."
                                 value={gameSearchQuery}
                                 onChange={e => setGameSearchQuery(e.target.value)}
@@ -101,14 +101,14 @@ export function GameSelectionScreen({
                             <div className="absolute right-1 top-1/2 -translate-y-1/2 flex bg-gray-800 rounded-lg p-1 border border-gray-700 overflow-hidden" title="Platform Filter">
                                 {/* Sliding Background */}
                                 <div
-                                    className={`absolute top-1 left-1 w-10 h-10 bg-gray-600 rounded-md transition-transform duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${showWindowsGame && !showMacGame ? 'translate-x-0' : 'translate-x-10'}`}
+                                    className={`absolute top-1 left-1 w-9 h-9 bg-gray-600 rounded-md transition-transform duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${showWindowsGame && !showMacGame ? 'translate-x-0' : 'translate-x-9'}`}
                                 />
                                 <button
                                     onClick={() => {
                                         setShowWindowsGame(true);
                                         setShowMacGame(false);
                                     }}
-                                    className={`relative z-10 w-10 h-10 rounded-md items-center justify-center flex transition-colors ${showWindowsGame && !showMacGame ? 'text-white' : 'text-gray-400 hover:text-white'}`}
+                                    className={`relative z-10 w-9 h-9 rounded-md items-center justify-center flex transition-colors ${showWindowsGame && !showMacGame ? 'text-white' : 'text-gray-400 hover:text-white'}`}
                                     title="Windows Games Only"
                                 >
                                     <svg xmlns="http://www.w3.org/2000/svg" className="w-[14px] h-[14px]" viewBox="0 0 24 24" fill="currentColor">
@@ -120,7 +120,7 @@ export function GameSelectionScreen({
                                         setShowMacGame(true);
                                         setShowWindowsGame(false);
                                     }}
-                                    className={`relative z-10 w-10 h-10 rounded-md items-center justify-center flex transition-colors ${!showWindowsGame && showMacGame ? 'text-white' : 'text-gray-400 hover:text-white'}`}
+                                    className={`relative z-10 w-9 h-9 rounded-md items-center justify-center flex transition-colors ${!showWindowsGame && showMacGame ? 'text-white' : 'text-gray-400 hover:text-white'}`}
                                     title="macOS Games Only"
                                 >
                                     <svg xmlns="http://www.w3.org/2000/svg" className="w-[12px] h-[14px]" viewBox="0 0 384 512" fill="currentColor">
@@ -132,7 +132,7 @@ export function GameSelectionScreen({
 
                         <button
                             onClick={onOpenPreferences}
-                            className="p-4 bg-gray-800 border border-gray-700 rounded-xl hover:bg-gray-700 hover:border-gray-600 transition-all text-gray-400 hover:text-white shadow-lg flex-shrink-0 flex items-center justify-center"
+                            className="h-14 w-14 bg-gray-800 border border-gray-700 rounded-xl hover:bg-gray-700 hover:border-gray-600 transition-all text-gray-400 hover:text-white shadow-lg flex-none flex items-center justify-center"
                             title="Preferences"
                         >
                             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">

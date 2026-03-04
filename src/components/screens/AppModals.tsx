@@ -120,6 +120,10 @@ export function AppModals({
                 title={progressState.title}
                 progress={progressState.progress}
                 currentTask={progressState.currentTask}
+                downloadedBytes={progressState.downloadedBytes}
+                totalBytes={progressState.totalBytes}
+                downloadSpeedBps={progressState.downloadSpeedBps}
+                activeDownloads={progressState.activeDownloads}
             />
 
             <UninstallModal

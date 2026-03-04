@@ -1,12 +1,48 @@
+import type { ProgressState } from '../../types/progress';
+
 interface ProgressModalProps {
     isOpen: boolean;
     title: string;
     progress: number; // 0 to 100
     currentTask: string;
+    downloadSpeedBps?: ProgressState['downloadSpeedBps'];
+    downloadedBytes?: ProgressState['downloadedBytes'];
+    totalBytes?: ProgressState['totalBytes'];
+    activeDownloads?: ProgressState['activeDownloads'];
 }
 
-export function ProgressModal({ isOpen, title, progress, currentTask }: ProgressModalProps) {
+const formatBytes = (bytes?: number) => {
+    if (typeof bytes !== 'number' || Number.isNaN(bytes) || bytes <= 0) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB'];
+    let value = bytes;
+    let unitIndex = 0;
+    while (value >= 1024 && unitIndex < units.length - 1) {
+        value /= 1024;
+        unitIndex++;
+    }
+    return `${value.toFixed(value >= 100 ? 0 : value >= 10 ? 1 : 2)} ${units[unitIndex]}`;
+};
+
+const formatSpeed = (speedBps?: number) => {
+    if (typeof speedBps !== 'number' || Number.isNaN(speedBps) || speedBps <= 0) return '--';
+    return `${formatBytes(speedBps)}/s`;
+};
+
+export function ProgressModal({
+    isOpen,
+    title,
+    progress,
+    currentTask,
+    downloadSpeedBps,
+    downloadedBytes,
+    totalBytes,
+    activeDownloads,
+}: ProgressModalProps) {
     if (!isOpen) return null;
+    const hasDownloadStats = typeof downloadedBytes === 'number' || typeof totalBytes === 'number' || typeof downloadSpeedBps === 'number';
+    const transferLabel = typeof totalBytes === 'number' && totalBytes > 0
+        ? `${formatBytes(downloadedBytes)} / ${formatBytes(totalBytes)}`
+        : `${formatBytes(downloadedBytes)} downloaded`;
 
     return (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
@@ -24,6 +60,16 @@ export function ProgressModal({ isOpen, title, progress, currentTask }: Progress
                         style={{ width: `${progress}%` }}
                     ></div>
                 </div>
+
+                {hasDownloadStats && (
+                    <div className="mb-4 flex items-center justify-between text-xs text-gray-400">
+                        <span>{transferLabel}</span>
+                        <span>
+                            {formatSpeed(downloadSpeedBps)}
+                            {typeof activeDownloads === 'number' && activeDownloads > 1 ? ` • ${activeDownloads} parallel` : ''}
+                        </span>
+                    </div>
+                )}
 
                 <div className="flex justify-center">
                     <svg className="animate-spin h-8 w-8 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">

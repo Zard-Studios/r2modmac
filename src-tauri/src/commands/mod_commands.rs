@@ -1,4 +1,5 @@
 use std::fs;
+use futures_util::StreamExt;
 use tauri::{command, AppHandle, Emitter, Manager};
 use crate::models::shared::*;
 use crate::utils::file_ops::*;
@@ -134,9 +135,70 @@ pub async fn install_mod(app: AppHandle, profile_id: String, download_url: Strin
 
     eprintln!("[install_mod] Installing {} directly to game: {:?}", mod_name, game_dir);
 
-    // Download
-    let response = reqwest::get(&download_url).await.map_err(|e| e.to_string())?;
-    let bytes = response.bytes().await.map_err(|e| e.to_string())?;
+    // Download with live progress events (bytes + speed)
+    let client = reqwest::Client::new();
+    let response = client
+        .get(&download_url)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(format!("Download failed with status {}", status));
+    }
+
+    let total_bytes = response.content_length();
+    let mut stream = response.bytes_stream();
+    let mut bytes: Vec<u8> = Vec::new();
+    let mut downloaded: u64 = 0;
+    let download_started = std::time::Instant::now();
+    let mut last_emit = std::time::Instant::now();
+
+    while let Some(next_chunk) = stream.next().await {
+        let chunk = next_chunk.map_err(|e| e.to_string())?;
+        downloaded += chunk.len() as u64;
+        bytes.extend_from_slice(&chunk);
+
+        let now = std::time::Instant::now();
+        if now.duration_since(last_emit).as_millis() >= 120 {
+            let elapsed = download_started.elapsed().as_secs_f64().max(0.001);
+            let speed_bps = downloaded as f64 / elapsed;
+            let progress_percent = total_bytes
+                .map(|total| {
+                    ((downloaded as f64 / total as f64) * 100.0)
+                        .round()
+                        .clamp(0.0, 100.0) as u8
+                })
+                .unwrap_or(0);
+
+            let _ = app.emit(
+                "mod-download-progress",
+                serde_json::json!({
+                    "mod_name": mod_name.as_str(),
+                    "downloaded_bytes": downloaded,
+                    "total_bytes": total_bytes,
+                    "speed_bps": speed_bps,
+                    "progress_percent": progress_percent,
+                    "done": false
+                }),
+            );
+            last_emit = now;
+        }
+    }
+
+    let elapsed = download_started.elapsed().as_secs_f64().max(0.001);
+    let final_speed_bps = downloaded as f64 / elapsed;
+    let _ = app.emit(
+        "mod-download-progress",
+        serde_json::json!({
+            "mod_name": mod_name.as_str(),
+            "downloaded_bytes": downloaded,
+            "total_bytes": total_bytes,
+            "speed_bps": final_speed_bps,
+            "progress_percent": 100,
+            "done": true
+        }),
+    );
     
     // Smart detection: Check if this is BepInEx framework (not just "BepInExPack/" prefix)
     let cursor = std::io::Cursor::new(&bytes);
@@ -516,6 +578,7 @@ pub async fn copy_mod_from_cache(app: AppHandle, profile_id: String, mod_name: S
 #[command]
 pub async fn fetch_packages(app: AppHandle, state: tauri::State<'_, AppState>, game_id: String) -> Result<usize, String> {
     use std::time::SystemTime;
+    use std::time::Duration;
 
     let start_time = SystemTime::now();
     
@@ -535,24 +598,71 @@ pub async fn fetch_packages(app: AppHandle, state: tauri::State<'_, AppState>, g
     eprintln!("[fetch_packages] Fetching index from: {}", index_url);
     
     let client = reqwest::Client::builder()
+        .user_agent("r2modmac/0.5.2")
+        .connect_timeout(Duration::from_secs(8))
+        .timeout(Duration::from_secs(25))
         .gzip(true)
         .build()
         .map_err(|e| e.to_string())?;
-        
-    let resp = client.get(&index_url)
+
+    fn decode_gzip_or_plain(bytes: &[u8], label: &str) -> Result<String, String> {
+        // Thunderstore blobs are usually raw gzip bytes, but support plain JSON fallback.
+        if bytes.starts_with(&[0x1f, 0x8b]) {
+            let mut gz = flate2::read::GzDecoder::new(bytes);
+            let mut out = String::new();
+            std::io::Read::read_to_string(&mut gz, &mut out)
+                .map_err(|e| format!("Failed to decompress {}: {}", label, e))?;
+            Ok(out)
+        } else {
+            String::from_utf8(bytes.to_vec())
+                .map_err(|e| format!("Failed to decode {} as utf-8: {}", label, e))
+        }
+    }
+
+    fn parse_index_chunk_urls(index_json: &str) -> Result<Vec<String>, String> {
+        let parsed: serde_json::Value = serde_json::from_str(index_json)
+            .map_err(|e| format!("Failed to parse index JSON: {}", e))?;
+
+        let extract_urls = |arr: &[serde_json::Value]| -> Vec<String> {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        };
+
+        if let Some(arr) = parsed.as_array() {
+            let urls = extract_urls(arr);
+            if !urls.is_empty() {
+                return Ok(urls);
+            }
+        }
+
+        if let Some(arr) = parsed.get("chunks").and_then(|v| v.as_array()) {
+            let urls = extract_urls(arr);
+            if !urls.is_empty() {
+                return Ok(urls);
+            }
+        }
+
+        Err("Index JSON has no valid chunk URLs".to_string())
+    }
+
+    let resp = client
+        .get(&index_url)
         .send()
         .await
         .map_err(|e| format!("Failed to fetch index: {}", e))?;
-        
-    // The index is a GZIP compressed JSON array of strings (URLs)
+    if !resp.status().is_success() {
+        return Err(format!("Index request failed with status {}", resp.status()));
+    }
+
     let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
-    let mut gz = flate2::read::GzDecoder::new(&bytes[..]);
-    let mut s = String::new();
-    std::io::Read::read_to_string(&mut gz, &mut s).map_err(|e| format!("Failed to decompress index: {}", e))?;
-    
-    let chunk_urls: Vec<String> = serde_json::from_str(&s).map_err(|e| format!("Failed to parse index: {}", e))?;
+    let index_json = decode_gzip_or_plain(&bytes, "index")?;
+    let chunk_urls: Vec<String> = parse_index_chunk_urls(&index_json)?;
     let total_chunks = chunk_urls.len();
     eprintln!("[fetch_packages] Found {} chunks", total_chunks);
+    if total_chunks == 0 {
+        return Ok(0);
+    }
 
     // 2. Prepare Cache Directory
     let cache_dir = app.path().app_cache_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")).join("chunks");
@@ -583,50 +693,114 @@ pub async fn fetch_packages(app: AppHandle, state: tauri::State<'_, AppState>, g
             }
         }
         
-        // Download and Decompress
-        let resp = client.get(url).send().await.map_err(|e| e.to_string())?;
-        let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
-        let mut gz = flate2::read::GzDecoder::new(&bytes[..]);
-        let mut json_str = String::new();
-        std::io::Read::read_to_string(&mut gz, &mut json_str).map_err(|e| e.to_string())?;
+        let mut last_error: Option<String> = None;
+        for attempt in 1..=3 {
+            let resp = match client.get(url).send().await {
+                Ok(resp) => resp,
+                Err(e) => {
+                    last_error = Some(format!("Attempt {} network error: {}", attempt, e));
+                    tokio::time::sleep(Duration::from_millis(250 * attempt as u64)).await;
+                    continue;
+                }
+            };
+
+            if !resp.status().is_success() {
+                last_error = Some(format!("Attempt {} failed with status {}", attempt, resp.status()));
+                tokio::time::sleep(Duration::from_millis(250 * attempt as u64)).await;
+                continue;
+            }
+
+            let bytes = match resp.bytes().await {
+                Ok(bytes) => bytes,
+                Err(e) => {
+                    last_error = Some(format!("Attempt {} failed reading body: {}", attempt, e));
+                    tokio::time::sleep(Duration::from_millis(250 * attempt as u64)).await;
+                    continue;
+                }
+            };
+
+            let json_str = if bytes.starts_with(&[0x1f, 0x8b]) {
+                let mut gz = flate2::read::GzDecoder::new(&bytes[..]);
+                let mut out = String::new();
+                match std::io::Read::read_to_string(&mut gz, &mut out) {
+                    Ok(_) => out,
+                    Err(e) => {
+                        last_error = Some(format!("Attempt {} failed decompressing gzip: {}", attempt, e));
+                        tokio::time::sleep(Duration::from_millis(250 * attempt as u64)).await;
+                        continue;
+                    }
+                }
+            } else {
+                match String::from_utf8(bytes.to_vec()) {
+                    Ok(out) => out,
+                    Err(e) => {
+                        last_error = Some(format!("Attempt {} invalid utf-8 chunk: {}", attempt, e));
+                        tokio::time::sleep(Duration::from_millis(250 * attempt as u64)).await;
+                        continue;
+                    }
+                }
+            };
+
+            let mut packages: Vec<serde_json::Value> = match serde_json::from_str(&json_str) {
+                Ok(packages) => packages,
+                Err(e) => {
+                    last_error = Some(format!("Attempt {} failed parsing JSON chunk: {}", attempt, e));
+                    tokio::time::sleep(Duration::from_millis(250 * attempt as u64)).await;
+                    continue;
+                }
+            };
         
-        // Parse
-        let mut packages: Vec<serde_json::Value> = serde_json::from_str(&json_str).map_err(|e| e.to_string())?;
+            // Filter out Manager packages (e.g. r2modman, Thunderstore Mod Manager) if they appear
+            packages.retain(|pkg| {
+                let full_name = pkg["full_name"].as_str().unwrap_or("");
+                !full_name.contains("ebkr-r2modman") && !full_name.contains("Tslat-ThunderstoreModManager")
+            });
         
-        // Filter out Manager packages (e.g. r2modman, Thunderstore Mod Manager) if they appear
-        packages.retain(|pkg| {
-            let full_name = pkg["full_name"].as_str().unwrap_or("");
-            !full_name.contains("ebkr-r2modman") && !full_name.contains("Tslat-ThunderstoreModManager")
-        });
+            // Save to cache (Async)
+            // We re-serialize to save clean JSON
+            if let Ok(cache_data) = serde_json::to_vec(&packages) {
+                let _ = tokio::fs::write(&cache_file, cache_data).await;
+            }
         
-        // Save to cache (Async)
-        // We re-serialize to save clean JSON
-        if let Ok(cache_data) = serde_json::to_vec(&packages) {
-            let _ = tokio::fs::write(&cache_file, cache_data).await;
+            return Ok(packages);
         }
-        
-        Ok(packages)
+
+        Err(last_error.unwrap_or_else(|| "Failed to load chunk".to_string()))
     }
 
-    // 3. Load FIRST chunk immediately for instant UI
-    if let Some(first_url) = chunk_urls.first() {
+    // 3. Load FIRST successful chunk immediately for instant UI
+    // If chunk #0 is slow/unavailable, try next few chunks to avoid infinite spinner.
+    let mut first_loaded_index: Option<usize> = None;
+    let first_attempts = std::cmp::min(5, chunk_urls.len());
+    for idx in 0..first_attempts {
+        let first_url = &chunk_urls[idx];
         match load_chunk(&client, first_url, &cache_dir).await {
             Ok(first_packages) => {
                 let count = first_packages.len();
-                eprintln!("[fetch_packages] First chunk loaded: {} packages (instant display ready!)", count);
+                eprintln!("[fetch_packages] First chunk loaded (index {}): {} packages", idx, count);
                 
                 // Update state immediately so UI can show something
                 let mut packages_lock = state.packages.write().await;
                 packages_lock.insert(game_id.clone(), first_packages);
+                first_loaded_index = Some(idx);
+                break;
             }
             Err(e) => {
-                eprintln!("[fetch_packages] Failed to load first chunk: {}", e);
+                eprintln!("[fetch_packages] Failed first chunk attempt idx {}: {}", idx, e);
             }
         }
     }
 
+    if first_loaded_index.is_none() {
+        return Err("Failed to load initial package chunks (network timeout or CDN issue)".to_string());
+    }
+
     // 4. Load remaining chunks in parallel (streaming to state)
-    let remaining_urls: Vec<String> = chunk_urls.into_iter().skip(1).collect();
+    let remaining_urls: Vec<String> = chunk_urls
+        .into_iter()
+        .enumerate()
+        .filter_map(|(idx, url)| if Some(idx) == first_loaded_index { None } else { Some(url) })
+        .collect();
     
     if !remaining_urls.is_empty() {
         let packages_arc = state.packages.clone();
@@ -636,28 +810,25 @@ pub async fn fetch_packages(app: AppHandle, state: tauri::State<'_, AppState>, g
         
         // Spawn background task for remaining chunks
         tokio::spawn(async move {
-            let mut tasks = Vec::new();
-            
-            for url in remaining_urls {
-                let cache_dir = cache_dir_clone.clone();
-                let client = client.clone();
-                
-                tasks.push(tokio::spawn(async move {
-                    load_chunk(&client, &url, &cache_dir).await
-                }));
-            }
+            let parallelism = 10usize;
+            let mut stream = futures_util::stream::iter(remaining_urls)
+                .map(|url| {
+                    let cache_dir = cache_dir_clone.clone();
+                    let client = client.clone();
+                    async move { load_chunk(&client, &url, &cache_dir).await }
+                })
+                .buffer_unordered(parallelism);
 
             // Collect and add to state as they complete
-            for task in futures_util::future::join_all(tasks).await {
-                match task {
-                    Ok(Ok(packages)) => {
+            while let Some(result) = stream.next().await {
+                match result {
+                    Ok(packages) => {
                         let mut packages_lock = packages_arc.write().await;
                         if let Some(existing) = packages_lock.get_mut(&game_id_clone) {
                             existing.extend(packages);
                         }
                     }
-                    Ok(Err(e)) => eprintln!("[fetch_packages] Chunk error: {}", e),
-                    Err(e) => eprintln!("[fetch_packages] Task error: {}", e),
+                    Err(e) => eprintln!("[fetch_packages] Chunk error: {}", e),
                 }
             }
             

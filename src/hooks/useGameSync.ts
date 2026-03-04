@@ -1,12 +1,9 @@
+import { listen } from '@tauri-apps/api/event';
 import type { Package } from '../types/thunderstore';
 import { useProfileStore } from '../store/useProfileStore';
+import type { ModDownloadProgressEvent, ProgressSetter } from '../types/progress';
 
 const MAX_PARALLEL_OPS = 10;
-
-interface ProgressSetter {
-    (state: { isOpen: boolean; title: string; progress: number; currentTask: string }): void;
-    (updater: (prev: { isOpen: boolean; title: string; progress: number; currentTask: string }) => { isOpen: boolean; title: string; progress: number; currentTask: string }): void;
-}
 
 interface UseGameSyncProps {
     activeProfileId: string | null;
@@ -96,10 +93,16 @@ export function useGameSync({
                     title: 'Syncing to Game',
                     progress: 0,
                     currentTask: `Installing ${syncResult.to_install.length} missing mods...`,
+                    downloadSpeedBps: undefined,
+                    downloadedBytes: undefined,
+                    totalBytes: undefined,
+                    activeDownloads: 0,
                 });
 
                 let completed = 0;
                 const total = syncResult.to_install.length;
+                const trackedModKeys = syncResult.to_install.map((modKey: string) => modKey.toLowerCase());
+                const activeDownloads = new Map<string, { downloaded: number; total?: number; speed: number; progress: number }>();
                 const updateProgress = (task: string) => {
                     setProgressState(prev => ({
                         ...prev,
@@ -108,8 +111,67 @@ export function useGameSync({
                     }));
                 };
 
+                const recomputeDownloadState = () => {
+                    const inFlight = Array.from(activeDownloads.values());
+                    if (inFlight.length === 0) {
+                        setProgressState(prev => ({
+                            ...prev,
+                            downloadSpeedBps: undefined,
+                            downloadedBytes: undefined,
+                            totalBytes: undefined,
+                            activeDownloads: 0,
+                        }));
+                        return;
+                    }
+
+                    const partialUnits = inFlight.reduce((sum, item) => sum + (Math.min(100, Math.max(0, item.progress)) / 100), 0);
+                    const overallProgress = Math.min(
+                        99,
+                        Math.round(((completed + partialUnits) / Math.max(total, 1)) * 100)
+                    );
+
+                    const downloadedBytes = inFlight.reduce((sum, item) => sum + item.downloaded, 0);
+                    const knownTotals = inFlight.filter(item => typeof item.total === 'number' && (item.total ?? 0) > 0);
+                    const totalBytes = knownTotals.length === inFlight.length
+                        ? knownTotals.reduce((sum, item) => sum + (item.total ?? 0), 0)
+                        : undefined;
+                    const totalSpeed = inFlight.reduce((sum, item) => sum + item.speed, 0);
+
+                    setProgressState(prev => ({
+                        ...prev,
+                        progress: Math.max(prev.progress, overallProgress),
+                        downloadedBytes,
+                        totalBytes,
+                        downloadSpeedBps: totalSpeed,
+                        activeDownloads: inFlight.length,
+                    }));
+                };
+
+                const unlistenDownloadProgress = await listen<ModDownloadProgressEvent>('mod-download-progress', (event) => {
+                    const payload = event.payload;
+                    if (!payload || !payload.mod_name) return;
+
+                    const modNameLower = payload.mod_name.toLowerCase();
+                    const isTracked = trackedModKeys.some((modKey) => modNameLower.startsWith(modKey));
+                    if (!isTracked) return;
+
+                    if (payload.done) {
+                        activeDownloads.delete(payload.mod_name);
+                    } else {
+                        activeDownloads.set(payload.mod_name, {
+                            downloaded: Math.max(0, payload.downloaded_bytes || 0),
+                            total: payload.total_bytes && payload.total_bytes > 0 ? payload.total_bytes : undefined,
+                            speed: Math.max(0, payload.speed_bps || 0),
+                            progress: Math.min(100, Math.max(0, payload.progress_percent || 0)),
+                        });
+                    }
+
+                    recomputeDownloadState();
+                });
+
                 const processMod = async (modKey: string) => {
                     let status = 'Installed';
+                    let trackedFullName: string | null = null;
                     try {
                     const modInProfile = activeProfile.mods.find(m => {
                         if (!m.enabled) return false;
@@ -136,6 +198,7 @@ export function useGameSync({
                                 status = 'Skipped (version not found)';
                                 return;
                             }
+                            trackedFullName = version.full_name;
                             await window.ipcRenderer.installMod(activeProfile.id, version.download_url, version.full_name, gamePath, legacyInstallMode);
                             actuallyInstalled++;
                             status = 'Installed';
@@ -146,20 +209,35 @@ export function useGameSync({
                         failedInstalls.push(`${modKey} (${String(err?.message || err || 'unknown error')})`);
                         status = 'Failed';
                     } finally {
+                        if (trackedFullName) {
+                            activeDownloads.delete(trackedFullName);
+                            recomputeDownloadState();
+                        }
                         completed++;
                         updateProgress(`${status} ${completed}/${total}: ${modKey}`);
                     }
                 };
 
-                for (let i = 0; i < syncResult.to_install.length; i += concurrency) {
-                    const batch = syncResult.to_install.slice(i, i + concurrency);
-                    if (concurrency === 1) {
-                        await processMod(batch[0]);
-                    } else {
-                        await Promise.all(batch.map((modKey) => processMod(modKey)));
+                try {
+                    for (let i = 0; i < syncResult.to_install.length; i += concurrency) {
+                        const batch = syncResult.to_install.slice(i, i + concurrency);
+                        if (concurrency === 1) {
+                            await processMod(batch[0]);
+                        } else {
+                            await Promise.all(batch.map((modKey) => processMod(modKey)));
+                        }
                     }
+                } finally {
+                    unlistenDownloadProgress();
                 }
-                setProgressState(prev => ({ ...prev, isOpen: false }));
+                setProgressState(prev => ({
+                    ...prev,
+                    isOpen: false,
+                    downloadSpeedBps: undefined,
+                    downloadedBytes: undefined,
+                    totalBytes: undefined,
+                    activeDownloads: 0,
+                }));
             }
 
             updateProfile(activeProfile.id, {

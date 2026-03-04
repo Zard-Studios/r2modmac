@@ -17,6 +17,7 @@ import { AppModals } from './components/screens/AppModals';
 import type { AppSettings, UpdateInfo } from './types/electron';
 import { MAC_IMAGE_CACHE_KEY, MAC_PLATFORM_CACHE_KEY } from './constants/cacheKeys';
 import type { PreferencesSettings } from './components/modals/PreferencesModal';
+import type { ProgressState } from './types/progress';
 
 import { useModActions } from './hooks/useModActions';
 import { useProfileActions } from './hooks/useProfileActions';
@@ -200,7 +201,7 @@ function App() {
 
   const [selectedMod, setSelectedMod] = useState<Package | null>(null)
   // Game Selector state moved to component
-  const [progressState, setProgressState] = useState({
+  const [progressState, setProgressState] = useState<ProgressState>({
     isOpen: false,
     title: '',
     progress: 0,
@@ -518,15 +519,38 @@ function App() {
       setAllPackages([])
     }
 
+    const withTimeout = async <T,>(promise: Promise<T>, ms: number, label: string): Promise<T> => {
+      let timeoutId: ReturnType<typeof setTimeout> | undefined;
+      try {
+        return await Promise.race([
+          promise,
+          new Promise<T>((_, reject) => {
+            timeoutId = setTimeout(() => reject(new Error(`${label} timed out after ${Math.round(ms / 1000)}s`)), ms);
+          }),
+        ]);
+      } finally {
+        if (timeoutId) clearTimeout(timeoutId);
+      }
+    };
+
     try {
       if (pageNum === 0 && reset) {
-        await window.ipcRenderer.fetchPackages(communityId)
+        await withTimeout(
+          window.ipcRenderer.fetchPackages(communityId),
+          45_000,
+          'Package fetch'
+        );
         // Now that cache is populated, fetch available categories
-        const cats = await window.ipcRenderer.getAvailableCategories(communityId)
+        const cats = await withTimeout(
+          window.ipcRenderer.getAvailableCategories(communityId),
+          10_000,
+          'Category fetch'
+        );
         setAvailableCategories(cats)
       }
 
-      const newPackages = await window.ipcRenderer.getPackages(
+      const newPackages = await withTimeout(
+        window.ipcRenderer.getPackages(
         communityId,
         pageNum,
         PAGE_SIZE,
@@ -538,7 +562,10 @@ function App() {
         filterOptions.categories,
         filterOptions.mods,
         filterOptions.modpacks
-      )
+      ),
+        20_000,
+        'Package query'
+      );
 
 
 
@@ -547,6 +574,13 @@ function App() {
       setAllPackages(updated)
     } catch (err) {
       console.error('Failed to load packages', err)
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.toLowerCase().includes('timed out')) {
+        await window.ipcRenderer.alert(
+          'Network Timeout',
+          'Thunderstore took too long to respond. Please retry in a few seconds.'
+        );
+      }
     } finally {
       setLoadingMods(false)
     }
