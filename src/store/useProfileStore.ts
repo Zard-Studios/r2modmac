@@ -22,7 +22,7 @@ interface ProfileState {
     setProfiles: (profiles: Profile[]) => void;
     addMod: (profileId: string, mod: InstalledMod) => void;
     removeMod: (profileId: string, modId: string) => Promise<void>;
-    toggleMod: (profileId: string, modId: string) => Promise<void>;
+    toggleMod: (profileId: string, modId: string, syncFiles?: boolean) => Promise<void>;
     loadProfiles: () => Promise<void>;
 }
 
@@ -37,6 +37,7 @@ export const useProfileStore = create<ProfileState>((set) => ({
             gameIdentifier,
             platform: platform || 'windows',
             mods: [],
+            needs_sync: false,
             dateCreated: Date.now(),
             lastUsed: Date.now(),
         };
@@ -100,9 +101,16 @@ export const useProfileStore = create<ProfileState>((set) => ({
             const updatedProfiles = [...state.profiles];
             const profile = { ...updatedProfiles[profileIndex] };
 
+            const normalizedMod: InstalledMod = {
+                ...mod,
+                pending_sync: mod.pending_sync ?? false,
+                synced_enabled: mod.synced_enabled ?? (mod.pending_sync ? undefined : mod.enabled),
+            };
+
             // Check if mod is already installed
-            if (!profile.mods.some(m => m.uuid4 === mod.uuid4)) {
-                profile.mods = [...profile.mods, mod];
+            if (!profile.mods.some(m => m.uuid4 === normalizedMod.uuid4)) {
+                profile.mods = [...profile.mods, normalizedMod];
+                profile.needs_sync = !!profile.needs_sync || profile.mods.some(m => m.pending_sync);
                 updatedProfiles[profileIndex] = profile;
                 debouncedSaveProfiles(updatedProfiles);
             }
@@ -138,6 +146,9 @@ export const useProfileStore = create<ProfileState>((set) => ({
             const profile = { ...updatedProfiles[profileIndex] };
 
             profile.mods = profile.mods.filter(m => m.uuid4 !== modId);
+            // Removal cannot be represented by per-mod pending markers after deletion,
+            // so keep profile-level pending sync true.
+            profile.needs_sync = true;
             updatedProfiles[profileIndex] = profile;
             debouncedSaveProfiles(updatedProfiles);
 
@@ -145,7 +156,7 @@ export const useProfileStore = create<ProfileState>((set) => ({
         });
     },
 
-    toggleMod: async (profileId, modId) => {
+    toggleMod: async (profileId, modId, syncFiles = true) => {
         // Get current state to find the mod
         const state = useProfileStore.getState();
         const profile = state.profiles.find(p => p.id === profileId);
@@ -161,10 +172,12 @@ export const useProfileStore = create<ProfileState>((set) => ({
         const modName = parts.length >= 2 ? `${parts[0]}-${parts[1]}` : mod.fullName;
 
         try {
-            // Call backend to actually rename the DLL files and sync to game if applicable
-            await window.ipcRenderer.toggleMod(profileId, modName, newEnabled, profile.gameIdentifier, profile.platform);
+            if (syncFiles) {
+                // Sync profile change to filesystem/game only when explicitly requested
+                await window.ipcRenderer.toggleMod(profileId, modName, newEnabled, profile.gameIdentifier, profile.platform);
+            }
 
-            // Update store state after successful backend call
+            // Update store state after successful operation
             set((state) => {
                 const profileIndex = state.profiles.findIndex(p => p.id === profileId);
                 if (profileIndex === -1) return state;
@@ -174,10 +187,15 @@ export const useProfileStore = create<ProfileState>((set) => ({
 
                 profile.mods = profile.mods.map(m => {
                     if (m.uuid4 === modId) {
-                        return { ...m, enabled: newEnabled };
+                        const pendingSync =
+                            m.synced_enabled === undefined
+                                ? true
+                                : newEnabled !== m.synced_enabled;
+                        return { ...m, enabled: newEnabled, pending_sync: pendingSync };
                     }
                     return m;
                 });
+                profile.needs_sync = profile.mods.some(m => m.pending_sync);
 
                 updatedProfiles[profileIndex] = profile;
                 debouncedSaveProfiles(updatedProfiles);
@@ -190,7 +208,22 @@ export const useProfileStore = create<ProfileState>((set) => ({
     },
 
     loadProfiles: async () => {
-        const profiles = await window.ipcRenderer.getProfiles();
+        const rawProfiles = await window.ipcRenderer.getProfiles();
+        const profiles = rawProfiles.map((profile) => {
+            const mods = (profile.mods || []).map((mod) => {
+                const pendingSync = !!mod.pending_sync;
+                return {
+                    ...mod,
+                    pending_sync: pendingSync,
+                    synced_enabled: mod.synced_enabled ?? (pendingSync ? undefined : mod.enabled),
+                };
+            });
+            return {
+                ...profile,
+                mods,
+                needs_sync: !!profile.needs_sync || mods.some((m: InstalledMod) => m.pending_sync),
+            };
+        });
         set({ profiles });
     }
 }));

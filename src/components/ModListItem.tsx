@@ -9,9 +9,13 @@ interface ModListItemProps {
     onClick?: () => void;
     installStatus: 'installed' | 'not_installed' | 'update_available';
     isBrowsing?: boolean;
+    legacyInstallMode?: boolean;
 }
 
-export function ModListItem({ mod, onInstall, onUninstall, onClick, installStatus, isBrowsing }: ModListItemProps) {
+export function ModListItem({ mod, onInstall, onUninstall, onClick, installStatus, isBrowsing, legacyInstallMode = false }: ModListItemProps) {
+    const installedLabel = legacyInstallMode ? 'Installed' : 'Added';
+    const installLabel = legacyInstallMode ? 'Install' : 'Add';
+
     // Format bytes to human readable string (KB, MB, GB)
     const formatBytes = (bytes: number): string => {
         if (bytes >= 1000 * 1000 * 1000) {
@@ -131,7 +135,7 @@ export function ModListItem({ mod, onInstall, onUninstall, onClick, installStatu
                                 : 'bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-900/20 active:scale-95'
                             }`}
                     >
-                        {installStatus === 'installed' ? 'Installed' : installStatus === 'update_available' ? 'Update' : 'Install'}
+                        {installStatus === 'installed' ? installedLabel : installStatus === 'update_available' ? 'Update' : installLabel}
                     </button>
                 </div>
             )}

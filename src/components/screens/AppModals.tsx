@@ -7,7 +7,7 @@ import { ExportModal } from '../modals/ExportModal'
 import { CrossOverGuideModal } from '../modals/CrossOverGuideModal';
 import { MacOSGuideModal } from '../modals/MacOSGuideModal';
 import { UpdateModal } from '../modals/UpdateModal';
-import PreferencesModal from '../modals/PreferencesModal';
+import PreferencesModal, { type PreferencesSettings } from '../modals/PreferencesModal';
 import type { Package, PackageVersion } from '../../types/thunderstore'
 import type { UpdateInfo } from '../../types/electron';
 
@@ -45,8 +45,12 @@ export interface AppModalsProps {
     setHideMacOSGuide: (hide: boolean) => void;
     showPreferences: boolean;
     setShowPreferences: (show: boolean) => void;
+    preferences: PreferencesSettings;
+    onSavePreferences: (settings: PreferencesSettings) => Promise<void>;
+    hasHiddenGuideWarnings: boolean;
+    onRestoreGuideWarnings: () => Promise<void>;
+    onSetGuideHidden: (guide: 'crossover' | 'macos', hidden: boolean) => Promise<void>;
     legacyInstallMode: boolean;
-    setLegacyInstallMode: (mode: boolean) => void;
 }
 
 export function AppModals({
@@ -61,7 +65,9 @@ export function AppModals({
     showUpdateModal, setShowUpdateModal, updateInfo,
     showCrossOverGuide, setShowCrossOverGuide, hideCrossOverGuide, setHideCrossOverGuide,
     showMacOSGuide, setShowMacOSGuide, hideMacOSGuide, setHideMacOSGuide,
-    showPreferences, setShowPreferences, legacyInstallMode, setLegacyInstallMode
+    showPreferences, setShowPreferences, preferences, onSavePreferences,
+    hasHiddenGuideWarnings, onRestoreGuideWarnings, onSetGuideHidden,
+    legacyInstallMode
 }: AppModalsProps) {
 
     return (
@@ -105,6 +111,7 @@ export function AppModals({
                             : false
                     }
                     isBrowsing={isBrowsingMode}
+                    legacyInstallMode={legacyInstallMode}
                 />
             )}
 
@@ -184,6 +191,7 @@ export function AppModals({
                     onClose={() => setShowCrossOverGuide(false)}
                     onDontShowAgain={() => {
                         setHideCrossOverGuide(true);
+                        void onSetGuideHidden('crossover', true).catch((e) => console.error('Failed to persist CrossOver guide preference', e));
                         setShowCrossOverGuide(false);
                     }}
                 />
@@ -195,6 +203,7 @@ export function AppModals({
                     onClose={() => setShowMacOSGuide(false)}
                     onDontShowAgain={() => {
                         setHideMacOSGuide(true);
+                        void onSetGuideHidden('macos', true).catch((e) => console.error('Failed to persist macOS guide preference', e));
                         setShowMacOSGuide(false);
                     }}
                 />
@@ -203,16 +212,10 @@ export function AppModals({
             <PreferencesModal
                 isOpen={showPreferences}
                 onClose={() => setShowPreferences(false)}
-                settings={{ legacy_install_mode: legacyInstallMode }}
-                onSave={async (newSettings) => {
-                    setLegacyInstallMode(newSettings.legacy_install_mode);
-                    // Save to backend
-                    const currentSettings = await window.ipcRenderer.getSettings();
-                    await window.ipcRenderer.saveSettings({
-                        ...currentSettings,
-                        legacy_install_mode: newSettings.legacy_install_mode
-                    });
-                }}
+                settings={preferences}
+                onSave={onSavePreferences}
+                hasHiddenGuideWarnings={hasHiddenGuideWarnings}
+                onRestoreGuideWarnings={onRestoreGuideWarnings}
             />
         </>
     );

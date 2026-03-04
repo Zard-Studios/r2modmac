@@ -8,9 +8,12 @@ interface ModCardProps {
     onClick?: () => void;
     installStatus: 'installed' | 'not_installed' | 'update_available';
     isBrowsing?: boolean;
+    legacyInstallMode?: boolean;
 }
 
-export function ModCard({ mod, onInstall, onUninstall, onClick, installStatus, isBrowsing }: ModCardProps) {
+export function ModCard({ mod, onInstall, onUninstall, onClick, installStatus, isBrowsing, legacyInstallMode = false }: ModCardProps) {
+    const installedLabel = legacyInstallMode ? 'Installed' : 'Added';
+    const installLabel = legacyInstallMode ? 'Install' : 'Add';
     // Format bytes to human readable string (KB, MB, GB)
     const formatBytes = (bytes: number): string => {
         if (bytes >= 1000 * 1000 * 1000) {
@@ -122,14 +125,14 @@ export function ModCard({ mod, onInstall, onUninstall, onClick, installStatus, i
                                 }
                             }}
                             disabled={installStatus === 'installed'}
-                            className={`px-4 py-1.5 rounded-lg text-sm font-semibold transition-all duration-200 ${installStatus === 'installed'
-                                ? 'bg-green-500/10 text-green-500 border border-green-500/20 cursor-default'
-                                : installStatus === 'update_available'
-                                    ? 'bg-yellow-600 hover:bg-yellow-500 text-white shadow-lg shadow-yellow-900/20 active:scale-95'
-                                    : 'bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-900/20 active:scale-95'
+                        className={`px-4 py-1.5 rounded-lg text-sm font-semibold transition-all duration-200 ${installStatus === 'installed'
+                            ? 'bg-green-500/10 text-green-500 border border-green-500/20 cursor-default'
+                            : installStatus === 'update_available'
+                                ? 'bg-yellow-600 hover:bg-yellow-500 text-white shadow-lg shadow-yellow-900/20 active:scale-95'
+                                : 'bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-900/20 active:scale-95'
                                 }`}
                         >
-                            {installStatus === 'installed' ? 'Installed' : installStatus === 'update_available' ? 'Update' : 'Install'}
+                            {installStatus === 'installed' ? installedLabel : installStatus === 'update_available' ? 'Update' : installLabel}
                         </button>
                     )}
                 </div>

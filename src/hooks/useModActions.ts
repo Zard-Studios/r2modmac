@@ -34,6 +34,7 @@ interface UseModActionsProps {
     activeProfileId: string | null;
     selectedCommunity: string | null;
     legacyInstallMode: boolean;
+    installInParallel: boolean;
     uninstallModalState: {
         isOpen: boolean;
         pkg: Package | null;
@@ -49,11 +50,12 @@ export function useModActions({
     activeProfileId,
     selectedCommunity,
     legacyInstallMode,
+    installInParallel,
     uninstallModalState,
     setProgressState,
     setUninstallModalState,
 }: UseModActionsProps) {
-    const { profiles, addMod, removeMod } = useProfileStore();
+    const { profiles, addMod, removeMod, updateProfile } = useProfileStore();
 
     // ── Core recursive installer (handles dependencies) ──────────────────────────
     const installModWithDependencies = async (
@@ -89,10 +91,19 @@ export function useModActions({
             try {
                 const result = await window.ipcRenderer.lookupPackagesByNames(selectedCommunity, depsToInstall);
                 if (progressCounter) progressCounter.total += result.found.length;
-                for (const depPkg of result.found) {
-                    const depVersion = depPkg.versions[0];
-                    if (depVersion) {
-                        await installModWithDependencies(depPkg, depVersion, installedCache, profileIdToUse, progressCounter, gamePath);
+                const dependencyTasks = result.found
+                    .map((depPkg) => {
+                        const depVersion = depPkg.versions[0];
+                        if (!depVersion) return null;
+                        return () => installModWithDependencies(depPkg, depVersion, installedCache, profileIdToUse, progressCounter, gamePath);
+                    })
+                    .filter((task): task is () => Promise<void> => !!task);
+
+                if (installInParallel && dependencyTasks.length > 1) {
+                    await Promise.all(dependencyTasks.map((task) => task()));
+                } else {
+                    for (const task of dependencyTasks) {
+                        await task();
                     }
                 }
             } catch (err) {
@@ -161,8 +172,7 @@ export function useModActions({
             return;
         }
 
-        // New mode: metadata only
-        setProgressState({ isOpen: true, title: `Adding ${pkg.name}`, progress: 0, currentTask: 'Resolving dependencies...' });
+        // New mode: metadata only (no progress modal - this is not a real install)
         try {
             const modsToAdd: InstalledMod[] = [];
             const processed = new Set<string>();
@@ -172,31 +182,49 @@ export function useModActions({
                 processed.add(ver.full_name);
                 const profile = profiles.find(p => p.id === profileIdToUse);
                 if (profile?.mods.some(m => m.fullName === ver.full_name)) return;
-                modsToAdd.push({ uuid4: ver.uuid4, fullName: ver.full_name, versionNumber: ver.version_number, iconUrl: ver.icon, enabled: true });
+                modsToAdd.push({
+                    uuid4: ver.uuid4,
+                    fullName: ver.full_name,
+                    versionNumber: ver.version_number,
+                    iconUrl: ver.icon,
+                    enabled: true,
+                    pending_sync: true,
+                });
 
+                const depsToResolve: string[] = [];
                 for (const depString of ver.dependencies) {
                     const parts = depString.split('-');
                     if (parts.length < 3) continue;
                     const depFullName = `${parts[0]}-${parts[1]}`;
                     if (profile?.mods.some(m => m.fullName.startsWith(depFullName))) continue;
                     if (processed.has(depFullName)) continue;
-                    if (selectedCommunity) {
-                        const result = await window.ipcRenderer.lookupPackagesByNames(selectedCommunity, [depFullName]);
-                        for (const depPkg of result.found) {
-                            const depVer = depPkg.versions[0];
-                            if (depVer) await collectModAndDeps(depPkg, depVer);
-                        }
+                    depsToResolve.push(depFullName);
+                }
+
+                if (!selectedCommunity || depsToResolve.length === 0) return;
+
+                const result = await window.ipcRenderer.lookupPackagesByNames(selectedCommunity, depsToResolve);
+                const dependencyTasks = result.found
+                    .map((depPkg) => {
+                        const depVer = depPkg.versions[0];
+                        if (!depVer) return null;
+                        return () => collectModAndDeps(depPkg, depVer);
+                    })
+                    .filter((task): task is () => Promise<void> => !!task);
+
+                if (installInParallel && dependencyTasks.length > 1) {
+                    await Promise.all(dependencyTasks.map((task) => task()));
+                } else {
+                    for (const task of dependencyTasks) {
+                        await task();
                     }
                 }
             };
 
             await collectModAndDeps(pkg, version);
-            setProgressState(prev => ({ ...prev, progress: 80, currentTask: `Adding ${modsToAdd.length} mods to profile...` }));
             for (const mod of modsToAdd) addMod(profileIdToUse, mod);
-            setProgressState(prev => ({ ...prev, progress: 100, currentTask: 'Done! Click "Apply to Game" to download.' }));
-            setTimeout(() => setProgressState(prev => ({ ...prev, isOpen: false })), 800);
+            updateProfile(profileIdToUse, { needs_sync: true });
         } catch (err: any) {
-            setProgressState(prev => ({ ...prev, isOpen: false }));
             alert(`Failed to add mod: ${err.message}`);
         }
     };
@@ -312,36 +340,67 @@ export function useModActions({
         const targetVersion = selectedVersion || pkg.versions[0];
         const targetProfile = profiles.find(p => p.id === profileIdToUse);
 
-        setProgressState({ isOpen: true, title: `Updating ${pkg.name}`, progress: 0, currentTask: 'Removing old version...' });
-        try {
-            const profile = profiles.find(p => p.id === profileIdToUse);
-            const oldMod = profile?.mods.find(m => m.fullName.startsWith(pkg.full_name));
-            if (oldMod) {
-                setProgressState(prev => ({ ...prev, progress: 20, currentTask: 'Uninstalling old version...' }));
-                await removeMod(profileIdToUse, oldMod.uuid4);
-            }
-            setProgressState(prev => ({ ...prev, progress: 40, currentTask: `Installing v${targetVersion.version_number}...` }));
+        if (legacyInstallMode) {
+            setProgressState({
+                isOpen: true,
+                title: `Updating ${pkg.name}`,
+                progress: 0,
+                currentTask: 'Removing old version...',
+            });
+            try {
+                const profile = profiles.find(p => p.id === profileIdToUse);
+                const oldMod = profile?.mods.find(m => m.fullName.startsWith(pkg.full_name));
+                if (oldMod) {
+                    setProgressState(prev => ({
+                        ...prev,
+                        progress: 20,
+                        currentTask: 'Uninstalling old version...',
+                    }));
+                    await removeMod(profileIdToUse, oldMod.uuid4);
+                }
+                setProgressState(prev => ({
+                    ...prev,
+                    progress: 40,
+                    currentTask: `Installing v${targetVersion.version_number}...`,
+                }));
 
-            if (legacyInstallMode) {
                 const gamePath = await window.ipcRenderer.getGamePath(selectedCommunity || '', targetProfile?.platform);
                 if (!gamePath) {
                     throw new Error('Game path not configured. Open Settings and set the game directory.');
                 }
                 await installModWithDependencies(pkg, targetVersion, new Set(), profileIdToUse, undefined, gamePath);
-            } else {
-                addMod(profileIdToUse, {
-                    uuid4: targetVersion.uuid4,
-                    fullName: targetVersion.full_name,
-                    versionNumber: targetVersion.version_number,
-                    iconUrl: targetVersion.icon,
-                    enabled: true,
-                });
+
+                setProgressState(prev => ({
+                    ...prev,
+                    progress: 100,
+                    currentTask: 'Update complete!',
+                }));
+                setTimeout(() => setProgressState(prev => ({ ...prev, isOpen: false })), 500);
+            } catch (err: any) {
+                setProgressState(prev => ({ ...prev, isOpen: false }));
+                alert(`Failed to update mod: ${err.message}`);
+            }
+            return;
+        }
+
+        // New mode update: metadata-only change, no progress modal
+        try {
+            const profile = profiles.find(p => p.id === profileIdToUse);
+            const oldMod = profile?.mods.find(m => m.fullName.startsWith(pkg.full_name));
+            if (oldMod) {
+                await removeMod(profileIdToUse, oldMod.uuid4);
             }
 
-            setProgressState(prev => ({ ...prev, progress: 100, currentTask: 'Update complete!' }));
-            setTimeout(() => setProgressState(prev => ({ ...prev, isOpen: false })), 500);
+            addMod(profileIdToUse, {
+                uuid4: targetVersion.uuid4,
+                fullName: targetVersion.full_name,
+                versionNumber: targetVersion.version_number,
+                iconUrl: targetVersion.icon,
+                enabled: true,
+                pending_sync: true,
+            });
+            updateProfile(profileIdToUse, { needs_sync: true });
         } catch (err: any) {
-            setProgressState(prev => ({ ...prev, isOpen: false }));
             alert(`Failed to update mod: ${err.message}`);
         }
     };

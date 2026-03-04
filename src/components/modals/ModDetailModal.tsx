@@ -15,11 +15,28 @@ interface ModDetailModalProps {
     gameId: string;
     installedMods?: InstalledMod[];
     isBrowsing?: boolean;
+    legacyInstallMode?: boolean;
 }
 
 type Tab = 'description' | 'changelog' | 'dependencies';
 
-export function ModDetailModal({ pkg, isOpen, onClose, onInstall, onUpdate, onUninstall, isInstalled, hasUpdate = false, gameId, installedMods = [], isBrowsing }: ModDetailModalProps) {
+export function ModDetailModal({
+    pkg,
+    isOpen,
+    onClose,
+    onInstall,
+    onUpdate,
+    onUninstall,
+    isInstalled,
+    hasUpdate = false,
+    gameId,
+    installedMods = [],
+    isBrowsing,
+    legacyInstallMode = false
+}: ModDetailModalProps) {
+    const installedLabel = legacyInstallMode ? 'Installed' : 'Added';
+    const installActionLabel = legacyInstallMode ? 'Install' : 'Add';
+
     const [selectedVersionNumber, setSelectedVersionNumber] = useState<string>(pkg.versions[0]?.version_number || '');
     const [activeTab, setActiveTab] = useState<Tab>('description');
     const [readmeContent, setReadmeContent] = useState<string | null>(null);
@@ -229,7 +246,7 @@ export function ModDetailModal({ pkg, isOpen, onClose, onInstall, onUpdate, onUn
                         <div className="flex items-center gap-2 text-xs">
                             {isSelectedInstalled ? (
                                 <span className="px-2 py-1 rounded-full bg-green-500/15 text-green-400 border border-green-500/30">
-                                    Installed
+                                    {installedLabel}
                                 </span>
                             ) : isSelectedLatest ? (
                                 <span className="px-2 py-1 rounded-full bg-blue-500/15 text-blue-300 border border-blue-500/30">
@@ -350,7 +367,7 @@ export function ModDetailModal({ pkg, isOpen, onClose, onInstall, onUpdate, onUn
                                                             </span>
                                                             {installedMods.some(m => m.fullName.startsWith(dep.full_name)) && (
                                                                 <span className="bg-green-500/20 text-green-400 px-1.5 py-0.5 rounded text-xs font-medium">
-                                                                    Installed
+                                                                    {installedLabel}
                                                                 </span>
                                                             )}
                                                         </div>
@@ -413,7 +430,7 @@ export function ModDetailModal({ pkg, isOpen, onClose, onInstall, onUpdate, onUn
                                     : 'bg-blue-600 hover:bg-blue-500 text-white'
                                     }`}
                             >
-                                {isSelectedInstalled ? 'Installed' : isInstalled ? `Update to v${mod.version_number}` : `Install v${mod.version_number}`}
+                                {isSelectedInstalled ? installedLabel : isInstalled ? `Update to v${mod.version_number}` : `${installActionLabel} v${mod.version_number}`}
                             </button>
                         </div>
                     )}

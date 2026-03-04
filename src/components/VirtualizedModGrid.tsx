@@ -14,9 +14,10 @@ interface VirtualizedModGridProps {
     viewMode?: 'grid' | 'list';
     isBrowsing?: boolean;
     searchQuery?: string; // For scroll-to-top on search
+    legacyInstallMode?: boolean;
 }
 
-export function VirtualizedModGrid({ packages, installedMods, onInstall, onUninstall, onModClick, viewMode = 'grid', isBrowsing, searchQuery }: VirtualizedModGridProps) {
+export function VirtualizedModGrid({ packages, installedMods, onInstall, onUninstall, onModClick, viewMode = 'grid', isBrowsing, searchQuery, legacyInstallMode = false }: VirtualizedModGridProps) {
     const parentRef = useRef<HTMLDivElement>(null);
     const [columnCount, setColumnCount] = useState(3);
 
@@ -169,6 +170,7 @@ export function VirtualizedModGrid({ packages, installedMods, onInstall, onUnins
                                             onClick={() => onModClick(pkg)}
                                             installStatus={getInstallStatus(pkg)}
                                             isBrowsing={isBrowsing}
+                                            legacyInstallMode={legacyInstallMode}
                                         />
                                     ) : (
                                         <ModListItem
@@ -179,6 +181,7 @@ export function VirtualizedModGrid({ packages, installedMods, onInstall, onUnins
                                             onClick={() => onModClick(pkg)}
                                             installStatus={getInstallStatus(pkg)}
                                             isBrowsing={isBrowsing}
+                                            legacyInstallMode={legacyInstallMode}
                                         />
                                     )
                                 ))}

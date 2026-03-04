@@ -34,7 +34,7 @@ export function useGameSync({
     setShowMacOSGuide,
     installModWithDependencies,
 }: UseGameSyncProps) {
-    const { profiles } = useProfileStore();
+    const { profiles, updateProfile } = useProfileStore();
 
     const handleSyncToGame = async (isVanillaOverride?: boolean) => {
         const activeProfile = profiles.find(p => p.id === activeProfileId);
@@ -46,6 +46,14 @@ export function useGameSync({
             if (isVanillaOverride !== undefined) {
                 const disabledMods = activeProfile.mods.filter(m => !m.enabled).map(m => m.fullName);
                 await window.ipcRenderer.installToGame(community, activeProfile.id, disabledMods, isVanillaOverride);
+                updateProfile(activeProfile.id, {
+                    needs_sync: false,
+                    mods: activeProfile.mods.map((m) => ({
+                        ...m,
+                        pending_sync: false,
+                        synced_enabled: m.enabled,
+                    })),
+                });
                 return;
             }
 
@@ -128,6 +136,15 @@ export function useGameSync({
                 }
                 setProgressState(prev => ({ ...prev, isOpen: false }));
             }
+
+            updateProfile(activeProfile.id, {
+                needs_sync: false,
+                mods: activeProfile.mods.map((m) => ({
+                    ...m,
+                    pending_sync: false,
+                    synced_enabled: m.enabled,
+                })),
+            });
 
             // ── Success message ────────────────────────────────────────────────────
             const { removed, to_install: toInstall, cached = 0 } = syncResult;

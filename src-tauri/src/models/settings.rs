@@ -11,6 +11,18 @@ pub struct Settings {
     pub game_paths: HashMap<String, String>,
     #[serde(default)]
     pub legacy_install_mode: bool,
+    #[serde(default = "default_true")]
+    pub ask_version_before_install: bool,
+    #[serde(default = "default_true")]
+    pub install_in_parallel: bool,
+    #[serde(default)]
+    pub confirm_before_apply_to_game: bool,
+    #[serde(default = "default_mod_view_mode")]
+    pub default_mod_view_mode: String,
+    #[serde(default)]
+    pub hide_crossover_guide: bool,
+    #[serde(default)]
+    pub hide_macos_guide: bool,
 }
 
 impl Settings {
@@ -20,6 +32,20 @@ impl Settings {
             favorite_games: Vec::new(),
             game_paths: HashMap::new(),
             legacy_install_mode: false,
+            ask_version_before_install: true,
+            install_in_parallel: true,
+            confirm_before_apply_to_game: false,
+            default_mod_view_mode: default_mod_view_mode(),
+            hide_crossover_guide: false,
+            hide_macos_guide: false,
         }
     }
+}
+
+fn default_mod_view_mode() -> String {
+    "grid".to_string()
+}
+
+fn default_true() -> bool {
+    true
 }

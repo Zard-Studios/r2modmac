@@ -8,6 +8,7 @@ interface ProfileSidebarProps {
     currentCommunity: Community | null;
     communityImage: string | undefined;
     packages: Package[];
+    legacyInstallMode: boolean;
     onSelectProfile: (profileId: string) => void;
     onToggleMod: (profileId: string, modUuid: string) => void;
     onViewModDetails: (pkg: Package) => void;
@@ -25,6 +26,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
     currentCommunity,
     communityImage,
     packages,
+    legacyInstallMode,
     onSelectProfile,
     onToggleMod,
     onViewModDetails,
@@ -103,6 +105,13 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
         }, 0);
     }, [displayedMods, latestVersionByPackage]);
 
+    const pendingSyncCount = useMemo(() => {
+        if (legacyInstallMode || !activeProfile) return 0;
+        const markedMods = activeProfile.mods.filter((m) => m.pending_sync).length;
+        if (markedMods > 0) return markedMods;
+        return activeProfile.needs_sync ? 1 : 0;
+    }, [activeProfile, legacyInstallMode]);
+
     return (
         <div className="h-full flex flex-col bg-gray-900 border-r border-gray-800 w-80 flex-shrink-0">
             {/* Header */}
@@ -146,7 +155,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                         {activeProfile?.is_vanilla ? (
                             <p className="text-xs text-gray-500 font-bold uppercase tracking-wider">DISABLED</p>
                         ) : (
-                            <p className="text-xs text-gray-500 truncate">{activeProfile?.mods.length} mods installed</p>
+                            <p className="text-xs text-gray-500 truncate">{activeProfile?.mods.length} mods in profile</p>
                         )}
                     </div>
                     {/* Header Actions */}
@@ -209,7 +218,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                         type="text"
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
-                        placeholder="search installed mods..."
+                        placeholder="search profile mods..."
                         className="w-full pl-9 pr-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
                     />
                 </div>
@@ -219,7 +228,19 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
             <div className={`flex-1 overflow-y-auto p-2 space-y-1 scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-transparent ${activeProfile?.is_vanilla ? 'grayscale opacity-75 pointer-events-none' : ''}`}>
                 <div className="px-2 py-2 text-xs font-bold text-gray-500 uppercase tracking-wider flex justify-between items-center">
                     <div className="flex items-center gap-2">
-                        <span>Installed Mods</span>
+                        <span>Profile Mods</span>
+                        {pendingSyncCount > 0 && (
+                            <span
+                                title='Pending sync changes. Click "Apply to Game" to sync modified profile mods.'
+                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] bg-sky-500/10 text-sky-300 border border-sky-500/25"
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.9} d="M20 11a8.1 8.1 0 0 0-15.5-2m-.5-4v4h4" />
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.9} d="M4 13a8.1 8.1 0 0 0 15.5 2m.5 4v-4h-4" />
+                                </svg>
+                                <span>{pendingSyncCount}</span>
+                            </span>
+                        )}
                         {updatesInView > 0 && (
                             <span
                                 className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] bg-amber-500/10 text-amber-400 border border-amber-500/20"
@@ -248,8 +269,8 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                             onClick={async () => {
                                 // Toggle the mod state
                                 onToggleMod(activeProfile!.id, mod.uuid4);
-                                // If we're ENABLING the mod, auto-apply after a short delay
-                                if (!mod.enabled) {
+                                // Auto-apply on toggle only in legacy mode.
+                                if (!mod.enabled && legacyInstallMode) {
                                     setTimeout(() => {
                                         onInstallToGame();
                                     }, 300);
@@ -278,6 +299,18 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                                 </div>
                                 <div className="text-xs text-gray-500 flex items-center gap-2">
                                     <span>v{mod.versionNumber}</span>
+                                    {!legacyInstallMode && mod.pending_sync && (
+                                        <span
+                                            className="inline-flex items-center text-sky-300"
+                                            title='Pending sync. Click "Apply to Game" to apply profile changes.'
+                                        >
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.9} d="M20 11a8.1 8.1 0 0 0-15.5-2m-.5-4v4h4" />
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.9} d="M4 13a8.1 8.1 0 0 0 15.5 2m.5 4v-4h-4" />
+                                            </svg>
+                                            <span className="sr-only">Pending sync</span>
+                                        </span>
+                                    )}
                                     {hasUpdate && mod.enabled && (
                                         <span
                                             className="inline-flex items-center text-amber-400"
@@ -348,7 +381,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-16 w-16 mb-3 opacity-20 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
                         </svg>
-                        <p className="text-gray-500 text-sm font-medium">No mods installed</p>
+                        <p className="text-gray-500 text-sm font-medium">No mods in profile</p>
                         <p className="text-gray-600 text-xs mt-1">Search for mods to get started</p>
                     </div>
                 )}

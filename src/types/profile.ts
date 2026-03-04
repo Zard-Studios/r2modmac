@@ -4,6 +4,8 @@ export interface InstalledMod {
     versionNumber: string;
     iconUrl?: string;
     enabled: boolean;
+    pending_sync?: boolean;
+    synced_enabled?: boolean;
 }
 
 export interface Profile {
@@ -11,6 +13,7 @@ export interface Profile {
     name: string;
     gameIdentifier: string;
     mods: InstalledMod[];
+    needs_sync?: boolean;
     dateCreated: number;
     lastUsed: number;
     profileImageUrl?: string;

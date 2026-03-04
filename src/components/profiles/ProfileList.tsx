@@ -296,7 +296,7 @@ export function ProfileList({
                                         {profile.is_vanilla ? (
                                             <span className="text-gray-500 font-bold uppercase tracking-wider text-xs">DISABLED</span>
                                         ) : (
-                                            <span>{profile.mods.length} mods installed</span>
+                                            <span>{profile.mods.length} mods in profile</span>
                                         )}
                                     </div>
                                     <div className="flex items-center text-sm text-gray-400 gap-2">

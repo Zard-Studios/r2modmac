@@ -10,12 +10,13 @@ import { ProfileList } from './components/profiles/ProfileList';
 import { ProfileSidebar } from './components/profiles/ProfileSidebar';
 import { useProfileStore } from './store/useProfileStore';
 import { useAppStore } from './store/useAppStore';
-import type { CommunityPlatformInfo, Package } from './types/thunderstore';
+import type { CommunityPlatformInfo, Package, PackageVersion } from './types/thunderstore';
 import { getVersion } from '@tauri-apps/api/app';
 import { listen } from '@tauri-apps/api/event';
 import { AppModals } from './components/screens/AppModals';
-import type { UpdateInfo } from './types/electron';
+import type { AppSettings, UpdateInfo } from './types/electron';
 import { MAC_IMAGE_CACHE_KEY, MAC_PLATFORM_CACHE_KEY } from './constants/cacheKeys';
+import type { PreferencesSettings } from './components/modals/PreferencesModal';
 
 import { useModActions } from './hooks/useModActions';
 import { useProfileActions } from './hooks/useProfileActions';
@@ -229,6 +230,10 @@ function App() {
   const [showUpdateModal, setShowUpdateModal] = useState(false)
   const [showPreferences, setShowPreferences] = useState(false)
   const [legacyInstallMode, setLegacyInstallMode] = useState(false)
+  const [askVersionBeforeInstall, setAskVersionBeforeInstall] = useState(true)
+  const [installInParallel, setInstallInParallel] = useState(true)
+  const [confirmBeforeApplyToGame, setConfirmBeforeApplyToGame] = useState(false)
+  const [defaultModViewMode, setDefaultModViewMode] = useState<'grid' | 'list'>('grid')
   const [isBrowsingMode, setIsBrowsingMode] = useState(false)
   const isInitialLoadRunningRef = useRef(false)
 
@@ -253,11 +258,17 @@ function App() {
     loadProfiles()
     checkForUpdates()
 
-    // Load legacy mode setting
-    window.ipcRenderer.getSettings().then((s: any) => {
-      if (s.legacy_install_mode !== undefined) {
-        setLegacyInstallMode(s.legacy_install_mode);
-      }
+    // Load app preferences
+    window.ipcRenderer.getSettings().then((s: AppSettings) => {
+      setLegacyInstallMode(!!s.legacy_install_mode);
+      setAskVersionBeforeInstall(s.ask_version_before_install ?? true);
+      setInstallInParallel(s.install_in_parallel ?? true);
+      setConfirmBeforeApplyToGame(!!s.confirm_before_apply_to_game);
+      const storedViewMode = s.default_mod_view_mode === 'list' ? 'list' : 'grid';
+      setDefaultModViewMode(storedViewMode);
+      setViewMode(storedViewMode);
+      setHideCrossOverGuide(!!s.hide_crossover_guide);
+      setHideMacOSGuide(!!s.hide_macos_guide);
     });
 
     // Listen for preferences menu event
@@ -554,6 +565,7 @@ function App() {
     activeProfileId,
     selectedCommunity,
     legacyInstallMode,
+    installInParallel,
     uninstallModalState,
     setProgressState,
     setUninstallModalState,
@@ -584,6 +596,85 @@ function App() {
     setShowMacOSGuide,
     installModWithDependencies,
   });
+
+  const handleInstallRequest = async (
+    pkg: Package,
+    targetProfileId?: string,
+    selectedVersion?: PackageVersion
+  ) => {
+    if (askVersionBeforeInstall && !selectedVersion) {
+      setSelectedMod(pkg);
+      return;
+    }
+
+    await handleInstallMod(pkg, targetProfileId, selectedVersion);
+  };
+
+  const handleInstallToGameRequest = async (isVanillaOverride?: boolean) => {
+    if (!confirmBeforeApplyToGame || isVanillaOverride !== undefined) {
+      await handleSyncToGame(isVanillaOverride);
+      return;
+    }
+
+    const confirmed = await window.ipcRenderer.confirm(
+      'Apply Profile to Game?',
+      'This will sync your profile mods into the game directory. Continue?'
+    );
+    if (!confirmed) return;
+
+    await handleSyncToGame();
+  };
+
+  const handleSavePreferences = async (newSettings: PreferencesSettings) => {
+    setLegacyInstallMode(newSettings.legacy_install_mode);
+    setAskVersionBeforeInstall(newSettings.ask_version_before_install);
+    setInstallInParallel(newSettings.install_in_parallel);
+    setConfirmBeforeApplyToGame(newSettings.confirm_before_apply_to_game);
+    setDefaultModViewMode(newSettings.default_mod_view_mode);
+    setViewMode(newSettings.default_mod_view_mode);
+
+    const currentSettings = await window.ipcRenderer.getSettings();
+    await window.ipcRenderer.saveSettings({
+      ...currentSettings,
+      legacy_install_mode: newSettings.legacy_install_mode,
+      ask_version_before_install: newSettings.ask_version_before_install,
+      install_in_parallel: newSettings.install_in_parallel,
+      confirm_before_apply_to_game: newSettings.confirm_before_apply_to_game,
+      default_mod_view_mode: newSettings.default_mod_view_mode,
+    });
+  };
+
+  const handleSetGuideHidden = async (guide: 'crossover' | 'macos', hidden: boolean) => {
+    if (guide === 'crossover') {
+      setHideCrossOverGuide(hidden);
+    } else {
+      setHideMacOSGuide(hidden);
+    }
+
+    const currentSettings = await window.ipcRenderer.getSettings();
+    await window.ipcRenderer.saveSettings({
+      ...currentSettings,
+      hide_crossover_guide: guide === 'crossover' ? hidden : !!currentSettings.hide_crossover_guide,
+      hide_macos_guide: guide === 'macos' ? hidden : !!currentSettings.hide_macos_guide,
+    });
+  };
+
+  const handleRestoreGuideWarnings = async () => {
+    setHideCrossOverGuide(false);
+    setHideMacOSGuide(false);
+
+    const currentSettings = await window.ipcRenderer.getSettings();
+    await window.ipcRenderer.saveSettings({
+      ...currentSettings,
+      hide_crossover_guide: false,
+      hide_macos_guide: false,
+    });
+
+    await window.ipcRenderer.alert(
+      'Warnings Restored',
+      'Setup warnings have been re-enabled. They will be shown again when needed.'
+    );
+  };
 
 
   // VIEW LOGIC
@@ -655,6 +746,14 @@ function App() {
               const disabledMods = profile.mods.filter(m => !m.enabled).map(m => m.fullName);
               // Apply directly to game with vanilla override
               await window.ipcRenderer.installToGame(selectedCommunity, profileId, disabledMods, newVanillaState);
+              updateProfile(profileId, {
+                needs_sync: false,
+                mods: profile.mods.map((m) => ({
+                  ...m,
+                  pending_sync: false,
+                  synced_enabled: m.enabled,
+                })),
+              });
             }
           }}
         />
@@ -671,8 +770,9 @@ function App() {
         currentCommunity={currentCommunity || null}
         communityImage={currentCommunity ? communityImages[currentCommunity.identifier] : undefined}
         packages={packages}
+        legacyInstallMode={legacyInstallMode}
         onSelectProfile={handleSelectProfile}
-        onToggleMod={toggleMod}
+        onToggleMod={(profileId, modUuid) => toggleMod(profileId, modUuid, legacyInstallMode)}
         onViewModDetails={(pkg) => setSelectedMod(pkg)}
         onOpenModFolder={async (profileId, modName) => {
           const activeProfilePlatform = activeProfile?.platform;
@@ -720,7 +820,7 @@ function App() {
           console.log("Resolving package for:", mod.fullName, "searching:", searchName);
           return await window.ipcRenderer.fetchPackageByName(searchName, selectedCommunity);
         }}
-        onInstallToGame={handleSyncToGame}
+        onInstallToGame={handleInstallToGameRequest}
         onExportProfile={() => setShowExportModal(true)}
         onOpenSettings={() => setShowSettings(true)}
         onUpdateProfile={updateProfile}
@@ -793,12 +893,13 @@ function App() {
           <VirtualizedModGrid
             packages={packages}
             installedMods={activeProfile?.mods || []}
-            onInstall={handleInstallMod}
+            onInstall={handleInstallRequest}
             onUninstall={handleUninstallWithDependencies}
             onModClick={setSelectedMod}
             viewMode={viewMode}
             isBrowsing={isBrowsingMode}
             searchQuery={searchQuery}
+            legacyInstallMode={legacyInstallMode}
           />
         </div>
       </div>
@@ -827,7 +928,7 @@ function App() {
         activeProfileId={activeProfileId}
         profiles={profiles}
         selectedCommunity={selectedCommunity}
-        handleInstallMod={handleInstallMod}
+        handleInstallMod={handleInstallRequest}
         handleUpdateMod={handleUpdateMod}
         handleUninstallWithDependencies={handleUninstallWithDependencies}
         isBrowsingMode={isBrowsingMode}
@@ -855,8 +956,18 @@ function App() {
         setHideMacOSGuide={setHideMacOSGuide}
         showPreferences={showPreferences}
         setShowPreferences={setShowPreferences}
+        preferences={{
+          legacy_install_mode: legacyInstallMode,
+          ask_version_before_install: askVersionBeforeInstall,
+          install_in_parallel: installInParallel,
+          confirm_before_apply_to_game: confirmBeforeApplyToGame,
+          default_mod_view_mode: defaultModViewMode,
+        }}
+        onSavePreferences={handleSavePreferences}
+        hasHiddenGuideWarnings={hideCrossOverGuide || hideMacOSGuide}
+        onRestoreGuideWarnings={handleRestoreGuideWarnings}
+        onSetGuideHidden={handleSetGuideHidden}
         legacyInstallMode={legacyInstallMode}
-        setLegacyInstallMode={setLegacyInstallMode}
       />
     </div>
   )

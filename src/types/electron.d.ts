@@ -1,6 +1,19 @@
 import type { Profile } from './profile';
 import type { Community, Package, CommunityPlatformInfo } from './thunderstore';
 
+export interface AppSettings {
+    steam_path: string | null;
+    favorite_games: string[];
+    game_paths: Record<string, string>;
+    legacy_install_mode?: boolean;
+    ask_version_before_install?: boolean;
+    install_in_parallel?: boolean;
+    confirm_before_apply_to_game?: boolean;
+    default_mod_view_mode?: 'grid' | 'list';
+    hide_crossover_guide?: boolean;
+    hide_macos_guide?: boolean;
+}
+
 export interface IElectronAPI {
     getProfiles: () => Promise<Profile[]>;
     saveProfiles: (profiles: Profile[]) => Promise<boolean>;
@@ -34,8 +47,8 @@ export interface IElectronAPI {
     openModFolder: (profileId: string, modName: string, gameIdentifier: string, platform?: 'windows' | 'mac') => Promise<void>;
     exportProfile: (profileId: string) => Promise<any>;
     deleteProfileFolder: (profileId: string, gameIdentifier?: string, platform?: 'windows' | 'mac') => Promise<boolean>;
-    getSettings: () => Promise<{ steam_path: string | null; favorite_games: string[]; game_paths: Record<string, string>; legacy_install_mode?: boolean }>;
-    saveSettings: (settings: { steam_path: string | null; favorite_games: string[]; game_paths: Record<string, string>; legacy_install_mode?: boolean }) => Promise<void>;
+    getSettings: () => Promise<AppSettings>;
+    saveSettings: (settings: AppSettings) => Promise<void>;
     getGamePath: (gameIdentifier: string, platform?: 'windows' | 'mac') => Promise<string | null>;
     setGamePath: (gameIdentifier: string, path: string, platform?: 'windows' | 'mac') => Promise<void>;
     openGameFolder: (gameIdentifier: string, platform?: 'windows' | 'mac') => Promise<void>;
