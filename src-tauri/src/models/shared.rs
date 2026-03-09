@@ -40,6 +40,8 @@ pub struct Settings {
     #[serde(default)]
     pub game_paths: HashMap<String, String>,
     #[serde(default)]
+    pub steam_launch_option_backups: HashMap<String, String>,
+    #[serde(default)]
     pub legacy_install_mode: bool,
     #[serde(default = "default_true")]
     pub ask_version_before_install: bool,
@@ -61,6 +63,7 @@ impl Settings {
             steam_path: None,
             favorite_games: Vec::new(),
             game_paths: HashMap::new(),
+            steam_launch_option_backups: HashMap::new(),
             legacy_install_mode: false,
             ask_version_before_install: true,
             install_in_parallel: true,
@@ -106,6 +109,42 @@ pub fn save_settings_impl(app: &tauri::AppHandle, settings: &Settings) -> Result
 
 pub fn normalize_for_matching(s: &str) -> String {
     s.to_lowercase().chars().filter(|c| c.is_alphanumeric()).collect()
+}
+
+pub fn is_balatro_identifier(game_identifier: &str) -> bool {
+    normalize_for_matching(game_identifier) == "balatro"
+}
+
+pub fn is_balatro_game_path(path: &std::path::Path) -> bool {
+    if path
+        .join("Balatro.app")
+        .join("Contents")
+        .join("MacOS")
+        .join("love")
+        .exists()
+    {
+        return true;
+    }
+
+    if path
+        .join("Contents")
+        .join("MacOS")
+        .join("love")
+        .exists()
+    {
+        return true;
+    }
+
+    false
+}
+
+pub fn get_balatro_mods_dir() -> Option<std::path::PathBuf> {
+    dirs::home_dir().map(|home| {
+        home.join("Library")
+            .join("Application Support")
+            .join("Balatro")
+            .join("Mods")
+    })
 }
 
 pub fn get_steam_library_folders(steam_path: &std::path::Path) -> Vec<std::path::PathBuf> {

@@ -5,6 +5,661 @@ use crate::models::shared::*;
 use crate::utils::file_ops::*;
 use crate::commands::game_commands::get_game_path;
 
+fn is_bepinex_shell_script(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    lower.ends_with(".sh") && lower.contains("bepinex")
+}
+
+fn is_balatro_lovely_mod(mod_name: &str) -> bool {
+    extract_mod_key(mod_name) == "thunderstore-lovely"
+}
+
+fn is_balatro_steamodded_mod(mod_name: &str) -> bool {
+    extract_mod_key(mod_name) == "steamopollys-steamodded"
+}
+
+fn balatro_target_folder_name(mod_name: &str) -> String {
+    if is_balatro_steamodded_mod(mod_name) {
+        "smods".to_string()
+    } else {
+        mod_name.to_string()
+    }
+}
+
+fn set_script_executable(path: &std::path::Path) -> Result<(), String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(path)
+            .map_err(|e| format!("Failed to inspect script permissions: {}", e))?
+            .permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(path, perms)
+            .map_err(|e| format!("Failed to set script executable bit: {}", e))?;
+    }
+
+    Ok(())
+}
+
+fn detect_lovely_runtime_in_zip<R: std::io::Read + std::io::Seek>(
+    archive: &mut zip::ZipArchive<R>,
+) -> (bool, bool) {
+    let mut has_macos_runtime = false;
+    let mut has_windows_runtime = false;
+
+    for i in 0..archive.len() {
+        if let Ok(file) = archive.by_index(i) {
+            let name = file.name().to_lowercase();
+            if name.ends_with("run_lovely_macos.sh") || name.ends_with("liblovely.dylib") {
+                has_macos_runtime = true;
+            }
+            if name.ends_with("version.dll") {
+                has_windows_runtime = true;
+            }
+        }
+    }
+
+    (has_macos_runtime, has_windows_runtime)
+}
+
+fn extract_zip_directory_to_target<R: std::io::Read + std::io::Seek>(
+    archive: &mut zip::ZipArchive<R>,
+    target_dir: &std::path::Path,
+) -> Result<(), String> {
+    if target_dir.exists() {
+        let _ = fs::remove_dir_all(target_dir);
+    }
+    fs::create_dir_all(target_dir).map_err(|e| e.to_string())?;
+
+    for i in 0..archive.len() {
+        let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
+        let outpath = match file.enclosed_name() {
+            Some(path) => target_dir.join(path),
+            None => continue,
+        };
+
+        if (*file.name()).ends_with('/') {
+            fs::create_dir_all(&outpath).map_err(|e| e.to_string())?;
+        } else {
+            if let Some(parent) = outpath.parent() {
+                fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            }
+            let mut outfile = fs::File::create(&outpath).map_err(|e| e.to_string())?;
+            std::io::copy(&mut file, &mut outfile).map_err(|e| e.to_string())?;
+        }
+    }
+
+    Ok(())
+}
+
+fn normalize_regular_mod_entry(
+    relative_path: &std::path::Path,
+    mod_name: &str,
+) -> Option<std::path::PathBuf> {
+    let normalized = relative_path
+        .components()
+        .filter_map(|component| match component {
+            std::path::Component::Normal(value) => Some(value.to_string_lossy().to_string()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    if normalized.is_empty() {
+        return None;
+    }
+
+    let first = normalized[0].to_lowercase();
+    let remainder = normalized.iter().skip(1).cloned().collect::<Vec<_>>();
+
+    let mut path = match first.as_str() {
+        "bepinex" => std::path::PathBuf::new(),
+        "plugins" | "patchers" | "core" | "config" | "monomod" => {
+            let mut root = std::path::PathBuf::from("BepInEx");
+            root.push(&first);
+            for part in &remainder {
+                root.push(part);
+            }
+            return Some(root);
+        }
+        "doorstop_libs" => {
+            let mut root = std::path::PathBuf::from("doorstop_libs");
+            for part in &remainder {
+                root.push(part);
+            }
+            return Some(root);
+        }
+        "doorstop_config.ini" | "libdoorstop.dylib" | "run_bepinex.sh" => {
+            return Some(std::path::PathBuf::from(&normalized[0]));
+        }
+        _ => {
+            let mut fallback = std::path::PathBuf::from("BepInEx");
+            fallback.push("plugins");
+            fallback.push(mod_name);
+            for part in &normalized {
+                fallback.push(part);
+            }
+            return Some(fallback);
+        }
+    };
+
+    for part in remainder {
+        path.push(part);
+    }
+
+    Some(path)
+}
+
+fn extract_regular_mod_to_root<R: std::io::Read + std::io::Seek>(
+    archive: &mut zip::ZipArchive<R>,
+    target_root: &std::path::Path,
+    mod_name: &str,
+) -> Result<(), String> {
+    for i in 0..archive.len() {
+        let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
+        let enclosed = match file.enclosed_name() {
+            Some(path) => path.to_path_buf(),
+            None => continue,
+        };
+        let Some(relative_target) = normalize_regular_mod_entry(&enclosed, mod_name) else {
+            continue;
+        };
+        let outpath = target_root.join(relative_target);
+
+        if (*file.name()).ends_with('/') {
+            fs::create_dir_all(&outpath).map_err(|e| e.to_string())?;
+            continue;
+        }
+
+        if let Some(parent) = outpath.parent() {
+            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+
+        let mut outfile = fs::File::create(&outpath).map_err(|e| e.to_string())?;
+        std::io::copy(&mut file, &mut outfile).map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
+}
+
+fn extract_lovely_zip_to_game_root<R: std::io::Read + std::io::Seek>(
+    archive: &mut zip::ZipArchive<R>,
+    game_dir: &std::path::Path,
+) -> Result<(), String> {
+    for i in 0..archive.len() {
+        let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
+        let file_name = std::path::Path::new(file.name())
+            .file_name()
+            .map(|name| name.to_string_lossy().to_string())
+            .unwrap_or_default();
+        let lower = file_name.to_lowercase();
+        if lower != "run_lovely_macos.sh" && lower != "liblovely.dylib" {
+            continue;
+        }
+
+        let outpath = game_dir.join(&file_name);
+        let mut outfile = fs::File::create(&outpath).map_err(|e| e.to_string())?;
+        std::io::copy(&mut file, &mut outfile).map_err(|e| e.to_string())?;
+        if lower == "run_lovely_macos.sh" {
+            set_script_executable(&outpath)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn extract_lovely_tarball_to_game_root(
+    bytes: &[u8],
+    game_dir: &std::path::Path,
+) -> Result<(), String> {
+    let gz = flate2::read::GzDecoder::new(bytes);
+    let mut archive = tar::Archive::new(gz);
+
+    for entry in archive.entries().map_err(|e| e.to_string())? {
+        let mut entry = entry.map_err(|e| e.to_string())?;
+        if !entry.header().entry_type().is_file() {
+            continue;
+        }
+
+        let file_name = entry
+            .path()
+            .map_err(|e| e.to_string())?
+            .file_name()
+            .map(|name| name.to_string_lossy().to_string())
+            .unwrap_or_default();
+        let lower = file_name.to_lowercase();
+
+        if lower != "run_lovely_macos.sh" && lower != "liblovely.dylib" {
+            continue;
+        }
+
+        let outpath = game_dir.join(&file_name);
+        let mut outfile = fs::File::create(&outpath).map_err(|e| e.to_string())?;
+        std::io::copy(&mut entry, &mut outfile).map_err(|e| e.to_string())?;
+        if lower == "run_lovely_macos.sh" {
+            set_script_executable(&outpath)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn lovely_asset_name_for_current_arch() -> &'static str {
+    match std::env::consts::ARCH {
+        "aarch64" => "lovely-aarch64-apple-darwin.tar.gz",
+        _ => "lovely-x86_64-apple-darwin.tar.gz",
+    }
+}
+
+async fn download_official_lovely_runtime(version: &str) -> Result<Vec<u8>, String> {
+    let client = reqwest::Client::builder()
+        .user_agent("r2modmac/0.5.2")
+        .build()
+        .map_err(|e| format!("Failed to build Lovely client: {}", e))?;
+    let desired_asset = lovely_asset_name_for_current_arch();
+    let exact_tag = format!("v{}", version);
+
+    let release_urls = [
+        format!(
+            "https://api.github.com/repos/ethangreen-dev/lovely-injector/releases/tags/{}",
+            exact_tag
+        ),
+        "https://api.github.com/repos/ethangreen-dev/lovely-injector/releases/latest".to_string(),
+    ];
+
+    for release_url in release_urls {
+        let response = match client.get(&release_url).send().await {
+            Ok(response) => response,
+            Err(_) => continue,
+        };
+        if !response.status().is_success() {
+            continue;
+        }
+
+        let release = response
+            .json::<serde_json::Value>()
+            .await
+            .map_err(|e| format!("Failed to parse Lovely release metadata: {}", e))?;
+
+        if let Some(download_url) = release["assets"].as_array().and_then(|assets| {
+            assets.iter().find_map(|asset| {
+                let name = asset["name"].as_str()?;
+                if name.eq_ignore_ascii_case(desired_asset) {
+                    asset["browser_download_url"].as_str().map(|s| s.to_string())
+                } else {
+                    None
+                }
+            })
+        }) {
+            eprintln!(
+                "[install_mod] Falling back to official Lovely runtime: {}",
+                download_url
+            );
+            let bytes = client
+                .get(&download_url)
+                .send()
+                .await
+                .map_err(|e| format!("Failed to download Lovely runtime: {}", e))?
+                .error_for_status()
+                .map_err(|e| format!("Official Lovely runtime request failed: {}", e))?
+                .bytes()
+                .await
+                .map_err(|e| format!("Failed to read Lovely runtime: {}", e))?;
+            return Ok(bytes.to_vec());
+        }
+    }
+
+    Err(format!(
+        "Could not resolve the official macOS Lovely runtime for version {}",
+        version
+    ))
+}
+
+pub(crate) fn extract_version_number_from_full_name(full_name: &str) -> Option<String> {
+    let tail = full_name.rsplit('-').next()?;
+    if tail.chars().all(|c| c.is_ascii_digit() || c == '.') {
+        Some(tail.to_string())
+    } else {
+        None
+    }
+}
+
+fn official_bepinex_version_candidates(thunderstore_version: &str) -> Vec<String> {
+    let mut candidates = Vec::new();
+    let parts: Vec<&str> = thunderstore_version.split('.').collect();
+
+    if parts.len() == 3
+        && parts[0].chars().all(|c| c.is_ascii_digit())
+        && parts[1].chars().all(|c| c.is_ascii_digit())
+        && parts[2].chars().all(|c| c.is_ascii_digit())
+        && parts[2].len() == 4
+    {
+        if let (Ok(major), Ok(minor), Ok(patch_major), Ok(patch_minor)) = (
+            parts[0].parse::<u32>(),
+            parts[1].parse::<u32>(),
+            parts[2][0..2].parse::<u32>(),
+            parts[2][2..4].parse::<u32>(),
+        ) {
+            candidates.push(format!("{}.{}.{}.{}", major, minor, patch_major, patch_minor));
+            if patch_minor == 0 {
+                candidates.push(format!("{}.{}.{}", major, minor, patch_major));
+            }
+        }
+    }
+
+    if candidates.is_empty() {
+        candidates.push(thunderstore_version.to_string());
+    }
+
+    let mut deduped = Vec::new();
+    for candidate in candidates {
+        if !deduped.contains(&candidate) {
+            deduped.push(candidate);
+        }
+    }
+    deduped
+}
+
+fn direct_bepinex_asset_candidates(official_version: &str) -> Vec<String> {
+    let mut assets = vec![
+        format!("BepInEx_macos_x64_{}.zip", official_version),
+        format!("BepInEx_unix_{}.zip", official_version),
+    ];
+    assets.dedup();
+    assets
+}
+
+async fn download_official_macos_bepinex_pack(thunderstore_version: &str) -> Result<Vec<u8>, String> {
+    let version_candidates = official_bepinex_version_candidates(thunderstore_version);
+    let client = reqwest::Client::builder()
+        .user_agent("r2modmac/0.5.2")
+        .build()
+        .map_err(|e| format!("Failed to build GitHub client: {}", e))?;
+
+    for official_version in &version_candidates {
+        let tag = format!("v{}", official_version);
+        let api_url = format!(
+            "https://api.github.com/repos/BepInEx/BepInEx/releases/tags/{}",
+            tag
+        );
+
+        if let Ok(response) = client.get(&api_url).send().await {
+            if response.status().is_success() {
+                if let Ok(release) = response.json::<serde_json::Value>().await {
+                    if let Some(download_url) = release["assets"].as_array().and_then(|assets| {
+                        assets
+                            .iter()
+                            .filter_map(|asset| {
+                                let name = asset["name"].as_str()?;
+                                let url = asset["browser_download_url"].as_str()?;
+                                Some((name.to_lowercase(), url.to_string()))
+                            })
+                            .find(|(name, _)| name.contains("macos_x64") && name.ends_with(".zip"))
+                            .or_else(|| {
+                                assets
+                                    .iter()
+                                    .filter_map(|asset| {
+                                        let name = asset["name"].as_str()?;
+                                        let url = asset["browser_download_url"].as_str()?;
+                                        Some((name.to_lowercase(), url.to_string()))
+                                    })
+                                    .find(|(name, _)| name.contains("unix") && name.ends_with(".zip"))
+                            })
+                            .map(|(_, url)| url)
+                    }) {
+                        eprintln!(
+                            "[install_mod] Falling back to official macOS BepInEx runtime: {}",
+                            download_url
+                        );
+                        let bytes = client
+                            .get(&download_url)
+                            .send()
+                            .await
+                            .map_err(|e| format!("Failed to download official BepInEx runtime: {}", e))?
+                            .error_for_status()
+                            .map_err(|e| format!("Official BepInEx runtime request failed: {}", e))?
+                            .bytes()
+                            .await
+                            .map_err(|e| format!("Failed to read official BepInEx runtime: {}", e))?;
+                        return Ok(bytes.to_vec());
+                    }
+                }
+            }
+        }
+
+        for asset_name in direct_bepinex_asset_candidates(official_version) {
+            let direct_url = format!(
+                "https://github.com/BepInEx/BepInEx/releases/download/{}/{}",
+                tag, asset_name
+            );
+            if let Ok(response) = client.get(&direct_url).send().await {
+                if response.status().is_success() {
+                    eprintln!(
+                        "[install_mod] Falling back to direct official macOS BepInEx asset: {}",
+                        direct_url
+                    );
+                    let bytes = response
+                        .bytes()
+                        .await
+                        .map_err(|e| format!("Failed to read official BepInEx asset: {}", e))?;
+                    return Ok(bytes.to_vec());
+                }
+            }
+        }
+    }
+
+    Err(format!(
+        "Could not resolve an official macOS BepInEx runtime for Thunderstore version {}",
+        thunderstore_version
+    ))
+}
+
+async fn download_official_macos_bepinex6_pack(
+    thunderstore_version: &str,
+    runtime_kind: &str,
+) -> Result<Vec<u8>, String> {
+    let build_number = thunderstore_version
+        .split('.')
+        .nth(2)
+        .ok_or_else(|| format!("Could not parse BepInEx 6 build number from {}", thunderstore_version))?;
+    let client = reqwest::Client::builder()
+        .user_agent("r2modmac/0.5.2")
+        .build()
+        .map_err(|e| format!("Failed to build GitHub client: {}", e))?;
+
+    let project_page = client
+        .get("https://builds.bepinex.dev/projects/bepinex_be")
+        .send()
+        .await
+        .map_err(|e| format!("Failed to query BepInEx build index: {}", e))?
+        .error_for_status()
+        .map_err(|e| format!("BepInEx build index request failed: {}", e))?
+        .text()
+        .await
+        .map_err(|e| format!("Failed to read BepInEx build index: {}", e))?;
+
+    let build_path = format!("/projects/bepinex_be/{}/", build_number);
+    let candidates: &[&str] = if runtime_kind == "il2cpp" {
+        &["bepinex-unity.il2cpp-macos-x64", "bepinex_unityil2cpp_x64"]
+    } else {
+        &[
+            "bepinex-unity.mono-macos-x64",
+            "bepinex_unitymono_unix",
+        ]
+    };
+
+    let href_re = regex::Regex::new(r#"href="([^"]+\.zip)""#)
+        .map_err(|e| format!("Invalid BepInEx build page regex: {}", e))?;
+    let mut hrefs: Vec<(String, String)> = href_re
+        .captures_iter(&project_page)
+        .filter_map(|captures| captures.get(1).map(|m| m.as_str().to_string()))
+        .filter(|href| href.contains(&build_path))
+        .map(|href| {
+            let lower = href.to_lowercase();
+            (href, lower)
+        })
+        .collect();
+
+    hrefs.sort_by_key(|(_, lower)| {
+        if runtime_kind == "il2cpp" {
+            if lower.contains("macos-x64") {
+                0
+            } else {
+                1
+            }
+        } else if lower.contains("macos-x64") {
+            0
+        } else if lower.contains("unitymono_unix") || lower.contains("mono-unix") {
+            1
+        } else {
+            2
+        }
+    });
+
+    for needle in candidates {
+        for (href, lower) in &hrefs {
+            if !lower.contains(needle) {
+                continue;
+            }
+
+            let download_url = if href.starts_with("http") {
+                href.clone()
+            } else {
+                format!("https://builds.bepinex.dev{}", href)
+            };
+
+            eprintln!(
+                "[install_mod] Falling back to official macOS BepInEx 6 runtime: {}",
+                download_url
+            );
+
+            let bytes = client
+                .get(&download_url)
+                .send()
+                .await
+                .map_err(|e| format!("Failed to download official BepInEx 6 runtime: {}", e))?
+                .error_for_status()
+                .map_err(|e| format!("Official BepInEx 6 runtime request failed: {}", e))?
+                .bytes()
+                .await
+                .map_err(|e| format!("Failed to read official BepInEx 6 runtime: {}", e))?;
+
+            let cursor = std::io::Cursor::new(bytes.as_ref());
+            let mut archive = zip::ZipArchive::new(cursor)
+                .map_err(|e| format!("Downloaded official BepInEx 6 runtime is not a zip: {}", e))?;
+            let (is_bepinex_pack, _) = detect_bepinex_structure(&mut archive);
+            let (has_macos_loader, _) = detect_bepinex_pack_platform(&mut archive);
+
+            if is_bepinex_pack && has_macos_loader {
+                return Ok(bytes.to_vec());
+            }
+        }
+    }
+
+    Err(format!(
+        "Could not resolve a valid BepInEx 6 {} macOS build for {}",
+        runtime_kind, thunderstore_version
+    ))
+}
+
+pub(crate) async fn download_official_macos_bepinex_runtime(
+    thunderstore_version: &str,
+    runtime_kind: &str,
+) -> Result<Vec<u8>, String> {
+    if thunderstore_version.starts_with("6.") {
+        download_official_macos_bepinex6_pack(thunderstore_version, runtime_kind).await
+    } else {
+        download_official_macos_bepinex_pack(thunderstore_version).await
+    }
+}
+
+pub(crate) fn extract_bepinex_pack_to_root<R: std::io::Read + std::io::Seek>(
+    archive: &mut zip::ZipArchive<R>,
+    target_root: &std::path::Path,
+    target_is_macos: bool,
+) -> Result<(), String> {
+    let (is_bepinex_pack, bepinex_prefix) = detect_bepinex_structure(archive);
+    if !is_bepinex_pack {
+        return Err("Archive does not look like a BepInEx runtime".to_string());
+    }
+
+    let prefix = bepinex_prefix.unwrap_or_default();
+    for i in 0..archive.len() {
+        let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
+        let name = file.name().to_string();
+        let relative_path = if !prefix.is_empty() && name.starts_with(&prefix) {
+            &name[prefix.len()..]
+        } else {
+            &name
+        };
+
+        if relative_path.is_empty() {
+            continue;
+        }
+
+        let Some(normalized_relative_path) = normalize_bepinex_pack_entry(relative_path, target_is_macos) else {
+            continue;
+        };
+        let outpath = target_root.join(&normalized_relative_path);
+
+        if name.ends_with('/') {
+            fs::create_dir_all(&outpath).map_err(|e| e.to_string())?;
+        } else {
+            if let Some(parent) = outpath.parent() {
+                fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            }
+            let mut outfile = fs::File::create(&outpath).map_err(|e| e.to_string())?;
+            std::io::copy(&mut file, &mut outfile).map_err(|e| e.to_string())?;
+            if normalized_relative_path
+                .file_name()
+                .map(|name| is_bepinex_shell_script(&name.to_string_lossy()))
+                .unwrap_or(false)
+            {
+                set_script_executable(&outpath)?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn normalize_bepinex_pack_entry(relative_path: &str, target_is_macos: bool) -> Option<std::path::PathBuf> {
+    let trimmed = relative_path.trim_start_matches("./").trim_matches('/');
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let path = std::path::Path::new(trimmed);
+    let file_name = path.file_name()?.to_string_lossy().to_string();
+    let lower_trimmed = trimmed.to_lowercase();
+    let is_root_level = path.components().count() == 1;
+
+    if lower_trimmed == "bepinex" || lower_trimmed.starts_with("bepinex/") {
+        return Some(std::path::PathBuf::from(trimmed));
+    }
+
+    if lower_trimmed == "doorstop_libs" || lower_trimmed.starts_with("doorstop_libs/") {
+        return Some(std::path::PathBuf::from(trimmed));
+    }
+
+    if lower_trimmed == "winhttp.dll" && target_is_macos {
+        return None;
+    }
+
+    if matches!(lower_trimmed.as_str(), "doorstop_config.ini" | "libdoorstop.dylib" | "winhttp.dll") {
+        return Some(std::path::PathBuf::from(file_name));
+    }
+
+    if is_root_level && is_bepinex_shell_script(&file_name) {
+        return Some(std::path::PathBuf::from("run_bepinex.sh"));
+    }
+
+    if is_root_level && lower_trimmed.ends_with(".dylib") {
+        return Some(std::path::PathBuf::from(file_name));
+    }
+
+    None
+}
+
 fn extract_mod_key(input: &str) -> String {
     let parts: Vec<&str> = input.split('-').collect();
     if parts.len() >= 2 {
@@ -126,12 +781,95 @@ fn find_mod_folder_in(base: &std::path::Path, mod_name: &str) -> Option<String> 
     fallback
 }
 
+fn is_macos_game_dir(path: &std::path::Path) -> bool {
+    fs::read_dir(path)
+        .map(|entries| {
+            entries.filter_map(|e| e.ok()).any(|entry| {
+                entry.file_name().to_string_lossy().ends_with(".app")
+            })
+        })
+        .unwrap_or(false)
+}
+
+fn find_macos_app_bundle(path: &std::path::Path) -> Option<std::path::PathBuf> {
+    if path
+        .file_name()
+        .map(|name| name.to_string_lossy().ends_with(".app"))
+        .unwrap_or(false)
+    {
+        return Some(path.to_path_buf());
+    }
+
+    fs::read_dir(path)
+        .ok()?
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .find(|entry_path| {
+            entry_path
+                .file_name()
+                .map(|name| name.to_string_lossy().ends_with(".app"))
+                .unwrap_or(false)
+        })
+}
+
+pub(crate) fn detect_unity_runtime_kind(game_dir: &std::path::Path) -> &'static str {
+    let Some(app_bundle) = find_macos_app_bundle(game_dir) else {
+        return "mono";
+    };
+
+    let data_dir = app_bundle.join("Contents").join("Resources").join("Data");
+    if data_dir.join("Managed").is_dir() {
+        "mono"
+    } else {
+        "il2cpp"
+    }
+}
+
+fn detect_bepinex_pack_platform<R: std::io::Read + std::io::Seek>(
+    archive: &mut zip::ZipArchive<R>,
+) -> (bool, bool) {
+    let mut has_macos_loader = false;
+    let mut has_windows_loader = false;
+
+    for i in 0..archive.len() {
+        if let Ok(mut file) = archive.by_index(i) {
+            let name = file.name().to_lowercase();
+            let file_name = std::path::Path::new(&name)
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+
+            if name.ends_with(".dylib") {
+                has_macos_loader = true;
+            }
+
+            if is_bepinex_shell_script(&file_name) {
+                let mut text = String::new();
+                let _ = std::io::Read::read_to_string(&mut file, &mut text);
+                let lower = text.to_lowercase();
+                if lower.contains("dyld_insert_libraries")
+                    && lower.contains("dylib")
+                    && (lower.contains("doorstop_enable") || lower.contains("doorstop_enabled"))
+                {
+                    has_macos_loader = true;
+                }
+            }
+
+            if name.ends_with("winhttp.dll") {
+                has_windows_loader = true;
+            }
+        }
+    }
+
+    (has_macos_loader, has_windows_loader)
+}
+
 #[command]
 pub async fn install_mod(app: AppHandle, profile_id: String, download_url: String, mod_name: String, game_path: String, use_profile_cache: Option<bool>) -> Result<serde_json::Value, String> {
     // Install DIRECTLY to game folder
     let game_dir = std::path::Path::new(&game_path);
-    let plugins_dir = game_dir.join("BepInEx").join("plugins");
-    let mod_dir = plugins_dir.join(&mod_name);
+    let target_is_macos = is_macos_game_dir(game_dir);
+    let target_is_balatro = target_is_macos && is_balatro_game_path(game_dir);
 
     eprintln!("[install_mod] Installing {} directly to game: {:?}", mod_name, game_dir);
 
@@ -200,70 +938,119 @@ pub async fn install_mod(app: AppHandle, profile_id: String, download_url: Strin
         }),
     );
     
+    let mut runtime_bytes = bytes;
+
+    if target_is_balatro {
+        if is_balatro_lovely_mod(&mod_name) {
+            let version_number = extract_version_number_from_full_name(&mod_name)
+                .ok_or_else(|| format!("Could not parse Lovely version from {}", mod_name))?;
+            let cursor = std::io::Cursor::new(&runtime_bytes);
+            let mut archive_for_detect = zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
+            let (has_macos_runtime, _has_windows_runtime) = detect_lovely_runtime_in_zip(&mut archive_for_detect);
+
+            if has_macos_runtime {
+                let cursor = std::io::Cursor::new(&runtime_bytes);
+                let mut archive = zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
+                extract_lovely_zip_to_game_root(&mut archive, game_dir)?;
+            } else {
+                runtime_bytes = download_official_lovely_runtime(&version_number).await?;
+                extract_lovely_tarball_to_game_root(&runtime_bytes, game_dir)?;
+            }
+
+            dequarantine_recursive(game_dir);
+
+            if use_profile_cache.unwrap_or(false) {
+                let profile_dir = app.path().app_data_dir().map_err(|e| e.to_string())?
+                    .join("profiles").join(&profile_id);
+                let cache_dir = profile_dir.join("BalatroRoot");
+                fs::create_dir_all(&cache_dir).map_err(|e| e.to_string())?;
+
+                for file_name in ["run_lovely_macos.sh", "liblovely.dylib"] {
+                    let src = game_dir.join(file_name);
+                    if src.exists() {
+                        let dst = cache_dir.join(file_name);
+                        fs::copy(&src, &dst).map_err(|e| e.to_string())?;
+                        if file_name.ends_with(".sh") {
+                            set_script_executable(&dst)?;
+                        }
+                    }
+                }
+            }
+
+            eprintln!("[install_mod] Successfully installed Lovely runtime for Balatro");
+            return Ok(serde_json::json!({ "success": true }));
+        }
+
+        let mods_root = get_balatro_mods_dir()
+            .ok_or_else(|| "Could not resolve ~/Library/Application Support/Balatro/Mods".to_string())?;
+        fs::create_dir_all(&mods_root).map_err(|e| e.to_string())?;
+
+        let target_folder = balatro_target_folder_name(&mod_name);
+        let mod_dir = mods_root.join(&target_folder);
+        let cursor = std::io::Cursor::new(&runtime_bytes);
+        let mut archive = zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
+        extract_zip_directory_to_target(&mut archive, &mod_dir)?;
+
+        if use_profile_cache.unwrap_or(false) {
+            let profile_dir = app.path().app_data_dir().map_err(|e| e.to_string())?
+                .join("profiles").join(&profile_id);
+            let profile_mod_dir = profile_dir.join("Balatro").join("Mods").join(&target_folder);
+            let cursor = std::io::Cursor::new(&runtime_bytes);
+            let mut cache_archive = zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
+            extract_zip_directory_to_target(&mut cache_archive, &profile_mod_dir)?;
+        }
+
+        return Ok(serde_json::json!({ "success": true }));
+    }
+
     // Smart detection: Check if this is BepInEx framework (not just "BepInExPack/" prefix)
-    let cursor = std::io::Cursor::new(&bytes);
+    let cursor = std::io::Cursor::new(&runtime_bytes);
     let mut archive_for_detect = zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
-    let (is_bepinex_pack, bepinex_prefix) = detect_bepinex_structure(&mut archive_for_detect);
+    let (mut is_bepinex_pack, _) = detect_bepinex_structure(&mut archive_for_detect);
+    let (mut has_macos_loader, mut has_windows_loader) = detect_bepinex_pack_platform(&mut archive_for_detect);
+
+    if is_bepinex_pack && target_is_macos && !has_macos_loader {
+        let version_number = extract_version_number_from_full_name(&mod_name)
+            .ok_or_else(|| format!("Could not parse BepInEx version from {}", mod_name))?;
+        let runtime_kind = detect_unity_runtime_kind(game_dir);
+        runtime_bytes = download_official_macos_bepinex_runtime(&version_number, runtime_kind).await?;
+
+        let cursor = std::io::Cursor::new(&runtime_bytes);
+        let mut fallback_archive = zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
+        let (fallback_is_bepinex_pack, _) =
+            detect_bepinex_structure(&mut fallback_archive);
+        let (fallback_has_macos_loader, fallback_has_windows_loader) =
+            detect_bepinex_pack_platform(&mut fallback_archive);
+
+        if !fallback_is_bepinex_pack || !fallback_has_macos_loader {
+            return Err("Downloaded official macOS BepInEx runtime looks invalid".to_string());
+        }
+
+        is_bepinex_pack = fallback_is_bepinex_pack;
+        has_macos_loader = fallback_has_macos_loader;
+        has_windows_loader = fallback_has_windows_loader;
+    }
 
     // Install to game folder
-    let cursor = std::io::Cursor::new(&bytes);
+    let cursor = std::io::Cursor::new(&runtime_bytes);
     let mut archive = zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
 
     if is_bepinex_pack {
-        // Install BepInExPack to GAME root (not profile!)
-        let prefix = bepinex_prefix.clone().unwrap_or_default();
-        eprintln!("[install_mod] Detected BepInExPack - installing to game root (stripping prefix: '{}')", prefix);
-        
-        for i in 0..archive.len() {
-            let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
-            let name = file.name().to_string();
-            
-            // Strip detected prefix (e.g., "BepInExPack/", "BepInExPack_PEAK/", etc.)
-            let relative_path = if !prefix.is_empty() && name.starts_with(&prefix) {
-                &name[prefix.len()..]
-            } else {
-                &name
-            };
-            
-            if relative_path.is_empty() { continue; }
-            
-            let outpath = game_dir.join(relative_path);
-            
-            if name.ends_with('/') {
-                fs::create_dir_all(&outpath).map_err(|e| e.to_string())?;
-            } else {
-                if let Some(p) = outpath.parent() {
-                    if !p.exists() {
-                        fs::create_dir_all(p).map_err(|e| e.to_string())?;
-                    }
-                }
-                let mut outfile = fs::File::create(&outpath).map_err(|e| e.to_string())?;
-                std::io::copy(&mut file, &mut outfile).map_err(|e| e.to_string())?;
-                eprintln!("[install_mod] Extracted: {}", relative_path);
-            }
+        if !target_is_macos && has_macos_loader && !has_windows_loader {
+            return Err("Detected a macOS-only BepInEx pack. Please use a Windows/CrossOver-compatible pack for this profile.".to_string());
+        }
+
+        eprintln!("[install_mod] Detected BepInExPack - installing to game root");
+        extract_bepinex_pack_to_root(&mut archive, game_dir, target_is_macos)?;
+
+        if target_is_macos {
+            migrate_root_plugins_into_bepinex(game_dir)?;
+            dequarantine_recursive(game_dir);
         }
     } else {
-        // Normal mod installation to game/BepInEx/plugins/{mod_name}
-        fs::create_dir_all(&mod_dir).map_err(|e| e.to_string())?;
-
-        for i in 0..archive.len() {
-            let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
-            let outpath = match file.enclosed_name() {
-                Some(path) => mod_dir.join(path),
-                None => continue,
-            };
-
-            if (*file.name()).ends_with('/') {
-                fs::create_dir_all(&outpath).map_err(|e| e.to_string())?;
-            } else {
-                if let Some(p) = outpath.parent() {
-                    if !p.exists() {
-                        fs::create_dir_all(p).map_err(|e| e.to_string())?;
-                    }
-                }
-                let mut outfile = fs::File::create(&outpath).map_err(|e| e.to_string())?;
-                std::io::copy(&mut file, &mut outfile).map_err(|e| e.to_string())?;
-            }
+        extract_regular_mod_to_root(&mut archive, game_dir, &mod_name)?;
+        if target_is_macos {
+            migrate_root_plugins_into_bepinex(game_dir)?;
         }
     }
 
@@ -271,68 +1058,24 @@ pub async fn install_mod(app: AppHandle, profile_id: String, download_url: Strin
     if use_profile_cache.unwrap_or(false) {
         let profile_dir = app.path().app_data_dir().map_err(|e| e.to_string())?
             .join("profiles").join(&profile_id);
-        let profile_plugins_dir = profile_dir.join("BepInEx").join("plugins");
-        let profile_mod_dir = profile_plugins_dir.join(&mod_name);
-
         eprintln!("[install_mod] LEGACY: Also caching to profile: {:?}", profile_dir);
 
-        let cursor = std::io::Cursor::new(&bytes);
+        let cursor = std::io::Cursor::new(&runtime_bytes);
         let mut archive = zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
 
         if is_bepinex_pack {
-            // Cache BepInExPack to profile root using same dynamic prefix
-            let prefix = bepinex_prefix.clone().unwrap_or_default();
-            for i in 0..archive.len() {
-                let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
-                let name = file.name().to_string();
-                
-                // Strip detected prefix
-                let relative_path = if !prefix.is_empty() && name.starts_with(&prefix) {
-                    &name[prefix.len()..]
-                } else {
-                    &name
-                };
-                
-                if relative_path.is_empty() { continue; }
-                
-                let outpath = profile_dir.join(relative_path);
-                
-                if name.ends_with('/') {
-                    let _ = fs::create_dir_all(&outpath);
-                } else {
-                    if let Some(p) = outpath.parent() {
-                        let _ = fs::create_dir_all(p);
-                    }
-                    if let Ok(mut outfile) = fs::File::create(&outpath) {
-                        let _ = std::io::copy(&mut file, &mut outfile);
-                    }
-                }
-            }
+            // Cache BepInExPack to profile root
+            extract_bepinex_pack_to_root(&mut archive, &profile_dir, target_is_macos)?;
         } else {
-            // Cache normal mod to profile/BepInEx/plugins/{mod_name}
-            eprintln!("[install_mod] Creating profile cache dir: {:?}", profile_mod_dir);
-            if let Err(e) = fs::create_dir_all(&profile_mod_dir) {
-                eprintln!("[install_mod] ERROR creating profile cache dir: {}", e);
+            eprintln!("[install_mod] Updating profile cache root for {:?}", profile_dir);
+            extract_regular_mod_to_root(&mut archive, &profile_dir, &mod_name)?;
+            if target_is_macos {
+                migrate_root_plugins_into_bepinex(&profile_dir)?;
             }
+        }
 
-            for i in 0..archive.len() {
-                let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
-                let outpath = match file.enclosed_name() {
-                    Some(path) => profile_mod_dir.join(path),
-                    None => continue,
-                };
-
-                if (*file.name()).ends_with('/') {
-                    let _ = fs::create_dir_all(&outpath);
-                } else {
-                    if let Some(p) = outpath.parent() {
-                        let _ = fs::create_dir_all(p);
-                    }
-                    if let Ok(mut outfile) = fs::File::create(&outpath) {
-                        let _ = std::io::copy(&mut file, &mut outfile);
-                    }
-                }
-            }
+        if target_is_macos {
+            dequarantine_recursive(game_dir);
         }
     }
 
@@ -396,6 +1139,47 @@ pub async fn open_mod_folder(
     let game_root = std::path::Path::new(&game_path);
     let mod_key = extract_mod_key(&mod_name);
 
+    if is_balatro_game_path(game_root) {
+        let mods_root = get_balatro_mods_dir().ok_or_else(|| "MODS_NOT_APPLIED".to_string())?;
+
+        if is_balatro_lovely_mod(&mod_name) {
+            let lovely_files_present = [
+                game_root.join("run_lovely_macos.sh"),
+                game_root.join("liblovely.dylib"),
+            ]
+            .iter()
+            .all(|path| path.exists());
+
+            if lovely_files_present {
+                open::that(game_root).map_err(|e| format!("Failed to open Balatro root folder: {}", e))?;
+                return Ok(());
+            }
+
+            return Err("MODS_NOT_APPLIED".to_string());
+        }
+
+        let target = if is_balatro_steamodded_mod(&mod_name) {
+            mods_root.join("smods")
+        } else if let Some(entry_name) = find_mod_folder_in(&mods_root, &mod_name) {
+            mods_root.join(entry_name)
+        } else if let Some(found_path) = find_mod_entry_recursive(&mods_root, &mod_name, 3) {
+            if found_path.is_file() {
+                found_path.parent().map(|p| p.to_path_buf()).unwrap_or(found_path)
+            } else {
+                found_path
+            }
+        } else {
+            return Err("MOD_NOT_INSTALLED".to_string());
+        };
+
+        if target.exists() {
+            open::that(&target).map_err(|e| format!("Failed to open Balatro mod folder: {}", e))?;
+            return Ok(());
+        }
+
+        return Err("MOD_NOT_INSTALLED".to_string());
+    }
+
     // BepInExPack is installed to game root (BepInEx/, doorstop files), not under plugins/.
     if mod_key.contains("bepinexpack") {
         let bepinex_root = game_root.join("BepInEx");
@@ -408,6 +1192,7 @@ pub async fn open_mod_folder(
             game_root.join("run_bepinex.sh"),
             game_root.join("doorstop_libs"),
             game_root.join("doorstop_config.ini"),
+            game_root.join("libdoorstop.dylib"),
             game_root.join("winhttp.dll"),
         ]
         .iter()
@@ -533,13 +1318,106 @@ pub async fn toggle_mod(app: AppHandle, profile_id: String, mod_name: String, en
 pub async fn copy_mod_from_cache(app: AppHandle, profile_id: String, mod_name: String, game_path: String) -> Result<serde_json::Value, String> {
     let profile_dir = app.path().app_data_dir().map_err(|e| e.to_string())?
         .join("profiles").join(&profile_id);
-    let profile_plugins_dir = profile_dir.join("BepInEx").join("plugins");
-    
     let game_dir = std::path::Path::new(&game_path);
-    let game_plugins_dir = game_dir.join("BepInEx").join("plugins");
-    
-    // Find the mod folder in profile cache (case insensitive partial match)
     let mod_name_lower = mod_name.to_lowercase();
+
+    if is_balatro_game_path(game_dir) {
+        if is_balatro_lovely_mod(&mod_name) {
+            let cache_dir = profile_dir.join("BalatroRoot");
+            if cache_dir.exists() {
+                for file_name in ["run_lovely_macos.sh", "liblovely.dylib"] {
+                    let src = cache_dir.join(file_name);
+                    if src.exists() {
+                        let dst = game_dir.join(file_name);
+                        fs::copy(&src, &dst).map_err(|e| e.to_string())?;
+                        if file_name.ends_with(".sh") {
+                            set_script_executable(&dst)?;
+                        }
+                    }
+                }
+                dequarantine_recursive(game_dir);
+                return Ok(serde_json::json!({ "success": true, "copied": true }));
+            }
+        } else {
+            let profile_mods_dir = profile_dir.join("Balatro").join("Mods");
+            let game_mods_dir = get_balatro_mods_dir()
+                .ok_or_else(|| "Could not resolve ~/Library/Application Support/Balatro/Mods".to_string())?;
+            fs::create_dir_all(&game_mods_dir).map_err(|e| e.to_string())?;
+
+            let target_folder = balatro_target_folder_name(&mod_name);
+            let src_path = profile_mods_dir.join(&target_folder);
+            let dst_path = game_mods_dir.join(&target_folder);
+            if src_path.exists() {
+                if dst_path.exists() {
+                    let _ = fs::remove_dir_all(&dst_path);
+                }
+                copy_dir_recursive(&src_path, &dst_path).map_err(|e| e.to_string())?;
+                return Ok(serde_json::json!({ "success": true, "copied": true }));
+            }
+        }
+
+        eprintln!("[copy_mod_from_cache] Balatro mod {} not found in profile cache", mod_name);
+        return Ok(serde_json::json!({ "success": false, "copied": false }));
+    }
+
+    if is_macos_game_dir(game_dir) && mod_name_lower.contains("bepinexpack") {
+        let profile_has_runtime = profile_dir.join("BepInEx").join("core").is_dir()
+            && profile_dir.join("doorstop_libs").is_dir()
+            && profile_dir.join("run_bepinex.sh").exists();
+
+        if profile_has_runtime {
+            let root_dirs = ["BepInEx", "doorstop_libs"];
+            for item in root_dirs {
+                let src = profile_dir.join(item);
+                let dst = game_dir.join(item);
+                if src.exists() {
+                    if dst.exists() {
+                        let _ = fs::remove_dir_all(&dst);
+                    }
+                    copy_dir_recursive(&src, &dst).map_err(|e| e.to_string())?;
+                }
+            }
+
+            let root_files = ["doorstop_config.ini", "libdoorstop.dylib", "run_bepinex.sh"];
+            for item in root_files {
+                let src = profile_dir.join(item);
+                let dst = game_dir.join(item);
+                if src.exists() {
+                    if dst.exists() {
+                        let _ = fs::remove_file(&dst);
+                    }
+                    fs::copy(&src, &dst).map_err(|e| e.to_string())?;
+                    if item.ends_with(".sh") {
+                        set_script_executable(&dst)?;
+                    }
+                }
+            }
+
+            dequarantine_recursive(game_dir);
+            migrate_root_plugins_into_bepinex(game_dir)?;
+            return Ok(serde_json::json!({ "success": true, "copied": true }));
+        }
+
+        let version_number = extract_version_number_from_full_name(&mod_name)
+            .ok_or_else(|| format!("Could not parse BepInEx version from {}", mod_name))?;
+        let runtime_kind = detect_unity_runtime_kind(game_dir);
+        let runtime_bytes = download_official_macos_bepinex_runtime(&version_number, runtime_kind).await?;
+
+        let cursor = std::io::Cursor::new(&runtime_bytes);
+        let mut game_archive = zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
+        extract_bepinex_pack_to_root(&mut game_archive, game_dir, true)?;
+
+        let cursor = std::io::Cursor::new(&runtime_bytes);
+        let mut profile_archive = zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
+        extract_bepinex_pack_to_root(&mut profile_archive, &profile_dir, true)?;
+
+        dequarantine_recursive(game_dir);
+        migrate_root_plugins_into_bepinex(game_dir)?;
+        return Ok(serde_json::json!({ "success": true, "copied": true }));
+    }
+
+    let profile_plugins_dir = profile_dir.join("BepInEx").join("plugins");
+    let game_plugins_dir = game_dir.join("BepInEx").join("plugins");
     
     if let Ok(entries) = fs::read_dir(&profile_plugins_dir) {
         for entry in entries.filter_map(|e| e.ok()) {
@@ -552,18 +1430,14 @@ pub async fn copy_mod_from_cache(app: AppHandle, profile_id: String, mod_name: S
                 
                 if src_path.is_dir() {
                     eprintln!("[copy_mod_from_cache] Copying {} from cache to game", folder_name);
-                    
-                    // Ensure target dir exists
                     fs::create_dir_all(&game_plugins_dir).map_err(|e| e.to_string())?;
-                    
-                    // Remove existing if present
                     if dst_path.exists() {
                         let _ = fs::remove_dir_all(&dst_path);
                     }
-                    
-                    // Copy
                     copy_dir_recursive(&src_path, &dst_path).map_err(|e| e.to_string())?;
-                    
+                    if is_macos_game_dir(game_dir) {
+                        migrate_root_plugins_into_bepinex(game_dir)?;
+                    }
                     return Ok(serde_json::json!({ "success": true, "copied": true }));
                 }
             }

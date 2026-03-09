@@ -1,5 +1,4 @@
-
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Menu, MenuItem } from '@tauri-apps/api/menu';
 import type { Profile } from '../../types/profile';
 import type { CommunityPlatformInfo } from '../../types/thunderstore';
@@ -42,6 +41,38 @@ export function ProfileList({
     const [selectedPlatform, setSelectedPlatform] = useState<'windows' | 'mac'>('windows');
     // null = no pending import; string = code; { file: string } = file
     const [pendingImport, setPendingImport] = useState<string | { file: string } | null>(null);
+
+    useEffect(() => {
+        const onKeyDown = (event: KeyboardEvent) => {
+            if (event.key !== 'Escape' || event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) {
+                return;
+            }
+
+            if (editingProfile) {
+                event.preventDefault();
+                setEditingProfile(null);
+                setEditName('');
+                return;
+            }
+
+            if (isImporting || pendingImport) {
+                event.preventDefault();
+                setIsImporting(false);
+                setPendingImport(null);
+                setImportCode('');
+                return;
+            }
+
+            if (isCreating) {
+                event.preventDefault();
+                setIsCreating(false);
+                setNewProfileName('');
+            }
+        };
+
+        window.addEventListener('keydown', onKeyDown);
+        return () => window.removeEventListener('keydown', onKeyDown);
+    }, [editingProfile, isCreating, isImporting, pendingImport]);
 
     const filteredProfiles = profiles.filter(p => p.gameIdentifier === selectedGameIdentifier);
     const isMacCompatible = selectedGamePlatform?.mac ?? false;
@@ -222,12 +253,6 @@ export function ProfileList({
                                             return;
                                         }
                                         const newVanillaState = !profile.is_vanilla;
-                                        if (newVanillaState && profile.platform === 'mac') {
-                                            await window.ipcRenderer.alert(
-                                                'Vanilla Mode Notice',
-                                                'Before launching in vanilla mode on macOS, remove the Steam Launch Option argument:\n\n/usr/bin/arch -x86_64 /bin/sh "run_bepinex.sh" %command%\n\nKeeping this argument in vanilla mode can cause instability or immediate crashes.'
-                                            );
-                                        }
                                         onToggleVanilla(profile.id, newVanillaState);
                                     }}
                                     className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${profile.is_vanilla

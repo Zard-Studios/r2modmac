@@ -80,6 +80,59 @@ pub fn calculate_dir_size(path: &std::path::Path) -> std::io::Result<u64> {
     Ok(size)
 }
 
+pub fn dequarantine_recursive(path: &std::path::Path) {
+    #[cfg(target_os = "macos")]
+    {
+        if !path.exists() {
+            return;
+        }
+
+        let _ = std::process::Command::new("/usr/bin/xattr")
+            .args(["-r", "-d", "com.apple.quarantine"])
+            .arg(path)
+            .output();
+    }
+}
+
+pub fn migrate_root_plugins_into_bepinex(game_path: &std::path::Path) -> Result<(), String> {
+    let legacy_plugins = game_path.join("plugins");
+    if !legacy_plugins.is_dir() {
+        return Ok(());
+    }
+
+    let bepinex_plugins = game_path.join("BepInEx").join("plugins");
+    fs::create_dir_all(&bepinex_plugins)
+        .map_err(|e| format!("Failed to prepare BepInEx plugins directory: {}", e))?;
+
+    if let Ok(entries) = fs::read_dir(&legacy_plugins) {
+        for entry in entries.filter_map(|e| e.ok()) {
+            let src = entry.path();
+            let dst = bepinex_plugins.join(entry.file_name());
+            if dst.exists() || dst.is_symlink() {
+                if dst.is_dir() && !dst.is_symlink() {
+                    let _ = fs::remove_dir_all(&dst);
+                } else {
+                    let _ = fs::remove_file(&dst);
+                }
+            }
+            fs::rename(&src, &dst).map_err(|e| {
+                format!(
+                    "Failed to move legacy plugins entry {} -> {}: {}",
+                    src.display(),
+                    dst.display(),
+                    e
+                )
+            })?;
+        }
+    }
+
+    if legacy_plugins.exists() {
+        let _ = fs::remove_dir_all(&legacy_plugins);
+    }
+
+    Ok(())
+}
+
 
 #[command]
 pub fn check_directory_exists(path: String) -> bool {

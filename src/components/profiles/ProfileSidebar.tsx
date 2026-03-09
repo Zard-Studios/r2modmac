@@ -319,12 +319,6 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                                     }
                                     // Calculate the NEW vanilla state
                                     const newVanillaState = !activeProfile.is_vanilla;
-                                    if (newVanillaState && activeProfile.platform === 'mac') {
-                                        await window.ipcRenderer.alert(
-                                            'Vanilla Mode Notice',
-                                            'Before launching in vanilla mode on macOS, remove the Steam Launch Option argument:\n\n/usr/bin/arch -x86_64 /bin/sh "run_bepinex.sh" %command%\n\nKeeping this argument in vanilla mode can cause instability or immediate crashes.'
-                                        );
-                                    }
                                     // Toggle vanilla mode in store
                                     onUpdateProfile(activeProfile.id, { is_vanilla: newVanillaState });
                                     // Apply immediately with the NEW state (no timing issues!)

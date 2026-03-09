@@ -5,7 +5,6 @@ import { UninstallModal } from '../modals/UninstallModal'
 import { SettingsModal } from '../modals/SettingsModal'
 import { ExportModal } from '../modals/ExportModal'
 import { CrossOverGuideModal } from '../modals/CrossOverGuideModal';
-import { MacOSGuideModal } from '../modals/MacOSGuideModal';
 import { UpdateModal } from '../modals/UpdateModal';
 import PreferencesModal, { type PreferencesSettings } from '../modals/PreferencesModal';
 import type { Package, PackageVersion } from '../../types/thunderstore'
@@ -39,10 +38,6 @@ export interface AppModalsProps {
     setShowCrossOverGuide: (show: boolean) => void;
     hideCrossOverGuide: boolean;
     setHideCrossOverGuide: (hide: boolean) => void;
-    showMacOSGuide: boolean;
-    setShowMacOSGuide: (show: boolean) => void;
-    hideMacOSGuide: boolean;
-    setHideMacOSGuide: (hide: boolean) => void;
     showPreferences: boolean;
     setShowPreferences: (show: boolean) => void;
     preferences: PreferencesSettings;
@@ -64,7 +59,6 @@ export function AppModals({
     showExportModal, setShowExportModal, handleExportCode, handleExportFile,
     showUpdateModal, setShowUpdateModal, updateInfo,
     showCrossOverGuide, setShowCrossOverGuide, hideCrossOverGuide, setHideCrossOverGuide,
-    showMacOSGuide, setShowMacOSGuide, hideMacOSGuide, setHideMacOSGuide,
     showPreferences, setShowPreferences, preferences, onSavePreferences,
     hasHiddenGuideWarnings, onRestoreGuideWarnings, onSetGuideHidden,
     legacyInstallMode
@@ -197,18 +191,6 @@ export function AppModals({
                         setHideCrossOverGuide(true);
                         void onSetGuideHidden('crossover', true).catch((e) => console.error('Failed to persist CrossOver guide preference', e));
                         setShowCrossOverGuide(false);
-                    }}
-                />
-            )}
-
-            {showMacOSGuide && !hideMacOSGuide && (
-                <MacOSGuideModal
-                    isOpen={showMacOSGuide}
-                    onClose={() => setShowMacOSGuide(false)}
-                    onDontShowAgain={() => {
-                        setHideMacOSGuide(true);
-                        void onSetGuideHidden('macos', true).catch((e) => console.error('Failed to persist macOS guide preference', e));
-                        setShowMacOSGuide(false);
                     }}
                 />
             )}

@@ -10,10 +10,8 @@ interface UseGameSyncProps {
     selectedCommunity: string | null;
     legacyInstallMode: boolean;
     installInParallel: boolean;
-    hideMacOSGuide: boolean;
     setProgressState: ProgressSetter;
     setShowCrossOverGuide: (v: boolean) => void;
-    setShowMacOSGuide: (v: boolean) => void;
     installModWithDependencies: (
         pkg: Package,
         version: any,
@@ -29,10 +27,8 @@ export function useGameSync({
     selectedCommunity,
     legacyInstallMode,
     installInParallel,
-    hideMacOSGuide,
     setProgressState,
     setShowCrossOverGuide,
-    setShowMacOSGuide,
     installModWithDependencies,
 }: UseGameSyncProps) {
     const { profiles, updateProfile } = useProfileStore();
@@ -65,16 +61,29 @@ export function useGameSync({
             }
 
             // ── BepInEx auto-install ───────────────────────────────────────────────
-            const isBepInExInstalled = activeProfile.mods.some(m => m.fullName.toLowerCase().includes('bepinexpack'));
-            if (!isBepInExInstalled) {
-                setProgressState({ isOpen: true, title: 'Checking Requirements', progress: 0, currentTask: 'Searching for BepInExPack...' });
-                const packages = await window.ipcRenderer.getPackages(community, 0, 20, 'BepInExPack', 'downloads');
-                const bepInExPkg = Array.isArray(packages) ? packages.find((p: Package) => p.name.toLowerCase().includes('bepinexpack')) : null;
+            const isBalatro = community === 'balatro';
+            const hasLoaderInstalled = isBalatro
+                ? activeProfile.mods.some(m => m.fullName.toLowerCase().includes('-lovely-'))
+                : activeProfile.mods.some(m => m.fullName.toLowerCase().includes('bepinexpack'));
+            if (!hasLoaderInstalled) {
+                const requirementQuery = isBalatro ? 'lovely' : 'BepInExPack';
+                setProgressState({
+                    isOpen: true,
+                    title: 'Checking Requirements',
+                    progress: 0,
+                    currentTask: `Searching for ${isBalatro ? 'Lovely' : 'BepInExPack'}...`
+                });
+                const packages = await window.ipcRenderer.getPackages(community, 0, 20, requirementQuery, 'downloads');
+                const loaderPkg = Array.isArray(packages)
+                    ? packages.find((p: Package) => isBalatro
+                        ? p.full_name?.toLowerCase().includes('thunderstore-lovely') || p.name.toLowerCase() === 'lovely'
+                        : p.name.toLowerCase().includes('bepinexpack'))
+                    : null;
 
-                if (bepInExPkg) {
-                    const version = bepInExPkg.versions[0];
-                    setProgressState(prev => ({ ...prev, progress: 20, currentTask: `Installing missing requirement: ${bepInExPkg.name}...` }));
-                    await installModWithDependencies(bepInExPkg, version, new Set(), activeProfile.id, undefined, gamePath);
+                if (loaderPkg) {
+                    const version = loaderPkg.versions[0];
+                    setProgressState(prev => ({ ...prev, progress: 20, currentTask: `Installing missing requirement: ${loaderPkg.name}...` }));
+                    await installModWithDependencies(loaderPkg, version, new Set(), activeProfile.id, undefined, gamePath);
                 }
                 setProgressState(prev => ({ ...prev, isOpen: false }));
             }
@@ -240,9 +249,29 @@ export function useGameSync({
                 }));
             }
 
-            updateProfile(activeProfile.id, {
+            const latestProfile = useProfileStore
+                .getState()
+                .profiles.find((p) => p.id === activeProfile.id) || activeProfile;
+            const disabledMods = latestProfile.mods.filter((m) => !m.enabled).map((m) => m.fullName);
+
+            setProgressState({
+                isOpen: true,
+                title: 'Syncing to Game',
+                progress: 100,
+                currentTask: community === 'balatro'
+                    ? 'Finalizing Lovely runtime and Balatro Mods folder...'
+                    : latestProfile.platform === 'mac'
+                    ? 'Finalizing BepInEx and Steam launch options...'
+                    : 'Applying profile files to game...'
+            });
+
+            await window.ipcRenderer.installToGame(community, latestProfile.id, disabledMods);
+
+            setProgressState(prev => ({ ...prev, isOpen: false }));
+
+            updateProfile(latestProfile.id, {
                 needs_sync: false,
-                mods: activeProfile.mods.map((m) => ({
+                mods: latestProfile.mods.map((m) => ({
                     ...m,
                     pending_sync: false,
                     synced_enabled: m.enabled,
@@ -275,16 +304,20 @@ export function useGameSync({
                 message += `\n\nFailed ${failedInstalls.length} mod(s) during sync:\n${preview}${more}`;
             }
 
+            if (community === 'balatro' && message !== 'Profile already synced! No changes needed.') {
+                message += '\n\nBalatro macOS: mod files are synced to ~/Library/Application Support/Balatro/Mods. Launch the modded game with run_lovely_macos.sh.';
+            } else if (latestProfile.platform === 'mac' && message !== 'Profile already synced! No changes needed.') {
+                message += '\n\nmacOS: Steam launch options are now managed automatically by r2modmac.';
+            }
+
             await window.ipcRenderer.alert('Success', message);
 
-            const syncedProfile = profiles.find(p => p.id === activeProfileId);
-            if (syncedProfile?.platform === 'mac') {
-                if (!hideMacOSGuide) setShowMacOSGuide(true);
-            } else {
+            const syncedProfile = useProfileStore.getState().profiles.find(p => p.id === activeProfileId);
+            if (syncedProfile?.platform !== 'mac') {
                 setShowCrossOverGuide(true);
             }
 
-        } catch (e: any) {
+            } catch (e: any) {
             console.error('Sync to game failed:', e);
             setProgressState(prev => ({ ...prev, isOpen: false }));
             alert('Error syncing: ' + e);

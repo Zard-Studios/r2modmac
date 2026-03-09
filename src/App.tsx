@@ -211,8 +211,6 @@ function App() {
   const [showExportModal, setShowExportModal] = useState(false)
   const [showCrossOverGuide, setShowCrossOverGuide] = useState(false)
   const [hideCrossOverGuide, setHideCrossOverGuide] = useState(false)
-  const [showMacOSGuide, setShowMacOSGuide] = useState(false)
-  const [hideMacOSGuide, setHideMacOSGuide] = useState(false)
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null)
   const [uninstallModalState, setUninstallModalState] = useState<{
     isOpen: boolean;
@@ -269,7 +267,6 @@ function App() {
       setDefaultModViewMode(storedViewMode);
       setViewMode(storedViewMode);
       setHideCrossOverGuide(!!s.hide_crossover_guide);
-      setHideMacOSGuide(!!s.hide_macos_guide);
     });
 
     // Listen for preferences menu event
@@ -626,10 +623,8 @@ function App() {
     selectedCommunity,
     legacyInstallMode,
     installInParallel,
-    hideMacOSGuide,
     setProgressState,
     setShowCrossOverGuide,
-    setShowMacOSGuide,
     installModWithDependencies,
   });
 
@@ -683,21 +678,17 @@ function App() {
   const handleSetGuideHidden = async (guide: 'crossover' | 'macos', hidden: boolean) => {
     if (guide === 'crossover') {
       setHideCrossOverGuide(hidden);
-    } else {
-      setHideMacOSGuide(hidden);
     }
 
     const currentSettings = await window.ipcRenderer.getSettings();
     await window.ipcRenderer.saveSettings({
       ...currentSettings,
       hide_crossover_guide: guide === 'crossover' ? hidden : !!currentSettings.hide_crossover_guide,
-      hide_macos_guide: guide === 'macos' ? hidden : !!currentSettings.hide_macos_guide,
     });
   };
 
   const handleRestoreGuideWarnings = async () => {
     setHideCrossOverGuide(false);
-    setHideMacOSGuide(false);
 
     const currentSettings = await window.ipcRenderer.getSettings();
     await window.ipcRenderer.saveSettings({
@@ -711,6 +702,84 @@ function App() {
       'Setup warnings have been re-enabled. They will be shown again when needed.'
     );
   };
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) {
+        return;
+      }
+
+      if (selectedMod) {
+        event.preventDefault();
+        setSelectedMod(null);
+        return;
+      }
+
+      if (uninstallModalState.isOpen) {
+        event.preventDefault();
+        setUninstallModalState((prev: any) => ({ ...prev, isOpen: false }));
+        return;
+      }
+
+      if (showSettings) {
+        event.preventDefault();
+        setShowSettings(false);
+        return;
+      }
+
+      if (showExportModal) {
+        event.preventDefault();
+        setShowExportModal(false);
+        return;
+      }
+
+      if (showUpdateModal) {
+        event.preventDefault();
+        setShowUpdateModal(false);
+        return;
+      }
+
+      if (showCrossOverGuide) {
+        event.preventDefault();
+        setShowCrossOverGuide(false);
+        return;
+      }
+
+      if (showPreferences) {
+        event.preventDefault();
+        setShowPreferences(false);
+        return;
+      }
+
+      if (activeProfileId || isBrowsingMode) {
+        event.preventDefault();
+        setSelectedMod(null);
+        selectProfile('');
+        setIsBrowsingMode(false);
+        return;
+      }
+
+      if (selectedCommunity) {
+        event.preventDefault();
+        setSelectedCommunity(null);
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [
+    activeProfileId,
+    isBrowsingMode,
+    selectedCommunity,
+    selectedMod,
+    selectProfile,
+    showCrossOverGuide,
+    showExportModal,
+    showPreferences,
+    showSettings,
+    showUpdateModal,
+    uninstallModalState.isOpen,
+  ]);
 
 
   // VIEW LOGIC
@@ -780,16 +849,23 @@ function App() {
             const profile = profiles.find(p => p.id === profileId);
             if (profile) {
               const disabledMods = profile.mods.filter(m => !m.enabled).map(m => m.fullName);
-              // Apply directly to game with vanilla override
-              await window.ipcRenderer.installToGame(selectedCommunity, profileId, disabledMods, newVanillaState);
-              updateProfile(profileId, {
-                needs_sync: false,
-                mods: profile.mods.map((m) => ({
-                  ...m,
-                  pending_sync: false,
-                  synced_enabled: m.enabled,
-                })),
-              });
+              try {
+                await window.ipcRenderer.installToGame(selectedCommunity, profileId, disabledMods, newVanillaState);
+                updateProfile(profileId, {
+                  needs_sync: false,
+                  mods: profile.mods.map((m) => ({
+                    ...m,
+                    pending_sync: false,
+                    synced_enabled: m.enabled,
+                  })),
+                });
+              } catch (error: any) {
+                updateProfile(profileId, { is_vanilla: !newVanillaState });
+                await window.ipcRenderer.alert(
+                  'Vanilla Mode Error',
+                  String(error?.message || error || 'Failed to update vanilla mode.')
+                );
+              }
             }
           }}
         />
@@ -985,10 +1061,6 @@ function App() {
         setShowCrossOverGuide={setShowCrossOverGuide}
         hideCrossOverGuide={hideCrossOverGuide}
         setHideCrossOverGuide={setHideCrossOverGuide}
-        showMacOSGuide={showMacOSGuide}
-        setShowMacOSGuide={setShowMacOSGuide}
-        hideMacOSGuide={hideMacOSGuide}
-        setHideMacOSGuide={setHideMacOSGuide}
         showPreferences={showPreferences}
         setShowPreferences={setShowPreferences}
         preferences={{
@@ -999,7 +1071,7 @@ function App() {
           default_mod_view_mode: defaultModViewMode,
         }}
         onSavePreferences={handleSavePreferences}
-        hasHiddenGuideWarnings={hideCrossOverGuide || hideMacOSGuide}
+        hasHiddenGuideWarnings={hideCrossOverGuide}
         onRestoreGuideWarnings={handleRestoreGuideWarnings}
         onSetGuideHidden={handleSetGuideHidden}
         legacyInstallMode={legacyInstallMode}
