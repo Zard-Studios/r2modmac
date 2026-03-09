@@ -78,6 +78,46 @@ fn get_profile_platform(app: &AppHandle, profile_id: &str) -> String {
     "windows".to_string()
 }
 
+fn get_profile_distribution(app: &AppHandle, profile_id: &str) -> String {
+    let profiles_path = app.path().app_data_dir().unwrap_or_default().join("profiles.json");
+    if profiles_path.exists() {
+        if let Ok(data) = fs::read_to_string(&profiles_path) {
+            if let Ok(profiles) = serde_json::from_str::<Vec<serde_json::Value>>(&data) {
+                if let Some(profile) = profiles.iter().find(|p| p["id"].as_str() == Some(profile_id)) {
+                    if let Some(distribution) = profile["distribution"].as_str() {
+                        if distribution == "steam" || distribution == "manual" {
+                            return distribution.to_string();
+                        }
+                    }
+                }
+            }
+        }
+    }
+    "steam".to_string()
+}
+
+fn get_profile_launch_mode(app: &AppHandle, profile_id: &str) -> String {
+    let profiles_path = app.path().app_data_dir().unwrap_or_default().join("profiles.json");
+    if profiles_path.exists() {
+        if let Ok(data) = fs::read_to_string(&profiles_path) {
+            if let Ok(profiles) = serde_json::from_str::<Vec<serde_json::Value>>(&data) {
+                if let Some(profile) = profiles.iter().find(|p| p["id"].as_str() == Some(profile_id)) {
+                    if let Some(launch_mode) = profile["launchMode"].as_str() {
+                        if launch_mode == "auto" || launch_mode == "steam" || launch_mode == "direct" {
+                            return launch_mode.to_string();
+                        }
+                    }
+                }
+            }
+        }
+    }
+    "auto".to_string()
+}
+
+fn should_manage_steam_launch_options(distribution: &str, launch_mode: &str) -> bool {
+    distribution == "steam" && launch_mode != "direct"
+}
+
 fn get_steam_roots_for_platform(app: &AppHandle, is_windows_profile: bool) -> Vec<std::path::PathBuf> {
     let settings = load_settings_impl(app);
     let mut steam_paths_to_check = Vec::new();
@@ -1253,12 +1293,16 @@ pub async fn find_game_executable(game_path: String) -> Result<Option<String>, S
 #[command]
 pub async fn install_to_game(app: AppHandle, game_identifier: String, profile_id: String, disabled_mods: Vec<String>, is_vanilla_override: Option<bool>) -> Result<(), String> {
     let profile_platform = get_profile_platform(&app, &profile_id);
+    let profile_distribution = get_profile_distribution(&app, &profile_id);
+    let profile_launch_mode = get_profile_launch_mode(&app, &profile_id);
     let is_mac_profile = profile_platform == "mac";
+    let manage_steam_launch = is_mac_profile
+        && should_manage_steam_launch_options(&profile_distribution, &profile_launch_mode);
     let settings = load_settings_impl(&app);
     let use_legacy_plugin_cache = settings.legacy_install_mode;
 
     // 1. Find game path
-    let game_path_str = get_game_path(app.clone(), game_identifier.clone(), Some(profile_platform)).await?
+    let game_path_str = get_game_path(app.clone(), game_identifier.clone(), Some(profile_platform.clone())).await?
         .ok_or("Game not found in Steam library")?;
     let game_path = std::path::Path::new(&game_path_str);
 
@@ -1291,7 +1335,10 @@ pub async fn install_to_game(app: AppHandle, game_identifier: String, profile_id
         vanilla
     };
 
-    eprintln!("[install_to_game] Profile is_mac_profile: {}", is_mac_profile);
+    eprintln!(
+        "[install_to_game] platform={} distribution={} launch_mode={} manage_steam_launch={}",
+        profile_platform, profile_distribution, profile_launch_mode, manage_steam_launch
+    );
 
     if is_vanilla {
         if is_mac_profile {
@@ -1516,8 +1563,12 @@ pub async fn install_to_game(app: AppHandle, game_identifier: String, profile_id
 
     if is_mac_profile && is_vanilla {
         sync_macos_runtime_disabled_state(game_path, true)?;
-        ensure_macos_steam_launch_options(&app, game_path, false)?;
-        eprintln!("[install_to_game] macOS vanilla mode complete - runtime disabled and Steam launch option cleared.");
+        if manage_steam_launch {
+            ensure_macos_steam_launch_options(&app, game_path, false)?;
+            eprintln!("[install_to_game] macOS vanilla mode complete - runtime disabled and Steam launch option cleared.");
+        } else {
+            eprintln!("[install_to_game] macOS vanilla mode complete - runtime disabled without touching Steam launch options.");
+        }
         return Ok(());
     }
     
@@ -1757,7 +1808,9 @@ pub async fn install_to_game(app: AppHandle, game_identifier: String, profile_id
         let run_script = canonicalize_macos_bepinex_script(game_path)?;
         configure_macos_bepinex_script(&run_script, game_path)?;
         dequarantine_recursive(game_path);
-        ensure_macos_steam_launch_options(&app, game_path, true)?;
+        if manage_steam_launch {
+            ensure_macos_steam_launch_options(&app, game_path, true)?;
+        }
     } else {
         let root_files = ["doorstop_config.ini", "winhttp.dll"];
 

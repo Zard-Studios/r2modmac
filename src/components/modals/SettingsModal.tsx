@@ -1,18 +1,24 @@
 import { useState, useEffect } from 'react';
 import { Button } from '../ui';
+import type { Profile, ProfileDistribution, ProfileLaunchMode, ProfilePlatform } from '../../types/profile';
 
 interface SettingsModalProps {
     isOpen: boolean;
     onClose: () => void;
     selectedGame?: string;
-    activeProfilePlatform?: 'windows' | 'mac';
+    activeProfile?: Profile | null;
+    onUpdateProfile?: (profileId: string, updates: Partial<Profile>) => void;
 }
 
-export function SettingsModal({ isOpen, onClose, selectedGame, activeProfilePlatform }: SettingsModalProps) {
+export function SettingsModal({ isOpen, onClose, selectedGame, activeProfile, onUpdateProfile }: SettingsModalProps) {
     const [steamPath, setSteamPath] = useState<string>('');
     const [loading, setLoading] = useState(false);
     const [gamePath, setGamePath] = useState<string | null>(null);
     const [checkingGamePath, setCheckingGamePath] = useState(false);
+    const [distribution, setDistribution] = useState<ProfileDistribution>('steam');
+    const [launchMode, setLaunchMode] = useState<ProfileLaunchMode>('auto');
+
+    const activeProfilePlatform: ProfilePlatform = activeProfile?.platform === 'mac' ? 'mac' : 'windows';
 
     const loadSettings = async () => {
         try {
@@ -40,6 +46,12 @@ export function SettingsModal({ isOpen, onClose, selectedGame, activeProfilePlat
     useEffect(() => {
         const init = async () => {
             if (isOpen) {
+                setDistribution(activeProfile?.distribution === 'manual' ? 'manual' : 'steam');
+                setLaunchMode(
+                    activeProfile?.launchMode === 'steam' || activeProfile?.launchMode === 'direct'
+                        ? activeProfile.launchMode
+                        : 'auto'
+                );
                 await loadSettings();
                 if (selectedGame) {
                     await checkGamePath();
@@ -47,7 +59,13 @@ export function SettingsModal({ isOpen, onClose, selectedGame, activeProfilePlat
             }
         };
         init();
-    }, [isOpen, selectedGame, activeProfilePlatform]);
+    }, [isOpen, selectedGame, activeProfile?.distribution, activeProfile?.launchMode, activeProfilePlatform]);
+
+    useEffect(() => {
+        if (distribution === 'manual' && launchMode === 'steam') {
+            setLaunchMode('direct');
+        }
+    }, [distribution, launchMode]);
 
     const handleSave = async () => {
         setLoading(true);
@@ -60,6 +78,12 @@ export function SettingsModal({ isOpen, onClose, selectedGame, activeProfilePlat
             // Re-check game path after saving
             if (selectedGame) {
                 await checkGamePath();
+            }
+            if (activeProfile && onUpdateProfile) {
+                onUpdateProfile(activeProfile.id, {
+                    distribution,
+                    launchMode,
+                });
             }
             onClose();
         } catch (e) {
@@ -107,8 +131,95 @@ export function SettingsModal({ isOpen, onClose, selectedGame, activeProfilePlat
 
     return (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-            <div className="bg-gray-900 border border-gray-700 rounded-xl p-6 w-full max-w-md shadow-2xl">
-                <h2 className="text-xl font-bold text-white mb-4">Settings</h2>
+            <div className="bg-gray-900 border border-gray-700 rounded-xl p-6 w-full max-w-2xl shadow-2xl">
+                <h2 className="text-xl font-bold text-white mb-6">Settings</h2>
+
+                {activeProfile && (
+                    <div className="mb-6 rounded-xl border border-gray-800 bg-gray-800/40 p-4">
+                        <div className="flex items-center justify-between gap-4 mb-4">
+                            <div>
+                                <h3 className="text-sm font-semibold text-white">Launch Source</h3>
+                                <p className="text-xs text-gray-400 mt-1">
+                                    Control how this profile discovers and launches the game.
+                                </p>
+                            </div>
+                            <span className="text-xs text-gray-500 uppercase tracking-[0.2em]">
+                                {activeProfilePlatform === 'mac' ? 'macOS' : 'Windows'}
+                            </span>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div className="rounded-lg border border-gray-700 bg-gray-900/60 p-4">
+                                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-gray-500 mb-3">Distribution</p>
+                                <div className="grid grid-cols-2 gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => setDistribution('steam')}
+                                        className={`rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${distribution === 'steam'
+                                            ? 'border-blue-500 bg-blue-500/10 text-white'
+                                            : 'border-gray-700 bg-gray-800 text-gray-400 hover:text-white hover:border-gray-600'
+                                            }`}
+                                    >
+                                        Steam
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setDistribution('manual')}
+                                        className={`rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${distribution === 'manual'
+                                            ? 'border-blue-500 bg-blue-500/10 text-white'
+                                            : 'border-gray-700 bg-gray-800 text-gray-400 hover:text-white hover:border-gray-600'
+                                            }`}
+                                    >
+                                        Manual
+                                    </button>
+                                </div>
+                                <p className="text-xs text-gray-500 mt-3">
+                                    Use Steam when the game is installed inside a Steam library. Use Manual for standalone copies.
+                                </p>
+                            </div>
+
+                            <div className="rounded-lg border border-gray-700 bg-gray-900/60 p-4">
+                                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-gray-500 mb-3">Launch Mode</p>
+                                <div className="grid grid-cols-3 gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => setLaunchMode('auto')}
+                                        className={`rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${launchMode === 'auto'
+                                            ? 'border-blue-500 bg-blue-500/10 text-white'
+                                            : 'border-gray-700 bg-gray-800 text-gray-400 hover:text-white hover:border-gray-600'
+                                            }`}
+                                    >
+                                        Auto
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setLaunchMode('steam')}
+                                        disabled={distribution !== 'steam'}
+                                        className={`rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${launchMode === 'steam'
+                                            ? 'border-blue-500 bg-blue-500/10 text-white'
+                                            : 'border-gray-700 bg-gray-800 text-gray-400 hover:text-white hover:border-gray-600'
+                                            } disabled:opacity-40 disabled:cursor-not-allowed`}
+                                    >
+                                        Steam
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setLaunchMode('direct')}
+                                        className={`rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${launchMode === 'direct'
+                                            ? 'border-blue-500 bg-blue-500/10 text-white'
+                                            : 'border-gray-700 bg-gray-800 text-gray-400 hover:text-white hover:border-gray-600'
+                                            }`}
+                                    >
+                                        Direct
+                                    </button>
+                                </div>
+                                <p className="text-xs text-gray-500 mt-3">
+                                    Auto uses the best path for this profile. Steam manages launch options. Direct avoids touching Steam launch options.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                )}
 
                 <div className="mb-6">
                     <label className="block text-sm font-medium text-gray-400 mb-2">
@@ -136,6 +247,11 @@ export function SettingsModal({ isOpen, onClose, selectedGame, activeProfilePlat
                             ? "Select your native macOS Steam folder (e.g., ~/Library/Application Support/Steam)."
                             : "Select the Steam folder inside your bottle (e.g., drive_c/Program Files (x86)/Steam)."}
                     </p>
+                    {distribution === 'manual' && (
+                        <p className="text-xs text-amber-400 mt-2">
+                            Manual profiles do not require Steam launch options, but Steam detection can still be kept as a fallback.
+                        </p>
+                    )}
                 </div>
 
                 {selectedGame && (

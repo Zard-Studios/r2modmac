@@ -1,5 +1,11 @@
 import { create } from 'zustand';
-import type { Profile, InstalledMod } from '../types/profile';
+import type {
+    Profile,
+    InstalledMod,
+    ProfileDistribution,
+    ProfileLaunchMode,
+    ProfilePlatform
+} from '../types/profile';
 
 // Debounced save to prevent rapid-fire file writes causing race conditions
 let saveTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -26,12 +32,28 @@ const dedupeModsByKey = (mods: InstalledMod[]): InstalledMod[] => {
     return Array.from(byKey.values());
 };
 
+const normalizeProfile = (profile: Profile): Profile => {
+    const platform: ProfilePlatform = profile.platform === 'mac' ? 'mac' : 'windows';
+    const distribution: ProfileDistribution = profile.distribution === 'manual' ? 'manual' : 'steam';
+    const launchMode: ProfileLaunchMode =
+        profile.launchMode === 'steam' || profile.launchMode === 'direct'
+            ? profile.launchMode
+            : 'auto';
+
+    return {
+        ...profile,
+        platform,
+        distribution,
+        launchMode,
+    };
+};
+
 interface ProfileState {
     profiles: Profile[];
     activeProfileId: string | null;
 
     // Actions
-    createProfile: (name: string, gameIdentifier: string, platform?: 'windows' | 'mac') => string;
+    createProfile: (name: string, gameIdentifier: string, platform?: ProfilePlatform) => string;
     selectProfile: (profileId: string) => void;
     deleteProfile: (profileId: string, gameIdentifier?: string) => Promise<void>;
     updateProfile: (profileId: string, updates: Partial<Profile>) => void;
@@ -47,16 +69,18 @@ export const useProfileStore = create<ProfileState>((set) => ({
     activeProfileId: null,
 
     createProfile: (name, gameIdentifier, platform) => {
-        const newProfile: Profile = {
+        const newProfile = normalizeProfile({
             id: crypto.randomUUID(),
             name,
             gameIdentifier,
             platform: platform || 'windows',
+            distribution: 'steam',
+            launchMode: 'auto',
             mods: [],
             needs_sync: false,
             dateCreated: Date.now(),
             lastUsed: Date.now(),
-        };
+        });
 
         set((state) => {
             const updatedProfiles = [...state.profiles, newProfile];
@@ -97,7 +121,7 @@ export const useProfileStore = create<ProfileState>((set) => ({
     updateProfile: (profileId, updates) => {
         set((state) => {
             const updatedProfiles = state.profiles.map(p =>
-                p.id === profileId ? { ...p, ...updates } : p
+                p.id === profileId ? normalizeProfile({ ...p, ...updates }) : p
             );
             debouncedSaveProfiles(updatedProfiles);
             return { profiles: updatedProfiles };
@@ -105,8 +129,9 @@ export const useProfileStore = create<ProfileState>((set) => ({
     },
 
     setProfiles: (profiles) => {
-        set({ profiles });
-        debouncedSaveProfiles(profiles);
+        const normalized = profiles.map((profile) => normalizeProfile(profile));
+        set({ profiles: normalized });
+        debouncedSaveProfiles(normalized);
     },
 
     addMod: (profileId, mod) => {
@@ -259,8 +284,8 @@ export const useProfileStore = create<ProfileState>((set) => ({
                 ...profile,
                 mods,
                 needs_sync: !!profile.needs_sync || mods.some((m: InstalledMod) => m.pending_sync),
-            };
+            } as Profile;
         });
-        set({ profiles });
+        set({ profiles: profiles.map((profile) => normalizeProfile(profile)) });
     }
 }));

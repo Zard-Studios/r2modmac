@@ -1075,6 +1075,7 @@ function App() {
         onRestoreGuideWarnings={handleRestoreGuideWarnings}
         onSetGuideHidden={handleSetGuideHidden}
         legacyInstallMode={legacyInstallMode}
+        onUpdateProfile={updateProfile}
       />
     </div>
   )

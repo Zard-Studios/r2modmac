@@ -1,3 +1,7 @@
+export type ProfilePlatform = 'windows' | 'mac';
+export type ProfileDistribution = 'steam' | 'manual';
+export type ProfileLaunchMode = 'auto' | 'steam' | 'direct';
+
 export interface InstalledMod {
     uuid4: string;
     fullName: string; // e.g. "ebkr-r2modman-3.1.0"
@@ -18,5 +22,7 @@ export interface Profile {
     lastUsed: number;
     profileImageUrl?: string;
     is_vanilla?: boolean;
-    platform?: 'windows' | 'mac';
+    platform?: ProfilePlatform;
+    distribution?: ProfileDistribution;
+    launchMode?: ProfileLaunchMode;
 }
