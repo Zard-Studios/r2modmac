@@ -22,6 +22,7 @@ interface ProfileSidebarProps {
     onExportProfile: () => void;
     onOpenSettings: () => void;
     onUpdateProfile: (profileId: string, updates: Partial<Profile>) => void;
+    onToggleVanilla: (profileId: string, newVanillaState: boolean) => Promise<void> | void;
 }
 
 export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
@@ -40,7 +41,8 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
     onResolvePackage,
     onExportProfile,
     onOpenSettings,
-    onUpdateProfile
+    onUpdateProfile,
+    onToggleVanilla,
 }) => {
     const [searchQuery, setSearchQuery] = useState('');
     const [isEditing, setIsEditing] = useState(false);
@@ -317,14 +319,8 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                                         alert("No mods to disable!");
                                         return;
                                     }
-                                    // Calculate the NEW vanilla state
                                     const newVanillaState = !activeProfile.is_vanilla;
-                                    // Toggle vanilla mode in store
-                                    onUpdateProfile(activeProfile.id, { is_vanilla: newVanillaState });
-                                    // Apply immediately with the NEW state (no timing issues!)
-                                    setTimeout(() => {
-                                        onInstallToGame(newVanillaState);
-                                    }, 100);
+                                    await onToggleVanilla(activeProfile.id, newVanillaState);
                                 }
                             }}
                             className={`p-1.5 rounded-lg transition-colors ${activeProfile?.is_vanilla

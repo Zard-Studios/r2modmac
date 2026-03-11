@@ -388,8 +388,14 @@ fn sync_macos_runtime_disabled_state(
         let disabled = game_path.join(format!("{}_DISABLED", item));
         if disable {
             rename_path_if_present(&active, &disabled)?;
-        } else if !active.exists() && disabled.exists() {
-            rename_path_if_present(&disabled, &active)?;
+        } else if disabled.exists() {
+            if !active.exists() {
+                rename_path_if_present(&disabled, &active)?;
+            } else if disabled.is_dir() && !disabled.is_symlink() {
+                let _ = fs::remove_dir_all(&disabled);
+            } else {
+                let _ = fs::remove_file(&disabled);
+            }
         }
     }
 
@@ -398,8 +404,12 @@ fn sync_macos_runtime_disabled_state(
         let disabled = game_path.join(format!("{}_DISABLED", item));
         if disable {
             rename_path_if_present(&active, &disabled)?;
-        } else if !active.exists() && disabled.exists() {
-            rename_path_if_present(&disabled, &active)?;
+        } else if disabled.exists() {
+            if !active.exists() {
+                rename_path_if_present(&disabled, &active)?;
+            } else {
+                let _ = fs::remove_file(&disabled);
+            }
         }
     }
 
@@ -415,8 +425,15 @@ fn sync_macos_runtime_disabled_state(
                 }
             } else if name.ends_with("_DISABLED") {
                 let active_name = name.trim_end_matches("_DISABLED").to_string();
-                if is_bepinex_shell_script_name(&active_name) && !game_path.join(&active_name).exists() {
-                    rename_path_if_present(&path, &game_path.join(active_name))?;
+                if is_bepinex_shell_script_name(&active_name) {
+                    let active_path = game_path.join(&active_name);
+                    if !active_path.exists() {
+                        rename_path_if_present(&path, &active_path)?;
+                    } else if path.is_dir() && !path.is_symlink() {
+                        let _ = fs::remove_dir_all(&path);
+                    } else {
+                        let _ = fs::remove_file(&path);
+                    }
                 }
             }
         }
@@ -1242,6 +1259,11 @@ pub async fn get_game_path(app: AppHandle, game_identifier: String, platform: Op
     let settings = load_settings_impl(&app);
     let platform = normalized_platform(platform.as_deref());
     let is_windows_profile = platform == Some("windows");
+    let cache_key = if let Some(p) = platform {
+        format!("{}::{}", game_identifier, p)
+    } else {
+        game_identifier.clone()
+    };
 
     // Check manual override first
     for key in manual_override_keys(&game_identifier, platform) {
@@ -1290,6 +1312,13 @@ pub async fn get_game_path(app: AppHandle, game_identifier: String, platform: Op
                        normalized_id.contains(&normalized_folder) {
                         let game_path = entry.path().to_string_lossy().to_string();
                         eprintln!("[get_game_path] Found match: {} -> {}", folder_name, game_path);
+                        if settings.game_paths.get(&cache_key) != Some(&game_path) {
+                            let mut updated_settings = settings.clone();
+                            updated_settings
+                                .game_paths
+                                .insert(cache_key.clone(), game_path.clone());
+                            let _ = save_settings_impl(&app, &updated_settings);
+                        }
                         return Ok(Some(game_path));
                     }
                 }

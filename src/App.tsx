@@ -940,6 +940,30 @@ function App() {
         onExportProfile={() => setShowExportModal(true)}
         onOpenSettings={() => setShowSettings(true)}
         onUpdateProfile={updateProfile}
+        onToggleVanilla={async (profileId, newVanillaState) => {
+          updateProfile(profileId, { is_vanilla: newVanillaState });
+          const profile = profiles.find(p => p.id === profileId);
+          if (profile) {
+            const disabledMods = profile.mods.filter(m => !m.enabled).map(m => m.fullName);
+            try {
+              await window.ipcRenderer.installToGame(selectedCommunity, profileId, disabledMods, newVanillaState);
+              updateProfile(profileId, {
+                needs_sync: false,
+                mods: profile.mods.map((m) => ({
+                  ...m,
+                  pending_sync: false,
+                  synced_enabled: m.enabled,
+                })),
+              });
+            } catch (error: any) {
+              updateProfile(profileId, { is_vanilla: !newVanillaState });
+              await window.ipcRenderer.alert(
+                'Vanilla Mode Error',
+                String(error?.message || error || 'Failed to update vanilla mode.')
+              );
+            }
+          }
+        }}
       />
     );
 
