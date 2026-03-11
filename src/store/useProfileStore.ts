@@ -35,10 +35,11 @@ const dedupeModsByKey = (mods: InstalledMod[]): InstalledMod[] => {
 const normalizeProfile = (profile: Profile): Profile => {
     const platform: ProfilePlatform = profile.platform === 'mac' ? 'mac' : 'windows';
     const distribution: ProfileDistribution = profile.distribution === 'manual' ? 'manual' : 'steam';
-    const launchMode: ProfileLaunchMode =
-        profile.launchMode === 'steam' || profile.launchMode === 'direct'
+    const launchMode: ProfileLaunchMode = distribution === 'manual'
+        ? 'direct'
+        : (profile.launchMode === 'steam' || profile.launchMode === 'direct'
             ? profile.launchMode
-            : 'auto';
+            : 'auto');
 
     return {
         ...profile,
@@ -53,7 +54,12 @@ interface ProfileState {
     activeProfileId: string | null;
 
     // Actions
-    createProfile: (name: string, gameIdentifier: string, platform?: ProfilePlatform) => string;
+    createProfile: (
+        name: string,
+        gameIdentifier: string,
+        platform?: ProfilePlatform,
+        distribution?: ProfileDistribution
+    ) => string;
     selectProfile: (profileId: string) => void;
     deleteProfile: (profileId: string, gameIdentifier?: string) => Promise<void>;
     updateProfile: (profileId: string, updates: Partial<Profile>) => void;
@@ -68,14 +74,14 @@ export const useProfileStore = create<ProfileState>((set) => ({
     profiles: [],
     activeProfileId: null,
 
-    createProfile: (name, gameIdentifier, platform) => {
+    createProfile: (name, gameIdentifier, platform, distribution) => {
         const newProfile = normalizeProfile({
             id: crypto.randomUUID(),
             name,
             gameIdentifier,
             platform: platform || 'windows',
-            distribution: 'steam',
-            launchMode: 'auto',
+            distribution: distribution === 'manual' ? 'manual' : 'steam',
+            launchMode: distribution === 'manual' ? 'direct' : 'auto',
             mods: [],
             needs_sync: false,
             dateCreated: Date.now(),

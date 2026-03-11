@@ -44,12 +44,13 @@ export function ProfileList({
 
     useEffect(() => {
         const onKeyDown = (event: KeyboardEvent) => {
-            if (event.key !== 'Escape' || event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) {
+            if (event.key !== 'Escape' || event.metaKey || event.ctrlKey || event.altKey) {
                 return;
             }
 
             if (editingProfile) {
                 event.preventDefault();
+                event.stopPropagation();
                 setEditingProfile(null);
                 setEditName('');
                 return;
@@ -57,6 +58,7 @@ export function ProfileList({
 
             if (isImporting || pendingImport) {
                 event.preventDefault();
+                event.stopPropagation();
                 setIsImporting(false);
                 setPendingImport(null);
                 setImportCode('');
@@ -65,13 +67,15 @@ export function ProfileList({
 
             if (isCreating) {
                 event.preventDefault();
+                event.stopPropagation();
                 setIsCreating(false);
                 setNewProfileName('');
+                setSelectedPlatform('windows');
             }
         };
 
-        window.addEventListener('keydown', onKeyDown);
-        return () => window.removeEventListener('keydown', onKeyDown);
+        window.addEventListener('keydown', onKeyDown, true);
+        return () => window.removeEventListener('keydown', onKeyDown, true);
     }, [editingProfile, isCreating, isImporting, pendingImport]);
 
     const filteredProfiles = profiles.filter(p => p.gameIdentifier === selectedGameIdentifier);
@@ -169,7 +173,10 @@ export function ProfileList({
                     {/* Create New Profile Card */}
                     <div
                         className="bg-gray-800/50 border-2 border-dashed border-gray-700 rounded-xl p-6 flex flex-col items-center justify-center text-center hover:border-blue-500/50 hover:bg-gray-800 transition-all cursor-pointer min-h-[200px] group"
-                        onClick={() => setIsCreating(true)}
+                        onClick={() => {
+                            setSelectedPlatform('windows');
+                            setIsCreating(true);
+                        }}
                     >
                         <div className="w-16 h-16 bg-gray-900 rounded-full flex items-center justify-center mb-4 group-hover:bg-blue-500/20 transition-colors">
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-gray-500 group-hover:text-blue-400 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -382,7 +389,15 @@ export function ProfileList({
                                 )}
 
                                 <div className="flex gap-3">
-                                    <Button variant="secondary" fullWidth onClick={() => setIsCreating(false)} type="button">
+                                    <Button
+                                        variant="secondary"
+                                        fullWidth
+                                        onClick={() => {
+                                            setIsCreating(false);
+                                            setSelectedPlatform('windows');
+                                        }}
+                                        type="button"
+                                    >
                                         Cancel
                                     </Button>
                                     <Button variant="primary" fullWidth type="submit" disabled={!newProfileName.trim()}>

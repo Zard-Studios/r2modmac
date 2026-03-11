@@ -9,7 +9,6 @@ import { UpdateModal } from '../modals/UpdateModal';
 import PreferencesModal, { type PreferencesSettings } from '../modals/PreferencesModal';
 import type { Package, PackageVersion } from '../../types/thunderstore'
 import type { UpdateInfo } from '../../types/electron';
-import type { Profile } from '../../types/profile';
 
 export interface AppModalsProps {
     selectedMod: Package | null;
@@ -47,7 +46,6 @@ export interface AppModalsProps {
     onRestoreGuideWarnings: () => Promise<void>;
     onSetGuideHidden: (guide: 'crossover' | 'macos', hidden: boolean) => Promise<void>;
     legacyInstallMode: boolean;
-    onUpdateProfile: (profileId: string, updates: Partial<Profile>) => void;
 }
 
 export function AppModals({
@@ -63,8 +61,7 @@ export function AppModals({
     showCrossOverGuide, setShowCrossOverGuide, hideCrossOverGuide, setHideCrossOverGuide,
     showPreferences, setShowPreferences, preferences, onSavePreferences,
     hasHiddenGuideWarnings, onRestoreGuideWarnings, onSetGuideHidden,
-    legacyInstallMode,
-    onUpdateProfile
+    legacyInstallMode
 }: AppModalsProps) {
 
     const activeProfile = activeProfileId ? profiles.find(p => p.id === activeProfileId) || null : null;
@@ -142,7 +139,6 @@ export function AppModals({
                 onClose={() => setShowSettings(false)}
                 selectedGame={selectedCommunity || undefined}
                 activeProfile={activeProfile}
-                onUpdateProfile={onUpdateProfile}
             />
 
             {showExportModal && activeProfileId && (

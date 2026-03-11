@@ -118,6 +118,29 @@ fn should_manage_steam_launch_options(distribution: &str, launch_mode: &str) -> 
     distribution == "steam" && launch_mode != "direct"
 }
 
+fn canonicalize_or_original(path: &std::path::Path) -> std::path::PathBuf {
+    fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+fn infer_distribution_from_game_path(
+    app: &AppHandle,
+    game_path: &std::path::Path,
+    is_windows_profile: bool,
+) -> String {
+    let game_path = canonicalize_or_original(game_path);
+
+    for steam_root in get_steam_roots_for_platform(app, is_windows_profile) {
+        for library_root in get_steam_library_folders(&steam_root) {
+            let common_root = canonicalize_or_original(&library_root.join("steamapps").join("common"));
+            if game_path.starts_with(&common_root) {
+                return "steam".to_string();
+            }
+        }
+    }
+
+    "manual".to_string()
+}
+
 fn get_steam_roots_for_platform(app: &AppHandle, is_windows_profile: bool) -> Vec<std::path::PathBuf> {
     let settings = load_settings_impl(app);
     let mut steam_paths_to_check = Vec::new();
@@ -131,7 +154,24 @@ fn get_steam_roots_for_platform(app: &AppHandle, is_windows_profile: bool) -> Ve
         }
     }
 
-    if let Some(steam_path_str) = &settings.steam_path {
+    let legacy_mac_steam_path = settings.steam_path.as_ref().filter(|path| {
+        let lower = path.to_lowercase();
+        !lower.contains("drive_c") && !lower.contains("crossover") && !lower.contains("wine")
+    });
+
+    let configured_steam_path = if is_windows_profile {
+        settings
+            .windows_steam_path
+            .as_ref()
+            .or(settings.steam_path.as_ref())
+    } else {
+        settings
+            .mac_steam_path
+            .as_ref()
+            .or(legacy_mac_steam_path)
+    };
+
+    if let Some(steam_path_str) = configured_steam_path {
         let configured_steam = std::path::PathBuf::from(steam_path_str);
         if configured_steam.exists() && !steam_paths_to_check.contains(&configured_steam) {
             steam_paths_to_check.push(configured_steam);
@@ -435,7 +475,7 @@ fn is_managed_macos_launch_option(value: &str) -> bool {
         && lower.contains("%command%")
 }
 
-fn quit_steam_if_running() -> Result<(), String> {
+fn quit_steam_if_running() -> Result<bool, String> {
     #[cfg(target_os = "macos")]
     {
         let steam_running = std::process::Command::new("/usr/bin/pgrep")
@@ -445,7 +485,7 @@ fn quit_steam_if_running() -> Result<(), String> {
             .unwrap_or(false);
 
         if !steam_running {
-            return Ok(());
+            return Ok(false);
         }
 
         let _ = std::process::Command::new("/usr/bin/osascript")
@@ -460,7 +500,7 @@ fn quit_steam_if_running() -> Result<(), String> {
                 .map(|status| status.success())
                 .unwrap_or(false);
             if !still_running {
-                return Ok(());
+                return Ok(true);
             }
         }
 
@@ -471,7 +511,26 @@ fn quit_steam_if_running() -> Result<(), String> {
     }
 
     #[allow(unreachable_code)]
-    Ok(())
+    Ok(false)
+}
+
+fn reopen_steam_if_needed(was_running: bool) {
+    #[cfg(target_os = "macos")]
+    {
+        if !was_running {
+            return;
+        }
+
+        let status = std::process::Command::new("/usr/bin/open")
+            .args(["-a", "Steam"])
+            .status();
+        if let Err(error) = status {
+            eprintln!(
+                "[ensure_macos_steam_launch_options] failed to relaunch Steam after updating launch options: {}",
+                error
+            );
+        }
+    }
 }
 
 fn find_next_non_whitespace(text: &str, mut index: usize, end: usize) -> Option<usize> {
@@ -1063,7 +1122,7 @@ pub(crate) fn ensure_macos_steam_launch_options(
         localconfig_path.display()
     );
 
-    quit_steam_if_running()?;
+    let steam_was_running = quit_steam_if_running()?;
 
     let localconfig = fs::read_to_string(&localconfig_path)
         .map_err(|e| format!("Failed to read Steam localconfig.vdf: {}", e))?;
@@ -1147,8 +1206,10 @@ pub(crate) fn ensure_macos_steam_launch_options(
         if settings_changed {
             save_settings_impl(app, &settings)?;
         }
+        reopen_steam_if_needed(steam_was_running);
         return Ok(());
     } else {
+        reopen_steam_if_needed(steam_was_running);
         return Ok(());
     }
 
@@ -1172,6 +1233,7 @@ pub(crate) fn ensure_macos_steam_launch_options(
         save_settings_impl(app, &settings)?;
     }
 
+    reopen_steam_if_needed(steam_was_running);
     Ok(())
 }
 
@@ -1240,6 +1302,22 @@ pub async fn get_game_path(app: AppHandle, game_identifier: String, platform: Op
 }
 
 #[command]
+pub async fn get_game_source(app: AppHandle, game_identifier: String, platform: Option<String>) -> Result<String, String> {
+    let platform = normalized_platform(platform.as_deref());
+    let is_windows_profile = platform == Some("windows");
+
+    let Some(game_path_str) = get_game_path(app.clone(), game_identifier, platform.map(|p| p.to_string())).await? else {
+        return Ok("unknown".to_string());
+    };
+
+    Ok(infer_distribution_from_game_path(
+        &app,
+        std::path::Path::new(&game_path_str),
+        is_windows_profile,
+    ))
+}
+
+#[command]
 pub async fn set_game_path(app: AppHandle, game_identifier: String, path: String, platform: Option<String>) -> Result<(), String> {
     let mut settings = load_settings_impl(&app);
     let key = if let Some(p) = normalized_platform(platform.as_deref()) {
@@ -1296,8 +1374,6 @@ pub async fn install_to_game(app: AppHandle, game_identifier: String, profile_id
     let profile_distribution = get_profile_distribution(&app, &profile_id);
     let profile_launch_mode = get_profile_launch_mode(&app, &profile_id);
     let is_mac_profile = profile_platform == "mac";
-    let manage_steam_launch = is_mac_profile
-        && should_manage_steam_launch_options(&profile_distribution, &profile_launch_mode);
     let settings = load_settings_impl(&app);
     let use_legacy_plugin_cache = settings.legacy_install_mode;
 
@@ -1305,6 +1381,14 @@ pub async fn install_to_game(app: AppHandle, game_identifier: String, profile_id
     let game_path_str = get_game_path(app.clone(), game_identifier.clone(), Some(profile_platform.clone())).await?
         .ok_or("Game not found in Steam library")?;
     let game_path = std::path::Path::new(&game_path_str);
+    let effective_distribution = if is_mac_profile {
+        infer_distribution_from_game_path(&app, game_path, false)
+    } else {
+        profile_distribution.clone()
+    };
+    let should_clear_steam_launch = is_mac_profile && effective_distribution == "steam";
+    let manage_steam_launch = is_mac_profile
+        && should_manage_steam_launch_options(&effective_distribution, &profile_launch_mode);
 
     // 2. Get profile path
     let profile_dir = app.path().app_data_dir().map_err(|e| e.to_string())?
@@ -1336,8 +1420,13 @@ pub async fn install_to_game(app: AppHandle, game_identifier: String, profile_id
     };
 
     eprintln!(
-        "[install_to_game] platform={} distribution={} launch_mode={} manage_steam_launch={}",
-        profile_platform, profile_distribution, profile_launch_mode, manage_steam_launch
+        "[install_to_game] platform={} stored_distribution={} effective_distribution={} launch_mode={} manage_steam_launch={} should_clear_steam_launch={}",
+        profile_platform,
+        profile_distribution,
+        effective_distribution,
+        profile_launch_mode,
+        manage_steam_launch,
+        should_clear_steam_launch
     );
 
     if is_vanilla {
@@ -1563,7 +1652,7 @@ pub async fn install_to_game(app: AppHandle, game_identifier: String, profile_id
 
     if is_mac_profile && is_vanilla {
         sync_macos_runtime_disabled_state(game_path, true)?;
-        if manage_steam_launch {
+        if should_clear_steam_launch {
             ensure_macos_steam_launch_options(&app, game_path, false)?;
             eprintln!("[install_to_game] macOS vanilla mode complete - runtime disabled and Steam launch option cleared.");
         } else {

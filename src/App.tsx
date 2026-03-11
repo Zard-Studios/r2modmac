@@ -13,6 +13,7 @@ import { useAppStore } from './store/useAppStore';
 import type { CommunityPlatformInfo, Package, PackageVersion } from './types/thunderstore';
 import { getVersion } from '@tauri-apps/api/app';
 import { listen } from '@tauri-apps/api/event';
+import { flushSync } from 'react-dom';
 import { AppModals } from './components/screens/AppModals';
 import type { AppSettings, UpdateInfo } from './types/electron';
 import { MAC_IMAGE_CACHE_KEY, MAC_PLATFORM_CACHE_KEY } from './constants/cacheKeys';
@@ -753,15 +754,19 @@ function App() {
 
       if (activeProfileId || isBrowsingMode) {
         event.preventDefault();
-        setSelectedMod(null);
-        selectProfile('');
-        setIsBrowsingMode(false);
+        flushSync(() => {
+          setSelectedMod(null);
+          selectProfile('');
+          setIsBrowsingMode(false);
+        });
         return;
       }
 
       if (selectedCommunity) {
         event.preventDefault();
-        setSelectedCommunity(null);
+        flushSync(() => {
+          setSelectedCommunity(null);
+        });
       }
     };
 
@@ -1075,7 +1080,6 @@ function App() {
         onRestoreGuideWarnings={handleRestoreGuideWarnings}
         onSetGuideHidden={handleSetGuideHidden}
         legacyInstallMode={legacyInstallMode}
-        onUpdateProfile={updateProfile}
       />
     </div>
   )

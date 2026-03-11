@@ -36,6 +36,10 @@ pub struct CachedPlatform {
 pub struct Settings {
     pub steam_path: Option<String>,
     #[serde(default)]
+    pub windows_steam_path: Option<String>,
+    #[serde(default)]
+    pub mac_steam_path: Option<String>,
+    #[serde(default)]
     pub favorite_games: Vec<String>,
     #[serde(default)]
     pub game_paths: HashMap<String, String>,
@@ -61,6 +65,8 @@ impl Settings {
     pub fn default() -> Self {
         Self {
             steam_path: None,
+            windows_steam_path: None,
+            mac_steam_path: None,
             favorite_games: Vec::new(),
             game_paths: HashMap::new(),
             steam_launch_option_backups: HashMap::new(),

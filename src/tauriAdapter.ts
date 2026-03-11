@@ -77,6 +77,7 @@ export const tauriAPI: IElectronAPI = {
     getSettings: async () => invoke('get_settings'),
     saveSettings: async (settings) => invoke('save_settings', { settings }),
     getGamePath: async (gameIdentifier, platform?) => invoke('get_game_path', { gameIdentifier, platform }),
+    getGameSource: async (gameIdentifier, platform?) => invoke<'steam' | 'manual' | 'unknown'>('get_game_source', { gameIdentifier, platform }),
     setGamePath: async (gameIdentifier, path, platform?) => invoke('set_game_path', { gameIdentifier, path, platform }),
     openGameFolder: async (gameIdentifier, platform?) => invoke('open_game_folder', { gameIdentifier, platform }),
     removeMod: async (profileId: string, modName: string) => {

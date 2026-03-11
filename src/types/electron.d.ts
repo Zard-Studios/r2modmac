@@ -3,6 +3,8 @@ import type { Community, Package, CommunityPlatformInfo } from './thunderstore';
 
 export interface AppSettings {
     steam_path: string | null;
+    windows_steam_path?: string | null;
+    mac_steam_path?: string | null;
     favorite_games: string[];
     game_paths: Record<string, string>;
     legacy_install_mode?: boolean;
@@ -50,6 +52,7 @@ export interface IElectronAPI {
     getSettings: () => Promise<AppSettings>;
     saveSettings: (settings: AppSettings) => Promise<void>;
     getGamePath: (gameIdentifier: string, platform?: 'windows' | 'mac') => Promise<string | null>;
+    getGameSource: (gameIdentifier: string, platform?: 'windows' | 'mac') => Promise<'steam' | 'manual' | 'unknown'>;
     setGamePath: (gameIdentifier: string, path: string, platform?: 'windows' | 'mac') => Promise<void>;
     openGameFolder: (gameIdentifier: string, platform?: 'windows' | 'mac') => Promise<void>;
     removeMod: (profileId: string, modName: string) => Promise<void>;

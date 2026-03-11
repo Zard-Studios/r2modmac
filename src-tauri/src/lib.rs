@@ -189,6 +189,7 @@ pub fn run() {
             commands::settings_commands::save_settings,
             
             commands::game_commands::get_game_path,
+            commands::game_commands::get_game_source,
             commands::game_commands::set_game_path,
             commands::game_commands::open_game_folder,
             commands::game_commands::find_game_executable,
