@@ -69,7 +69,10 @@ export interface IElectronAPI {
     copyModFromCache: (profileId: string, modName: string, gamePath: string) => Promise<{ success: boolean; copied: boolean }>;
     clearProfileCache: () => Promise<{ cleared: number; chunks_cleared?: number; bytes_freed: number }>;
     openProfileFolder: (profileId: string) => Promise<void>;
+    isGameRunning: (gameIdentifier: string, platform?: 'windows' | 'mac') => Promise<boolean>;
     launchGameWithMods: (gameIdentifier: string, platform?: 'windows' | 'mac') => Promise<void>;
+    launchGameVanilla: (gameIdentifier: string, platform?: 'windows' | 'mac') => Promise<void>;
+    stopGame: (gameIdentifier: string, platform?: 'windows' | 'mac') => Promise<void>;
 }
 
 export interface UpdateInfo {

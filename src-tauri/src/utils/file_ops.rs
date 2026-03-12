@@ -95,39 +95,48 @@ pub fn dequarantine_recursive(path: &std::path::Path) {
 }
 
 pub fn migrate_root_plugins_into_bepinex(game_path: &std::path::Path) -> Result<(), String> {
-    let legacy_plugins = game_path.join("plugins");
-    if !legacy_plugins.is_dir() {
-        return Ok(());
-    }
+    let migrations = [
+        ("plugins", "plugins"),
+        ("patchers", "patchers"),
+        ("monomod", "monomod"),
+    ];
 
-    let bepinex_plugins = game_path.join("BepInEx").join("plugins");
-    fs::create_dir_all(&bepinex_plugins)
-        .map_err(|e| format!("Failed to prepare BepInEx plugins directory: {}", e))?;
-
-    if let Ok(entries) = fs::read_dir(&legacy_plugins) {
-        for entry in entries.filter_map(|e| e.ok()) {
-            let src = entry.path();
-            let dst = bepinex_plugins.join(entry.file_name());
-            if dst.exists() || dst.is_symlink() {
-                if dst.is_dir() && !dst.is_symlink() {
-                    let _ = fs::remove_dir_all(&dst);
-                } else {
-                    let _ = fs::remove_file(&dst);
-                }
-            }
-            fs::rename(&src, &dst).map_err(|e| {
-                format!(
-                    "Failed to move legacy plugins entry {} -> {}: {}",
-                    src.display(),
-                    dst.display(),
-                    e
-                )
-            })?;
+    for (legacy_name, target_name) in migrations {
+        let legacy_dir = game_path.join(legacy_name);
+        if !legacy_dir.is_dir() {
+            continue;
         }
-    }
 
-    if legacy_plugins.exists() {
-        let _ = fs::remove_dir_all(&legacy_plugins);
+        let target_dir = game_path.join("BepInEx").join(target_name);
+        fs::create_dir_all(&target_dir)
+            .map_err(|e| format!("Failed to prepare BepInEx {} directory: {}", target_name, e))?;
+
+        if let Ok(entries) = fs::read_dir(&legacy_dir) {
+            for entry in entries.filter_map(|e| e.ok()) {
+                let src = entry.path();
+                let dst = target_dir.join(entry.file_name());
+                if dst.exists() || dst.is_symlink() {
+                    if dst.is_dir() && !dst.is_symlink() {
+                        let _ = fs::remove_dir_all(&dst);
+                    } else {
+                        let _ = fs::remove_file(&dst);
+                    }
+                }
+                fs::rename(&src, &dst).map_err(|e| {
+                    format!(
+                        "Failed to move legacy {} entry {} -> {}: {}",
+                        legacy_name,
+                        src.display(),
+                        dst.display(),
+                        e
+                    )
+                })?;
+            }
+        }
+
+        if legacy_dir.exists() {
+            let _ = fs::remove_dir_all(&legacy_dir);
+        }
     }
 
     Ok(())

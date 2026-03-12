@@ -120,7 +120,16 @@ export const tauriAPI: IElectronAPI = {
     openProfileFolder: async (profileId: string) => {
         return await invoke('open_profile_folder', { profileId });
     },
+    isGameRunning: async (gameIdentifier: string, platform?: 'windows' | 'mac') => {
+        return await invoke<boolean>('is_game_running', { gameIdentifier, platform });
+    },
     launchGameWithMods: async (gameIdentifier: string, platform?: 'windows' | 'mac') => {
         return await invoke('launch_game_with_mods', { gameIdentifier, platform });
-    }
+    },
+    launchGameVanilla: async (gameIdentifier: string, platform?: 'windows' | 'mac') => {
+        return await invoke('launch_game_vanilla', { gameIdentifier, platform });
+    },
+    stopGame: async (gameIdentifier: string, platform?: 'windows' | 'mac') => {
+        return await invoke('stop_game', { gameIdentifier, platform });
+    },
 };

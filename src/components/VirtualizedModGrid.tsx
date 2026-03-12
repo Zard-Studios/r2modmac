@@ -32,7 +32,7 @@ export function VirtualizedModGrid({ packages, installedMods, onInstall, onUnins
 
     const COLUMN_WIDTH = 320;
     const GAP = 16;
-    const GRID_ROW_HEIGHT = 280;
+    const GRID_ROW_HEIGHT = 248;
     const LIST_ROW_HEIGHT = 80;
 
     // Helper to check install status
@@ -126,7 +126,7 @@ export function VirtualizedModGrid({ packages, installedMods, onInstall, onUnins
     return (
         <div
             ref={parentRef}
-            className="flex-1 h-full overflow-y-auto p-6 pb-0"
+            className="flex-1 h-full overflow-y-auto px-6 pt-4 pb-0"
         >
             <div
                 style={{
@@ -149,7 +149,7 @@ export function VirtualizedModGrid({ packages, installedMods, onInstall, onUnins
                                 left: 0,
                                 width: '100%',
                                 transform: `translateY(${virtualRow.start}px)`,
-                                paddingBottom: '16px',
+                                paddingBottom: '12px',
                             }}
                         >
                             <div

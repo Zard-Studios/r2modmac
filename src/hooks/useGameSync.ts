@@ -35,7 +35,7 @@ export function useGameSync({
 
     const handleSyncToGame = async (isVanillaOverride?: boolean) => {
         const activeProfile = profiles.find(p => p.id === activeProfileId);
-        const community = selectedCommunity;
+        const community = activeProfile?.gameIdentifier || selectedCommunity;
         if (!activeProfile || !community) return;
 
         try {
@@ -43,14 +43,6 @@ export function useGameSync({
             if (isVanillaOverride !== undefined) {
                 const disabledMods = activeProfile.mods.filter(m => !m.enabled).map(m => m.fullName);
                 await window.ipcRenderer.installToGame(community, activeProfile.id, disabledMods, isVanillaOverride);
-                updateProfile(activeProfile.id, {
-                    needs_sync: false,
-                    mods: activeProfile.mods.map((m) => ({
-                        ...m,
-                        pending_sync: false,
-                        synced_enabled: m.enabled,
-                    })),
-                });
                 return;
             }
 

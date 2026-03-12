@@ -1,7 +1,7 @@
-import type { CSSProperties, MouseEvent } from 'react';
-import { memo, useMemo } from 'react';
+import type { MouseEvent } from 'react';
+import { memo, useEffect, useMemo } from 'react';
 import type { Community, CommunityPlatformInfo } from '../../types/thunderstore';
-import { LazyImage } from '../LazyImage';
+import { LazyImage, warmImageCache } from '../LazyImage';
 
 interface GameSelectorProps {
     communities: Community[];
@@ -12,11 +12,6 @@ interface GameSelectorProps {
     favoriteGames: string[];
     onToggleFavorite: (identifier: string, e: React.MouseEvent) => void;
 }
-
-const CARD_STYLE: CSSProperties = {
-    contentVisibility: 'auto',
-    containIntrinsicSize: '260px 360px',
-};
 
 const gradients = [
     'from-red-500 to-orange-500',
@@ -86,7 +81,6 @@ const GameCard = memo(function GameCard({
         <button
             key={community.identifier}
             onClick={() => onSelect(community.identifier)}
-            style={CARD_STYLE}
             className={`group relative flex flex-col rounded-xl overflow-hidden transition-all duration-300 text-left border ${isSelected
                 ? 'ring-2 ring-blue-500 border-transparent shadow-md shadow-blue-500/20 scale-[1.02]'
                 : 'border-gray-800 hover:border-gray-600 hover:shadow-lg hover:shadow-black/30 hover:-translate-y-1'
@@ -174,6 +168,69 @@ export function GameSelector({ communities, selectedCommunity, onSelect, communi
         [communities, favoriteGames]
     );
 
+    useEffect(() => {
+        const urls = communities
+            .map((community) => communityImages[community.identifier])
+            .filter((url): url is string => typeof url === 'string' && url.length > 0);
+
+        if (urls.length === 0) {
+            return;
+        }
+
+        let cancelled = false;
+        let nextIndex = 0;
+        let activeLoads = 0;
+        let timeoutId: number | null = null;
+        let idleCallbackId: number | null = null;
+        const concurrency = 4;
+
+        const queueMore = () => {
+            if (cancelled) return;
+
+            while (activeLoads < concurrency && nextIndex < urls.length) {
+                const url = urls[nextIndex++];
+                activeLoads += 1;
+                void warmImageCache(url)
+                    .catch(() => undefined)
+                    .finally(() => {
+                        activeLoads -= 1;
+                        scheduleWarmup();
+                    });
+            }
+        };
+
+        const scheduleWarmup = () => {
+            if (cancelled || (nextIndex >= urls.length && activeLoads === 0)) {
+                return;
+            }
+
+            if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+                idleCallbackId = window.requestIdleCallback(() => {
+                    idleCallbackId = null;
+                    queueMore();
+                }, { timeout: 500 });
+                return;
+            }
+
+            timeoutId = globalThis.setTimeout(() => {
+                timeoutId = null;
+                queueMore();
+            }, 120);
+        };
+
+        scheduleWarmup();
+
+        return () => {
+            cancelled = true;
+            if (timeoutId !== null) {
+                window.clearTimeout(timeoutId);
+            }
+            if (idleCallbackId !== null && typeof window !== 'undefined' && 'cancelIdleCallback' in window) {
+                window.cancelIdleCallback(idleCallbackId);
+            }
+        };
+    }, [communities, communityImages]);
+
     return (
         <div className="p-4 pt-0 space-y-8">
 
@@ -194,7 +251,7 @@ export function GameSelector({ communities, selectedCommunity, onSelect, communi
                                 isFavorite={true}
                                 imageUrl={communityImages[community.identifier]}
                                 platform={communityPlatforms[community.identifier]}
-                                eager={index < 8}
+                                eager={index < 18}
                                 onSelect={onSelect}
                                 onToggleFavorite={onToggleFavorite}
                             />
@@ -225,7 +282,7 @@ export function GameSelector({ communities, selectedCommunity, onSelect, communi
                                 isFavorite={false}
                                 imageUrl={communityImages[community.identifier]}
                                 platform={communityPlatforms[community.identifier]}
-                                eager={favorites.length === 0 && index < 8}
+                                eager={favorites.length === 0 && index < 24}
                                 onSelect={onSelect}
                                 onToggleFavorite={onToggleFavorite}
                             />

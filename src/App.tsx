@@ -209,6 +209,9 @@ function App() {
     currentTask: ''
   })
   const [showSettings, setShowSettings] = useState(false)
+  const [isLaunchingProfile, setIsLaunchingProfile] = useState(false)
+  const [isStoppingProfile, setIsStoppingProfile] = useState(false)
+  const [isGameRunning, setIsGameRunning] = useState(false)
   const [showExportModal, setShowExportModal] = useState(false)
   const [showCrossOverGuide, setShowCrossOverGuide] = useState(false)
   const [hideCrossOverGuide, setHideCrossOverGuide] = useState(false)
@@ -252,6 +255,38 @@ function App() {
   const { communities, communityImages, communityPlatforms, setCommunities, setCommunityImages, setCommunityPlatforms } = useAppStore();
 
   const [selectedCommunity, setSelectedCommunity] = useState<string | null>(null)
+
+  useEffect(() => {
+    const activeProfile = profiles.find((profile) => profile.id === activeProfileId)
+    if (!activeProfile || activeProfile.platform !== 'mac') {
+      setIsGameRunning(false)
+      return
+    }
+
+    let cancelled = false
+    const pollRunningState = async () => {
+      try {
+        const running = await window.ipcRenderer.isGameRunning(activeProfile.gameIdentifier, activeProfile.platform)
+        if (!cancelled) {
+          setIsGameRunning(running)
+        }
+      } catch {
+        if (!cancelled) {
+          setIsGameRunning(false)
+        }
+      }
+    }
+
+    void pollRunningState()
+    const intervalId = window.setInterval(() => {
+      void pollRunningState()
+    }, 1500)
+
+    return () => {
+      cancelled = true
+      window.clearInterval(intervalId)
+    }
+  }, [profiles, activeProfileId])
 
   useEffect(() => {
     loadData()
@@ -657,6 +692,36 @@ function App() {
     await handleSyncToGame();
   };
 
+  const handleToggleProfileVanilla = async (profileId: string, newVanillaState: boolean) => {
+    const profile = profiles.find((p) => p.id === profileId);
+    if (!profile) return;
+
+    const disabledMods = profile.mods.filter((m) => !m.enabled).map((m) => m.fullName);
+    const hadPendingSync = !!profile.needs_sync || profile.mods.some((m) => m.pending_sync);
+
+    updateProfile(profileId, { is_vanilla: newVanillaState });
+
+    try {
+      await window.ipcRenderer.installToGame(
+        profile.gameIdentifier,
+        profile.id,
+        disabledMods,
+        newVanillaState
+      );
+
+      updateProfile(profileId, {
+        is_vanilla: newVanillaState,
+        needs_sync: hadPendingSync,
+      });
+    } catch (error: any) {
+      updateProfile(profileId, { is_vanilla: !newVanillaState });
+      await window.ipcRenderer.alert(
+        'Profile Toggle Failed',
+        String(error?.message || error || 'Failed to update the profile runtime state.')
+      );
+    }
+  };
+
   const handleSavePreferences = async (newSettings: PreferencesSettings) => {
     setLegacyInstallMode(newSettings.legacy_install_mode);
     setAskVersionBeforeInstall(newSettings.ask_version_before_install);
@@ -847,32 +912,7 @@ function App() {
           onBrowseMods={() => setIsBrowsingMode(true)}
           onDeleteProfile={deleteProfile}
           onUpdateProfile={updateProfile}
-          onToggleVanilla={async (profileId, newVanillaState) => {
-            // Update profile state
-            updateProfile(profileId, { is_vanilla: newVanillaState });
-            // Find the profile to get its mods
-            const profile = profiles.find(p => p.id === profileId);
-            if (profile) {
-              const disabledMods = profile.mods.filter(m => !m.enabled).map(m => m.fullName);
-              try {
-                await window.ipcRenderer.installToGame(selectedCommunity, profileId, disabledMods, newVanillaState);
-                updateProfile(profileId, {
-                  needs_sync: false,
-                  mods: profile.mods.map((m) => ({
-                    ...m,
-                    pending_sync: false,
-                    synced_enabled: m.enabled,
-                  })),
-                });
-              } catch (error: any) {
-                updateProfile(profileId, { is_vanilla: !newVanillaState });
-                await window.ipcRenderer.alert(
-                  'Vanilla Mode Error',
-                  String(error?.message || error || 'Failed to update vanilla mode.')
-                );
-              }
-            }
-          }}
+          onToggleVanilla={handleToggleProfileVanilla}
         />
       </div>
     );
@@ -880,6 +920,74 @@ function App() {
     // STEP 3: MOD MANAGEMENT
     const activeProfile = profiles.find(p => p.id === activeProfileId);
     const currentCommunity = communities.find(c => c.identifier === selectedCommunity);
+    const profileNeedsSync = !!activeProfile?.needs_sync || !!activeProfile?.mods.some((mod) => mod.pending_sync);
+
+    const handleLaunchModdedDirect = async () => {
+      if (!activeProfile) return;
+      if (activeProfile.is_vanilla) {
+        await window.ipcRenderer.alert('Mods Disabled', 'Enable the profile before launching the modded game.');
+        return;
+      }
+
+      try {
+        setIsLaunchingProfile(true);
+        if (profileNeedsSync) {
+          await handleInstallToGameRequest();
+        }
+        await window.ipcRenderer.launchGameWithMods(activeProfile.gameIdentifier, activeProfile.platform);
+        setIsGameRunning(true);
+      } catch (error: any) {
+        await window.ipcRenderer.alert(
+          'Launch Failed',
+          String(error?.message || error || 'Failed to launch the modded game.')
+        );
+      } finally {
+        setIsLaunchingProfile(false);
+      }
+    };
+
+    const handleLaunchVanillaDirect = async () => {
+      if (!activeProfile) return;
+
+      try {
+        setIsLaunchingProfile(true);
+        await window.ipcRenderer.launchGameVanilla(activeProfile.gameIdentifier, activeProfile.platform);
+        setIsGameRunning(true);
+      } catch (error: any) {
+        await window.ipcRenderer.alert(
+          'Launch Failed',
+          String(error?.message || error || 'Failed to launch the vanilla game.')
+        );
+      } finally {
+        setIsLaunchingProfile(false);
+      }
+    };
+
+    const handleLaunchProfileDirect = async () => {
+      if (!activeProfile) return;
+      if (activeProfile.is_vanilla) {
+        await handleLaunchVanillaDirect();
+        return;
+      }
+      await handleLaunchModdedDirect();
+    };
+
+    const handleStopProfileDirect = async () => {
+      if (!activeProfile) return;
+
+      try {
+        setIsStoppingProfile(true);
+        await window.ipcRenderer.stopGame(activeProfile.gameIdentifier, activeProfile.platform);
+        setIsGameRunning(false);
+      } catch (error: any) {
+        await window.ipcRenderer.alert(
+          'Stop Failed',
+          String(error?.message || error || 'Failed to stop the running game.')
+        );
+      } finally {
+        setIsStoppingProfile(false);
+      }
+    };
 
     const sidebar = (
       <ProfileSidebar
@@ -937,33 +1045,14 @@ function App() {
           return await window.ipcRenderer.fetchPackageByName(searchName, selectedCommunity);
         }}
         onInstallToGame={handleInstallToGameRequest}
+        onLaunchProfile={handleLaunchProfileDirect}
+        onStopProfile={handleStopProfileDirect}
+        isLaunching={isLaunchingProfile || isStoppingProfile}
+        isGameRunning={isGameRunning}
         onExportProfile={() => setShowExportModal(true)}
         onOpenSettings={() => setShowSettings(true)}
         onUpdateProfile={updateProfile}
-        onToggleVanilla={async (profileId, newVanillaState) => {
-          updateProfile(profileId, { is_vanilla: newVanillaState });
-          const profile = profiles.find(p => p.id === profileId);
-          if (profile) {
-            const disabledMods = profile.mods.filter(m => !m.enabled).map(m => m.fullName);
-            try {
-              await window.ipcRenderer.installToGame(selectedCommunity, profileId, disabledMods, newVanillaState);
-              updateProfile(profileId, {
-                needs_sync: false,
-                mods: profile.mods.map((m) => ({
-                  ...m,
-                  pending_sync: false,
-                  synced_enabled: m.enabled,
-                })),
-              });
-            } catch (error: any) {
-              updateProfile(profileId, { is_vanilla: !newVanillaState });
-              await window.ipcRenderer.alert(
-                'Vanilla Mode Error',
-                String(error?.message || error || 'Failed to update vanilla mode.')
-              );
-            }
-          }
-        }}
+        onToggleVanilla={handleToggleProfileVanilla}
       />
     );
 

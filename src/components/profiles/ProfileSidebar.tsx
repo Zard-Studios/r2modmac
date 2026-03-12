@@ -18,6 +18,10 @@ interface ProfileSidebarProps {
     onOpenModFolder: (profileId: string, modName: string) => void;
     onUninstallMod: (mod: InstalledMod) => Promise<void> | void;
     onInstallToGame: (isVanillaOverride?: boolean) => void;
+    onLaunchProfile: () => Promise<void> | void;
+    onStopProfile: () => Promise<void> | void;
+    isLaunching?: boolean;
+    isGameRunning?: boolean;
     onResolvePackage: (mod: InstalledMod) => Promise<Package | null>;
     onExportProfile: () => void;
     onOpenSettings: () => void;
@@ -38,6 +42,10 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
     onOpenModFolder,
     onUninstallMod,
     onInstallToGame,
+    onLaunchProfile,
+    onStopProfile,
+    isLaunching = false,
+    isGameRunning = false,
     onResolvePackage,
     onExportProfile,
     onOpenSettings,
@@ -537,21 +545,50 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
 
                 {/* Install Button - Only if profile active */}
                 {activeProfile && (
-                    <button
-                        onClick={() => !activeProfile.is_vanilla && onInstallToGame()}
-                        disabled={activeProfile.is_vanilla}
-                        className={`w-full group relative flex items-center justify-center gap-2 px-4 py-3 rounded-xl transition-all duration-200 ${activeProfile.is_vanilla
-                            ? 'bg-gray-700 text-gray-400 cursor-not-allowed grayscale'
-                            : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white shadow-lg shadow-blue-900/20 hover:shadow-blue-900/40 hover:-translate-y-0.5 active:translate-y-0'
-                            }`}
-                    >
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                        </svg>
-                        <span className="font-bold text-sm tracking-wide">
-                            {activeProfile.is_vanilla ? 'Mods Disabled' : 'Apply to Game'}
-                        </span>
-                    </button>
+                    <div className="flex gap-2">
+                        <button
+                            onClick={() => onInstallToGame()}
+                            className="flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-blue-600 text-white border border-blue-500 shadow-sm"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                                <path d="M8.75 2.75a.75.75 0 0 0-1.5 0v5.69L5.03 6.22a.75.75 0 0 0-1.06 1.06l3.5 3.5a.75.75 0 0 0 1.06 0l3.5-3.5a.75.75 0 0 0-1.06-1.06L8.75 8.44V2.75Z" />
+                                <path d="M3.5 9.75a.75.75 0 0 0-1.5 0v1.5A2.75 2.75 0 0 0 4.75 14h6.5A2.75 2.75 0 0 0 14 11.25v-1.5a.75.75 0 0 0-1.5 0v1.5c0 .69-.56 1.25-1.25 1.25h-6.5c-.69 0-1.25-.56-1.25-1.25v-1.5Z" />
+                            </svg>
+                            <span className="font-bold text-sm tracking-wide">
+                                Apply to Game
+                            </span>
+                        </button>
+
+                        {activeProfile.platform === 'mac' && (
+                            <button
+                                onClick={() => {
+                                    if (isGameRunning) {
+                                        void onStopProfile();
+                                        return;
+                                    }
+                                    void onLaunchProfile();
+                                }}
+                                disabled={isLaunching}
+                                className={`w-14 flex items-center justify-center rounded-xl text-white border shadow-sm ${isLaunching
+                                    ? 'bg-gray-700 border-gray-600 cursor-wait opacity-70'
+                                    : isGameRunning
+                                        ? 'bg-red-600 border-red-500'
+                                        : 'bg-green-600 border-green-500'
+                                    }`}
+                                title={isGameRunning ? 'Stop Game' : activeProfile.is_vanilla ? 'Launch Vanilla' : 'Launch Modded'}
+                            >
+                                {isGameRunning ? (
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                                        <rect width="10" height="10" x="3" y="3" rx="1.5" />
+                                    </svg>
+                                ) : (
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="currentColor" viewBox="0 0 16 16" aria-hidden="true">
+                                        <path d="M3 3.732a1.5 1.5 0 0 1 2.305-1.265l6.706 4.267a1.5 1.5 0 0 1 0 2.531l-6.706 4.268A1.5 1.5 0 0 1 3 12.267V3.732Z" />
+                                    </svg>
+                                )}
+                            </button>
+                        )}
+                    </div>
                 )}
 
 
@@ -584,7 +621,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                         {activeProfile ? (
                             <button
                                 onClick={onExportProfile}
-                                className="flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white transition-colors text-xs font-medium border border-gray-700 hover:border-gray-600"
+                                className="flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-gray-800 text-gray-300 text-xs font-medium border border-gray-700"
                             >
                                 <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
@@ -596,7 +633,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                         )}
                         <button
                             onClick={onOpenSettings}
-                            className={`flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white transition-colors text-xs font-medium border border-gray-700 hover:border-gray-600 ${!activeProfile ? 'col-span-2' : ''}`}
+                            className={`flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-gray-800 text-gray-300 text-xs font-medium border border-gray-700 ${!activeProfile ? 'col-span-2' : ''}`}
                         >
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />

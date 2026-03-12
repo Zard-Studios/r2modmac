@@ -12,7 +12,7 @@ const loadedImageUrls = new Set<string>();
 const failedImageUrls = new Set<string>();
 const pendingImageLoads = new Map<string, Promise<void>>();
 
-function preloadImage(src: string) {
+export function warmImageCache(src: string) {
     if (loadedImageUrls.has(src)) {
         return Promise.resolve();
     }
@@ -31,11 +31,13 @@ function preloadImage(src: string) {
         img.onload = () => {
             loadedImageUrls.add(src);
             pendingImageLoads.delete(src);
+            window.dispatchEvent(new CustomEvent('lazy-image-loaded', { detail: src }));
             resolve();
         };
         img.onerror = () => {
             failedImageUrls.add(src);
             pendingImageLoads.delete(src);
+            window.dispatchEvent(new CustomEvent('lazy-image-error', { detail: src }));
             reject(new Error('Image failed to load'));
         };
         img.src = src;
@@ -62,6 +64,29 @@ export function LazyImage({ src, alt, className, fallback, eager = false }: Lazy
     }, [src, eager]);
 
     useEffect(() => {
+        const handleLoaded = (event: Event) => {
+            const customEvent = event as CustomEvent<string>;
+            if (customEvent.detail !== src) return;
+            setShouldLoad(true);
+            setIsLoaded(true);
+            setHasError(false);
+        };
+
+        const handleErrored = (event: Event) => {
+            const customEvent = event as CustomEvent<string>;
+            if (customEvent.detail !== src) return;
+            setHasError(true);
+        };
+
+        window.addEventListener('lazy-image-loaded', handleLoaded as EventListener);
+        window.addEventListener('lazy-image-error', handleErrored as EventListener);
+        return () => {
+            window.removeEventListener('lazy-image-loaded', handleLoaded as EventListener);
+            window.removeEventListener('lazy-image-error', handleErrored as EventListener);
+        };
+    }, [src]);
+
+    useEffect(() => {
         if (eager || loadedImageUrls.has(src)) {
             setShouldLoad(true);
             return;
@@ -78,7 +103,7 @@ export function LazyImage({ src, alt, className, fallback, eager = false }: Lazy
                 }
             },
             {
-                rootMargin: '500px 0px',
+                rootMargin: '1200px 0px',
                 threshold: 0.01,
             }
         );
@@ -93,7 +118,7 @@ export function LazyImage({ src, alt, className, fallback, eager = false }: Lazy
         }
 
         let cancelled = false;
-        preloadImage(src)
+        warmImageCache(src)
             .then(() => {
                 if (!cancelled) {
                     setIsLoaded(true);
@@ -120,10 +145,10 @@ export function LazyImage({ src, alt, className, fallback, eager = false }: Lazy
                 <img
                     src={src}
                     alt={alt}
-                    loading={eager ? 'eager' : 'lazy'}
+                    loading="eager"
                     decoding="async"
-                    fetchPriority={eager ? 'high' : 'low'}
-                    className={`w-full h-full object-cover transition-opacity duration-150 ${isLoaded ? 'opacity-100' : 'opacity-0'}`}
+                    fetchPriority={eager ? 'high' : 'auto'}
+                    className={`w-full h-full object-cover ${isLoaded ? 'opacity-100' : 'opacity-0'}`}
                     onLoad={() => {
                         loadedImageUrls.add(src);
                         setIsLoaded(true);

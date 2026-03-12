@@ -194,7 +194,10 @@ pub fn run() {
             commands::game_commands::open_game_folder,
             commands::game_commands::find_game_executable,
             commands::game_commands::install_to_game,
+            commands::game_commands::is_game_running,
             commands::game_commands::launch_game_with_mods,
+            commands::game_commands::launch_game_vanilla,
+            commands::game_commands::stop_game,
             commands::game_commands::sync_profile_to_game,
             
             commands::mod_commands::install_mod,

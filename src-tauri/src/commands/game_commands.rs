@@ -145,6 +145,20 @@ fn get_steam_roots_for_platform(app: &AppHandle, is_windows_profile: bool) -> Ve
     let settings = load_settings_impl(app);
     let mut steam_paths_to_check = Vec::new();
 
+    let expand_user_path = |raw: &str| -> std::path::PathBuf {
+        if raw == "~" {
+            return dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from(raw));
+        }
+
+        if let Some(stripped) = raw.strip_prefix("~/") {
+            if let Some(home) = dirs::home_dir() {
+                return home.join(stripped);
+            }
+        }
+
+        std::path::PathBuf::from(raw)
+    };
+
     if !is_windows_profile {
         if let Some(home) = dirs::home_dir() {
             let mac_steam = home.join("Library/Application Support/Steam");
@@ -172,7 +186,7 @@ fn get_steam_roots_for_platform(app: &AppHandle, is_windows_profile: bool) -> Ve
     };
 
     if let Some(steam_path_str) = configured_steam_path {
-        let configured_steam = std::path::PathBuf::from(steam_path_str);
+        let configured_steam = expand_user_path(steam_path_str);
         if configured_steam.exists() && !steam_paths_to_check.contains(&configured_steam) {
             steam_paths_to_check.push(configured_steam);
         }
@@ -226,6 +240,25 @@ fn find_steam_app_id_for_game_path(
             let canonical_manifest = fs::canonicalize(&manifest_game_path).unwrap_or(manifest_game_path);
             if canonical_manifest == canonical_game {
                 return Some(app_id);
+            }
+        }
+    }
+
+    None
+}
+
+fn find_matching_steam_root_for_game_path(
+    app: &AppHandle,
+    game_path: &std::path::Path,
+    is_windows_profile: bool,
+) -> Option<std::path::PathBuf> {
+    let canonical_game = canonicalize_or_original(game_path);
+
+    for steam_root in get_steam_roots_for_platform(app, is_windows_profile) {
+        for library_root in get_steam_library_folders(&steam_root) {
+            let common_root = canonicalize_or_original(&library_root.join("steamapps").join("common"));
+            if canonical_game.starts_with(&common_root) {
+                return Some(steam_root);
             }
         }
     }
@@ -297,6 +330,130 @@ fn get_latest_localconfig_path(steam_root: &std::path::Path) -> Option<std::path
                 .and_then(|metadata| metadata.modified())
                 .ok()
         })
+}
+
+fn find_macos_app_bundle(game_path: &std::path::Path) -> Option<std::path::PathBuf> {
+    if game_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| name.ends_with(".app"))
+        .unwrap_or(false)
+    {
+        return Some(game_path.to_path_buf());
+    }
+
+    if !game_path.is_dir() {
+        return None;
+    }
+
+    fs::read_dir(game_path)
+        .ok()?
+        .filter_map(|entry| entry.ok())
+        .find(|entry| entry.file_name().to_string_lossy().ends_with(".app"))
+        .map(|entry| entry.path())
+}
+
+fn find_macos_executable_path(game_path: &std::path::Path) -> Option<std::path::PathBuf> {
+    let app_bundle = find_macos_app_bundle(game_path)?;
+    let macos_dir = app_bundle.join("Contents").join("MacOS");
+    if !macos_dir.is_dir() {
+        return None;
+    }
+
+    let defaults_output = std::process::Command::new("/usr/bin/defaults")
+        .args([
+            "read",
+            &app_bundle.join("Contents").join("Info").to_string_lossy(),
+            "CFBundleExecutable",
+        ])
+        .output()
+        .ok()?;
+
+    if defaults_output.status.success() {
+        let executable_name = String::from_utf8_lossy(&defaults_output.stdout).trim().to_string();
+        if !executable_name.is_empty() {
+            let candidate = macos_dir.join(&executable_name);
+            if candidate.exists() {
+                return Some(candidate);
+            }
+        }
+    }
+
+    fs::read_dir(&macos_dir)
+        .ok()?
+        .filter_map(|entry| entry.ok())
+        .find(|entry| entry.file_type().map(|t| t.is_file()).unwrap_or(false))
+        .map(|entry| entry.path())
+}
+
+fn is_process_running_for_executable(executable_path: &std::path::Path) -> bool {
+    std::process::Command::new("/usr/bin/pgrep")
+        .args(["-f", &executable_path.to_string_lossy()])
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+fn wait_for_process_start(executable_path: &std::path::Path, timeout_ms: u64) -> bool {
+    let poll_interval = 250u64;
+    let attempts = std::cmp::max(1, timeout_ms / poll_interval);
+
+    for _ in 0..attempts {
+        if is_process_running_for_executable(executable_path) {
+            return true;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(poll_interval));
+    }
+
+    is_process_running_for_executable(executable_path)
+}
+
+fn wait_for_process_exit(executable_path: &std::path::Path, timeout_ms: u64) -> bool {
+    let poll_interval = 250u64;
+    let attempts = std::cmp::max(1, timeout_ms / poll_interval);
+
+    for _ in 0..attempts {
+        if !is_process_running_for_executable(executable_path) {
+            return true;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(poll_interval));
+    }
+
+    !is_process_running_for_executable(executable_path)
+}
+
+fn launch_via_steam_for_game_path(
+    app: &AppHandle,
+    game_path: &std::path::Path,
+) -> Result<(), String> {
+    let steam_root = find_matching_steam_root_for_game_path(app, game_path, false)
+        .ok_or_else(|| "Game not found in a Steam library".to_string())?;
+    let app_id = find_steam_app_id_for_game_path(&steam_root, game_path)
+        .ok_or_else(|| "Couldn't determine the Steam app ID for this game".to_string())?;
+
+    let executable_path = find_macos_executable_path(game_path);
+    if let Some(executable_path) = executable_path.as_ref() {
+        if is_process_running_for_executable(executable_path) {
+            return Err("Game is already running.".to_string());
+        }
+    }
+
+    let status = std::process::Command::new("/usr/bin/open")
+        .arg(format!("steam://run/{}", app_id))
+        .status()
+        .map_err(|e| format!("Failed to ask Steam to launch the game: {}", e))?;
+
+    if !status.success() {
+        return Err("Steam rejected the launch request.".to_string());
+    }
+
+    if let Some(executable_path) = executable_path.as_ref() {
+        if !wait_for_process_start(executable_path, 15_000) {
+            return Err("Steam did not start the game process in time.".to_string());
+        }
+    }
+
+    Ok(())
 }
 
 fn find_bepinex_script_in_dir(dir: &std::path::Path) -> Option<std::path::PathBuf> {
@@ -1400,24 +1557,21 @@ pub async fn find_game_executable(game_path: String) -> Result<Option<String>, S
 #[command]
 pub async fn install_to_game(app: AppHandle, game_identifier: String, profile_id: String, disabled_mods: Vec<String>, is_vanilla_override: Option<bool>) -> Result<(), String> {
     let profile_platform = get_profile_platform(&app, &profile_id);
-    let profile_distribution = get_profile_distribution(&app, &profile_id);
-    let profile_launch_mode = get_profile_launch_mode(&app, &profile_id);
     let is_mac_profile = profile_platform == "mac";
     let settings = load_settings_impl(&app);
     let use_legacy_plugin_cache = settings.legacy_install_mode;
 
     // 1. Find game path
     let game_path_str = get_game_path(app.clone(), game_identifier.clone(), Some(profile_platform.clone())).await?
-        .ok_or("Game not found in Steam library")?;
+        .ok_or("Game path not found")?;
     let game_path = std::path::Path::new(&game_path_str);
     let effective_distribution = if is_mac_profile {
         infer_distribution_from_game_path(&app, game_path, false)
     } else {
-        profile_distribution.clone()
+        get_profile_distribution(&app, &profile_id)
     };
     let should_clear_steam_launch = is_mac_profile && effective_distribution == "steam";
-    let manage_steam_launch = is_mac_profile
-        && should_manage_steam_launch_options(&effective_distribution, &profile_launch_mode);
+    let manage_steam_launch = is_mac_profile && effective_distribution == "steam";
 
     // 2. Get profile path
     let profile_dir = app.path().app_data_dir().map_err(|e| e.to_string())?
@@ -1451,9 +1605,9 @@ pub async fn install_to_game(app: AppHandle, game_identifier: String, profile_id
     eprintln!(
         "[install_to_game] platform={} stored_distribution={} effective_distribution={} launch_mode={} manage_steam_launch={} should_clear_steam_launch={}",
         profile_platform,
-        profile_distribution,
+        get_profile_distribution(&app, &profile_id),
         effective_distribution,
-        profile_launch_mode,
+        get_profile_launch_mode(&app, &profile_id),
         manage_steam_launch,
         should_clear_steam_launch
     );
@@ -1690,7 +1844,7 @@ pub async fn install_to_game(app: AppHandle, game_identifier: String, profile_id
         return Ok(());
     }
     
-    if is_vanilla {
+    if !is_mac_profile && is_vanilla {
         // Vanilla mode: RENAME BepInEx folder to BepInEx_DISABLED (preserves mods!)
         let bepinex_folder = game_path.join("BepInEx");
         let bepinex_disabled = game_path.join("BepInEx_DISABLED");
@@ -1705,7 +1859,7 @@ pub async fn install_to_game(app: AppHandle, game_identifier: String, profile_id
             fs::rename(&bepinex_folder, &bepinex_disabled)
                 .map_err(|e| format!("Failed to disable BepInEx: {}", e))?;
         }
-    } else {
+    } else if !is_mac_profile {
         // Normal mode: Check if BepInEx_DISABLED exists and restore it
         let bepinex_folder = game_path.join("BepInEx");
         let bepinex_disabled = game_path.join("BepInEx_DISABLED");
@@ -1925,6 +2079,7 @@ pub async fn install_to_game(app: AppHandle, game_identifier: String, profile_id
         migrate_root_plugins_into_bepinex(game_path)?;
         let run_script = canonicalize_macos_bepinex_script(game_path)?;
         configure_macos_bepinex_script(&run_script, game_path)?;
+        sync_macos_runtime_disabled_state(game_path, false)?;
         dequarantine_recursive(game_path);
         if manage_steam_launch {
             ensure_macos_steam_launch_options(&app, game_path, true)?;
@@ -1970,11 +2125,18 @@ pub async fn launch_game_with_mods(app: AppHandle, game_identifier: String, plat
         .await?
         .ok_or_else(|| "Game path not found".to_string())?;
     let game_path = std::path::PathBuf::from(&game_path_str);
+    let executable_path = find_macos_executable_path(&game_path);
 
     if is_balatro_identifier(&game_identifier) || is_balatro_game_path(&game_path) {
         let run_script = game_path.join(BALATRO_LOVELY_SCRIPT);
         if !run_script.exists() {
             return Err("run_lovely_macos.sh not found".to_string());
+        }
+
+        if let Some(executable_path) = executable_path.as_ref() {
+            if is_process_running_for_executable(executable_path) {
+                return Err("Game is already running.".to_string());
+            }
         }
 
         set_executable_if_present(&run_script)?;
@@ -1986,12 +2148,29 @@ pub async fn launch_game_with_mods(app: AppHandle, game_identifier: String, plat
             .spawn()
             .map_err(|e| format!("Failed to launch run_lovely_macos.sh: {}", e))?;
 
+        if let Some(executable_path) = executable_path.as_ref() {
+            if !wait_for_process_start(executable_path, 15_000) {
+                return Err("Game did not start in time.".to_string());
+            }
+        }
+
         return Ok(());
+    }
+
+    if infer_distribution_from_game_path(&app, &game_path, false) == "steam" {
+        ensure_macos_steam_launch_options(&app, &game_path, true)?;
+        return launch_via_steam_for_game_path(&app, &game_path);
     }
 
     let run_script = canonicalize_macos_bepinex_script(&game_path)?;
     
     if run_script.exists() {
+        if let Some(executable_path) = executable_path.as_ref() {
+            if is_process_running_for_executable(executable_path) {
+                return Err("Game is already running.".to_string());
+            }
+        }
+
         configure_macos_bepinex_script(&run_script, &game_path)?;
         dequarantine_recursive(&game_path);
         
@@ -2001,6 +2180,12 @@ pub async fn launch_game_with_mods(app: AppHandle, game_identifier: String, plat
             .current_dir(&game_path)
             .spawn()
             .map_err(|e| format!("Failed to launch run_bepinex.sh: {}", e))?;
+
+        if let Some(executable_path) = executable_path.as_ref() {
+            if !wait_for_process_start(executable_path, 15_000) {
+                return Err("Game did not start in time.".to_string());
+            }
+        }
         
         Ok(())
     } else {
@@ -2013,12 +2198,157 @@ pub async fn launch_game_with_mods(app: AppHandle, game_identifier: String, plat
                     .map(|e| e.path())
             });
         if let Some(bundle) = app_bundle {
+            if let Some(executable_path) = executable_path.as_ref() {
+                if is_process_running_for_executable(executable_path) {
+                    return Err("Game is already running.".to_string());
+                }
+            }
             let _ = open::that(&bundle);
+            if let Some(executable_path) = executable_path.as_ref() {
+                if !wait_for_process_start(executable_path, 15_000) {
+                    return Err("Game did not start in time.".to_string());
+                }
+            }
             Ok(())
         } else {
             Err("run_bepinex.sh not found and no .app bundle found either".to_string())
         }
     }
+}
+
+#[command]
+pub async fn launch_game_vanilla(app: AppHandle, game_identifier: String, platform: Option<String>) -> Result<(), String> {
+    let game_path_str = get_game_path(app.clone(), game_identifier, platform)
+        .await?
+        .ok_or_else(|| "Game path not found".to_string())?;
+    let game_path = std::path::PathBuf::from(&game_path_str);
+    let executable_path = find_macos_executable_path(&game_path);
+
+    if infer_distribution_from_game_path(&app, &game_path, false) == "steam" {
+        ensure_macos_steam_launch_options(&app, &game_path, false)?;
+        return launch_via_steam_for_game_path(&app, &game_path);
+    }
+
+    let app_bundle = if game_path.is_dir() {
+        fs::read_dir(&game_path)
+            .ok()
+            .and_then(|entries| {
+                entries
+                    .filter_map(|e| e.ok())
+                    .find(|e| e.file_name().to_string_lossy().ends_with(".app"))
+                    .map(|e| e.path())
+            })
+    } else if game_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| name.ends_with(".app"))
+        .unwrap_or(false)
+    {
+        Some(game_path.clone())
+    } else {
+        None
+    };
+
+    if let Some(bundle) = app_bundle {
+        if let Some(executable_path) = executable_path.as_ref() {
+            if is_process_running_for_executable(executable_path) {
+                return Err("Game is already running.".to_string());
+            }
+        }
+        open::that(&bundle).map_err(|e| format!("Failed to launch app bundle: {}", e))?;
+        if let Some(executable_path) = executable_path.as_ref() {
+            if !wait_for_process_start(executable_path, 15_000) {
+                return Err("Game did not start in time.".to_string());
+            }
+        }
+        return Ok(());
+    }
+
+    if let Ok(Some(executable)) = find_game_executable(game_path_str.clone()).await {
+        if let Some(executable_path) = executable_path.as_ref() {
+            if is_process_running_for_executable(executable_path) {
+                return Err("Game is already running.".to_string());
+            }
+        }
+        open::that(executable).map_err(|e| format!("Failed to launch game executable: {}", e))?;
+        if let Some(executable_path) = executable_path.as_ref() {
+            if !wait_for_process_start(executable_path, 15_000) {
+                return Err("Game did not start in time.".to_string());
+            }
+        }
+        return Ok(());
+    }
+
+    if let Some(executable_path) = executable_path.as_ref() {
+        if is_process_running_for_executable(executable_path) {
+            return Err("Game is already running.".to_string());
+        }
+    }
+    open::that(&game_path).map_err(|e| format!("Failed to launch game: {}", e))?;
+    if let Some(executable_path) = executable_path.as_ref() {
+        if !wait_for_process_start(executable_path, 15_000) {
+            return Err("Game did not start in time.".to_string());
+        }
+    }
+    Ok(())
+}
+
+#[command]
+pub async fn is_game_running(
+    app: AppHandle,
+    game_identifier: String,
+    platform: Option<String>,
+) -> Result<bool, String> {
+    let game_path_str = match get_game_path(app.clone(), game_identifier, platform).await? {
+        Some(path) => path,
+        None => return Ok(false),
+    };
+    let game_path = std::path::PathBuf::from(&game_path_str);
+    let Some(executable_path) = find_macos_executable_path(&game_path) else {
+        return Ok(false);
+    };
+
+    Ok(is_process_running_for_executable(&executable_path))
+}
+
+#[command]
+pub async fn stop_game(
+    app: AppHandle,
+    game_identifier: String,
+    platform: Option<String>,
+) -> Result<(), String> {
+    let game_path_str = get_game_path(app.clone(), game_identifier, platform)
+        .await?
+        .ok_or_else(|| "Game path not found".to_string())?;
+    let game_path = std::path::PathBuf::from(&game_path_str);
+    let executable_path = find_macos_executable_path(&game_path)
+        .ok_or_else(|| "Could not determine the game executable.".to_string())?;
+
+    if !is_process_running_for_executable(&executable_path) {
+        return Ok(());
+    }
+
+    let exec_pattern = executable_path.to_string_lossy().to_string();
+
+    let _ = std::process::Command::new("/usr/bin/pkill")
+        .args(["-TERM", "-f", &exec_pattern])
+        .status()
+        .map_err(|e| format!("Failed to stop the game: {}", e))?;
+
+    if wait_for_process_exit(&executable_path, 5_000) {
+        return Ok(());
+    }
+
+    let _ = std::process::Command::new("/usr/bin/pkill")
+        .args(["-KILL", "-f", &exec_pattern])
+        .status()
+        .map_err(|e| format!("Failed to force stop the game: {}", e))?;
+
+    if !wait_for_process_exit(&executable_path, 3_000) {
+        return Err("Game did not stop in time.".to_string());
+    }
+
+    Ok(())
 }
 
 #[command]
