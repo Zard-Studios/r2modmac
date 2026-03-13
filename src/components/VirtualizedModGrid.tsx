@@ -20,6 +20,7 @@ interface VirtualizedModGridProps {
 export function VirtualizedModGrid({ packages, installedMods, onInstall, onUninstall, onModClick, viewMode = 'grid', isBrowsing, searchQuery, legacyInstallMode = false }: VirtualizedModGridProps) {
     const parentRef = useRef<HTMLDivElement>(null);
     const [columnCount, setColumnCount] = useState(3);
+    const [availableWidth, setAvailableWidth] = useState(0);
 
     // Scroll to top when search query changes
     const prevSearchQuery = useRef(searchQuery);
@@ -92,11 +93,13 @@ export function VirtualizedModGrid({ packages, installedMods, onInstall, onUnins
             if (!parentRef.current) return;
             if (viewMode === 'list') {
                 setColumnCount(1);
+                setAvailableWidth(0);
                 return;
             }
             const width = parentRef.current.offsetWidth - 100;
             const cols = Math.max(1, Math.min(3, Math.floor(width / (COLUMN_WIDTH + GAP))));
             setColumnCount(cols);
+            setAvailableWidth(width);
         };
 
         updateColumnCount();
@@ -123,6 +126,10 @@ export function VirtualizedModGrid({ packages, installedMods, onInstall, onUnins
             element?.getBoundingClientRect().height ?? LIST_ROW_HEIGHT,
     });
 
+    const gridColumnWidth = viewMode === 'grid' && columnCount > 0
+        ? Math.min(470, Math.floor((availableWidth - GAP * (columnCount - 1)) / columnCount))
+        : COLUMN_WIDTH;
+
     if (viewMode === 'grid') {
         return (
             <div
@@ -132,7 +139,8 @@ export function VirtualizedModGrid({ packages, installedMods, onInstall, onUnins
                 <div
                     className="grid gap-4"
                     style={{
-                        gridTemplateColumns: `repeat(${columnCount}, minmax(0, 1fr))`,
+                        gridTemplateColumns: `repeat(${columnCount}, minmax(0, ${gridColumnWidth}px))`,
+                        justifyContent: 'start',
                     }}
                 >
                     {packages.map((pkg) => (
