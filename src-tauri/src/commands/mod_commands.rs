@@ -1560,7 +1560,9 @@ pub async fn fetch_packages(app: AppHandle, state: tauri::State<'_, AppState>, g
                     // Filter out Manager packages from cache too
                     packages.retain(|pkg| {
                         let full_name = pkg["full_name"].as_str().unwrap_or("");
-                        !full_name.contains("ebkr-r2modman") && !full_name.contains("Tslat-ThunderstoreModManager")
+                        !full_name.contains("ebkr-r2modman")
+                            && !full_name.contains("Tslat-ThunderstoreModManager")
+                            && !full_name.contains("Kesomannen-GaleModManager")
                     });
                     return Ok(packages);
                 }
@@ -1627,7 +1629,9 @@ pub async fn fetch_packages(app: AppHandle, state: tauri::State<'_, AppState>, g
             // Filter out Manager packages (e.g. r2modman, Thunderstore Mod Manager) if they appear
             packages.retain(|pkg| {
                 let full_name = pkg["full_name"].as_str().unwrap_or("");
-                !full_name.contains("ebkr-r2modman") && !full_name.contains("Tslat-ThunderstoreModManager")
+                !full_name.contains("ebkr-r2modman")
+                    && !full_name.contains("Tslat-ThunderstoreModManager")
+                    && !full_name.contains("Kesomannen-GaleModManager")
             });
         
             // Save to cache (Async)

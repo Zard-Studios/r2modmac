@@ -32,7 +32,7 @@ export function VirtualizedModGrid({ packages, installedMods, onInstall, onUnins
 
     const COLUMN_WIDTH = 320;
     const GAP = 16;
-    const GRID_ROW_HEIGHT = 248;
+    const GRID_ROW_HEIGHT = 224;
     const LIST_ROW_HEIGHT = 80;
 
     // Helper to check install status
@@ -149,7 +149,7 @@ export function VirtualizedModGrid({ packages, installedMods, onInstall, onUnins
                                 left: 0,
                                 width: '100%',
                                 transform: `translateY(${virtualRow.start}px)`,
-                                paddingBottom: '12px',
+                                paddingBottom: '4px',
                             }}
                         >
                             <div
