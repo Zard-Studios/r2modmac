@@ -73,7 +73,7 @@ export function VirtualizedModGrid({ packages, installedMods, onInstall, onUnins
             let newScrollTop = 0;
             if (newMode === 'grid') {
                 // Recalculate cols for safety
-                const width = parentRef.current.offsetWidth - 48;
+                const width = parentRef.current.offsetWidth - 100;
                 const cols = Math.max(1, Math.min(3, Math.floor(width / (COLUMN_WIDTH + GAP))));
 
                 const rowIndex = Math.floor(firstVisibleItemIndex / cols);
@@ -94,7 +94,7 @@ export function VirtualizedModGrid({ packages, installedMods, onInstall, onUnins
                 setColumnCount(1);
                 return;
             }
-            const width = parentRef.current.offsetWidth - 48;
+            const width = parentRef.current.offsetWidth - 100;
             const cols = Math.max(1, Math.min(3, Math.floor(width / (COLUMN_WIDTH + GAP))));
             setColumnCount(cols);
         };
@@ -114,19 +114,48 @@ export function VirtualizedModGrid({ packages, installedMods, onInstall, onUnins
         };
     }, [viewMode]);
 
-    const rowCount = Math.ceil(packages.length / columnCount);
-
     const rowVirtualizer = useVirtualizer({
-        count: rowCount,
+        count: viewMode === 'list' ? packages.length : 0,
         getScrollElement: () => parentRef.current,
-        estimateSize: () => viewMode === 'list' ? LIST_ROW_HEIGHT : GRID_ROW_HEIGHT,
+        estimateSize: () => LIST_ROW_HEIGHT,
         overscan: 5,
+        measureElement: (element) =>
+            element?.getBoundingClientRect().height ?? LIST_ROW_HEIGHT,
     });
+
+    if (viewMode === 'grid') {
+        return (
+            <div
+                ref={parentRef}
+                className="flex-1 h-full overflow-y-auto px-[50px] pt-[50px] pb-0"
+            >
+                <div
+                    className="grid gap-4"
+                    style={{
+                        gridTemplateColumns: `repeat(${columnCount}, minmax(0, 1fr))`,
+                    }}
+                >
+                    {packages.map((pkg) => (
+                        <ModCard
+                            key={pkg.uuid4}
+                            mod={pkg.versions[0]}
+                            onInstall={() => onInstall(pkg)}
+                            onUninstall={() => onUninstall(pkg)}
+                            onClick={() => onModClick(pkg)}
+                            installStatus={getInstallStatus(pkg)}
+                            isBrowsing={isBrowsing}
+                            legacyInstallMode={legacyInstallMode}
+                        />
+                    ))}
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div
             ref={parentRef}
-            className="flex-1 h-full overflow-y-auto px-6 pt-4 pb-0"
+            className="flex-1 h-full overflow-y-auto px-[50px] pt-[50px] pb-0"
         >
             <div
                 style={{
@@ -136,56 +165,31 @@ export function VirtualizedModGrid({ packages, installedMods, onInstall, onUnins
                 }}
             >
                 {rowVirtualizer.getVirtualItems().map((virtualRow) => {
-                    const startIndex = virtualRow.index * columnCount;
-                    const endIndex = Math.min(startIndex + columnCount, packages.length);
-                    const rowPackages = packages.slice(startIndex, endIndex);
-
+                    const pkg = packages[virtualRow.index];
                     return (
                         <div
                             key={virtualRow.key}
+                            ref={rowVirtualizer.measureElement}
+                            data-index={virtualRow.index}
                             style={{
                                 position: 'absolute',
                                 top: 0,
                                 left: 0,
                                 width: '100%',
                                 transform: `translateY(${virtualRow.start}px)`,
-                                paddingBottom: '4px',
+                                paddingBottom: '8px',
                             }}
                         >
-                            <div
-                                className={`grid ${viewMode === 'grid' ? 'gap-4' : 'gap-2'}`}
-                                style={{
-                                    gridTemplateColumns: viewMode === 'grid'
-                                        ? `repeat(${columnCount}, minmax(0, 1fr))`
-                                        : 'minmax(0, 1fr)',
-                                }}
-                            >
-                                {rowPackages.map((pkg) => (
-                                    viewMode === 'grid' ? (
-                                        <ModCard
-                                            key={pkg.uuid4}
-                                            mod={pkg.versions[0]}
-                                            onInstall={() => onInstall(pkg)}
-                                            onUninstall={() => onUninstall(pkg)}
-                                            onClick={() => onModClick(pkg)}
-                                            installStatus={getInstallStatus(pkg)}
-                                            isBrowsing={isBrowsing}
-                                            legacyInstallMode={legacyInstallMode}
-                                        />
-                                    ) : (
-                                        <ModListItem
-                                            key={pkg.uuid4}
-                                            mod={pkg.versions[0]}
-                                            onInstall={() => onInstall(pkg)}
-                                            onUninstall={() => onUninstall(pkg)}
-                                            onClick={() => onModClick(pkg)}
-                                            installStatus={getInstallStatus(pkg)}
-                                            isBrowsing={isBrowsing}
-                                            legacyInstallMode={legacyInstallMode}
-                                        />
-                                    )
-                                ))}
-                            </div>
+                            <ModListItem
+                                key={pkg.uuid4}
+                                mod={pkg.versions[0]}
+                                onInstall={() => onInstall(pkg)}
+                                onUninstall={() => onUninstall(pkg)}
+                                onClick={() => onModClick(pkg)}
+                                installStatus={getInstallStatus(pkg)}
+                                isBrowsing={isBrowsing}
+                                legacyInstallMode={legacyInstallMode}
+                            />
                         </div>
                     );
                 })}

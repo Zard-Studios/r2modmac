@@ -1058,7 +1058,7 @@ function App() {
 
     const main = (
       <div className="flex-1 flex flex-col min-w-0 bg-gray-900 h-full">
-        <div className="p-5 border-b border-gray-800 flex items-center justify-between gap-4 flex-shrink-0">
+        <div className="px-[50px] py-5 border-b border-gray-800 flex items-center justify-between gap-4 flex-shrink-0">
           <div className="flex items-center gap-4">
             {isBrowsingMode && (
               <Button variant="ghost" size="sm" onClick={() => setIsBrowsingMode(false)}>
