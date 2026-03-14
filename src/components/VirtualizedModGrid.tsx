@@ -127,7 +127,7 @@ export function VirtualizedModGrid({ packages, installedMods, onInstall, onUnins
     });
 
     const gridColumnWidth = viewMode === 'grid' && columnCount > 0
-        ? Math.min(470, Math.floor((availableWidth - GAP * (columnCount - 1)) / columnCount))
+        ? Math.min(420, Math.floor((availableWidth - GAP * (columnCount - 1)) / columnCount))
         : COLUMN_WIDTH;
 
     if (viewMode === 'grid') {
