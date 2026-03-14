@@ -1,5 +1,5 @@
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { useRef, useState, useEffect, useLayoutEffect } from 'react';
+import { useRef, useState, useEffect, useLayoutEffect, useMemo, useCallback } from 'react';
 import { ModCard } from './ModCard';
 import { ModListItem } from './ModListItem';
 import type { Package } from '../types/thunderstore';
@@ -17,6 +17,20 @@ interface VirtualizedModGridProps {
     legacyInstallMode?: boolean;
 }
 
+const COLUMN_WIDTH = 320;
+const GAP = 16;
+const GRID_ROW_HEIGHT = 224;
+const LIST_ROW_HEIGHT = 80;
+
+// Split flat array into rows of `cols` items
+function chunkIntoRows<T>(items: T[], cols: number): T[][] {
+    const rows: T[][] = [];
+    for (let i = 0; i < items.length; i += cols) {
+        rows.push(items.slice(i, i + cols));
+    }
+    return rows;
+}
+
 export function VirtualizedModGrid({ packages, installedMods, onInstall, onUninstall, onModClick, viewMode = 'grid', isBrowsing, searchQuery, legacyInstallMode = false }: VirtualizedModGridProps) {
     const parentRef = useRef<HTMLDivElement>(null);
     const [columnCount, setColumnCount] = useState(3);
@@ -31,32 +45,19 @@ export function VirtualizedModGrid({ packages, installedMods, onInstall, onUnins
         prevSearchQuery.current = searchQuery;
     }, [searchQuery]);
 
-    const COLUMN_WIDTH = 320;
-    const GAP = 16;
-    const GRID_ROW_HEIGHT = 224;
-    const LIST_ROW_HEIGHT = 80;
-
     // Helper to check install status
-    const getInstallStatus = (pkg: Package): 'installed' | 'not_installed' | 'update_available' => {
+    const getInstallStatus = useCallback((pkg: Package): 'installed' | 'not_installed' | 'update_available' => {
         const installed = installedMods.find(m => m.fullName.startsWith(pkg.full_name));
         if (!installed) return 'not_installed';
-
-        // Compare versions
-        if (installed.versionNumber !== pkg.versions[0].version_number) {
-            return 'update_available';
-        }
-
+        if (installed.versionNumber !== pkg.versions[0].version_number) return 'update_available';
         return 'installed';
-    };
+    }, [installedMods]);
 
-    // Scroll Synchronization
-    // We synchronize based on viewMode changes
+    // Scroll Synchronization on viewMode changes
     const prevViewMode = useRef(viewMode);
 
-    // We capture/restore scroll synchronously in useLayoutEffect to avoid flicker
     useLayoutEffect(() => {
         if (prevViewMode.current !== viewMode && parentRef.current) {
-
             const scrollTop = parentRef.current.scrollTop;
             const oldMode = prevViewMode.current;
             const newMode = viewMode;
@@ -73,10 +74,8 @@ export function VirtualizedModGrid({ packages, installedMods, onInstall, onUnins
 
             let newScrollTop = 0;
             if (newMode === 'grid') {
-                // Recalculate cols for safety
                 const width = parentRef.current.offsetWidth - 100;
                 const cols = Math.max(1, Math.min(3, Math.floor(width / (COLUMN_WIDTH + GAP))));
-
                 const rowIndex = Math.floor(firstVisibleItemIndex / cols);
                 newScrollTop = rowIndex * GRID_ROW_HEIGHT;
             } else {
@@ -117,7 +116,26 @@ export function VirtualizedModGrid({ packages, installedMods, onInstall, onUnins
         };
     }, [viewMode]);
 
-    const rowVirtualizer = useVirtualizer({
+    const gridColumnWidth = viewMode === 'grid' && columnCount > 0
+        ? Math.min(420, Math.floor((availableWidth - GAP * (columnCount - 1)) / columnCount))
+        : COLUMN_WIDTH;
+
+    // For grid: chunk packages into rows so we can virtualize row-by-row
+    const gridRows = useMemo(
+        () => viewMode === 'grid' ? chunkIntoRows(packages, columnCount) : [],
+        [packages, columnCount, viewMode]
+    );
+
+    const gridRowVirtualizer = useVirtualizer({
+        count: viewMode === 'grid' ? gridRows.length : 0,
+        getScrollElement: () => parentRef.current,
+        estimateSize: () => GRID_ROW_HEIGHT + GAP,
+        overscan: 3,
+        measureElement: (element) =>
+            element?.getBoundingClientRect().height ?? GRID_ROW_HEIGHT + GAP,
+    });
+
+    const listRowVirtualizer = useVirtualizer({
         count: viewMode === 'list' ? packages.length : 0,
         getScrollElement: () => parentRef.current,
         estimateSize: () => LIST_ROW_HEIGHT,
@@ -126,35 +144,53 @@ export function VirtualizedModGrid({ packages, installedMods, onInstall, onUnins
             element?.getBoundingClientRect().height ?? LIST_ROW_HEIGHT,
     });
 
-    const gridColumnWidth = viewMode === 'grid' && columnCount > 0
-        ? Math.min(420, Math.floor((availableWidth - GAP * (columnCount - 1)) / columnCount))
-        : COLUMN_WIDTH;
-
     if (viewMode === 'grid') {
         return (
             <div
                 ref={parentRef}
                 className="flex-1 h-full overflow-y-auto px-[50px] pt-[50px] pb-0"
             >
-                <div
-                    className="grid gap-4"
-                    style={{
-                        gridTemplateColumns: `repeat(${columnCount}, minmax(0, ${gridColumnWidth}px))`,
-                        justifyContent: 'start',
-                    }}
-                >
-                    {packages.map((pkg) => (
-                        <ModCard
-                            key={pkg.uuid4}
-                            mod={pkg.versions[0]}
-                            onInstall={() => onInstall(pkg)}
-                            onUninstall={() => onUninstall(pkg)}
-                            onClick={() => onModClick(pkg)}
-                            installStatus={getInstallStatus(pkg)}
-                            isBrowsing={isBrowsing}
-                            legacyInstallMode={legacyInstallMode}
-                        />
-                    ))}
+                {/* Virtual grid: only visible rows are in the DOM */}
+                <div style={{ height: `${gridRowVirtualizer.getTotalSize()}px`, position: 'relative' }}>
+                    {gridRowVirtualizer.getVirtualItems().map((virtualRow) => {
+                        const rowPkgs = gridRows[virtualRow.index];
+                        return (
+                            <div
+                                key={virtualRow.key}
+                                ref={gridRowVirtualizer.measureElement}
+                                data-index={virtualRow.index}
+                                style={{
+                                    position: 'absolute',
+                                    top: 0,
+                                    left: 0,
+                                    width: '100%',
+                                    transform: `translateY(${virtualRow.start}px)`,
+                                }}
+                            >
+                                <div
+                                    className="grid gap-4"
+                                    style={{
+                                        gridTemplateColumns: `repeat(${columnCount}, minmax(0, ${gridColumnWidth}px))`,
+                                        justifyContent: 'start',
+                                        paddingBottom: GAP,
+                                    }}
+                                >
+                                    {rowPkgs.map((pkg) => (
+                                        <ModCard
+                                            key={pkg.uuid4}
+                                            mod={pkg.versions[0]}
+                                            onInstall={() => onInstall(pkg)}
+                                            onUninstall={() => onUninstall(pkg)}
+                                            onClick={() => onModClick(pkg)}
+                                            installStatus={getInstallStatus(pkg)}
+                                            isBrowsing={isBrowsing}
+                                            legacyInstallMode={legacyInstallMode}
+                                        />
+                                    ))}
+                                </div>
+                            </div>
+                        );
+                    })}
                 </div>
             </div>
         );
@@ -167,17 +203,17 @@ export function VirtualizedModGrid({ packages, installedMods, onInstall, onUnins
         >
             <div
                 style={{
-                    height: `${rowVirtualizer.getTotalSize()}px`,
+                    height: `${listRowVirtualizer.getTotalSize()}px`,
                     width: '100%',
                     position: 'relative',
                 }}
             >
-                {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+                {listRowVirtualizer.getVirtualItems().map((virtualRow) => {
                     const pkg = packages[virtualRow.index];
                     return (
                         <div
                             key={virtualRow.key}
-                            ref={rowVirtualizer.measureElement}
+                            ref={listRowVirtualizer.measureElement}
                             data-index={virtualRow.index}
                             style={{
                                 position: 'absolute',
