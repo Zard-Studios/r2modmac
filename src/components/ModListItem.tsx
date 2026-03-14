@@ -1,6 +1,15 @@
 
+import { memo } from 'react';
 import type { PackageVersion } from '../types/thunderstore';
 import { LazyImage } from './LazyImage';
+
+// Defined outside the component so it is not recreated on every render
+function formatBytes(bytes: number): string {
+    if (bytes >= 1000 * 1000 * 1000) return `${(bytes / (1000 * 1000 * 1000)).toFixed(1)} GB`;
+    if (bytes >= 1000 * 1000) return `${(bytes / (1000 * 1000)).toFixed(1)} MB`;
+    if (bytes >= 1000) return `${(bytes / 1000).toFixed(0)} KB`;
+    return `${bytes} B`;
+}
 
 interface ModListItemProps {
     mod: PackageVersion;
@@ -12,25 +21,13 @@ interface ModListItemProps {
     legacyInstallMode?: boolean;
 }
 
-export function ModListItem({ mod, onInstall, onUninstall, onClick, installStatus, isBrowsing, legacyInstallMode = false }: ModListItemProps) {
+export const ModListItem = memo(function ModListItem({ mod, onInstall, onUninstall, onClick, installStatus, isBrowsing, legacyInstallMode = false }: ModListItemProps) {
     const installedLabel = legacyInstallMode ? 'Installed' : 'Added';
     const installLabel = legacyInstallMode ? 'Install' : 'Add';
 
-    // Format bytes to human readable string (KB, MB, GB)
-    const formatBytes = (bytes: number): string => {
-        if (bytes >= 1000 * 1000 * 1000) {
-            return `${(bytes / (1000 * 1000 * 1000)).toFixed(1)} GB`;
-        } else if (bytes >= 1000 * 1000) {
-            return `${(bytes / (1000 * 1000)).toFixed(1)} MB`;
-        } else if (bytes >= 1000) {
-            return `${(bytes / 1000).toFixed(0)} KB`;
-        }
-        return `${bytes} B`;
-    };
-
     return (
         <div
-            className="flex items-center gap-4 p-3 bg-gray-800 border border-gray-700 rounded-lg hover:border-blue-500/50 hover:bg-gray-750 transition-all cursor-pointer group"
+            className="flex items-center gap-4 p-3 bg-gray-800 border border-gray-700 rounded-lg hover:border-blue-500/50 hover:bg-gray-750 transition-[border-color,background-color] cursor-pointer group"
             onClick={onClick}
         >
             {/* Icon */}
@@ -141,4 +138,4 @@ export function ModListItem({ mod, onInstall, onUninstall, onClick, installStatu
             )}
         </div>
     );
-}
+});

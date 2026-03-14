@@ -103,8 +103,8 @@ export function LazyImage({ src, alt, className, fallback, eager = false }: Lazy
                 }
             },
             {
-                rootMargin: '1200px 0px',
-                threshold: 0.01,
+                rootMargin: '2400px 0px',
+                threshold: 0,
             }
         );
 

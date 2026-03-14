@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import type { PackageVersion } from '../types/thunderstore';
 import { LazyImage } from './LazyImage';
 
@@ -11,24 +12,21 @@ interface ModCardProps {
     legacyInstallMode?: boolean;
 }
 
-export function ModCard({ mod, onInstall, onUninstall, onClick, installStatus, isBrowsing, legacyInstallMode = false }: ModCardProps) {
+// Defined outside the component so it is not recreated on every render
+function formatBytes(bytes: number): string {
+    if (bytes >= 1000 * 1000 * 1000) return `${(bytes / (1000 * 1000 * 1000)).toFixed(1)} GB`;
+    if (bytes >= 1000 * 1000) return `${(bytes / (1000 * 1000)).toFixed(1)} MB`;
+    if (bytes >= 1000) return `${(bytes / 1000).toFixed(0)} KB`;
+    return `${bytes} B`;
+}
+
+export const ModCard = memo(function ModCard({ mod, onInstall, onUninstall, onClick, installStatus, isBrowsing, legacyInstallMode = false }: ModCardProps) {
     const installedLabel = legacyInstallMode ? 'Installed' : 'Added';
     const installLabel = legacyInstallMode ? 'Install' : 'Add';
-    // Format bytes to human readable string (KB, MB, GB)
-    const formatBytes = (bytes: number): string => {
-        if (bytes >= 1000 * 1000 * 1000) {
-            return `${(bytes / (1000 * 1000 * 1000)).toFixed(1)} GB`;
-        } else if (bytes >= 1000 * 1000) {
-            return `${(bytes / (1000 * 1000)).toFixed(1)} MB`;
-        } else if (bytes >= 1000) {
-            return `${(bytes / 1000).toFixed(0)} KB`;
-        }
-        return `${bytes} B`;
-    };
 
     return (
         <div
-            className="bg-gray-800 rounded-xl p-4 border border-gray-700 hover:border-blue-500/50 transition-all duration-200 group flex flex-col h-full cursor-pointer"
+            className="bg-gray-800 rounded-xl p-4 border border-gray-700 hover:border-blue-500/50 transition-[border-color] duration-200 group flex flex-col h-full cursor-pointer"
             onClick={onClick}
         >
             {/* Header with Icon and Title */}
@@ -139,4 +137,4 @@ export function ModCard({ mod, onInstall, onUninstall, onClick, installStatus, i
             </div>
         </div>
     );
-}
+});
