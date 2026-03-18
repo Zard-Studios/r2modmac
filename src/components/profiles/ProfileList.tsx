@@ -37,6 +37,7 @@ export function ProfileList({
     const [editingProfile, setEditingProfile] = useState<Profile | null>(null);
     const [newProfileName, setNewProfileName] = useState('');
     const [editName, setEditName] = useState('');
+    const [editLaunchMode, setEditLaunchMode] = useState<'auto' | 'steam' | 'direct'>('auto');
     const [importCode, setImportCode] = useState('');
     const [selectedPlatform, setSelectedPlatform] = useState<'windows' | 'mac'>('windows');
     // null = no pending import; string = code; { file: string } = file
@@ -53,6 +54,7 @@ export function ProfileList({
                 event.stopPropagation();
                 setEditingProfile(null);
                 setEditName('');
+                setEditLaunchMode('auto');
                 return;
             }
 
@@ -111,10 +113,18 @@ export function ProfileList({
     const handleUpdateProfile = (e: React.FormEvent) => {
         e.preventDefault();
         if (editingProfile && editName.trim()) {
-            onUpdateProfile(editingProfile.id, { name: editName.trim() });
+            onUpdateProfile(editingProfile.id, { name: editName.trim(), launchMode: editLaunchMode });
             setEditingProfile(null);
             setEditName('');
+            setEditLaunchMode('auto');
         }
+    };
+
+    const getLaunchModeForProfile = (profile: Profile): 'auto' | 'steam' | 'direct' => {
+        if (profile.launchMode === 'steam' || profile.launchMode === 'direct') {
+            return profile.launchMode;
+        }
+        return profile.distribution === 'manual' ? 'direct' : 'auto';
     };
 
     const handleImageSelect = async () => {
@@ -240,14 +250,15 @@ export function ProfileList({
                         >
                             <div className="absolute top-0 right-0 p-6 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity z-10">
                                 <button
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        setEditingProfile(profile);
-                                        setEditName(profile.name);
-                                    }}
-                                    className="w-8 h-8 bg-gray-700 hover:bg-gray-600 text-gray-300 hover:text-white rounded-full flex items-center justify-center transition-colors"
-                                    title="Edit Profile"
-                                >
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            setEditingProfile(profile);
+                                            setEditName(profile.name);
+                                            setEditLaunchMode(getLaunchModeForProfile(profile));
+                                        }}
+                                        className="w-8 h-8 bg-gray-700 hover:bg-gray-600 text-gray-300 hover:text-white rounded-full flex items-center justify-center transition-colors"
+                                        title="Edit Profile"
+                                    >
                                     <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
                                     </svg>
@@ -312,7 +323,7 @@ export function ProfileList({
                                             </svg>
                                         </span>
                                     ) : (
-                                        <span title="Windows (CrossOver) profile" className="flex flex-col justify-center items-center flex-shrink-0 text-gray-400 w-4 h-4">
+                                        <span title="Windows/Wine profile" className="flex flex-col justify-center items-center flex-shrink-0 text-gray-400 w-4 h-4">
                                             <svg xmlns="http://www.w3.org/2000/svg" className="w-[14px] h-[14px]" viewBox="0 0 24 24" fill="currentColor">
                                                 <path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.9-1.801" />
                                             </svg>
@@ -573,8 +584,26 @@ export function ProfileList({
                                     className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 mb-6"
                                     autoFocus
                                 />
+                                <div className="mb-6">
+                                    <label className="block text-sm text-gray-400 mb-2">Launch Mode</label>
+                                    <select
+                                        value={editLaunchMode}
+                                        onChange={(e) => setEditLaunchMode(e.target.value as 'auto' | 'steam' | 'direct')}
+                                        className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-blue-500"
+                                    >
+                                        <option value="auto">Auto</option>
+                                        <option value="steam">Steam</option>
+                                        <option value="direct">Direct</option>
+                                    </select>
+                                    <p className="text-xs text-gray-500 mt-2">
+                                        Steam keeps the wrapper inside Steam. Direct launches the local wrapper without restarting Steam.
+                                    </p>
+                                </div>
                                 <div className="flex gap-3">
-                                    <Button variant="secondary" fullWidth onClick={() => setEditingProfile(null)} type="button">
+                                    <Button variant="secondary" fullWidth onClick={() => {
+                                        setEditingProfile(null);
+                                        setEditLaunchMode('auto');
+                                    }} type="button">
                                         Cancel
                                     </Button>
                                     <Button variant="primary" fullWidth type="submit" disabled={!editName.trim()}>

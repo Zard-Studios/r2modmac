@@ -212,6 +212,8 @@ function App() {
   const [isLaunchingProfile, setIsLaunchingProfile] = useState(false)
   const [isStoppingProfile, setIsStoppingProfile] = useState(false)
   const [isGameRunning, setIsGameRunning] = useState(false)
+  const applyInFlightRef = useRef(false)
+  const [isApplyingToGame, setIsApplyingToGame] = useState(false)
   const [showExportModal, setShowExportModal] = useState(false)
   const [showCrossOverGuide, setShowCrossOverGuide] = useState(false)
   const [hideCrossOverGuide, setHideCrossOverGuide] = useState(false)
@@ -258,7 +260,7 @@ function App() {
 
   useEffect(() => {
     const activeProfile = profiles.find((profile) => profile.id === activeProfileId)
-    if (!activeProfile || activeProfile.platform !== 'mac') {
+    if (!activeProfile) {
       setIsGameRunning(false)
       return
     }
@@ -678,18 +680,28 @@ function App() {
   };
 
   const handleInstallToGameRequest = async (isVanillaOverride?: boolean) => {
-    if (!confirmBeforeApplyToGame || isVanillaOverride !== undefined) {
-      await handleSyncToGame(isVanillaOverride);
-      return;
+    if (applyInFlightRef.current) return;
+
+    applyInFlightRef.current = true;
+    setIsApplyingToGame(true);
+
+    try {
+      if (!confirmBeforeApplyToGame || isVanillaOverride !== undefined) {
+        await handleSyncToGame(isVanillaOverride);
+        return;
+      }
+
+      const confirmed = await window.ipcRenderer.confirm(
+        'Apply Profile to Game?',
+        'This will sync your profile mods into the game directory. Continue?'
+      );
+      if (!confirmed) return;
+
+      await handleSyncToGame();
+    } finally {
+      applyInFlightRef.current = false;
+      setIsApplyingToGame(false);
     }
-
-    const confirmed = await window.ipcRenderer.confirm(
-      'Apply Profile to Game?',
-      'This will sync your profile mods into the game directory. Continue?'
-    );
-    if (!confirmed) return;
-
-    await handleSyncToGame();
   };
 
   const handleToggleProfileVanilla = async (profileId: string, newVanillaState: boolean) => {
@@ -699,9 +711,20 @@ function App() {
     const disabledMods = profile.mods.filter((m) => !m.enabled).map((m) => m.fullName);
     const hadPendingSync = !!profile.needs_sync || profile.mods.some((m) => m.pending_sync);
 
+    setIsApplyingToGame(true);
     updateProfile(profileId, { is_vanilla: newVanillaState });
 
     try {
+      if (newVanillaState) {
+        try {
+          await window.ipcRenderer.stopGame(profile.gameIdentifier, profile.platform);
+          setIsGameRunning(false);
+        } catch (error) {
+          console.warn('Failed to stop the running game before switching to vanilla:', error);
+        }
+      }
+
+      await window.ipcRenderer.saveProfiles(useProfileStore.getState().profiles);
       await window.ipcRenderer.installToGame(
         profile.gameIdentifier,
         profile.id,
@@ -719,6 +742,8 @@ function App() {
         'Profile Toggle Failed',
         String(error?.message || error || 'Failed to update the profile runtime state.')
       );
+    } finally {
+      setIsApplyingToGame(false);
     }
   };
 
@@ -934,7 +959,7 @@ function App() {
         if (profileNeedsSync) {
           await handleInstallToGameRequest();
         }
-        await window.ipcRenderer.launchGameWithMods(activeProfile.gameIdentifier, activeProfile.platform);
+        await window.ipcRenderer.launchGameWithMods(activeProfile.gameIdentifier, activeProfile.id, activeProfile.platform);
         setIsGameRunning(true);
       } catch (error: any) {
         await window.ipcRenderer.alert(
@@ -951,7 +976,7 @@ function App() {
 
       try {
         setIsLaunchingProfile(true);
-        await window.ipcRenderer.launchGameVanilla(activeProfile.gameIdentifier, activeProfile.platform);
+        await window.ipcRenderer.launchGameVanilla(activeProfile.gameIdentifier, activeProfile.id, activeProfile.platform);
         setIsGameRunning(true);
       } catch (error: any) {
         await window.ipcRenderer.alert(
@@ -1030,6 +1055,21 @@ function App() {
         }}
         onUninstallMod={async (mod) => {
           if (!activeProfile) return;
+          const community = selectedCommunity || activeProfile.gameIdentifier;
+          if (community) {
+            let searchName = mod.fullName.replace(/-\d+\.\d+\.\d+$/, '');
+            const pkg = await window.ipcRenderer.fetchPackageByName(searchName, community);
+            if (pkg) {
+              await handleUninstallWithDependencies(pkg, activeProfile.id);
+              return;
+            }
+          }
+
+          const confirmed = await window.ipcRenderer.confirm(
+            'Uninstall Mod',
+            `Uninstall ${mod.fullName}?`
+          );
+          if (!confirmed) return;
           await removeMod(activeProfile.id, mod.uuid4);
         }}
         onResolvePackage={async (mod) => {
@@ -1047,6 +1087,7 @@ function App() {
         onInstallToGame={handleInstallToGameRequest}
         onLaunchProfile={handleLaunchProfileDirect}
         onStopProfile={handleStopProfileDirect}
+        isApplying={isApplyingToGame}
         isLaunching={isLaunchingProfile || isStoppingProfile}
         isGameRunning={isGameRunning}
         onExportProfile={() => setShowExportModal(true)}

@@ -123,11 +123,11 @@ export const tauriAPI: IElectronAPI = {
     isGameRunning: async (gameIdentifier: string, platform?: 'windows' | 'mac') => {
         return await invoke<boolean>('is_game_running', { gameIdentifier, platform });
     },
-    launchGameWithMods: async (gameIdentifier: string, platform?: 'windows' | 'mac') => {
-        return await invoke('launch_game_with_mods', { gameIdentifier, platform });
+    launchGameWithMods: async (gameIdentifier: string, profileId: string, platform?: 'windows' | 'mac') => {
+        return await invoke('launch_game_with_mods', { gameIdentifier, profileId, platform });
     },
-    launchGameVanilla: async (gameIdentifier: string, platform?: 'windows' | 'mac') => {
-        return await invoke('launch_game_vanilla', { gameIdentifier, platform });
+    launchGameVanilla: async (gameIdentifier: string, profileId: string, platform?: 'windows' | 'mac') => {
+        return await invoke('launch_game_vanilla', { gameIdentifier, profileId, platform });
     },
     stopGame: async (gameIdentifier: string, platform?: 'windows' | 'mac') => {
         return await invoke('stop_game', { gameIdentifier, platform });

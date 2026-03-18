@@ -2,6 +2,12 @@ use std::fs;
 use tauri::{command, AppHandle, Manager};
 use crate::models::shared::*;
 use crate::utils::file_ops::*;
+use crate::utils::mod_manifest::{
+    cleanup_owned_mod_manifests,
+    load_owned_mod_manifests,
+    manifest_matches_target_root,
+    GAME_MANIFEST_SCOPE,
+};
 use crate::commands::mod_commands::{
     detect_unity_runtime_kind,
     download_official_macos_bepinex_runtime,
@@ -31,6 +37,228 @@ fn manual_override_keys(game_identifier: &str, platform: Option<&str>) -> Vec<St
     } else {
         vec![game_identifier.to_string()]
     }
+}
+
+fn normalize_mod_match_value(input: &str) -> String {
+    let stem = std::path::Path::new(input)
+        .file_stem()
+        .map(|value| value.to_string_lossy().to_string())
+        .unwrap_or_else(|| input.to_string());
+
+    stem.to_lowercase()
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .collect()
+}
+
+fn derive_mod_match_terms(input: &str) -> Vec<String> {
+    let stem = std::path::Path::new(input)
+        .file_stem()
+        .map(|value| value.to_string_lossy().to_string())
+        .unwrap_or_else(|| input.to_string());
+    let parts: Vec<&str> = stem.split('-').filter(|part| !part.is_empty()).collect();
+    let mut terms = Vec::new();
+
+    if parts.len() >= 2 {
+        terms.push(normalize_mod_match_value(parts[1]));
+        terms.push(normalize_mod_match_value(&format!("{}-{}", parts[0], parts[1])));
+    }
+
+    terms.push(normalize_mod_match_value(&stem));
+    terms.retain(|term| term.len() >= 3);
+    terms.sort();
+    terms.dedup();
+    terms
+}
+
+fn is_metadata_only_plugin_file_name(name: &str) -> bool {
+    matches!(
+        name.to_lowercase().as_str(),
+        ".ds_store"
+            | "manifest.json"
+            | "icon.png"
+            | "readme"
+            | "readme.md"
+            | "readme.txt"
+            | "changelog"
+            | "changelog.md"
+            | "changelog.txt"
+            | "license"
+            | "license.md"
+            | "license.txt"
+    )
+}
+
+fn path_has_plugin_payload(path: &std::path::Path, depth: usize) -> bool {
+    if depth == 0 || !path.exists() {
+        return false;
+    }
+
+    if path.is_file() {
+        return path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .map(|name| !is_metadata_only_plugin_file_name(name))
+            .unwrap_or(false);
+    }
+
+    let entries = match fs::read_dir(path) {
+        Ok(entries) => entries,
+        Err(_) => return false,
+    };
+
+    for entry in entries.filter_map(|entry| entry.ok()) {
+        let child_path = entry.path();
+        if child_path.is_file() {
+            let file_name = entry.file_name().to_string_lossy().to_string();
+            if !is_metadata_only_plugin_file_name(&file_name) {
+                return true;
+            }
+        } else if child_path.is_dir() && path_has_plugin_payload(&child_path, depth - 1) {
+            return true;
+        }
+    }
+
+    false
+}
+
+fn entry_name_matches_mod_payload(entry_name: &str, folder_name: &str, mod_key: &str) -> bool {
+    let entry_norm = normalize_mod_match_value(entry_name);
+    if entry_norm.is_empty() {
+        return false;
+    }
+
+    let mut terms = derive_mod_match_terms(folder_name);
+    terms.extend(derive_mod_match_terms(mod_key));
+    terms.sort();
+    terms.dedup();
+
+    terms
+        .iter()
+        .any(|term| entry_norm.contains(term) || term.contains(&entry_norm))
+}
+
+fn game_mod_folder_has_payload(
+    plugins_root: &std::path::Path,
+    folder_path: &std::path::Path,
+    folder_name: &str,
+    mod_key: &str,
+) -> bool {
+    if path_has_plugin_payload(folder_path, 6) {
+        return true;
+    }
+
+    let entries = match fs::read_dir(plugins_root) {
+        Ok(entries) => entries,
+        Err(_) => return false,
+    };
+
+    for entry in entries.filter_map(|entry| entry.ok()) {
+        let sibling_path = entry.path();
+        if sibling_path == folder_path {
+            continue;
+        }
+
+        let sibling_name = entry.file_name().to_string_lossy().to_string();
+        if !entry_name_matches_mod_payload(&sibling_name, folder_name, mod_key) {
+            continue;
+        }
+
+        if path_has_plugin_payload(&sibling_path, 6) {
+            return true;
+        }
+    }
+
+    false
+}
+
+fn game_mod_folder_is_auxiliary_payload(
+    folder_name: &str,
+    folder_key: &str,
+    desired_full_by_key: &std::collections::HashMap<String, String>,
+) -> bool {
+    desired_full_by_key.iter().any(|(desired_key, desired_full)| {
+        desired_key != folder_key
+            && entry_name_matches_mod_payload(folder_name, desired_full, desired_key)
+    })
+}
+
+fn remove_plugin_entry(path: &std::path::Path) -> std::io::Result<()> {
+    if path.is_symlink() || path.is_file() {
+        fs::remove_file(path)
+    } else if path.is_dir() {
+        fs::remove_dir_all(path)
+    } else {
+        Ok(())
+    }
+}
+
+fn is_stale_generated_entry_name(name: &str) -> bool {
+    !matches!(
+        name.to_lowercase().as_str(),
+        ".ds_store" | "bepinex.cfg"
+    )
+}
+
+fn cleanup_stale_generated_mod_artifacts(
+    game_path: &std::path::Path,
+    desired_mod_labels: &[String],
+) -> Result<usize, String> {
+    let keep_terms = desired_mod_labels
+        .iter()
+        .flat_map(|label| derive_mod_match_terms(label))
+        .collect::<std::collections::HashSet<_>>();
+
+    let known_roots = [
+        game_path.join("BepInEx").join("config"),
+        game_path.join("BepInEx").join("cache"),
+        game_path.join("BepInEx").join("Translation"),
+        game_path.join("config"),
+        game_path.join("cache"),
+        game_path.join("Translation"),
+    ];
+
+    let mut removed = 0usize;
+    for root in known_roots {
+        if !root.is_dir() {
+            continue;
+        }
+
+        let entries = match fs::read_dir(&root) {
+            Ok(entries) => entries,
+            Err(_) => continue,
+        };
+
+        for entry in entries.filter_map(|entry| entry.ok()) {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if !is_stale_generated_entry_name(&name) {
+                continue;
+            }
+
+            let entry_norm = normalize_mod_match_value(&name);
+            if entry_norm.is_empty() {
+                continue;
+            }
+
+            let belongs_to_desired_mod = keep_terms
+                .iter()
+                .any(|term| entry_norm.contains(term) || term.contains(&entry_norm));
+            if belongs_to_desired_mod {
+                continue;
+            }
+
+            remove_plugin_entry(&entry.path()).map_err(|e| {
+                format!(
+                    "Failed to remove stale generated artifact {}: {}",
+                    entry.path().display(),
+                    e
+                )
+            })?;
+            removed += 1;
+        }
+    }
+
+    Ok(removed)
 }
 
 fn manual_path_matches_platform(path: &std::path::Path, is_windows_profile: bool) -> bool {
@@ -118,8 +346,141 @@ fn should_manage_steam_launch_options(distribution: &str, launch_mode: &str) -> 
     distribution == "steam" && launch_mode != "direct"
 }
 
+fn profile_prefers_direct_launch(launch_mode: &str) -> bool {
+    launch_mode == "direct"
+}
+
+fn macos_steam_launch_option_is_managed(
+    app: &AppHandle,
+    game_path: &std::path::Path,
+) -> Result<bool, String> {
+    let app_id = find_steam_app_id_for_game_path_any(app, game_path, false)
+        .ok_or_else(|| "Couldn't determine the Steam app ID for this macOS game".to_string())?;
+
+    let steam_roots = get_steam_roots_for_platform(app, false);
+    let steam_root_for_config = find_matching_steam_root_for_game_path(app, game_path, false)
+        .or_else(|| {
+            steam_roots
+                .iter()
+                .find(|root| get_latest_localconfig_path(root).is_some())
+                .cloned()
+        })
+        .or_else(|| steam_roots.first().cloned())
+        .ok_or_else(|| "No Steam installation found to inspect macOS launch options".to_string())?;
+
+    let localconfig_path = get_latest_localconfig_path(&steam_root_for_config).ok_or_else(|| {
+        "Couldn't locate Steam's localconfig.vdf for macOS launch option inspection.".to_string()
+    })?;
+
+    let localconfig = fs::read_to_string(&localconfig_path)
+        .map_err(|e| format!("Failed to read Steam localconfig.vdf: {}", e))?;
+
+    Ok(get_launch_options_for_app(&localconfig, &app_id)
+        .as_deref()
+        .map(is_managed_macos_launch_option)
+        .unwrap_or(false))
+}
+
 fn canonicalize_or_original(path: &std::path::Path) -> std::path::PathBuf {
     fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+fn game_path_matches_install_root(game_path: &std::path::Path, install_root: &std::path::Path) -> bool {
+    let canonical_game = canonicalize_or_original(game_path);
+    let canonical_install = canonicalize_or_original(install_root);
+    canonical_game == canonical_install
+        || canonical_game.starts_with(&canonical_install)
+        || canonical_install.starts_with(&canonical_game)
+}
+
+fn find_steam_app_id_for_library_root(
+    library_root: &std::path::Path,
+    game_path: &std::path::Path,
+) -> Option<String> {
+    let steamapps_dir = library_root.join("steamapps");
+    if !steamapps_dir.exists() {
+        return None;
+    }
+
+    let entries = fs::read_dir(&steamapps_dir).ok()?;
+    for entry in entries.filter_map(|e| e.ok()) {
+        let path = entry.path();
+        let file_name = entry.file_name().to_string_lossy().to_string();
+        if !file_name.starts_with("appmanifest_") || !file_name.ends_with(".acf") {
+            continue;
+        }
+
+        let content = match fs::read_to_string(&path) {
+            Ok(content) => content,
+            Err(_) => continue,
+        };
+
+        let app_id = match parse_manifest_value(&content, "appid") {
+            Some(value) => value,
+            None => continue,
+        };
+        let install_dir = match parse_manifest_value(&content, "installdir") {
+            Some(value) => value,
+            None => continue,
+        };
+
+        let manifest_game_path = library_root.join("steamapps").join("common").join(install_dir);
+        if game_path_matches_install_root(game_path, &manifest_game_path) {
+            return Some(app_id);
+        }
+    }
+
+    None
+}
+
+fn find_embedded_steam_library_root_for_game_path(
+    game_path: &std::path::Path,
+) -> Option<std::path::PathBuf> {
+    let canonical_game = canonicalize_or_original(game_path);
+
+    for ancestor in canonical_game.ancestors() {
+        let is_common = ancestor
+            .file_name()
+            .and_then(|value| value.to_str())
+            .map(|value| value.eq_ignore_ascii_case("common"))
+            .unwrap_or(false);
+        if !is_common {
+            continue;
+        }
+
+        let Some(steamapps_dir) = ancestor.parent() else {
+            continue;
+        };
+        let is_steamapps = steamapps_dir
+            .file_name()
+            .and_then(|value| value.to_str())
+            .map(|value| value.eq_ignore_ascii_case("steamapps"))
+            .unwrap_or(false);
+        if !is_steamapps {
+            continue;
+        }
+
+        let Some(library_root) = steamapps_dir.parent() else {
+            continue;
+        };
+        if find_steam_app_id_for_library_root(library_root, &canonical_game).is_some() {
+            return Some(library_root.to_path_buf());
+        }
+    }
+
+    None
+}
+
+fn can_launch_via_steam_for_game_path(
+    app: &AppHandle,
+    game_path: &std::path::Path,
+    is_windows_profile: bool,
+) -> bool {
+    let Some(steam_root) = find_matching_steam_root_for_game_path(app, game_path, is_windows_profile) else {
+        return false;
+    };
+
+    find_steam_app_id_for_game_path(&steam_root, game_path).is_some()
 }
 
 fn infer_distribution_from_game_path(
@@ -136,6 +497,10 @@ fn infer_distribution_from_game_path(
                 return "steam".to_string();
             }
         }
+    }
+
+    if find_embedded_steam_library_root_for_game_path(&game_path).is_some() {
+        return "steam".to_string();
     }
 
     "manual".to_string()
@@ -206,41 +571,29 @@ fn find_steam_app_id_for_game_path(
     steam_root: &std::path::Path,
     game_path: &std::path::Path,
 ) -> Option<String> {
-    let canonical_game = fs::canonicalize(game_path).ok()?;
-
     for library_root in get_steam_library_folders(steam_root) {
-        let steamapps_dir = library_root.join("steamapps");
-        if !steamapps_dir.exists() {
-            continue;
+        if let Some(app_id) = find_steam_app_id_for_library_root(&library_root, game_path) {
+            return Some(app_id);
         }
+    }
 
-        let entries = fs::read_dir(&steamapps_dir).ok()?;
-        for entry in entries.filter_map(|e| e.ok()) {
-            let path = entry.path();
-            let file_name = entry.file_name().to_string_lossy().to_string();
-            if !file_name.starts_with("appmanifest_") || !file_name.ends_with(".acf") {
-                continue;
-            }
+    None
+}
 
-            let content = match fs::read_to_string(&path) {
-                Ok(content) => content,
-                Err(_) => continue,
-            };
+fn find_steam_app_id_for_game_path_any(
+    app: &AppHandle,
+    game_path: &std::path::Path,
+    is_windows_profile: bool,
+) -> Option<String> {
+    for steam_root in get_steam_roots_for_platform(app, is_windows_profile) {
+        if let Some(app_id) = find_steam_app_id_for_game_path(&steam_root, game_path) {
+            return Some(app_id);
+        }
+    }
 
-            let app_id = match parse_manifest_value(&content, "appid") {
-                Some(value) => value,
-                None => continue,
-            };
-            let install_dir = match parse_manifest_value(&content, "installdir") {
-                Some(value) => value,
-                None => continue,
-            };
-
-            let manifest_game_path = library_root.join("steamapps").join("common").join(install_dir);
-            let canonical_manifest = fs::canonicalize(&manifest_game_path).unwrap_or(manifest_game_path);
-            if canonical_manifest == canonical_game {
-                return Some(app_id);
-            }
+    if let Some(library_root) = find_embedded_steam_library_root_for_game_path(game_path) {
+        if let Some(app_id) = find_steam_app_id_for_library_root(&library_root, game_path) {
+            return Some(app_id);
         }
     }
 
@@ -386,57 +739,617 @@ fn find_macos_executable_path(game_path: &std::path::Path) -> Option<std::path::
         .map(|entry| entry.path())
 }
 
-fn is_process_running_for_executable(executable_path: &std::path::Path) -> bool {
+fn is_windows_game_executable_name(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    lower.ends_with(".exe")
+        && !lower.contains("unitycrashhandler")
+        && !lower.contains("crashhandler")
+        && !lower.starts_with("unins")
+        && !lower.contains("setup")
+}
+
+fn windows_executable_score(game_path: &std::path::Path, executable_path: &std::path::Path) -> i32 {
+    let stem = executable_path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default();
+    let folder_name = game_path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default();
+
+    let normalized_stem = normalize_for_matching(stem);
+    let normalized_folder = normalize_for_matching(folder_name);
+    let lower_stem = stem.to_lowercase();
+
+    let mut score = 0;
+    if !normalized_stem.is_empty() && !normalized_folder.is_empty() {
+        if normalized_stem == normalized_folder {
+            score += 120;
+        } else if normalized_stem.contains(&normalized_folder) || normalized_folder.contains(&normalized_stem) {
+            score += 70;
+        }
+    }
+
+    if lower_stem.contains("launcher") || lower_stem.contains("bootstrap") {
+        score -= 25;
+    }
+    if lower_stem.contains("eac") || lower_stem.contains("battleye") {
+        score -= 20;
+    }
+
+    score - (stem.len() as i32)
+}
+
+fn find_windows_executable_path(game_path: &std::path::Path) -> Option<std::path::PathBuf> {
+    if game_path.is_file() {
+        let name = game_path.file_name()?.to_string_lossy().to_string();
+        if is_windows_game_executable_name(&name) {
+            return Some(game_path.to_path_buf());
+        }
+        return None;
+    }
+
+    let entries = fs::read_dir(game_path).ok()?;
+    let mut candidates: Vec<std::path::PathBuf> = entries
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|value| value.to_str())
+                .map(is_windows_game_executable_name)
+                .unwrap_or(false)
+        })
+        .collect();
+
+    if candidates.is_empty() {
+        return None;
+    }
+
+    candidates.sort_by_key(|path| std::cmp::Reverse(windows_executable_score(game_path, path)));
+    candidates.into_iter().next()
+}
+
+fn build_process_match_pattern(path: &std::path::Path) -> String {
+    regex::escape(&path.to_string_lossy())
+}
+
+fn push_unique_pattern(patterns: &mut Vec<String>, pattern: String) {
+    if !pattern.is_empty() && !patterns.contains(&pattern) {
+        patterns.push(pattern);
+    }
+}
+
+fn map_native_path_to_wine_path(
+    prefix_root: &std::path::Path,
+    native_path: &std::path::Path,
+) -> Option<String> {
+    let canonical_native = canonicalize_or_original(native_path);
+    let dosdevices_dir = prefix_root.join("dosdevices");
+    if dosdevices_dir.is_dir() {
+        let entries = fs::read_dir(&dosdevices_dir).ok()?;
+        for entry in entries.filter_map(|entry| entry.ok()) {
+            let device_name = entry.file_name().to_string_lossy().to_string();
+            if device_name.len() != 2 || !device_name.ends_with(':') {
+                continue;
+            }
+
+            let mapped_target = fs::canonicalize(entry.path()).unwrap_or_else(|_| entry.path());
+            if !canonical_native.starts_with(&mapped_target) {
+                continue;
+            }
+
+            let relative = canonical_native.strip_prefix(&mapped_target).ok()?;
+            let mut wine_path = format!("{}\\", device_name.to_uppercase());
+            let relative_path = relative
+                .components()
+                .map(|component| component.as_os_str().to_string_lossy().to_string())
+                .collect::<Vec<_>>()
+                .join("\\");
+            wine_path.push_str(&relative_path);
+            return Some(wine_path.trim_end_matches('\\').to_string());
+        }
+    }
+
+    let drive_c_root = prefix_root.join("drive_c");
+    let canonical_drive_c = canonicalize_or_original(&drive_c_root);
+    if canonical_native.starts_with(&canonical_drive_c) {
+        let relative = canonical_native.strip_prefix(&canonical_drive_c).ok()?;
+        let relative_path = relative
+            .components()
+            .map(|component| component.as_os_str().to_string_lossy().to_string())
+            .collect::<Vec<_>>()
+            .join("\\");
+        return Some(format!("C:\\{}", relative_path));
+    }
+
+    None
+}
+
+fn build_windows_process_match_patterns(executable_path: &std::path::Path) -> Vec<String> {
+    let mut patterns = Vec::new();
+    push_unique_pattern(&mut patterns, build_process_match_pattern(executable_path));
+
+    if let Some(prefix_root) = find_wine_prefix_root(executable_path) {
+        if let Some(windows_path) = map_native_path_to_wine_path(&prefix_root, executable_path) {
+            push_unique_pattern(&mut patterns, regex::escape(&windows_path));
+        }
+    }
+
+    if let Some(file_name) = executable_path.file_name().and_then(|value| value.to_str()) {
+        push_unique_pattern(&mut patterns, regex::escape(file_name));
+    }
+
+    patterns
+}
+
+fn is_process_running_for_pattern(pattern: &str) -> bool {
     std::process::Command::new("/usr/bin/pgrep")
-        .args(["-f", &executable_path.to_string_lossy()])
+        .args(["-f", pattern])
         .status()
         .map(|status| status.success())
         .unwrap_or(false)
 }
 
-fn wait_for_process_start(executable_path: &std::path::Path, timeout_ms: u64) -> bool {
-    let poll_interval = 250u64;
-    let attempts = std::cmp::max(1, timeout_ms / poll_interval);
-
-    for _ in 0..attempts {
-        if is_process_running_for_executable(executable_path) {
-            return true;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(poll_interval));
-    }
-
-    is_process_running_for_executable(executable_path)
+fn is_process_running_for_patterns(patterns: &[String]) -> bool {
+    patterns.iter().any(|pattern| is_process_running_for_pattern(pattern))
 }
 
-fn wait_for_process_exit(executable_path: &std::path::Path, timeout_ms: u64) -> bool {
+fn is_process_running_for_executable(executable_path: &std::path::Path) -> bool {
+    is_process_running_for_pattern(&build_process_match_pattern(executable_path))
+}
+
+fn wait_for_process_start_pattern(pattern: &str, timeout_ms: u64) -> bool {
     let poll_interval = 250u64;
     let attempts = std::cmp::max(1, timeout_ms / poll_interval);
 
     for _ in 0..attempts {
-        if !is_process_running_for_executable(executable_path) {
+        if is_process_running_for_pattern(pattern) {
             return true;
         }
         std::thread::sleep(std::time::Duration::from_millis(poll_interval));
     }
 
-    !is_process_running_for_executable(executable_path)
+    is_process_running_for_pattern(pattern)
+}
+
+fn wait_for_process_start_patterns(patterns: &[String], timeout_ms: u64) -> bool {
+    let poll_interval = 250u64;
+    let attempts = std::cmp::max(1, timeout_ms / poll_interval);
+
+    for _ in 0..attempts {
+        if is_process_running_for_patterns(patterns) {
+            return true;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(poll_interval));
+    }
+
+    is_process_running_for_patterns(patterns)
+}
+
+fn wait_for_process_start(executable_path: &std::path::Path, timeout_ms: u64) -> bool {
+    wait_for_process_start_pattern(&build_process_match_pattern(executable_path), timeout_ms)
+}
+
+fn wait_for_process_exit_pattern(pattern: &str, timeout_ms: u64) -> bool {
+    let poll_interval = 250u64;
+    let attempts = std::cmp::max(1, timeout_ms / poll_interval);
+
+    for _ in 0..attempts {
+        if !is_process_running_for_pattern(pattern) {
+            return true;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(poll_interval));
+    }
+
+    !is_process_running_for_pattern(pattern)
+}
+
+fn wait_for_process_exit_patterns(patterns: &[String], timeout_ms: u64) -> bool {
+    let poll_interval = 250u64;
+    let attempts = std::cmp::max(1, timeout_ms / poll_interval);
+
+    for _ in 0..attempts {
+        if !is_process_running_for_patterns(patterns) {
+            return true;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(poll_interval));
+    }
+
+    !is_process_running_for_patterns(patterns)
+}
+
+fn find_wine_prefix_root(path: &std::path::Path) -> Option<std::path::PathBuf> {
+    for ancestor in path.ancestors() {
+        let is_drive_c = ancestor
+            .file_name()
+            .and_then(|value| value.to_str())
+            .map(|value| value.eq_ignore_ascii_case("drive_c"))
+            .unwrap_or(false);
+        if is_drive_c {
+            return ancestor.parent().map(|parent| parent.to_path_buf());
+        }
+    }
+    None
+}
+
+fn find_enclosing_app_bundle(path: &std::path::Path) -> Option<std::path::PathBuf> {
+    path.ancestors().find_map(|ancestor| {
+        let is_app_bundle = ancestor
+            .extension()
+            .and_then(|value| value.to_str())
+            .map(|value| value.eq_ignore_ascii_case("app"))
+            .unwrap_or(false);
+        if is_app_bundle {
+            Some(ancestor.to_path_buf())
+        } else {
+            None
+        }
+    })
+}
+
+fn push_unique_existing_path(paths: &mut Vec<std::path::PathBuf>, candidate: std::path::PathBuf) {
+    if candidate.exists() && candidate.is_file() && !paths.contains(&candidate) {
+        paths.push(candidate);
+    }
+}
+
+fn find_named_file_under(
+    root: &std::path::Path,
+    names: &[&str],
+    max_depth: usize,
+) -> Option<std::path::PathBuf> {
+    if !root.exists() || !root.is_dir() {
+        return None;
+    }
+
+    let wanted: Vec<String> = names.iter().map(|name| name.to_lowercase()).collect();
+    let mut stack = vec![(root.to_path_buf(), 0usize)];
+
+    while let Some((dir, depth)) = stack.pop() {
+        let entries = match fs::read_dir(&dir) {
+            Ok(entries) => entries,
+            Err(_) => continue,
+        };
+
+        for entry in entries.filter_map(|entry| entry.ok()) {
+            let path = entry.path();
+            let file_name = entry.file_name().to_string_lossy().to_lowercase();
+
+            if wanted.iter().any(|name| name == &file_name) && path.is_file() {
+                return Some(path);
+            }
+
+            if depth < max_depth && entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false) {
+                stack.push((path, depth + 1));
+            }
+        }
+    }
+
+    None
+}
+
+fn find_executables_in_path(names: &[&str]) -> Vec<std::path::PathBuf> {
+    let mut found = Vec::new();
+    let Some(path_var) = std::env::var_os("PATH") else {
+        return found;
+    };
+
+    for dir in std::env::split_paths(&path_var) {
+        for name in names {
+            push_unique_existing_path(&mut found, dir.join(name));
+        }
+    }
+
+    found
+}
+
+fn find_wine_runner_binary(
+    prefix_root: Option<&std::path::Path>,
+    executable_path: &std::path::Path,
+) -> Option<std::path::PathBuf> {
+    let mut candidates = Vec::new();
+
+    if let Some(prefix_root) = prefix_root {
+        for relative in [
+            "bin/wine",
+            "wine/bin/wine",
+            "bin/wine64",
+            "wine/bin/wine64",
+        ] {
+            push_unique_existing_path(&mut candidates, prefix_root.join(relative));
+        }
+    }
+
+    if let Some(bundle_path) = find_enclosing_app_bundle(executable_path)
+        .or_else(|| prefix_root.and_then(find_enclosing_app_bundle))
+    {
+        for relative in [
+            "Contents/Frameworks/wswine.bundle/bin/wine",
+            "Contents/Resources/wine/bin/wine",
+            "Contents/SharedSupport/wine/bin/wine",
+            "Contents/SharedSupport/CrossOver/CrossOver-Hosted Application/wine",
+            "Contents/Frameworks/wswine.bundle/bin/wine64",
+            "Contents/Resources/wine/bin/wine64",
+            "Contents/SharedSupport/wine/bin/wine64",
+            "Contents/SharedSupport/CrossOver/CrossOver-Hosted Application/wine64",
+        ] {
+            push_unique_existing_path(&mut candidates, bundle_path.join(relative));
+        }
+
+        if let Some(found) = find_named_file_under(&bundle_path.join("Contents"), &["wine", "wine64"], 6) {
+            push_unique_existing_path(&mut candidates, found);
+        }
+    }
+
+    if let Some(home) = dirs::home_dir() {
+        for app_path in [
+            std::path::PathBuf::from("/Applications/CrossOver.app"),
+            home.join("Applications").join("CrossOver.app"),
+        ] {
+            push_unique_existing_path(
+                &mut candidates,
+                app_path
+                    .join("Contents/SharedSupport/CrossOver/CrossOver-Hosted Application/wine"),
+            );
+            push_unique_existing_path(
+                &mut candidates,
+                app_path
+                    .join("Contents/SharedSupport/CrossOver/CrossOver-Hosted Application/wine64"),
+            );
+        }
+
+        for root in [
+            home.join("Library/Application Support/heroic/tools"),
+            home.join("Library/Application Support/Whisky"),
+        ] {
+            if let Some(found) = find_named_file_under(&root, &["wine", "wine64"], 6) {
+                push_unique_existing_path(&mut candidates, found);
+            }
+        }
+
+        for app_root in [std::path::PathBuf::from("/Applications"), home.join("Applications")] {
+            let entries = match fs::read_dir(&app_root) {
+                Ok(entries) => entries,
+                Err(_) => continue,
+            };
+
+            for entry in entries.filter_map(|entry| entry.ok()) {
+                let path = entry.path();
+                let name = entry.file_name().to_string_lossy().to_lowercase();
+                if !path.is_dir() || !name.ends_with(".app") {
+                    continue;
+                }
+                if !["crossover", "wine", "wineskin", "whisky", "heroic"]
+                    .iter()
+                    .any(|keyword| name.contains(keyword))
+                {
+                    continue;
+                }
+                if let Some(found) = find_named_file_under(&path.join("Contents"), &["wine", "wine64"], 6) {
+                    push_unique_existing_path(&mut candidates, found);
+                }
+            }
+        }
+    }
+
+    for path in find_executables_in_path(&["wine", "wine64"]) {
+        push_unique_existing_path(&mut candidates, path);
+    }
+
+    for candidate in [
+        "/opt/homebrew/bin/wine",
+        "/usr/local/bin/wine",
+        "/opt/homebrew/bin/wine64",
+        "/usr/local/bin/wine64",
+    ] {
+        push_unique_existing_path(&mut candidates, std::path::PathBuf::from(candidate));
+    }
+
+    candidates.into_iter().next()
+}
+
+fn is_crossover_bottle(prefix_root: &std::path::Path) -> bool {
+    prefix_root.join("cxbottle.conf").exists()
+        || prefix_root
+            .to_string_lossy()
+            .to_lowercase()
+            .contains("/crossover/bottles/")
+}
+
+fn is_crossover_runner(runner_path: &std::path::Path) -> bool {
+    runner_path
+        .to_string_lossy()
+        .to_lowercase()
+        .contains("crossover")
+}
+
+fn configure_windows_runner_command(
+    command: &mut std::process::Command,
+    runner_path: &std::path::Path,
+    prefix_root: Option<&std::path::Path>,
+) -> Result<(), String> {
+    let use_crossover_bottle_mode = prefix_root
+        .map(|prefix_root| is_crossover_bottle(prefix_root) && is_crossover_runner(runner_path))
+        .unwrap_or(false);
+
+    if use_crossover_bottle_mode {
+        let bottle_path = prefix_root
+            .ok_or_else(|| "CrossOver bottle path could not be determined.".to_string())?;
+        command.arg("--bottle").arg(bottle_path);
+        eprintln!(
+            "[windows_runner] Using CrossOver bottle {:?} with runner {:?}",
+            bottle_path, runner_path
+        );
+    } else if let Some(prefix_root) = prefix_root {
+        command.env("WINEPREFIX", prefix_root);
+        eprintln!(
+            "[windows_runner] Using Wine prefix {:?} with runner {:?}",
+            prefix_root, runner_path
+        );
+    } else {
+        eprintln!(
+            "[windows_runner] Using runner {:?} without explicit prefix",
+            runner_path
+        );
+    }
+
+    Ok(())
+}
+
+fn launch_windows_direct_game(game_path: &std::path::Path) -> Result<(), String> {
+    let executable_path = find_windows_executable_path(game_path)
+        .ok_or_else(|| "Could not find a Windows game executable in the selected folder.".to_string())?;
+    let process_patterns = build_windows_process_match_patterns(&executable_path);
+
+    if is_process_running_for_patterns(&process_patterns) {
+        return Err("Game is already running.".to_string());
+    }
+
+    let prefix_root = find_wine_prefix_root(&executable_path).or_else(|| find_wine_prefix_root(game_path));
+
+    if let Some(runner_path) = find_wine_runner_binary(prefix_root.as_deref(), &executable_path) {
+        let mut command = std::process::Command::new(&runner_path);
+        let executable_dir = executable_path.parent().unwrap_or(game_path);
+        configure_windows_runner_command(&mut command, &runner_path, prefix_root.as_deref())?;
+        eprintln!(
+            "[launch_windows_direct_game] Launching Windows executable directly: {:?}",
+            executable_path
+        );
+        command
+            .arg(&executable_path)
+            .current_dir(executable_dir)
+            .spawn()
+            .map_err(|e| format!("Failed to launch the Windows game via {}: {}", runner_path.display(), e))?;
+    } else if let Some(app_bundle) = find_enclosing_app_bundle(game_path) {
+        open::that(&app_bundle)
+            .map_err(|e| format!("Failed to launch the Windows wrapper app: {}", e))?;
+    } else {
+        return Err(
+            "No compatible Wine launcher was found. Install a Wine-compatible launcher or point the game path inside a Wine/CrossOver/Wineskin prefix."
+                .to_string(),
+        );
+    }
+
+    if !wait_for_process_start_patterns(&process_patterns, 20_000) {
+        return Err("Game did not start in time.".to_string());
+    }
+
+    Ok(())
+}
+
+fn launch_windows_steam_game(
+    app: &AppHandle,
+    game_path: &std::path::Path,
+) -> Result<(), String> {
+    let executable_path = find_windows_executable_path(game_path)
+        .ok_or_else(|| "Could not find a Windows game executable in the selected folder.".to_string())?;
+    let process_patterns = build_windows_process_match_patterns(&executable_path);
+
+    if is_process_running_for_patterns(&process_patterns) {
+        return Err("Game is already running.".to_string());
+    }
+
+    let steam_root = find_matching_steam_root_for_game_path(app, game_path, true)
+        .ok_or_else(|| "Could not match this Windows game to a Steam installation.".to_string())?;
+    let app_id = find_steam_app_id_for_game_path(&steam_root, game_path)
+        .ok_or_else(|| "Could not determine the Steam app ID for this Windows game.".to_string())?;
+    let steam_executable = steam_root.join("steam.exe");
+    if !steam_executable.exists() {
+        return Err(format!(
+            "Steam executable not found at {}. Check the Windows Steam directory in Settings.",
+            steam_executable.display()
+        ));
+    }
+
+    let prefix_root = find_wine_prefix_root(&steam_executable)
+        .or_else(|| find_wine_prefix_root(&executable_path))
+        .or_else(|| find_wine_prefix_root(game_path));
+    let runner_path = find_wine_runner_binary(prefix_root.as_deref(), &steam_executable)
+        .ok_or_else(|| {
+            "No compatible Wine launcher was found for this Steam installation. Set the game path inside Wine/CrossOver/Wineskin/Whisky and try again."
+                .to_string()
+        })?;
+
+    let mut command = std::process::Command::new(&runner_path);
+    configure_windows_runner_command(&mut command, &runner_path, prefix_root.as_deref())?;
+    eprintln!(
+        "[launch_windows_steam_game] Launching Steam app {} via {:?} using steam executable {:?}",
+        app_id, runner_path, steam_executable
+    );
+    command
+        .arg(&steam_executable)
+        .arg("-applaunch")
+        .arg(&app_id)
+        .current_dir(&steam_root)
+        .spawn()
+        .map_err(|e| format!("Failed to launch Steam app {}: {}", app_id, e))?;
+
+    if !wait_for_process_start_patterns(&process_patterns, 60_000) {
+        eprintln!(
+            "[launch_windows_steam_game] Steam accepted the launch request for app {}, but the game process was not observed in time. Continuing optimistically.",
+            app_id
+        );
+    }
+
+    Ok(())
+}
+
+fn launch_windows_game(app: &AppHandle, game_path: &std::path::Path) -> Result<(), String> {
+    let distribution = infer_distribution_from_game_path(app, game_path, true);
+    if distribution == "steam" && can_launch_via_steam_for_game_path(app, game_path, true) {
+        return launch_windows_steam_game(app, game_path);
+    }
+
+    launch_windows_direct_game(game_path)
+}
+
+fn launch_macos_bepinex_wrapper(
+    game_path: &std::path::Path,
+    executable_path: Option<&std::path::PathBuf>,
+    context: &str,
+) -> Result<bool, String> {
+    if find_bepinex_script_in_dir(game_path).is_none() {
+        return Ok(false);
+    }
+
+    let run_script = canonicalize_macos_bepinex_script(game_path)?;
+
+    if let Some(executable_path) = executable_path.as_ref() {
+        if is_process_running_for_executable(executable_path) {
+            return Err("Game is already running.".to_string());
+        }
+    }
+
+    configure_macos_bepinex_script(&run_script, game_path)?;
+    dequarantine_recursive(game_path);
+
+    eprintln!("[{}] Launching via run_bepinex.sh at {:?}", context, run_script);
+
+    std::process::Command::new(&run_script)
+        .current_dir(game_path)
+        .spawn()
+        .map_err(|e| format!("Failed to launch run_bepinex.sh: {}", e))?;
+
+    if let Some(executable_path) = executable_path.as_ref() {
+        if !wait_for_process_start(executable_path, 60_000) {
+            eprintln!(
+                "[{}] run_bepinex.sh launch request succeeded, but the game process was not observed in time. Continuing optimistically.",
+                context
+            );
+        }
+    }
+
+    Ok(true)
 }
 
 fn launch_via_steam_for_game_path(
     app: &AppHandle,
     game_path: &std::path::Path,
 ) -> Result<(), String> {
-    let steam_root = find_matching_steam_root_for_game_path(app, game_path, false)
-        .ok_or_else(|| "Game not found in a Steam library".to_string())?;
-    let app_id = find_steam_app_id_for_game_path(&steam_root, game_path)
+    let app_id = find_steam_app_id_for_game_path_any(app, game_path, false)
         .ok_or_else(|| "Couldn't determine the Steam app ID for this game".to_string())?;
-
     let executable_path = find_macos_executable_path(game_path);
-    if let Some(executable_path) = executable_path.as_ref() {
-        if is_process_running_for_executable(executable_path) {
-            return Err("Game is already running.".to_string());
-        }
-    }
 
     let status = std::process::Command::new("/usr/bin/open")
         .arg(format!("steam://run/{}", app_id))
@@ -448,8 +1361,11 @@ fn launch_via_steam_for_game_path(
     }
 
     if let Some(executable_path) = executable_path.as_ref() {
-        if !wait_for_process_start(executable_path, 15_000) {
-            return Err("Steam did not start the game process in time.".to_string());
+        if !wait_for_process_start(executable_path, 60_000) {
+            eprintln!(
+                "[launch_via_steam_for_game_path] Steam accepted the launch request for app {}, but the game process was not observed in time. Continuing optimistically.",
+                app_id
+            );
         }
     }
 
@@ -512,6 +1428,35 @@ fn has_complete_macos_bepinex_runtime(game_path: &std::path::Path) -> bool {
     has_core && has_doorstop_payload && has_script
 }
 
+fn ensure_windows_bepinex_console_enabled(game_path: &std::path::Path) -> Result<(), String> {
+    let config_path = game_path.join("BepInEx").join("config").join("BepInEx.cfg");
+    if !config_path.exists() {
+        return Ok(());
+    }
+
+    let content = fs::read_to_string(&config_path)
+        .map_err(|e| format!("Failed to read BepInEx.cfg: {}", e))?;
+
+    if content.contains("[Logging.Console]") && content.contains("Enabled = true") {
+        return Ok(());
+    }
+
+    let updated = if content.contains("[Logging.Console]") && content.contains("Enabled = false") {
+        content.replacen("Enabled = false", "Enabled = true", 1)
+    } else if content.contains("[Logging.Console]") {
+        content
+    } else {
+        format!(
+            "{}\n[Logging.Console]\nEnabled = true\n",
+            content.trim_end()
+        )
+    };
+
+    fs::write(&config_path, updated)
+        .map_err(|e| format!("Failed to update BepInEx.cfg: {}", e))?;
+    Ok(())
+}
+
 fn rename_path_if_present(src: &std::path::Path, dst: &std::path::Path) -> Result<(), String> {
     if !src.exists() && !src.is_symlink() {
         return Ok(());
@@ -532,12 +1477,11 @@ fn sync_macos_runtime_disabled_state(
     game_path: &std::path::Path,
     disable: bool,
 ) -> Result<(), String> {
-    let dir_items = ["BepInEx", "doorstop_libs", "plugins"];
+    let dir_items = ["BepInEx", "doorstop_libs"];
     let file_items = [
         "doorstop_config.ini",
         "libdoorstop.dylib",
         ".doorstop_version",
-        CANONICAL_MAC_BEPINEX_SCRIPT,
     ];
 
     for item in dir_items {
@@ -567,6 +1511,18 @@ fn sync_macos_runtime_disabled_state(
             } else {
                 let _ = fs::remove_file(&disabled);
             }
+        }
+    }
+
+    let active_script = game_path.join(CANONICAL_MAC_BEPINEX_SCRIPT);
+    let disabled_script = game_path.join(format!("{}_DISABLED", CANONICAL_MAC_BEPINEX_SCRIPT));
+    if !active_script.exists() && disabled_script.exists() {
+        rename_path_if_present(&disabled_script, &active_script)?;
+    } else if active_script.exists() && disabled_script.exists() {
+        if disabled_script.is_dir() && !disabled_script.is_symlink() {
+            let _ = fs::remove_dir_all(&disabled_script);
+        } else {
+            let _ = fs::remove_file(&disabled_script);
         }
     }
 
@@ -643,10 +1599,8 @@ fn read_manifest_version(dir: &std::path::Path) -> Option<String> {
 
 fn is_managed_macos_launch_option(value: &str) -> bool {
     let lower = value.to_lowercase();
-    lower.contains("/usr/bin/arch")
-        && lower.contains("-x86_64")
-        && lower.contains("bepinex.sh")
-        && lower.contains("%command%")
+    let has_script = lower.contains("run_bepinex.sh") || lower.contains("bepinex.sh");
+    has_script && lower.contains("%command%")
 }
 
 fn quit_steam_if_running() -> Result<bool, String> {
@@ -721,12 +1675,31 @@ fn find_matching_brace(text: &str, open_index: usize, end: usize) -> Option<usiz
     let bytes = text.as_bytes();
     let mut depth = 0usize;
     let mut index = open_index;
+    let mut in_string = false;
+    let mut escaped = false;
 
     while index < end {
-        match bytes[index] {
+        let byte = bytes[index];
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if byte == b'\\' {
+                escaped = true;
+            } else if byte == b'"' {
+                in_string = false;
+            }
+            index += 1;
+            continue;
+        }
+
+        match byte {
+            b'"' => in_string = true,
             b'{' => depth += 1,
             b'}' => {
-                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return None;
+                }
+                depth -= 1;
                 if depth == 0 {
                     return Some(index);
                 }
@@ -752,13 +1725,10 @@ fn find_block_by_key(
         let relative_match = text[search_start..end].find(&pattern)?;
         let key_index = search_start + relative_match;
         let line_start = text[..key_index].rfind('\n').map(|idx| idx + 1).unwrap_or(0);
-        let line_end = text[key_index..end]
-            .find('\n')
-            .map(|idx| key_index + idx)
-            .unwrap_or(end);
         let indentation = text[line_start..key_index].to_string();
 
-        let brace_index = find_next_non_whitespace(text, line_end, end)?;
+        let block_search_start = key_index + pattern.len();
+        let brace_index = find_next_non_whitespace(text, block_search_start, end)?;
         if text.as_bytes()[brace_index] == b'{' {
             let close_index = find_matching_brace(text, brace_index, end)?;
             return Some((key_index, brace_index, close_index, indentation));
@@ -786,13 +1756,10 @@ fn find_all_blocks_by_key(
         };
         let key_index = search_start + relative_match;
         let line_start = text[..key_index].rfind('\n').map(|idx| idx + 1).unwrap_or(0);
-        let line_end = text[key_index..end]
-            .find('\n')
-            .map(|idx| key_index + idx)
-            .unwrap_or(end);
         let indentation = text[line_start..key_index].to_string();
 
-        if let Some(brace_index) = find_next_non_whitespace(text, line_end, end) {
+        let block_search_start = key_index + pattern.len();
+        if let Some(brace_index) = find_next_non_whitespace(text, block_search_start, end) {
             if text.as_bytes()[brace_index] == b'{' {
                 if let Some(close_index) = find_matching_brace(text, brace_index, end) {
                     matches.push((key_index, brace_index, close_index, indentation));
@@ -834,6 +1801,10 @@ fn find_steam_apps_block(text: &str, app_id: Option<&str>) -> Option<(usize, usi
         find_block_by_key(text, "Steam", valve_open + 1, valve_close)?;
 
     let candidates = find_all_blocks_by_key(text, "apps", steam_open + 1, steam_close);
+    if candidates.is_empty() {
+        return None;
+    }
+
     let mut scored = candidates
         .into_iter()
         .map(|candidate| {
@@ -842,8 +1813,27 @@ fn find_steam_apps_block(text: &str, app_id: Option<&str>) -> Option<(usize, usi
             let mut score = 0i32;
 
             if let Some(app_id) = app_id {
-                if find_block_by_key(text, app_id, *apps_open + 1, *apps_close).is_some() {
-                    score += 1000;
+                if let Some((_, app_open, app_close, _)) =
+                    find_block_by_key(text, app_id, *apps_open + 1, *apps_close)
+                {
+                    score += 2000;
+                    let app_content = &text[app_open + 1..app_close];
+                    if app_content.contains("\"LastPlayed\"")
+                        || app_content.contains("\"Playtime\"")
+                        || app_content.contains("\"BadgeData\"")
+                        || app_content.contains("\"cloud\"")
+                        || app_content.contains("\"autocloud\"")
+                        || app_content.contains("\"LaunchOptions\"")
+                    {
+                        score += 500;
+                    }
+                    if app_content.contains("\"UseSteamControllerConfig\"")
+                        || app_content.contains("\"SteamControllerRumble\"")
+                    {
+                        score -= 1000;
+                    }
+                } else {
+                    score -= 1000;
                 }
             }
 
@@ -856,17 +1846,18 @@ fn find_steam_apps_block(text: &str, app_id: Option<&str>) -> Option<(usize, usi
             if content.contains("\"UseSteamControllerConfig\"") {
                 score -= 250;
             }
+            if content.contains("\"SteamControllerRumble\"")
+                || content.contains("\"SteamControllerRumbleIntensity\"")
+            {
+                score -= 250;
+            }
 
             (score, candidate)
         })
         .collect::<Vec<_>>();
 
     scored.sort_by(|a, b| b.0.cmp(&a.0));
-    scored
-        .into_iter()
-        .map(|(_, candidate)| candidate)
-        .next()
-        .or_else(|| find_block_by_key(text, "apps", 0, text.len()))
+    scored.into_iter().map(|(_, candidate)| candidate).next()
 }
 
 fn get_launch_options_for_app(text: &str, app_id: &str) -> Option<String> {
@@ -1105,6 +2096,12 @@ fn configure_macos_bepinex_script(
 a="/$0"; a=${{a%/*}}; a=${{a#/}}; a=${{a:-.}}; BASEDIR=$(cd "$a"; pwd -P)
 cd "$BASEDIR"
 
+# r2modmac: if the runtime is marked disabled, launch the game without Doorstop.
+runtime_disabled=false
+if [ -e "$BASEDIR/BepInEx_DISABLED" ] || [ -e "$BASEDIR/doorstop_libs_DISABLED" ] || [ -e "$BASEDIR/libdoorstop.dylib_DISABLED" ] || [ -e "$BASEDIR/doorstop_config.ini_DISABLED" ]; then
+    runtime_disabled=true
+fi
+
 if [ "$2" = "SteamLaunch" ]; then
     "$1" "$2" "$3" "$4" "$0" "$7"
     exit
@@ -1172,6 +2169,11 @@ case $executable_type in
 esac
 
 doorstop_libname="libdoorstop_${{arch}}.dylib"
+
+if [ "$runtime_disabled" = true ]; then
+    exec "${{executable_path}}"
+fi
+
 export LD_LIBRARY_PATH="${{doorstop_libs}}:${{LD_LIBRARY_PATH}}"
 export LD_PRELOAD="${{doorstop_libname}}:${{LD_PRELOAD}}"
 export DYLD_LIBRARY_PATH="${{doorstop_libs}}"
@@ -1198,7 +2200,27 @@ exec "${{executable_path}}"
     let original = script.clone();
     script = script.replace("\r\n", "\n");
 
-    if !has_macos_doorstop_support(&script) {
+    // CRITICAL: detect if the script has a working runtime_disabled early-exit BEFORE
+    // DYLD_INSERT_LIBRARIES. Original BepInEx scripts set the runtime_disabled variable but
+    // never skip loading Doorstop when it's disabled. This causes a DYLD crash because
+    // doorstop_libs is renamed to doorstop_libs_DISABLED in vanilla mode and the dylib
+    // path no longer resolves. Always regenerate if the early-exit is absent or misplaced.
+    let has_early_exit = script.contains("if [ \"$runtime_disabled\" = true ]");
+    let early_exit_before_dyld = if has_early_exit {
+        let exit_pos = script.find("if [ \"$runtime_disabled\" = true ]").unwrap_or(usize::MAX);
+        let dyld_pos = script.find("DYLD_INSERT_LIBRARIES=").unwrap_or(usize::MAX);
+        exit_pos < dyld_pos
+    } else {
+        false
+    };
+
+    let needs_regeneration = !has_macos_doorstop_support(&script) || !early_exit_before_dyld;
+    if needs_regeneration {
+        eprintln!(
+            "[configure_macos_bepinex_script] Regenerating script (has_doorstop={} early_exit_ok={}).",
+            has_macos_doorstop_support(&script),
+            early_exit_before_dyld
+        );
         script = build_generated_macos_bepinex_script(&relative_executable);
     } else if script.contains("\nexecutable_name=\"\"") {
         script = script.replace(
@@ -1218,6 +2240,19 @@ exec "${{executable_path}}"
                 insert_after,
                 "cd \"$BASEDIR\" # r2modmac: run from game directory for macOS compatibility\n",
             );
+        }
+    }
+
+    if !script.contains("r2modmac: if the runtime is marked disabled") {
+        let runtime_disabled_block = "\n# r2modmac: if the runtime is marked disabled, launch the game without Doorstop.\nruntime_disabled=false\nif [ -e \"$BASEDIR/BepInEx_DISABLED\" ] || [ -e \"$BASEDIR/doorstop_libs_DISABLED\" ] || [ -e \"$BASEDIR/libdoorstop.dylib_DISABLED\" ] || [ -e \"$BASEDIR/doorstop_config.ini_DISABLED\" ]; then\n    runtime_disabled=true\nfi\n\nif [ \"$runtime_disabled\" = true ]; then\n    exec \"${{executable_path}}\"\nfi\n";
+        if let Some(idx) = script.find("BASEDIR=") {
+            let insert_at = script[idx..]
+                .find('\n')
+                .map(|offset| idx + offset + 1)
+                .unwrap_or(script.len());
+            script.insert_str(insert_at, runtime_disabled_block);
+        } else {
+            script.push_str(runtime_disabled_block);
         }
     }
 
@@ -1274,19 +2309,37 @@ pub(crate) fn ensure_macos_steam_launch_options(
         None
     };
 
-    let mut matched: Option<(std::path::PathBuf, String)> = None;
-    for steam_root in steam_roots {
-        if let Some(app_id) = find_steam_app_id_for_game_path(&steam_root, game_path) {
-            matched = Some((steam_root, app_id));
+    let mut matched_steam_root: Option<std::path::PathBuf> = None;
+    let mut app_id: Option<String> = None;
+    for steam_root in &steam_roots {
+        if let Some(found_app_id) = find_steam_app_id_for_game_path(steam_root, game_path) {
+            matched_steam_root = Some(steam_root.clone());
+            app_id = Some(found_app_id);
             break;
         }
     }
 
-    let (steam_root, app_id) = matched.ok_or_else(|| {
+    if app_id.is_none() {
+        if let Some(library_root) = find_embedded_steam_library_root_for_game_path(game_path) {
+            app_id = find_steam_app_id_for_library_root(&library_root, game_path);
+        }
+    }
+
+    let app_id = app_id.ok_or_else(|| {
         "Couldn't determine the Steam app ID for this macOS game. Automatic launch option setup failed.".to_string()
     })?;
 
-    let localconfig_path = get_latest_localconfig_path(&steam_root).ok_or_else(|| {
+    let steam_root_for_config = matched_steam_root
+        .or_else(|| {
+            steam_roots
+                .iter()
+                .find(|root| get_latest_localconfig_path(root).is_some())
+                .cloned()
+        })
+        .or_else(|| steam_roots.first().cloned())
+        .ok_or_else(|| "No Steam installation found to configure macOS launch options".to_string())?;
+
+    let localconfig_path = get_latest_localconfig_path(&steam_root_for_config).ok_or_else(|| {
         "Couldn't locate Steam's localconfig.vdf for automatic macOS launch option setup.".to_string()
     })?;
 
@@ -1296,12 +2349,15 @@ pub(crate) fn ensure_macos_steam_launch_options(
         localconfig_path.display()
     );
 
-    let steam_was_running = quit_steam_if_running()?;
-
     let localconfig = fs::read_to_string(&localconfig_path)
         .map_err(|e| format!("Failed to read Steam localconfig.vdf: {}", e))?;
 
-    let backup_key = format!("steam::{}", app_id);
+    let scoped_backup_key = format!(
+        "steam::{}::{}",
+        canonicalize_or_original(&localconfig_path).to_string_lossy(),
+        app_id
+    );
+    let legacy_backup_key = format!("steam::{}", app_id);
     let mut settings = load_settings_impl(app);
 
     let desired = if enable_mods {
@@ -1327,27 +2383,45 @@ pub(crate) fn ensure_macos_steam_launch_options(
     }
 
     let mut settings_changed = false;
+    let mut steam_was_running: Option<bool> = None;
+    let mut ensure_steam_stopped = || -> Result<(), String> {
+        if steam_was_running.is_none() {
+            steam_was_running = Some(quit_steam_if_running()?);
+        }
+        Ok(())
+    };
 
     if enable_mods {
         if let Some(current) = current_launch_options.as_ref() {
             if !current.trim().is_empty() && !is_managed_macos_launch_option(current) {
-                if !settings.steam_launch_option_backups.contains_key(&backup_key) {
+                if !settings
+                    .steam_launch_option_backups
+                    .contains_key(&scoped_backup_key)
+                {
                     settings
                         .steam_launch_option_backups
-                        .insert(backup_key.clone(), current.clone());
+                        .insert(scoped_backup_key.clone(), current.clone());
                     settings_changed = true;
                 }
             }
         }
-    } else if current_launch_options
-        .as_deref()
-        .map(is_managed_macos_launch_option)
-        .unwrap_or(false)
-    {
-        if let Some(previous) = settings.steam_launch_option_backups.remove(&backup_key) {
+        if settings
+            .steam_launch_option_backups
+            .remove(&legacy_backup_key)
+            .is_some()
+        {
+            settings_changed = true;
+        }
+    } else {
+        if let Some(previous) = settings
+            .steam_launch_option_backups
+            .remove(&scoped_backup_key)
+            .or_else(|| settings.steam_launch_option_backups.remove(&legacy_backup_key))
+        {
             let (restored_text, _) =
                 update_launch_options_in_localconfig(&localconfig, &app_id, Some(&previous))?;
             if restored_text != localconfig {
+                ensure_steam_stopped()?;
                 fs::write(&localconfig_path, restored_text)
                     .map_err(|e| format!("Failed to restore Steam launch options: {}", e))?;
                 let persisted = fs::read_to_string(&localconfig_path)
@@ -1360,7 +2434,13 @@ pub(crate) fn ensure_macos_steam_launch_options(
                 }
             }
             settings_changed = true;
-        } else if updated_text != localconfig {
+        } else if current_launch_options
+            .as_deref()
+            .map(is_managed_macos_launch_option)
+            .unwrap_or(false)
+            && updated_text != localconfig
+        {
+            ensure_steam_stopped()?;
             fs::write(&localconfig_path, updated_text)
                 .map_err(|e| format!("Failed to clear Steam launch options: {}", e))?;
             let persisted = fs::read_to_string(&localconfig_path)
@@ -1380,14 +2460,12 @@ pub(crate) fn ensure_macos_steam_launch_options(
         if settings_changed {
             save_settings_impl(app, &settings)?;
         }
-        reopen_steam_if_needed(steam_was_running);
-        return Ok(());
-    } else {
-        reopen_steam_if_needed(steam_was_running);
+        reopen_steam_if_needed(steam_was_running.unwrap_or(false));
         return Ok(());
     }
 
     if updated_text != localconfig {
+        ensure_steam_stopped()?;
         fs::write(&localconfig_path, updated_text)
             .map_err(|e| format!("Failed to update Steam launch options: {}", e))?;
         let persisted = fs::read_to_string(&localconfig_path)
@@ -1407,7 +2485,7 @@ pub(crate) fn ensure_macos_steam_launch_options(
         save_settings_impl(app, &settings)?;
     }
 
-    reopen_steam_if_needed(steam_was_running);
+    reopen_steam_if_needed(steam_was_running.unwrap_or(false));
     Ok(())
 }
 
@@ -1442,7 +2520,7 @@ pub async fn get_game_path(app: AppHandle, game_identifier: String, platform: Op
 
     if steam_paths_to_check.is_empty() {
         if is_windows_profile {
-            return Err("No CrossOver/Wine Steam path configured. Go to Settings and set your Steam directory inside the CrossOver bottle.".to_string());
+            return Err("No Windows Steam path configured. Go to Settings and set your Steam directory inside the Wine/CrossOver/Wineskin prefix, or set the game directory manually.".to_string());
         }
         return Err("No Steam installation found (Native macOS or CrossOver)".to_string());
     }
@@ -1542,13 +2620,8 @@ pub async fn find_game_executable(game_path: String) -> Result<Option<String>, S
     }
     
     // Fallback: look for .exe (for Wine/Proton)
-    if let Ok(entries) = fs::read_dir(path) {
-        for entry in entries.filter_map(|e| e.ok()) {
-            let name = entry.file_name().to_string_lossy().to_string();
-            if name.ends_with(".exe") && !name.contains("UnityCrashHandler") {
-                return Ok(Some(entry.path().to_string_lossy().to_string()));
-            }
-        }
+    if let Some(executable_path) = find_windows_executable_path(path) {
+        return Ok(Some(executable_path.to_string_lossy().to_string()));
     }
     
     Ok(None)
@@ -1570,8 +2643,9 @@ pub async fn install_to_game(app: AppHandle, game_identifier: String, profile_id
     } else {
         get_profile_distribution(&app, &profile_id)
     };
-    let should_clear_steam_launch = is_mac_profile && effective_distribution == "steam";
-    let manage_steam_launch = is_mac_profile && effective_distribution == "steam";
+    let launch_mode = get_profile_launch_mode(&app, &profile_id);
+    let manage_steam_launch =
+        is_mac_profile && should_manage_steam_launch_options(&effective_distribution, &launch_mode);
 
     // 2. Get profile path
     let profile_dir = app.path().app_data_dir().map_err(|e| e.to_string())?
@@ -1603,18 +2677,17 @@ pub async fn install_to_game(app: AppHandle, game_identifier: String, profile_id
     };
 
     eprintln!(
-        "[install_to_game] platform={} stored_distribution={} effective_distribution={} launch_mode={} manage_steam_launch={} should_clear_steam_launch={}",
+        "[install_to_game] platform={} stored_distribution={} effective_distribution={} launch_mode={} manage_steam_launch={}",
         profile_platform,
         get_profile_distribution(&app, &profile_id),
         effective_distribution,
-        get_profile_launch_mode(&app, &profile_id),
-        manage_steam_launch,
-        should_clear_steam_launch
+        launch_mode,
+        manage_steam_launch
     );
 
     if is_vanilla {
         if is_mac_profile {
-            eprintln!("[install_to_game] Profile is in VANILLA mode on macOS. Steam launch options will be cleared, game files left intact.");
+            eprintln!("[install_to_game] Profile is in VANILLA mode on macOS. Runtime will be disabled while the Steam wrapper stays in place.");
         } else {
             eprintln!("[install_to_game] Profile is in VANILLA mode. Cleaning game folder.");
         }
@@ -1834,13 +2907,19 @@ pub async fn install_to_game(app: AppHandle, game_identifier: String, profile_id
         .collect();
 
     if is_mac_profile && is_vanilla {
-        sync_macos_runtime_disabled_state(game_path, true)?;
-        if should_clear_steam_launch {
-            ensure_macos_steam_launch_options(&app, game_path, false)?;
-            eprintln!("[install_to_game] macOS vanilla mode complete - runtime disabled and Steam launch option cleared.");
-        } else {
-            eprintln!("[install_to_game] macOS vanilla mode complete - runtime disabled without touching Steam launch options.");
+        if find_bepinex_script_in_dir(game_path).is_some() {
+            let run_script = canonicalize_macos_bepinex_script(game_path)?;
+            configure_macos_bepinex_script(&run_script, game_path)?;
+            dequarantine_recursive(game_path);
         }
+        // Always ensure launch options are REMOVED in vanilla mode (remove the BepInEx wrapper).
+        // Do not gate on !macos_steam_launch_option_is_managed: the current state doesn't matter,
+        // we always want the options to reflect the desired mode.
+        if manage_steam_launch {
+            ensure_macos_steam_launch_options(&app, game_path, false)?;
+        }
+        sync_macos_runtime_disabled_state(game_path, true)?;
+        eprintln!("[install_to_game] macOS vanilla mode complete - runtime disabled while preserving the Steam wrapper.");
         return Ok(());
     }
     
@@ -2081,6 +3160,9 @@ pub async fn install_to_game(app: AppHandle, game_identifier: String, profile_id
         configure_macos_bepinex_script(&run_script, game_path)?;
         sync_macos_runtime_disabled_state(game_path, false)?;
         dequarantine_recursive(game_path);
+        // Always ensure launch options are SET in modded mode (add the BepInEx wrapper).
+        // Do not gate on !macos_steam_launch_option_is_managed: always push the correct value
+        // so that switching between profiles/modes always produces the right launch options.
         if manage_steam_launch {
             ensure_macos_steam_launch_options(&app, game_path, true)?;
         }
@@ -2113,6 +3195,10 @@ pub async fn install_to_game(app: AppHandle, game_identifier: String, profile_id
                 }
             }
         }
+
+        if !is_vanilla {
+            ensure_windows_bepinex_console_enabled(game_path)?;
+        }
     }
 
     eprintln!("[install_to_game] Sync complete!");
@@ -2120,11 +3206,24 @@ pub async fn install_to_game(app: AppHandle, game_identifier: String, profile_id
 }
 
 #[command]
-pub async fn launch_game_with_mods(app: AppHandle, game_identifier: String, platform: Option<String>) -> Result<(), String> {
+pub async fn launch_game_with_mods(
+    app: AppHandle,
+    game_identifier: String,
+    profile_id: String,
+    platform: Option<String>
+) -> Result<(), String> {
+    let is_windows_profile = normalized_platform(platform.as_deref()) == Some("windows");
     let game_path_str = get_game_path(app.clone(), game_identifier.clone(), platform)
         .await?
         .ok_or_else(|| "Game path not found".to_string())?;
     let game_path = std::path::PathBuf::from(&game_path_str);
+    let launch_mode = get_profile_launch_mode(&app, &profile_id);
+    let use_direct_launch = profile_prefers_direct_launch(&launch_mode);
+
+    if is_windows_profile {
+        return launch_windows_game(&app, &game_path);
+    }
+
     let executable_path = find_macos_executable_path(&game_path);
 
     if is_balatro_identifier(&game_identifier) || is_balatro_game_path(&game_path) {
@@ -2149,44 +3248,33 @@ pub async fn launch_game_with_mods(app: AppHandle, game_identifier: String, plat
             .map_err(|e| format!("Failed to launch run_lovely_macos.sh: {}", e))?;
 
         if let Some(executable_path) = executable_path.as_ref() {
-            if !wait_for_process_start(executable_path, 15_000) {
-                return Err("Game did not start in time.".to_string());
+            if !wait_for_process_start(executable_path, 60_000) {
+                eprintln!(
+                    "[launch_game_with_mods] run_lovely_macos.sh launch request succeeded, but the game process was not observed in time. Continuing optimistically."
+                );
             }
         }
 
         return Ok(());
     }
 
-    if infer_distribution_from_game_path(&app, &game_path, false) == "steam" {
-        ensure_macos_steam_launch_options(&app, &game_path, true)?;
+    // Safety-net: before launching via Steam as MODDED, ensure the BepInEx launch
+    // option is actually set in localconfig.vdf. This covers the case where the user
+    // presses Play without having run "Apply to Game" first, or where a previous
+    // vanilla launch left the options cleared.
+    let dist = infer_distribution_from_game_path(&app, &game_path, false);
+    if should_manage_steam_launch_options(&dist, &launch_mode) && !use_direct_launch {
+        if let Ok(false) = macos_steam_launch_option_is_managed(&app, &game_path) {
+            eprintln!("[launch_game_with_mods] Launch options not set — forcing BepInEx launch option before Steam launch.");
+            let _ = ensure_macos_steam_launch_options(&app, &game_path, true);
+        }
+    }
+
+    if dist == "steam" && !use_direct_launch {
         return launch_via_steam_for_game_path(&app, &game_path);
     }
 
-    let run_script = canonicalize_macos_bepinex_script(&game_path)?;
-    
-    if run_script.exists() {
-        if let Some(executable_path) = executable_path.as_ref() {
-            if is_process_running_for_executable(executable_path) {
-                return Err("Game is already running.".to_string());
-            }
-        }
-
-        configure_macos_bepinex_script(&run_script, &game_path)?;
-        dequarantine_recursive(&game_path);
-        
-        eprintln!("[launch_game_with_mods] Launching via run_bepinex.sh at {:?}", run_script);
-        
-        std::process::Command::new(&run_script)
-            .current_dir(&game_path)
-            .spawn()
-            .map_err(|e| format!("Failed to launch run_bepinex.sh: {}", e))?;
-
-        if let Some(executable_path) = executable_path.as_ref() {
-            if !wait_for_process_start(executable_path, 15_000) {
-                return Err("Game did not start in time.".to_string());
-            }
-        }
-        
+    if launch_macos_bepinex_wrapper(&game_path, executable_path.as_ref(), "launch_game_with_mods")? {
         Ok(())
     } else {
         // Fallback: open the .app directly
@@ -2205,8 +3293,10 @@ pub async fn launch_game_with_mods(app: AppHandle, game_identifier: String, plat
             }
             let _ = open::that(&bundle);
             if let Some(executable_path) = executable_path.as_ref() {
-                if !wait_for_process_start(executable_path, 15_000) {
-                    return Err("Game did not start in time.".to_string());
+                if !wait_for_process_start(executable_path, 60_000) {
+                    eprintln!(
+                        "[launch_game_with_mods] App bundle launch request succeeded, but the game process was not observed in time. Continuing optimistically."
+                    );
                 }
             }
             Ok(())
@@ -2217,15 +3307,44 @@ pub async fn launch_game_with_mods(app: AppHandle, game_identifier: String, plat
 }
 
 #[command]
-pub async fn launch_game_vanilla(app: AppHandle, game_identifier: String, platform: Option<String>) -> Result<(), String> {
+pub async fn launch_game_vanilla(
+    app: AppHandle,
+    game_identifier: String,
+    profile_id: String,
+    platform: Option<String>
+) -> Result<(), String> {
+    let is_windows_profile = normalized_platform(platform.as_deref()) == Some("windows");
     let game_path_str = get_game_path(app.clone(), game_identifier, platform)
         .await?
         .ok_or_else(|| "Game path not found".to_string())?;
     let game_path = std::path::PathBuf::from(&game_path_str);
+    let launch_mode = get_profile_launch_mode(&app, &profile_id);
+    let use_direct_launch = profile_prefers_direct_launch(&launch_mode);
+
+    if is_windows_profile {
+        return launch_windows_game(&app, &game_path);
+    }
+
     let executable_path = find_macos_executable_path(&game_path);
 
-    if infer_distribution_from_game_path(&app, &game_path, false) == "steam" {
-        ensure_macos_steam_launch_options(&app, &game_path, false)?;
+    if use_direct_launch {
+        if launch_macos_bepinex_wrapper(&game_path, executable_path.as_ref(), "launch_game_vanilla")? {
+            return Ok(());
+        }
+    }
+
+    // Safety-net: before launching via Steam as VANILLA, ensure any BepInEx launch
+    // option is removed from localconfig.vdf. This covers the case where the user
+    // presses Play without having run "Apply to Game" (switch to vanilla) first.
+    let dist = infer_distribution_from_game_path(&app, &game_path, false);
+    if should_manage_steam_launch_options(&dist, &launch_mode) && !use_direct_launch {
+        if let Ok(true) = macos_steam_launch_option_is_managed(&app, &game_path) {
+            eprintln!("[launch_game_vanilla] BepInEx launch option still set — forcing removal before vanilla Steam launch.");
+            let _ = ensure_macos_steam_launch_options(&app, &game_path, false);
+        }
+    }
+
+    if dist == "steam" && !use_direct_launch {
         return launch_via_steam_for_game_path(&app, &game_path);
     }
 
@@ -2257,8 +3376,10 @@ pub async fn launch_game_vanilla(app: AppHandle, game_identifier: String, platfo
         }
         open::that(&bundle).map_err(|e| format!("Failed to launch app bundle: {}", e))?;
         if let Some(executable_path) = executable_path.as_ref() {
-            if !wait_for_process_start(executable_path, 15_000) {
-                return Err("Game did not start in time.".to_string());
+            if !wait_for_process_start(executable_path, 60_000) {
+                eprintln!(
+                    "[launch_game_vanilla] App bundle launch request succeeded, but the game process was not observed in time. Continuing optimistically."
+                );
             }
         }
         return Ok(());
@@ -2272,8 +3393,10 @@ pub async fn launch_game_vanilla(app: AppHandle, game_identifier: String, platfo
         }
         open::that(executable).map_err(|e| format!("Failed to launch game executable: {}", e))?;
         if let Some(executable_path) = executable_path.as_ref() {
-            if !wait_for_process_start(executable_path, 15_000) {
-                return Err("Game did not start in time.".to_string());
+            if !wait_for_process_start(executable_path, 60_000) {
+                eprintln!(
+                    "[launch_game_vanilla] Executable launch request succeeded, but the game process was not observed in time. Continuing optimistically."
+                );
             }
         }
         return Ok(());
@@ -2299,11 +3422,20 @@ pub async fn is_game_running(
     game_identifier: String,
     platform: Option<String>,
 ) -> Result<bool, String> {
+    let is_windows_profile = normalized_platform(platform.as_deref()) == Some("windows");
     let game_path_str = match get_game_path(app.clone(), game_identifier, platform).await? {
         Some(path) => path,
         None => return Ok(false),
     };
     let game_path = std::path::PathBuf::from(&game_path_str);
+
+    if is_windows_profile {
+        let Some(executable_path) = find_windows_executable_path(&game_path) else {
+            return Ok(false);
+        };
+        return Ok(is_process_running_for_patterns(&build_windows_process_match_patterns(&executable_path)));
+    }
+
     let Some(executable_path) = find_macos_executable_path(&game_path) else {
         return Ok(false);
     };
@@ -2317,25 +3449,61 @@ pub async fn stop_game(
     game_identifier: String,
     platform: Option<String>,
 ) -> Result<(), String> {
+    let is_windows_profile = normalized_platform(platform.as_deref()) == Some("windows");
     let game_path_str = get_game_path(app.clone(), game_identifier, platform)
         .await?
         .ok_or_else(|| "Game path not found".to_string())?;
     let game_path = std::path::PathBuf::from(&game_path_str);
-    let executable_path = find_macos_executable_path(&game_path)
-        .ok_or_else(|| "Could not determine the game executable.".to_string())?;
+    if is_windows_profile {
+        let executable_path = find_windows_executable_path(&game_path)
+            .ok_or_else(|| "Could not determine the Windows game executable.".to_string())?;
+        let process_patterns = build_windows_process_match_patterns(&executable_path);
 
-    if !is_process_running_for_executable(&executable_path) {
+        if !is_process_running_for_patterns(&process_patterns) {
+            return Ok(());
+        }
+
+        for pattern in &process_patterns {
+            let _ = std::process::Command::new("/usr/bin/pkill")
+                .args(["-TERM", "-f", pattern])
+                .status()
+                .map_err(|e| format!("Failed to stop the game: {}", e))?;
+        }
+
+        if wait_for_process_exit_patterns(&process_patterns, 5_000) {
+            return Ok(());
+        }
+
+        for pattern in &process_patterns {
+            let _ = std::process::Command::new("/usr/bin/pkill")
+                .args(["-KILL", "-f", pattern])
+                .status()
+                .map_err(|e| format!("Failed to force stop the game: {}", e))?;
+        }
+
+        if !wait_for_process_exit_patterns(&process_patterns, 3_000) {
+            return Err("Game did not stop in time.".to_string());
+        }
+
         return Ok(());
     }
 
-    let exec_pattern = executable_path.to_string_lossy().to_string();
+    let executable_path = {
+        find_macos_executable_path(&game_path)
+            .ok_or_else(|| "Could not determine the game executable.".to_string())?
+    };
+    let exec_pattern = build_process_match_pattern(&executable_path);
+
+    if !is_process_running_for_pattern(&exec_pattern) {
+        return Ok(());
+    }
 
     let _ = std::process::Command::new("/usr/bin/pkill")
         .args(["-TERM", "-f", &exec_pattern])
         .status()
         .map_err(|e| format!("Failed to stop the game: {}", e))?;
 
-    if wait_for_process_exit(&executable_path, 5_000) {
+    if wait_for_process_exit_pattern(&exec_pattern, 5_000) {
         return Ok(());
     }
 
@@ -2344,7 +3512,7 @@ pub async fn stop_game(
         .status()
         .map_err(|e| format!("Failed to force stop the game: {}", e))?;
 
-    if !wait_for_process_exit(&executable_path, 3_000) {
+    if !wait_for_process_exit_pattern(&exec_pattern, 3_000) {
         return Err("Game did not stop in time.".to_string());
     }
 
@@ -2551,28 +3719,76 @@ pub async fn sync_profile_to_game(app: AppHandle, profile_id: String, game_ident
         }));
     }
 
+    let stored_manifests = load_owned_mod_manifests(&app, &profile_id, GAME_MANIFEST_SCOPE)?
+        .into_iter()
+        .filter(|entry| manifest_matches_target_root(&entry.manifest, game_path))
+        .collect::<Vec<_>>();
+    let (manifests_to_remove, manifests_to_keep): (Vec<_>, Vec<_>) =
+        stored_manifests.into_iter().partition(|entry| {
+            let desired_full = desired_full_by_key.get(&entry.manifest.mod_key);
+            match desired_full {
+                Some(full) => full != &entry.manifest.mod_full_name.to_lowercase(),
+                None => true,
+            }
+        });
+    let removed_manifest_keys = manifests_to_remove
+        .iter()
+        .map(|entry| entry.manifest.mod_key.clone())
+        .collect::<std::collections::HashSet<_>>();
+    let removed_by_manifest =
+        cleanup_owned_mod_manifests(game_path, &manifests_to_remove, &manifests_to_keep)?;
+    let stale_generated_removed =
+        cleanup_stale_generated_mod_artifacts(game_path, &profile_mod_full_names)?;
+    if removed_by_manifest > 0 || stale_generated_removed > 0 {
+        eprintln!(
+            "[sync_profile_to_game] Cleaned {} tracked manifests and {} stale generated artifacts",
+            removed_by_manifest,
+            stale_generated_removed
+        );
+    }
+
     // 3. Scan game plugins folder for currently installed mods
     // Store both the folder name AND the derived key
     let mut game_mod_folders: Vec<(String, String)> = vec![]; // (folder_name, author-modname key)
+    let mut invalid_game_mod_folders: Vec<String> = vec![];
     if game_plugins.exists() {
         if let Ok(entries) = fs::read_dir(&game_plugins) {
             for entry in entries.filter_map(|e| e.ok()) {
                 if entry.path().is_dir() {
                     let folder_name = entry.file_name().to_string_lossy().to_string();
                     let mod_key = extract_mod_key(&folder_name);
-                    game_mod_folders.push((folder_name, mod_key));
+                    if game_mod_folder_has_payload(&game_plugins, &entry.path(), &folder_name, &mod_key) {
+                        game_mod_folders.push((folder_name, mod_key));
+                    } else {
+                        eprintln!(
+                            "[sync_profile_to_game] Detected broken/metadata-only mod folder: {}",
+                            folder_name
+                        );
+                        invalid_game_mod_folders.push(folder_name);
+                    }
                 }
             }
         }
     }
 
-    eprintln!("[sync_profile_to_game] Game has {} mods installed", game_mod_folders.len());
+    eprintln!(
+        "[sync_profile_to_game] Game has {} valid mods installed ({} broken placeholders)",
+        game_mod_folders.len(),
+        invalid_game_mod_folders.len()
+    );
 
     // 4. Calculate diff using Author-ModName key + version awareness.
     // Remove entries not present in profile OR with a mismatched pinned version.
-    let mut to_remove: Vec<String> = Vec::new();
+    let mut to_remove: Vec<String> = invalid_game_mod_folders.clone();
     for (folder_name, gm_key) in &game_mod_folders {
         if !desired_key_set.contains(gm_key) {
+            if game_mod_folder_is_auxiliary_payload(folder_name, gm_key, &desired_full_by_key) {
+                eprintln!(
+                    "[sync_profile_to_game] Keeping auxiliary payload folder: {}",
+                    folder_name
+                );
+                continue;
+            }
             to_remove.push(folder_name.clone());
             continue;
         }
@@ -2643,13 +3859,16 @@ pub async fn sync_profile_to_game(app: AppHandle, profile_id: String, game_ident
     eprintln!("[sync_profile_to_game] To remove: {:?}, To install: {:?}", to_remove.len(), to_install.len());
 
     // 5. Remove mods not in profile (we have the exact folder names from the tuple)
-    let mut removed = 0;
+    let mut removed = removed_manifest_keys.len();
     for folder_name in &to_remove {
         let folder_path = game_plugins.join(folder_name);
         if folder_path.exists() {
             eprintln!("[sync_profile_to_game] Removing: {}", folder_name);
-            let _ = fs::remove_dir_all(&folder_path);
-            removed += 1;
+            if remove_plugin_entry(&folder_path).is_ok() {
+                if !removed_manifest_keys.contains(&extract_mod_key(folder_name)) {
+                    removed += 1;
+                }
+            }
         }
     }
 

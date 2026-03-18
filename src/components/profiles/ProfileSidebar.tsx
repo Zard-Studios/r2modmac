@@ -20,6 +20,7 @@ interface ProfileSidebarProps {
     onInstallToGame: (isVanillaOverride?: boolean) => void;
     onLaunchProfile: () => Promise<void> | void;
     onStopProfile: () => Promise<void> | void;
+    isApplying?: boolean;
     isLaunching?: boolean;
     isGameRunning?: boolean;
     onResolvePackage: (mod: InstalledMod) => Promise<Package | null>;
@@ -44,6 +45,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
     onInstallToGame,
     onLaunchProfile,
     onStopProfile,
+    isApplying = false,
     isLaunching = false,
     isGameRunning = false,
     onResolvePackage,
@@ -308,6 +310,13 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                         ) : (
                             <p className="text-xs text-gray-500 truncate">{activeProfile?.mods.length} mods in profile</p>
                         )}
+                        {activeProfile?.platform === 'mac' && activeProfile.launchMode !== 'auto' && (
+                            <p className="text-[10px] text-gray-500 font-bold uppercase tracking-wider">
+                                {activeProfile.launchMode === 'direct'
+                                    ? 'Direct launch'
+                                    : 'Steam launch'}
+                            </p>
+                        )}
                     </div>
                     {/* Header Actions */}
                     <div className="flex gap-1">
@@ -490,12 +499,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                                 <button
                                     onClick={async (e) => {
                                         e.stopPropagation();
-                                        const confirmed = await window.ipcRenderer.confirm(
-                                            'Uninstall Mod',
-                                            `Uninstall ${mod.fullName}?`
-                                        );
-                                        if (!confirmed) return;
-                                        onUninstallMod(mod);
+                                        await onUninstallMod(mod);
                                     }}
                                     className="p-1.5 text-gray-400 hover:text-red-400 hover:bg-red-400/10 rounded-md transition-colors"
                                     title="Uninstall"
@@ -548,7 +552,12 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                     <div className="flex gap-2">
                         <button
                             onClick={() => onInstallToGame()}
-                            className="flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-blue-600 text-white border border-blue-500 shadow-sm"
+                            disabled={isApplying}
+                            className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-white border shadow-sm ${
+                                isApplying
+                                    ? 'bg-gray-700 border-gray-600 cursor-wait opacity-70'
+                                    : 'bg-blue-600 border-blue-500'
+                            }`}
                         >
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
                                 <path d="M8.75 2.75a.75.75 0 0 0-1.5 0v5.69L5.03 6.22a.75.75 0 0 0-1.06 1.06l3.5 3.5a.75.75 0 0 0 1.06 0l3.5-3.5a.75.75 0 0 0-1.06-1.06L8.75 8.44V2.75Z" />
@@ -559,35 +568,39 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                             </span>
                         </button>
 
-                        {activeProfile.platform === 'mac' && (
-                            <button
-                                onClick={() => {
-                                    if (isGameRunning) {
-                                        void onStopProfile();
-                                        return;
-                                    }
-                                    void onLaunchProfile();
-                                }}
-                                disabled={isLaunching}
-                                className={`w-14 flex items-center justify-center rounded-xl text-white border shadow-sm ${isLaunching
-                                    ? 'bg-gray-700 border-gray-600 cursor-wait opacity-70'
-                                    : isGameRunning
-                                        ? 'bg-red-600 border-red-500'
-                                        : 'bg-green-600 border-green-500'
-                                    }`}
-                                title={isGameRunning ? 'Stop Game' : activeProfile.is_vanilla ? 'Launch Vanilla' : 'Launch Modded'}
-                            >
-                                {isGameRunning ? (
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-                                        <rect width="10" height="10" x="3" y="3" rx="1.5" />
-                                    </svg>
-                                ) : (
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="currentColor" viewBox="0 0 16 16" aria-hidden="true">
-                                        <path d="M3 3.732a1.5 1.5 0 0 1 2.305-1.265l6.706 4.267a1.5 1.5 0 0 1 0 2.531l-6.706 4.268A1.5 1.5 0 0 1 3 12.267V3.732Z" />
-                                    </svg>
-                                )}
-                            </button>
-                        )}
+                        <button
+                            onClick={() => {
+                                if (isGameRunning) {
+                                    void onStopProfile();
+                                    return;
+                                }
+                                void onLaunchProfile();
+                            }}
+                            disabled={isLaunching || isApplying}
+                            className={`w-14 flex items-center justify-center rounded-xl text-white border shadow-sm ${(isLaunching || isApplying)
+                                ? 'bg-gray-700 border-gray-600 cursor-wait opacity-70'
+                                : isGameRunning
+                                    ? 'bg-red-600 border-red-500'
+                                    : 'bg-green-600 border-green-500'
+                                }`}
+                            title={isGameRunning
+                                ? 'Stop Game'
+                                : activeProfile.launchMode === 'direct'
+                                    ? (activeProfile.is_vanilla ? 'Launch Vanilla Direct' : 'Launch Direct')
+                                    : activeProfile.is_vanilla
+                                        ? 'Launch Vanilla'
+                                        : 'Launch Modded'}
+                        >
+                            {isGameRunning ? (
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                                    <rect width="10" height="10" x="3" y="3" rx="1.5" />
+                                </svg>
+                            ) : (
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="currentColor" viewBox="0 0 16 16" aria-hidden="true">
+                                    <path d="M3 3.732a1.5 1.5 0 0 1 2.305-1.265l6.706 4.267a1.5 1.5 0 0 1 0 2.531l-6.706 4.268A1.5 1.5 0 0 1 3 12.267V3.732Z" />
+                                </svg>
+                            )}
+                        </button>
                     </div>
                 )}
 

@@ -70,8 +70,8 @@ export interface IElectronAPI {
     clearProfileCache: () => Promise<{ cleared: number; chunks_cleared?: number; bytes_freed: number }>;
     openProfileFolder: (profileId: string) => Promise<void>;
     isGameRunning: (gameIdentifier: string, platform?: 'windows' | 'mac') => Promise<boolean>;
-    launchGameWithMods: (gameIdentifier: string, platform?: 'windows' | 'mac') => Promise<void>;
-    launchGameVanilla: (gameIdentifier: string, platform?: 'windows' | 'mac') => Promise<void>;
+    launchGameWithMods: (gameIdentifier: string, profileId: string, platform?: 'windows' | 'mac') => Promise<void>;
+    launchGameVanilla: (gameIdentifier: string, profileId: string, platform?: 'windows' | 'mac') => Promise<void>;
     stopGame: (gameIdentifier: string, platform?: 'windows' | 'mac') => Promise<void>;
 }
 

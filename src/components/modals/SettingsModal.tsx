@@ -162,7 +162,7 @@ export function SettingsModal({ isOpen, onClose, selectedGame, activeProfile }: 
                     <p className="text-xs text-gray-500 mt-2">
                         {activeProfilePlatform === 'mac'
                             ? "Select your native macOS Steam folder (e.g., ~/Library/Application Support/Steam)."
-                            : "Select the Steam folder inside your bottle (e.g., drive_c/Program Files (x86)/Steam)."}
+                            : "Select the Steam folder inside your Windows prefix or bottle (e.g., drive_c/Program Files (x86)/Steam)."}
                     </p>
                     </div>
                 )}

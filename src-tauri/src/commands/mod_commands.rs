@@ -3,6 +3,11 @@ use futures_util::StreamExt;
 use tauri::{command, AppHandle, Emitter, Manager};
 use crate::models::shared::*;
 use crate::utils::file_ops::*;
+use crate::utils::mod_manifest::{
+    backup_existing_mod_files,
+    save_owned_mod_manifest,
+    GAME_MANIFEST_SCOPE,
+};
 use crate::commands::game_commands::get_game_path;
 
 fn is_bepinex_shell_script(name: &str) -> bool {
@@ -96,7 +101,24 @@ fn normalize_regular_mod_entry(
     relative_path: &std::path::Path,
     mod_name: &str,
 ) -> Option<std::path::PathBuf> {
-    let normalized = relative_path
+    fn is_regular_mod_anchor(component: &str) -> bool {
+        matches!(
+            component.to_lowercase().as_str(),
+            "bepinex"
+                | "plugins"
+                | "patchers"
+                | "core"
+                | "config"
+                | "monomod"
+                | "doorstop_libs"
+                | "doorstop_config.ini"
+                | "libdoorstop.dylib"
+                | "run_bepinex.sh"
+                | "winhttp.dll"
+        )
+    }
+
+    let mut normalized = relative_path
         .components()
         .filter_map(|component| match component {
             std::path::Component::Normal(value) => Some(value.to_string_lossy().to_string()),
@@ -108,11 +130,26 @@ fn normalize_regular_mod_entry(
         return None;
     }
 
+    if let Some(anchor_index) = normalized
+        .iter()
+        .position(|component| is_regular_mod_anchor(component))
+    {
+        if anchor_index > 0 {
+            normalized = normalized.split_off(anchor_index);
+        }
+    }
+
     let first = normalized[0].to_lowercase();
     let remainder = normalized.iter().skip(1).cloned().collect::<Vec<_>>();
 
-    let mut path = match first.as_str() {
-        "bepinex" => std::path::PathBuf::new(),
+    match first.as_str() {
+        "bepinex" => {
+            let mut root = std::path::PathBuf::from("BepInEx");
+            for part in &remainder {
+                root.push(part);
+            }
+            return Some(root);
+        }
         "plugins" | "patchers" | "core" | "config" | "monomod" => {
             let mut root = std::path::PathBuf::from("BepInEx");
             root.push(&first);
@@ -140,13 +177,7 @@ fn normalize_regular_mod_entry(
             }
             return Some(fallback);
         }
-    };
-
-    for part in remainder {
-        path.push(part);
     }
-
-    Some(path)
 }
 
 fn extract_regular_mod_to_root<R: std::io::Read + std::io::Seek>(
@@ -179,6 +210,33 @@ fn extract_regular_mod_to_root<R: std::io::Read + std::io::Seek>(
     }
 
     Ok(())
+}
+
+fn collect_regular_mod_files<R: std::io::Read + std::io::Seek>(
+    archive: &mut zip::ZipArchive<R>,
+    mod_name: &str,
+) -> Result<Vec<std::path::PathBuf>, String> {
+    let mut files = Vec::new();
+
+    for i in 0..archive.len() {
+        let file = archive.by_index(i).map_err(|e| e.to_string())?;
+        if file.name().ends_with('/') {
+            continue;
+        }
+
+        let enclosed = match file.enclosed_name() {
+            Some(path) => path.to_path_buf(),
+            None => continue,
+        };
+        let Some(relative_target) = normalize_regular_mod_entry(&enclosed, mod_name) else {
+            continue;
+        };
+        files.push(relative_target);
+    }
+
+    files.sort();
+    files.dedup();
+    Ok(files)
 }
 
 fn extract_lovely_zip_to_game_root<R: std::io::Read + std::io::Seek>(
@@ -340,9 +398,8 @@ fn official_bepinex_version_candidates(thunderstore_version: &str) -> Vec<String
             parts[2][2..4].parse::<u32>(),
         ) {
             candidates.push(format!("{}.{}.{}.{}", major, minor, patch_major, patch_minor));
-            if patch_minor == 0 {
-                candidates.push(format!("{}.{}.{}", major, minor, patch_major));
-            }
+            candidates.push(format!("{}.{}.{}", major, minor, patch_major));
+            candidates.push(format!("{}.{}.{}.0", major, minor, patch_major));
         }
     }
 
@@ -368,6 +425,71 @@ fn direct_bepinex_asset_candidates(official_version: &str) -> Vec<String> {
     assets
 }
 
+fn select_macos_bepinex_asset_url(release: &serde_json::Value) -> Option<String> {
+    let assets = release["assets"].as_array()?;
+
+    let collect_assets = || {
+        assets
+            .iter()
+            .filter_map(|asset| {
+                let name = asset["name"].as_str()?;
+                let url = asset["browser_download_url"].as_str()?;
+                Some((name.to_lowercase(), url.to_string()))
+            })
+            .collect::<Vec<_>>()
+    };
+
+    let asset_entries = collect_assets();
+    asset_entries
+        .iter()
+        .find(|(name, _)| name.contains("macos_x64") && name.ends_with(".zip"))
+        .or_else(|| {
+            asset_entries
+                .iter()
+                .find(|(name, _)| name.contains("unix") && name.ends_with(".zip"))
+        })
+        .map(|(_, url)| url.clone())
+}
+
+async fn download_bepinex_release_asset(
+    client: &reqwest::Client,
+    api_url: &str,
+    context: &str,
+) -> Result<Option<Vec<u8>>, String> {
+    let response = match client.get(api_url).send().await {
+        Ok(response) => response,
+        Err(_) => return Ok(None),
+    };
+    if !response.status().is_success() {
+        return Ok(None);
+    }
+
+    let release = response
+        .json::<serde_json::Value>()
+        .await
+        .map_err(|e| format!("Failed to parse {} release metadata: {}", context, e))?;
+    let Some(download_url) = select_macos_bepinex_asset_url(&release) else {
+        return Ok(None);
+    };
+
+    eprintln!(
+        "[install_mod] Falling back to official macOS BepInEx runtime: {}",
+        download_url
+    );
+    let bytes = client
+        .get(&download_url)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to download official BepInEx runtime: {}", e))?
+        .error_for_status()
+        .map_err(|e| format!("Official BepInEx runtime request failed: {}", e))?
+        .bytes()
+        .await
+        .map_err(|e| format!("Failed to read official BepInEx runtime: {}", e))?;
+
+    Ok(Some(bytes.to_vec()))
+}
+
 async fn download_official_macos_bepinex_pack(thunderstore_version: &str) -> Result<Vec<u8>, String> {
     let version_candidates = official_bepinex_version_candidates(thunderstore_version);
     let client = reqwest::Client::builder()
@@ -382,48 +504,10 @@ async fn download_official_macos_bepinex_pack(thunderstore_version: &str) -> Res
             tag
         );
 
-        if let Ok(response) = client.get(&api_url).send().await {
-            if response.status().is_success() {
-                if let Ok(release) = response.json::<serde_json::Value>().await {
-                    if let Some(download_url) = release["assets"].as_array().and_then(|assets| {
-                        assets
-                            .iter()
-                            .filter_map(|asset| {
-                                let name = asset["name"].as_str()?;
-                                let url = asset["browser_download_url"].as_str()?;
-                                Some((name.to_lowercase(), url.to_string()))
-                            })
-                            .find(|(name, _)| name.contains("macos_x64") && name.ends_with(".zip"))
-                            .or_else(|| {
-                                assets
-                                    .iter()
-                                    .filter_map(|asset| {
-                                        let name = asset["name"].as_str()?;
-                                        let url = asset["browser_download_url"].as_str()?;
-                                        Some((name.to_lowercase(), url.to_string()))
-                                    })
-                                    .find(|(name, _)| name.contains("unix") && name.ends_with(".zip"))
-                            })
-                            .map(|(_, url)| url)
-                    }) {
-                        eprintln!(
-                            "[install_mod] Falling back to official macOS BepInEx runtime: {}",
-                            download_url
-                        );
-                        let bytes = client
-                            .get(&download_url)
-                            .send()
-                            .await
-                            .map_err(|e| format!("Failed to download official BepInEx runtime: {}", e))?
-                            .error_for_status()
-                            .map_err(|e| format!("Official BepInEx runtime request failed: {}", e))?
-                            .bytes()
-                            .await
-                            .map_err(|e| format!("Failed to read official BepInEx runtime: {}", e))?;
-                        return Ok(bytes.to_vec());
-                    }
-                }
-            }
+        if let Some(bytes) =
+            download_bepinex_release_asset(&client, &api_url, &format!("BepInEx {}", tag)).await?
+        {
+            return Ok(bytes);
         }
 
         for asset_name in direct_bepinex_asset_candidates(official_version) {
@@ -441,6 +525,44 @@ async fn download_official_macos_bepinex_pack(thunderstore_version: &str) -> Res
                         .bytes()
                         .await
                         .map_err(|e| format!("Failed to read official BepInEx asset: {}", e))?;
+                    return Ok(bytes.to_vec());
+                }
+            }
+        }
+    }
+
+    let releases_url = "https://api.github.com/repos/BepInEx/BepInEx/releases?per_page=20";
+    if let Ok(response) = client.get(releases_url).send().await {
+        if response.status().is_success() {
+            let releases = response
+                .json::<Vec<serde_json::Value>>()
+                .await
+                .map_err(|e| format!("Failed to parse BepInEx releases list: {}", e))?;
+
+            for release in releases {
+                let Some(tag_name) = release["tag_name"].as_str() else {
+                    continue;
+                };
+                if !tag_name.starts_with("v5.") {
+                    continue;
+                }
+
+                if let Some(download_url) = select_macos_bepinex_asset_url(&release) {
+                    eprintln!(
+                        "[install_mod] Falling back to latest compatible BepInEx 5 macOS runtime: {} ({})",
+                        tag_name,
+                        download_url
+                    );
+                    let bytes = client
+                        .get(&download_url)
+                        .send()
+                        .await
+                        .map_err(|e| format!("Failed to download fallback BepInEx runtime: {}", e))?
+                        .error_for_status()
+                        .map_err(|e| format!("Fallback BepInEx runtime request failed: {}", e))?
+                        .bytes()
+                        .await
+                        .map_err(|e| format!("Failed to read fallback BepInEx runtime: {}", e))?;
                     return Ok(bytes.to_vec());
                 }
             }
@@ -620,6 +742,48 @@ pub(crate) fn extract_bepinex_pack_to_root<R: std::io::Read + std::io::Seek>(
     }
 
     Ok(())
+}
+
+fn collect_bepinex_pack_files<R: std::io::Read + std::io::Seek>(
+    archive: &mut zip::ZipArchive<R>,
+    target_is_macos: bool,
+) -> Result<Vec<std::path::PathBuf>, String> {
+    let (is_bepinex_pack, bepinex_prefix) = detect_bepinex_structure(archive);
+    if !is_bepinex_pack {
+        return Err("Archive does not look like a BepInEx runtime".to_string());
+    }
+
+    let prefix = bepinex_prefix.unwrap_or_default();
+    let mut files = Vec::new();
+
+    for i in 0..archive.len() {
+        let file = archive.by_index(i).map_err(|e| e.to_string())?;
+        let name = file.name().to_string();
+        if name.ends_with('/') {
+            continue;
+        }
+
+        let relative_path = if !prefix.is_empty() && name.starts_with(&prefix) {
+            &name[prefix.len()..]
+        } else {
+            &name
+        };
+
+        if relative_path.is_empty() {
+            continue;
+        }
+
+        let Some(normalized_relative_path) =
+            normalize_bepinex_pack_entry(relative_path, target_is_macos)
+        else {
+            continue;
+        };
+        files.push(normalized_relative_path);
+    }
+
+    files.sort();
+    files.dedup();
+    Ok(files)
 }
 
 fn normalize_bepinex_pack_entry(relative_path: &str, target_is_macos: bool) -> Option<std::path::PathBuf> {
@@ -1032,6 +1196,29 @@ pub async fn install_mod(app: AppHandle, profile_id: String, download_url: Strin
     }
 
     // Install to game folder
+    let managed_files = {
+        let cursor = std::io::Cursor::new(&runtime_bytes);
+        let mut manifest_archive = zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
+
+        if is_bepinex_pack {
+            collect_bepinex_pack_files(&mut manifest_archive, target_is_macos)?
+        } else {
+            collect_regular_mod_files(&mut manifest_archive, &mod_name)?
+        }
+    };
+    let backed_up_files = if managed_files.is_empty() {
+        Vec::new()
+    } else {
+        backup_existing_mod_files(
+            &app,
+            &profile_id,
+            GAME_MANIFEST_SCOPE,
+            &mod_name,
+            game_dir,
+            &managed_files,
+        )?
+    };
+
     let cursor = std::io::Cursor::new(&runtime_bytes);
     let mut archive = zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
 
@@ -1052,6 +1239,18 @@ pub async fn install_mod(app: AppHandle, profile_id: String, download_url: Strin
         if target_is_macos {
             migrate_root_plugins_into_bepinex(game_dir)?;
         }
+    }
+
+    if !managed_files.is_empty() {
+        save_owned_mod_manifest(
+            &app,
+            &profile_id,
+            GAME_MANIFEST_SCOPE,
+            &mod_name,
+            game_dir,
+            &managed_files,
+            &backed_up_files,
+        )?;
     }
 
     // LEGACY MODE: Also save to profile cache folder

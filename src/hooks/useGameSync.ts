@@ -31,16 +31,23 @@ export function useGameSync({
     setShowCrossOverGuide,
     installModWithDependencies,
 }: UseGameSyncProps) {
-    const { profiles, updateProfile } = useProfileStore();
+    const { updateProfile } = useProfileStore();
+
+    const persistProfilesNow = async () => {
+        const latestProfiles = useProfileStore.getState().profiles;
+        await window.ipcRenderer.saveProfiles(latestProfiles);
+        return latestProfiles;
+    };
 
     const handleSyncToGame = async (isVanillaOverride?: boolean) => {
-        const activeProfile = profiles.find(p => p.id === activeProfileId);
+        const activeProfile = useProfileStore.getState().profiles.find(p => p.id === activeProfileId);
         const community = activeProfile?.gameIdentifier || selectedCommunity;
         if (!activeProfile || !community) return;
 
         try {
             // Vanilla override — direct call, no BepInEx setup needed
             if (isVanillaOverride !== undefined) {
+                await persistProfilesNow();
                 const disabledMods = activeProfile.mods.filter(m => !m.enabled).map(m => m.fullName);
                 await window.ipcRenderer.installToGame(community, activeProfile.id, disabledMods, isVanillaOverride);
                 return;
@@ -79,6 +86,8 @@ export function useGameSync({
                 }
                 setProgressState(prev => ({ ...prev, isOpen: false }));
             }
+
+            await persistProfilesNow();
 
             // ── Profile sync ──────────────────────────────────────────────────────
             const syncResult = await window.ipcRenderer.syncProfileToGame(activeProfile.id, community, legacyInstallMode);
@@ -241,9 +250,7 @@ export function useGameSync({
                 }));
             }
 
-            const latestProfile = useProfileStore
-                .getState()
-                .profiles.find((p) => p.id === activeProfile.id) || activeProfile;
+            const latestProfile = useProfileStore.getState().profiles.find((p) => p.id === activeProfile.id) || activeProfile;
             const disabledMods = latestProfile.mods.filter((m) => !m.enabled).map((m) => m.fullName);
 
             setProgressState({
@@ -299,13 +306,20 @@ export function useGameSync({
             if (community === 'balatro' && message !== 'Profile already synced! No changes needed.') {
                 message += '\n\nBalatro macOS: mod files are synced to ~/Library/Application Support/Balatro/Mods. Launch the modded game with run_lovely_macos.sh.';
             } else if (latestProfile.platform === 'mac' && message !== 'Profile already synced! No changes needed.') {
-                message += '\n\nmacOS: Steam launch options are now managed automatically by r2modmac.';
+                if (latestProfile.launchMode === 'direct') {
+                    message += '\n\nmacOS: direct launch mode is enabled, so the local wrapper will start the game without restarting Steam.';
+                } else {
+                    message += '\n\nmacOS: use the sidebar play button to launch this profile. Steam launch options are applied automatically when a valid Steam install is available.';
+                }
+            } else if (message !== 'Profile already synced! No changes needed.') {
+                message += '\n\nWindows/Wine: you can now use the sidebar play button to launch this profile directly.';
             }
 
             await window.ipcRenderer.alert('Success', message);
 
             const syncedProfile = useProfileStore.getState().profiles.find(p => p.id === activeProfileId);
-            if (syncedProfile?.platform !== 'mac') {
+            const isCrossOverProfile = typeof gamePath === 'string' && gamePath.toLowerCase().includes('crossover');
+            if (syncedProfile?.platform !== 'mac' && isCrossOverProfile) {
                 setShowCrossOverGuide(true);
             }
 

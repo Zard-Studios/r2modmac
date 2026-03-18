@@ -36,7 +36,7 @@ export function useProfileActions({
             if (!gamePath) {
                 await window.ipcRenderer.alert(
                     'Game Path Required',
-                    'Please configure the game directory in Settings before importing profiles.\n\nGo to Settings → Game Directory → Set the path to your Wine/CrossOver game folder.'
+                    'Please configure the game directory in Settings before importing profiles.\n\nGo to Settings → Game Directory → Set the path to your Windows game folder inside Wine, CrossOver, Wineskin, or another compatible wrapper.'
                 );
                 return;
             }
