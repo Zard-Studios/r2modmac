@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { PackageVersion, Package } from '../../types/thunderstore';
 import type { InstalledMod } from '../../types/profile';
 import DOMPurify from 'dompurify';
+import { LikeStat } from '../LikeStat';
 
 interface ModDetailModalProps {
     pkg: Package;
@@ -206,6 +207,12 @@ export function ModDetailModal({
                                     </svg>
                                     {mod.downloads.toLocaleString()}
                                 </span>
+                                <LikeStat
+                                    count={pkg.rating_score}
+                                    className="gap-1.5 text-rose-400"
+                                    iconClassName="w-4 h-4"
+                                    title={`${pkg.rating_score.toLocaleString()} likes`}
+                                />
                                 <span className="flex items-center gap-1.5" title={dependencies.length > 0 ? `Package: ${formatBytes(mod.file_size)} + ${dependencies.length} dependencies` : undefined}>
                                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />

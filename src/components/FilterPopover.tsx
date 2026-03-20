@@ -98,7 +98,7 @@ export function FilterPopover({ options, onChange, availableCategories }: Filter
                                 className="w-full h-8 bg-gray-900 border border-gray-700 rounded-lg px-3 text-white focus:outline-none focus:border-blue-500"
                             >
                                 <option value="downloads">Most Downloaded</option>
-                                <option value="rating">Top Rated</option>
+                                <option value="rating">Most Reviewed</option>
                                 <option value="updated">Last Updated</option>
                                 <option value="alphabetical">Alphabetical</option>
                             </select>

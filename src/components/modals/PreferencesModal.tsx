@@ -201,8 +201,8 @@ export default function PreferencesModal({
                                 <div className="flex items-center gap-4">
                                     <RowIcon kind="parallel" />
                                     <div>
-                                        <p className="text-[15px] font-medium text-white">Run Mod Operations in Parallel</p>
-                                        <p className="text-[13px] text-gray-400 mt-0.5 leading-snug">Speeds up large operations and Apply to Game syncing.</p>
+                                        <p className="text-[15px] font-medium text-white">Download Mods in Parallel</p>
+                                        <p className="text-[13px] text-gray-400 mt-0.5 leading-snug">Downloads mods in parallel for faster installation.</p>
                                     </div>
                                 </div>
                                 <Toggle value={installInParallel} onChange={setInstallInParallel} />

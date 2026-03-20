@@ -179,6 +179,7 @@ export function VirtualizedModGrid({ packages, installedMods, onInstall, onUnins
                                         <ModCard
                                             key={pkg.uuid4}
                                             mod={pkg.versions[0]}
+                                            likesCount={pkg.rating_score}
                                             onInstall={() => onInstall(pkg)}
                                             onUninstall={() => onUninstall(pkg)}
                                             onClick={() => onModClick(pkg)}
@@ -227,6 +228,7 @@ export function VirtualizedModGrid({ packages, installedMods, onInstall, onUnins
                             <ModListItem
                                 key={pkg.uuid4}
                                 mod={pkg.versions[0]}
+                                likesCount={pkg.rating_score}
                                 onInstall={() => onInstall(pkg)}
                                 onUninstall={() => onUninstall(pkg)}
                                 onClick={() => onModClick(pkg)}
