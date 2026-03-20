@@ -37,7 +37,6 @@ export function ProfileList({
     const [editingProfile, setEditingProfile] = useState<Profile | null>(null);
     const [newProfileName, setNewProfileName] = useState('');
     const [editName, setEditName] = useState('');
-    const [editLaunchMode, setEditLaunchMode] = useState<'auto' | 'steam' | 'direct'>('auto');
     const [importCode, setImportCode] = useState('');
     const [selectedPlatform, setSelectedPlatform] = useState<'windows' | 'mac'>('windows');
     // null = no pending import; string = code; { file: string } = file
@@ -54,7 +53,6 @@ export function ProfileList({
                 event.stopPropagation();
                 setEditingProfile(null);
                 setEditName('');
-                setEditLaunchMode('auto');
                 return;
             }
 
@@ -113,18 +111,10 @@ export function ProfileList({
     const handleUpdateProfile = (e: React.FormEvent) => {
         e.preventDefault();
         if (editingProfile && editName.trim()) {
-            onUpdateProfile(editingProfile.id, { name: editName.trim(), launchMode: editLaunchMode });
+            onUpdateProfile(editingProfile.id, { name: editName.trim() });
             setEditingProfile(null);
             setEditName('');
-            setEditLaunchMode('auto');
         }
-    };
-
-    const getLaunchModeForProfile = (profile: Profile): 'auto' | 'steam' | 'direct' => {
-        if (profile.launchMode === 'steam' || profile.launchMode === 'direct') {
-            return profile.launchMode;
-        }
-        return profile.distribution === 'manual' ? 'direct' : 'auto';
     };
 
     const handleImageSelect = async () => {
@@ -249,12 +239,11 @@ export function ProfileList({
                             className="bg-gray-800 border border-gray-700 rounded-xl p-6 hover:border-blue-500 transition-all cursor-pointer flex flex-col min-h-[200px] group relative overflow-hidden"
                         >
                             <div className="absolute top-0 right-0 p-6 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity z-10">
-                                <button
+                                    <button
                                         onClick={(e) => {
                                             e.stopPropagation();
                                             setEditingProfile(profile);
                                             setEditName(profile.name);
-                                            setEditLaunchMode(getLaunchModeForProfile(profile));
                                         }}
                                         className="w-8 h-8 bg-gray-700 hover:bg-gray-600 text-gray-300 hover:text-white rounded-full flex items-center justify-center transition-colors"
                                         title="Edit Profile"
@@ -584,25 +573,9 @@ export function ProfileList({
                                     className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 mb-6"
                                     autoFocus
                                 />
-                                <div className="mb-6">
-                                    <label className="block text-sm text-gray-400 mb-2">Launch Mode</label>
-                                    <select
-                                        value={editLaunchMode}
-                                        onChange={(e) => setEditLaunchMode(e.target.value as 'auto' | 'steam' | 'direct')}
-                                        className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-blue-500"
-                                    >
-                                        <option value="auto">Auto</option>
-                                        <option value="steam">Steam</option>
-                                        <option value="direct">Direct</option>
-                                    </select>
-                                    <p className="text-xs text-gray-500 mt-2">
-                                        Steam keeps the wrapper inside Steam. Direct launches the local wrapper without restarting Steam.
-                                    </p>
-                                </div>
                                 <div className="flex gap-3">
                                     <Button variant="secondary" fullWidth onClick={() => {
                                         setEditingProfile(null);
-                                        setEditLaunchMode('auto');
                                     }} type="button">
                                         Cancel
                                     </Button>
