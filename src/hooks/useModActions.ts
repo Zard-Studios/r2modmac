@@ -59,6 +59,11 @@ export function useModActions({
 }: UseModActionsProps) {
     const { profiles, addMod, removeMod, updateProfile } = useProfileStore();
 
+    const getPackageKey = (fullName: string) => {
+        const parts = fullName.split('-');
+        return parts.length >= 2 ? `${parts[0]}-${parts[1]}` : fullName;
+    };
+
     const runWithConcurrency = async (tasks: Array<() => Promise<void>>, maxConcurrency: number) => {
         for (let i = 0; i < tasks.length; i += maxConcurrency) {
             const batch = tasks.slice(i, i + maxConcurrency);
@@ -249,15 +254,20 @@ export function useModActions({
             return;
         }
 
-        const modDependencies = version.dependencies
-            .map(dep => { const parts = dep.split('-'); return parts.length >= 2 ? `${parts[0]}-${parts[1]}` : dep; })
-            .filter(dep => !dep.toLowerCase().includes('bepinexpack'));
+        const targetPackageKey = getPackageKey(pkg.full_name);
+        const modDependencies = Array.from(new Set(
+            version.dependencies
+                .map(getPackageKey)
+                .filter((dep) => dep.length > 0)
+                .filter((dep) => dep.toLowerCase() !== targetPackageKey.toLowerCase())
+                .filter((dep) => !dep.toLowerCase().includes('bepinexpack'))
+        ));
 
         const orphanDepsDetails: { name: string; icon?: string }[] = [];
 
         if (modDependencies.length > 0 && selectedCommunity) {
             const otherMods = profile.mods.filter(m => !m.fullName.startsWith(pkg.full_name));
-            const otherModNames = otherMods.map(m => { const parts = m.fullName.split('-'); return parts.length >= 2 ? `${parts[0]}-${parts[1]}` : m.fullName; });
+            const otherModNames = otherMods.map((m) => getPackageKey(m.fullName));
             const otherModsDeps = new Set<string>();
 
             if (otherModNames.length > 0) {
@@ -267,8 +277,10 @@ export function useModActions({
                         const otherVer = otherPkg.versions[0];
                         if (otherVer) {
                             for (const dep of otherVer.dependencies) {
-                                const parts = dep.split('-');
-                                otherModsDeps.add(parts.length >= 2 ? `${parts[0]}-${parts[1]}` : dep);
+                                const depKey = getPackageKey(dep);
+                                if (depKey.toLowerCase() !== targetPackageKey.toLowerCase()) {
+                                    otherModsDeps.add(depKey);
+                                }
                             }
                         }
                     }
@@ -277,13 +289,15 @@ export function useModActions({
 
             for (const dep of modDependencies) {
                 if (!otherModsDeps.has(dep)) {
-                    const installedDep = profile.mods.find(m => m.fullName.startsWith(dep));
+                    const installedDep = profile.mods.find((m) => getPackageKey(m.fullName).toLowerCase() === dep.toLowerCase());
                     if (installedDep) orphanDepsDetails.push({ name: dep, icon: installedDep.iconUrl });
                 }
             }
         }
 
-        const allInstalledDeps = modDependencies.filter(dep => profile.mods.some(m => m.fullName.startsWith(dep)));
+        const allInstalledDeps = modDependencies.filter((dep) =>
+            profile.mods.some((m) => getPackageKey(m.fullName).toLowerCase() === dep.toLowerCase())
+        );
 
         if (allInstalledDeps.length === 0) {
             const confirmed = await window.ipcRenderer.confirm('Uninstall Mod', `Uninstall ${pkg.name}?`);

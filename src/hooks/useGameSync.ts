@@ -311,8 +311,6 @@ export function useGameSync({
                 } else {
                     message += '\n\nmacOS: use the sidebar play button to launch this profile. Steam launch options are applied automatically when a valid Steam install is available.';
                 }
-            } else if (message !== 'Profile already synced! No changes needed.') {
-                message += '\n\nWindows/Wine: you can now use the sidebar play button to launch this profile directly.';
             }
 
             await window.ipcRenderer.alert('Success', message);
