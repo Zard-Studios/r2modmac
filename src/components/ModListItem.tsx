@@ -82,21 +82,21 @@ export const ModListItem = memo(function ModListItem({ mod, likesCount, onInstal
             </div>
 
             {/* Stats */}
-            <div className={`flex flex-col items-end gap-1 text-xs text-gray-500 font-medium justify-center flex-shrink-0 ${isBrowsing ? 'ml-auto mr-6' : 'w-24 mr-4'}`}>
-                <div className="flex items-center gap-1.5" title="Downloads">
+            <div className={`flex flex-col items-end gap-1 text-xs text-gray-500 font-medium justify-center flex-shrink-0 ${isBrowsing ? 'ml-auto mr-4' : 'w-24 mr-2'}`}>
+                <div className="flex items-center flex-row-reverse gap-1.5" title="Downloads">
                     <svg className="w-3.5 h-3.5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
                     <span className="text-gray-400">{mod.downloads.toLocaleString()}</span>
                 </div>
 
-                <LikeStat count={likesCount} className="gap-1.5 text-rose-400" iconClassName="w-3.5 h-3.5" />
+                <LikeStat count={likesCount} className="flex-row-reverse gap-1.5 text-rose-400" iconClassName="w-3.5 h-3.5" />
 
                 {mod.dependencies && mod.dependencies.length >= 5 ? (
-                    <div className="flex items-center gap-1.5 text-indigo-400" title="Modpack (contains multiple mods)">
+                    <div className="flex items-center flex-row-reverse gap-1.5 text-indigo-400" title="Modpack (contains multiple mods)">
                         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
                         <span>{mod.dependencies.length} mods</span>
                     </div>
                 ) : (
-                    <div className="flex items-center gap-1.5" title="File Size">
+                    <div className="flex items-center flex-row-reverse gap-1.5" title="File Size">
                         <svg className="w-3.5 h-3.5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" /></svg>
                         <span className="text-gray-400">{formatBytes(mod.file_size)}</span>
                     </div>
@@ -105,7 +105,7 @@ export const ModListItem = memo(function ModListItem({ mod, likesCount, onInstal
 
             {/* Actions */}
             {!isBrowsing && (
-                <div className="flex items-center gap-2 pl-4 border-l border-gray-700 flex-shrink-0 min-w-[140px] justify-end">
+                <div className="flex items-center gap-1.5 pl-2 border-l border-gray-700 flex-shrink-0 min-w-[136px] justify-end">
                     {installStatus === 'installed' && onUninstall && (
                         <button
                             onClick={(e) => {
