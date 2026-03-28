@@ -244,6 +244,7 @@ function App() {
   const [defaultModViewMode, setDefaultModViewMode] = useState<'grid' | 'list'>('grid')
   const [isBrowsingMode, setIsBrowsingMode] = useState(false)
   const isInitialLoadRunningRef = useRef(false)
+  const packagesLoadRequestRef = useRef(0)
 
   const {
     profiles,
@@ -549,12 +550,14 @@ function App() {
   };
 
   const loadPackages = async (communityId: string, pageNum: number, reset: boolean = false) => {
-    // Prevent duplicate calls while loading
-    if (loadingMods) return;
+    const requestId = ++packagesLoadRequestRef.current;
+    const isStaleRequest = () => requestId !== packagesLoadRequestRef.current;
+
     setLoadingMods(true)
 
     if (reset) {
       setAllPackages([])
+      setAvailableCategories([])
     }
 
     const withTimeout = async <T,>(promise: Promise<T>, ms: number, label: string): Promise<T> => {
@@ -578,12 +581,14 @@ function App() {
           45_000,
           'Package fetch'
         );
+        if (isStaleRequest()) return;
         // Now that cache is populated, fetch available categories
         const cats = await withTimeout(
           window.ipcRenderer.getAvailableCategories(communityId),
           10_000,
           'Category fetch'
         );
+        if (isStaleRequest()) return;
         setAvailableCategories(cats)
       }
 
@@ -600,10 +605,11 @@ function App() {
         filterOptions.categories,
         filterOptions.mods,
         filterOptions.modpacks
-      ),
+        ),
         20_000,
         'Package query'
       );
+      if (isStaleRequest()) return;
 
 
 
@@ -611,6 +617,7 @@ function App() {
       const updated = reset ? newPackages : [...allPackages, ...newPackages]
       setAllPackages(updated)
     } catch (err) {
+      if (isStaleRequest()) return;
       console.error('Failed to load packages', err)
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.toLowerCase().includes('timed out')) {
@@ -620,7 +627,9 @@ function App() {
         );
       }
     } finally {
-      setLoadingMods(false)
+      if (requestId === packagesLoadRequestRef.current) {
+        setLoadingMods(false)
+      }
     }
   }
 
