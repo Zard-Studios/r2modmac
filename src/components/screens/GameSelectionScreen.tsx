@@ -10,6 +10,8 @@ export interface GameSelectionScreenProps {
     selectedCommunity: string | null;
     onSelectCommunity: (id: string) => void;
     onOpenPreferences: () => void;
+    searchQuery: string;
+    onSearchQueryChange: (value: string) => void;
 }
 
 export function GameSelectionScreen({
@@ -19,9 +21,10 @@ export function GameSelectionScreen({
     loading,
     selectedCommunity,
     onSelectCommunity,
-    onOpenPreferences
+    onOpenPreferences,
+    searchQuery,
+    onSearchQueryChange,
 }: GameSelectionScreenProps) {
-    const [gameSearchQuery, setGameSearchQuery] = useState('');
     const [showWindowsGame, setShowWindowsGame] = useState(true);
     const [showMacGame, setShowMacGame] = useState(false);
     const [favoriteGames, setFavoriteGames] = useState<string[]>([]);
@@ -54,8 +57,8 @@ export function GameSelectionScreen({
 
     const filteredCommunities = communities
         .filter(c =>
-            c.name.toLowerCase().includes(gameSearchQuery.toLowerCase()) ||
-            c.identifier.toLowerCase().includes(gameSearchQuery.toLowerCase())
+            c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            c.identifier.toLowerCase().includes(searchQuery.toLowerCase())
         )
         .filter(c => {
             const platform = communityPlatforms[c.identifier];
@@ -93,8 +96,12 @@ export function GameSelectionScreen({
                             <input
                                 className="w-full h-full min-h-[56px] bg-gray-800 border border-gray-700 pl-12 pr-24 py-3 sm:py-4 rounded-xl text-base sm:text-lg text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 transition-all shadow-lg"
                                 placeholder="Search for a game..."
-                                value={gameSearchQuery}
-                                onChange={e => setGameSearchQuery(e.target.value)}
+                                value={searchQuery}
+                                onChange={e => onSearchQueryChange(e.target.value)}
+                                spellCheck={false}
+                                autoCorrect="off"
+                                autoCapitalize="none"
+                                autoComplete="off"
                                 autoFocus
                             />
 
@@ -162,6 +169,7 @@ export function GameSelectionScreen({
                                 communityPlatforms={communityPlatforms}
                                 favoriteGames={favoriteGames}
                                 onToggleFavorite={toggleFavorite}
+                                searchQuery={searchQuery}
                             />
                         </div>
                     )}

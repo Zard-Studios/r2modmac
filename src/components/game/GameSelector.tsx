@@ -11,6 +11,7 @@ interface GameSelectorProps {
     communityPlatforms: Record<string, CommunityPlatformInfo>;
     favoriteGames: string[];
     onToggleFavorite: (identifier: string, e: React.MouseEvent) => void;
+    searchQuery: string;
 }
 
 const gradients = [
@@ -54,16 +55,18 @@ interface GameCardProps {
     imageUrl?: string;
     platform?: CommunityPlatformInfo;
     eager?: boolean;
+    searchQuery: string;
     onSelect: (identifier: string) => void;
     onToggleFavorite: (identifier: string, e: MouseEvent) => void;
 }
 
 const GameCard = memo(function GameCard({
-    community, isSelected, isFavorite, imageUrl, platform, eager = false, onSelect, onToggleFavorite,
+    community, isSelected, isFavorite, imageUrl, platform, eager = false, searchQuery, onSelect, onToggleFavorite,
 }: GameCardProps) {
     const gradient = getGradient(community.name);
     const isWindowsCompatible = platform?.windows ?? true;
     const isMacCompatible = platform?.mac ?? false;
+    const showFavoriteAlways = searchQuery.trim().length > 0;
 
     return (
         <button
@@ -126,7 +129,9 @@ const GameCard = memo(function GameCard({
                 <div
                     className={`absolute top-2 left-2 p-1.5 rounded-full transition-[opacity,transform,background-color] duration-200 z-20 ${isFavorite
                         ? 'bg-black/50 text-yellow-400 opacity-100 hover:scale-110'
-                        : 'bg-black/30 text-gray-400 opacity-0 group-hover:opacity-100 hover:text-white hover:bg-blue-500/50'
+                        : showFavoriteAlways
+                            ? 'bg-black/30 text-gray-400 opacity-100 hover:scale-110 hover:text-white hover:bg-blue-500/50'
+                            : 'bg-black/30 text-gray-400 opacity-0 group-hover:opacity-100 hover:text-white hover:bg-blue-500/50'
                         }`}
                     onClick={(e) => onToggleFavorite(community.identifier, e)}
                     title={isFavorite ? "Remove from favorites" : "Add to favorites"}
@@ -146,7 +151,7 @@ const GameCard = memo(function GameCard({
     );
 });
 
-export function GameSelector({ communities, selectedCommunity, onSelect, communityImages, communityPlatforms, favoriteGames, onToggleFavorite }: GameSelectorProps) {
+export function GameSelector({ communities, selectedCommunity, onSelect, communityImages, communityPlatforms, favoriteGames, onToggleFavorite, searchQuery }: GameSelectorProps) {
     const favorites = useMemo(
         () => communities.filter(c => favoriteGames.includes(c.identifier)),
         [communities, favoriteGames]
@@ -218,6 +223,7 @@ export function GameSelector({ communities, selectedCommunity, onSelect, communi
                                 imageUrl={communityImages[community.identifier]}
                                 platform={communityPlatforms[community.identifier]}
                                 eager={index < 18}
+                                searchQuery={searchQuery}
                                 onSelect={onSelect}
                                 onToggleFavorite={onToggleFavorite}
                             />
@@ -246,6 +252,7 @@ export function GameSelector({ communities, selectedCommunity, onSelect, communi
                                 imageUrl={communityImages[community.identifier]}
                                 platform={communityPlatforms[community.identifier]}
                                 eager={favorites.length === 0 && index < 24}
+                                searchQuery={searchQuery}
                                 onSelect={onSelect}
                                 onToggleFavorite={onToggleFavorite}
                             />

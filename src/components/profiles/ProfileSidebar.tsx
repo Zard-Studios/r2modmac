@@ -367,6 +367,10 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
                         placeholder="search profile mods..."
+                        spellCheck={false}
+                        autoCorrect="off"
+                        autoCapitalize="none"
+                        autoComplete="off"
                         className="w-full pl-9 pr-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
                     />
                 </div>

@@ -187,6 +187,7 @@ function App() {
   const [loading, setLoading] = useState(true)
   const [loadingMods, setLoadingMods] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+  const [gameSearchQuery, setGameSearchQuery] = useState('')
   const [filterOptions, setFilterOptions] = useState<FilterOptions>({
     sort: 'downloads',
     sortDirection: 'desc',
@@ -893,6 +894,8 @@ function App() {
         selectedCommunity={selectedCommunity}
         onSelectCommunity={setSelectedCommunity}
         onOpenPreferences={() => setShowPreferences(true)}
+        searchQuery={gameSearchQuery}
+        onSearchQueryChange={setGameSearchQuery}
       />
     );
   } else if (!activeProfileId && !isBrowsingMode) {
