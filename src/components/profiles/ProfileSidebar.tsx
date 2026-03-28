@@ -23,6 +23,8 @@ interface ProfileSidebarProps {
     isApplying?: boolean;
     isLaunching?: boolean;
     isGameRunning?: boolean;
+    hasConfiguredGamePath?: boolean;
+    isCheckingGamePath?: boolean;
     onResolvePackage: (mod: InstalledMod) => Promise<Package | null>;
     onExportProfile: () => void;
     onOpenSettings: () => void;
@@ -48,6 +50,8 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
     isApplying = false,
     isLaunching = false,
     isGameRunning = false,
+    hasConfiguredGamePath = false,
+    isCheckingGamePath = false,
     onResolvePackage,
     onExportProfile,
     onOpenSettings,
@@ -113,6 +117,50 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
         return activeProfile.mods.filter((m) => selectedModIdSet.has(m.uuid4));
     }, [activeProfile, selectedModIdSet]);
     const selectionMode = effectiveSelectedModIds.length > 0;
+    const launchActionBlocked = !isGameRunning && (isCheckingGamePath || !hasConfiguredGamePath);
+    let launchActionTitle = 'Game directory is not configured. Open Settings and set the path before launching.';
+    if (isGameRunning) {
+        launchActionTitle = 'Stop Game';
+    } else if (isCheckingGamePath) {
+        launchActionTitle = 'Checking game directory...';
+    } else if (hasConfiguredGamePath && activeProfile) {
+        launchActionTitle = activeProfile.launchMode === 'direct'
+            ? (activeProfile.is_vanilla ? 'Launch Vanilla Direct' : 'Launch Direct')
+            : activeProfile.is_vanilla
+                ? 'Launch Vanilla'
+                : 'Launch Modded';
+    }
+    const launchActionButton = (
+        <button
+            onClick={() => {
+                if (isGameRunning) {
+                    void onStopProfile();
+                    return;
+                }
+                void onLaunchProfile();
+            }}
+            disabled={isLaunching || isApplying || launchActionBlocked}
+            className={`w-14 flex items-center justify-center rounded-xl text-white border shadow-sm ${(isLaunching || isApplying)
+                ? 'bg-gray-700 border-gray-600 cursor-wait opacity-70'
+                : launchActionBlocked
+                    ? 'bg-gray-700 border-gray-600 cursor-not-allowed opacity-60'
+                    : isGameRunning
+                        ? 'bg-red-600 border-red-500'
+                        : 'bg-green-600 border-green-500'
+                }`}
+            title={launchActionTitle}
+        >
+            {isGameRunning ? (
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                    <rect width="10" height="10" x="3" y="3" rx="1.5" />
+                </svg>
+            ) : (
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="currentColor" viewBox="0 0 16 16" aria-hidden="true">
+                    <path d="M3 3.732a1.5 1.5 0 0 1 2.305-1.265l6.706 4.267a1.5 1.5 0 0 1 0 2.531l-6.706 4.268A1.5 1.5 0 0 1 3 12.267V3.732Z" />
+                </svg>
+            )}
+        </button>
+    );
 
     const latestVersionByPackage = useMemo(() => {
         const map = new Map<string, string>();
@@ -572,39 +620,13 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                             </span>
                         </button>
 
-                        <button
-                            onClick={() => {
-                                if (isGameRunning) {
-                                    void onStopProfile();
-                                    return;
-                                }
-                                void onLaunchProfile();
-                            }}
-                            disabled={isLaunching || isApplying}
-                            className={`w-14 flex items-center justify-center rounded-xl text-white border shadow-sm ${(isLaunching || isApplying)
-                                ? 'bg-gray-700 border-gray-600 cursor-wait opacity-70'
-                                : isGameRunning
-                                    ? 'bg-red-600 border-red-500'
-                                    : 'bg-green-600 border-green-500'
-                                }`}
-                            title={isGameRunning
-                                ? 'Stop Game'
-                                : activeProfile.launchMode === 'direct'
-                                    ? (activeProfile.is_vanilla ? 'Launch Vanilla Direct' : 'Launch Direct')
-                                    : activeProfile.is_vanilla
-                                        ? 'Launch Vanilla'
-                                        : 'Launch Modded'}
-                        >
-                            {isGameRunning ? (
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-                                    <rect width="10" height="10" x="3" y="3" rx="1.5" />
-                                </svg>
-                            ) : (
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="currentColor" viewBox="0 0 16 16" aria-hidden="true">
-                                    <path d="M3 3.732a1.5 1.5 0 0 1 2.305-1.265l6.706 4.267a1.5 1.5 0 0 1 0 2.531l-6.706 4.268A1.5 1.5 0 0 1 3 12.267V3.732Z" />
-                                </svg>
-                            )}
-                        </button>
+                        {launchActionBlocked ? (
+                            <span className="inline-flex" title={launchActionTitle}>
+                                {launchActionButton}
+                            </span>
+                        ) : (
+                            launchActionButton
+                        )}
                     </div>
                 )}
 

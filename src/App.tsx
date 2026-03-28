@@ -261,9 +261,11 @@ function App() {
   const { communities, communityImages, communityPlatforms, setCommunities, setCommunityImages, setCommunityPlatforms } = useAppStore();
 
   const [selectedCommunity, setSelectedCommunity] = useState<string | null>(null)
+  const activeProfile = profiles.find((profile) => profile.id === activeProfileId) ?? null
+  const [activeProfileGamePath, setActiveProfileGamePath] = useState<string | null>(null)
+  const [isCheckingActiveProfileGamePath, setIsCheckingActiveProfileGamePath] = useState(false)
 
   useEffect(() => {
-    const activeProfile = profiles.find((profile) => profile.id === activeProfileId)
     if (!activeProfile) {
       setIsGameRunning(false)
       return
@@ -292,7 +294,40 @@ function App() {
       cancelled = true
       window.clearInterval(intervalId)
     }
-  }, [profiles, activeProfileId])
+  }, [activeProfile?.gameIdentifier, activeProfile?.platform])
+
+  useEffect(() => {
+    if (!activeProfile) {
+      setActiveProfileGamePath(null)
+      setIsCheckingActiveProfileGamePath(false)
+      return
+    }
+
+    let cancelled = false
+    const checkGamePath = async () => {
+      setIsCheckingActiveProfileGamePath(true)
+      try {
+        const path = await window.ipcRenderer.getGamePath(activeProfile.gameIdentifier, activeProfile.platform)
+        if (!cancelled) {
+          setActiveProfileGamePath(typeof path === 'string' && path.trim().length > 0 ? path : null)
+        }
+      } catch {
+        if (!cancelled) {
+          setActiveProfileGamePath(null)
+        }
+      } finally {
+        if (!cancelled) {
+          setIsCheckingActiveProfileGamePath(false)
+        }
+      }
+    }
+
+    void checkGamePath()
+
+    return () => {
+      cancelled = true
+    }
+  }, [activeProfile?.gameIdentifier, activeProfile?.platform, showSettings])
 
   useEffect(() => {
     loadData()
@@ -957,7 +992,6 @@ function App() {
     );
   } else {
     // STEP 3: MOD MANAGEMENT
-    const activeProfile = profiles.find(p => p.id === activeProfileId);
     const currentCommunity = communities.find(c => c.identifier === selectedCommunity);
     const profileNeedsSync = !!activeProfile?.needs_sync || !!activeProfile?.mods.some((mod) => mod.pending_sync);
     const markActiveProfileUsed = () => {
@@ -1037,7 +1071,7 @@ function App() {
     const sidebar = (
       <ProfileSidebar
         key={activeProfile?.id || 'no-profile'}
-        activeProfile={activeProfile}
+        activeProfile={activeProfile ?? undefined}
         currentCommunity={currentCommunity || null}
         communityImage={currentCommunity ? communityImages[currentCommunity.identifier] : undefined}
         packages={packages}
@@ -1110,6 +1144,8 @@ function App() {
         isApplying={isApplyingToGame}
         isLaunching={isLaunchingProfile || isStoppingProfile}
         isGameRunning={isGameRunning}
+        hasConfiguredGamePath={!!activeProfileGamePath}
+        isCheckingGamePath={isCheckingActiveProfileGamePath}
         onExportProfile={() => setShowExportModal(true)}
         onOpenSettings={() => setShowSettings(true)}
         onUpdateProfile={updateProfile}
