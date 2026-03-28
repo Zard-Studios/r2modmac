@@ -792,7 +792,7 @@ function App() {
     });
 
     await window.ipcRenderer.alert(
-      'Warnings Restored',
+      'Warnings restored',
       'Setup warnings have been re-enabled. They will be shown again when needed.'
     );
   };

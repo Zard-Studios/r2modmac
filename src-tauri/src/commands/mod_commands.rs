@@ -1751,37 +1751,9 @@ pub async fn fetch_packages(app: AppHandle, state: tauri::State<'_, AppState>, g
         return Ok(0);
     }
 
-    // 2. Prepare Cache Directory
-    let cache_dir = app.path().app_cache_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")).join("chunks");
-    if !cache_dir.exists() {
-        let _ = fs::create_dir_all(&cache_dir);
-    }
-
-    // Helper function to load a single chunk
-    async fn load_chunk(client: &reqwest::Client, url: &str, cache_dir: &std::path::Path) -> Result<Vec<serde_json::Value>, String> {
-        // Extract hash from URL for cache key
-        let hash = url.split("/sha256/").nth(1)
-            .and_then(|s| s.split('.').next())
-            .ok_or_else(|| "Invalid URL format".to_string())?;
-            
-        let cache_file = cache_dir.join(format!("{}.json", hash));
-        
-        // Check cache (Async)
-        if cache_file.exists() {
-            if let Ok(bytes) = tokio::fs::read(&cache_file).await {
-                if let Ok(mut packages) = serde_json::from_slice::<Vec<serde_json::Value>>(&bytes) {
-                    // Filter out Manager packages from cache too
-                    packages.retain(|pkg| {
-                        let full_name = pkg["full_name"].as_str().unwrap_or("");
-                        !full_name.contains("ebkr-r2modman")
-                            && !full_name.contains("Tslat-ThunderstoreModManager")
-                            && !full_name.contains("Kesomannen-GaleModManager")
-                    });
-                    return Ok(packages);
-                }
-            }
-        }
-        
+    // 2. Load chunks directly from the network and keep them in memory only.
+    // This avoids creating large per-game cache files on disk.
+    async fn load_chunk(client: &reqwest::Client, url: &str) -> Result<Vec<serde_json::Value>, String> {
         let mut last_error: Option<String> = None;
         for attempt in 1..=3 {
             let resp = match client.get(url).send().await {
@@ -1846,13 +1818,7 @@ pub async fn fetch_packages(app: AppHandle, state: tauri::State<'_, AppState>, g
                     && !full_name.contains("Tslat-ThunderstoreModManager")
                     && !full_name.contains("Kesomannen-GaleModManager")
             });
-        
-            // Save to cache (Async)
-            // We re-serialize to save clean JSON
-            if let Ok(cache_data) = serde_json::to_vec(&packages) {
-                let _ = tokio::fs::write(&cache_file, cache_data).await;
-            }
-        
+
             return Ok(packages);
         }
 
@@ -1865,7 +1831,7 @@ pub async fn fetch_packages(app: AppHandle, state: tauri::State<'_, AppState>, g
     let first_attempts = std::cmp::min(5, chunk_urls.len());
     for idx in 0..first_attempts {
         let first_url = &chunk_urls[idx];
-        match load_chunk(&client, first_url, &cache_dir).await {
+        match load_chunk(&client, first_url).await {
             Ok(first_packages) => {
                 let count = first_packages.len();
                 eprintln!("[fetch_packages] First chunk loaded (index {}): {} packages", idx, count);
@@ -1896,7 +1862,6 @@ pub async fn fetch_packages(app: AppHandle, state: tauri::State<'_, AppState>, g
     if !remaining_urls.is_empty() {
         let packages_arc = state.packages.clone();
         let game_id_clone = game_id.clone();
-        let cache_dir_clone = cache_dir.clone();
         let app_handle = app.clone();
         
         // Spawn background task for remaining chunks
@@ -1904,9 +1869,8 @@ pub async fn fetch_packages(app: AppHandle, state: tauri::State<'_, AppState>, g
             let parallelism = 10usize;
             let mut stream = futures_util::stream::iter(remaining_urls)
                 .map(|url| {
-                    let cache_dir = cache_dir_clone.clone();
                     let client = client.clone();
-                    async move { load_chunk(&client, &url, &cache_dir).await }
+                    async move { load_chunk(&client, &url).await }
                 })
                 .buffer_unordered(parallelism);
 

@@ -33,15 +33,20 @@ pub fn run() {
                 }
             }
 
-            if let Ok(cache_dir) = app.path().app_cache_dir() {
-                let chunks_dir = cache_dir.join("chunks");
-                if chunks_dir.exists() {
-                    let _ = std::fs::remove_dir_all(&chunks_dir);
-                }
-            }
-
             if let Ok(data_dir) = app.path().app_data_dir() {
-                let settings = models::shared::load_settings_impl(&app.handle());
+                let mut settings = models::shared::load_settings_impl(&app.handle());
+
+                if !settings.thunderstore_chunk_cache_migrated {
+                    if let Ok(cache_dir) = app.path().app_cache_dir() {
+                        let chunks_dir = cache_dir.join("chunks");
+                        if chunks_dir.exists() {
+                            let _ = std::fs::remove_dir_all(&chunks_dir);
+                        }
+                    }
+                    settings.thunderstore_chunk_cache_migrated = true;
+                    let _ = models::shared::save_settings_impl(&app.handle(), &settings);
+                }
+
                 if !settings.legacy_install_mode {
                     let profiles_dir = data_dir.join("profiles");
                     if profiles_dir.exists() {

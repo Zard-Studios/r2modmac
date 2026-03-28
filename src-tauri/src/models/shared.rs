@@ -60,6 +60,8 @@ pub struct Settings {
     pub hide_crossover_guide: bool,
     #[serde(default)]
     pub hide_macos_guide: bool,
+    #[serde(default)]
+    pub thunderstore_chunk_cache_migrated: bool,
 }
 
 impl Settings {
@@ -78,6 +80,7 @@ impl Settings {
             default_mod_view_mode: default_mod_view_mode(),
             hide_crossover_guide: false,
             hide_macos_guide: false,
+            thunderstore_chunk_cache_migrated: false,
         }
     }
 }

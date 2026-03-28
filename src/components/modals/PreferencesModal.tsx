@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import { Button } from '../ui';
-import { MAC_IMAGE_CACHE_KEY, MAC_PLATFORM_CACHE_KEY } from '../../constants/cacheKeys';
 
 export interface PreferencesSettings {
     legacy_install_mode: boolean;
@@ -179,7 +178,7 @@ export default function PreferencesModal({
                                 <div className="flex items-center gap-4">
                                     <RowIcon kind="install" />
                                     <div>
-                                        <p className="text-[15px] font-medium text-white">Legacy Install Mode</p>
+                                        <p className="text-[15px] font-medium text-white">Legacy install mode</p>
                                         <p className="text-[13px] text-gray-400 mt-0.5 leading-snug">Download starts immediately on install. Uses more disk space.</p>
                                     </div>
                                 </div>
@@ -190,7 +189,7 @@ export default function PreferencesModal({
                                 <div className="flex items-center gap-4">
                                     <RowIcon kind="version" />
                                     <div>
-                                        <p className="text-[15px] font-medium text-white">Ask Version Before Installing</p>
+                                        <p className="text-[15px] font-medium text-white">Ask version before installing</p>
                                         <p className="text-[13px] text-gray-400 mt-0.5 leading-snug">Open mod details first to select an exact version for install.</p>
                                     </div>
                                 </div>
@@ -201,7 +200,7 @@ export default function PreferencesModal({
                                 <div className="flex items-center gap-4">
                                     <RowIcon kind="parallel" />
                                     <div>
-                                        <p className="text-[15px] font-medium text-white">Download Mods in Parallel</p>
+                                        <p className="text-[15px] font-medium text-white">Download mods in parallel</p>
                                         <p className="text-[13px] text-gray-400 mt-0.5 leading-snug">Downloads mods in parallel for faster installation.</p>
                                     </div>
                                 </div>
@@ -212,7 +211,7 @@ export default function PreferencesModal({
                                 <div className="flex items-center gap-4">
                                     <RowIcon kind="apply" />
                                     <div>
-                                        <p className="text-[15px] font-medium text-white">Confirm Before Apply to Game</p>
+                                        <p className="text-[15px] font-medium text-white">Confirm before apply to game</p>
                                         <p className="text-[13px] text-gray-400 mt-0.5 leading-snug">Require confirmation before making structural game file changes.</p>
                                     </div>
                                 </div>
@@ -223,7 +222,7 @@ export default function PreferencesModal({
                                 <div className="flex items-center gap-4">
                                     <RowIcon kind="layout" />
                                     <div>
-                                        <p className="text-[15px] font-medium text-white">Default Mods View</p>
+                                        <p className="text-[15px] font-medium text-white">Default mods view</p>
                                         <p className="text-[13px] text-gray-400 mt-0.5 leading-snug">Choose the initial layout when browsing mods.</p>
                                     </div>
                                 </div>
@@ -237,7 +236,7 @@ export default function PreferencesModal({
                                     <button
                                         onClick={() => setDefaultModViewMode('grid')}
                                         className={`relative z-10 p-2 rounded w-10 flex items-center justify-center transition-colors ${defaultModViewMode === 'grid' ? 'text-white' : 'text-gray-400 hover:text-white'}`}
-                                        title="Grid View"
+                                        title="Grid view"
                                     >
                                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
@@ -246,7 +245,7 @@ export default function PreferencesModal({
                                     <button
                                         onClick={() => setDefaultModViewMode('list')}
                                         className={`relative z-10 p-2 rounded w-10 flex items-center justify-center transition-colors ${defaultModViewMode === 'list' ? 'text-white' : 'text-gray-400 hover:text-white'}`}
-                                        title="List View"
+                                        title="List view"
                                     >
                                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
@@ -266,7 +265,7 @@ export default function PreferencesModal({
                                 <div className="flex items-center gap-4">
                                     <RowIcon kind="warning" />
                                     <div>
-                                        <p className="text-[15px] font-medium text-white">Restore Setup Warnings</p>
+                                        <p className="text-[15px] font-medium text-white">Restore setup warnings</p>
                                         <p className="text-[13px] text-gray-400 mt-0.5 leading-snug">
                                             Re-enable alerts previously hidden with "Don't show again".
                                         </p>
@@ -287,7 +286,7 @@ export default function PreferencesModal({
                                         : 'bg-gray-900 text-gray-600 border border-gray-800 cursor-not-allowed'
                                         }`}
                                 >
-                                    {restoringWarnings ? 'Restoring...' : 'Show Again'}
+                                    {restoringWarnings ? 'Restoring...' : 'Show again'}
                                 </button>
                             </div>
                         </div>
@@ -300,34 +299,62 @@ export default function PreferencesModal({
                                 <div className="flex items-center gap-4">
                                     <RowIcon kind="cache" />
                                     <div>
-                                        <p className="text-[15px] font-medium text-white">Clear App Cache</p>
+                                        <p className="text-[15px] font-medium text-white">Clear app cache</p>
                                         <p className="text-[13px] text-gray-400 mt-0.5 leading-snug">
-                                            Deletes caches. Requires app re-launch to apply.
+                                            Deletes cache files. Requires the app to relaunch to apply.
                                         </p>
                                     </div>
                                 </div>
                                 <button
                                     onClick={async () => {
                                         const confirmed = await window.ipcRenderer.confirm(
-                                            'Clear App Cache?',
-                                            'This will delete profile cache and game detection cache. You may need to re-download mods and re-fetch game compatibility. Continue?'
+                                            'Clear app cache?',
+                                            settings.legacy_install_mode
+                                                ? 'This will delete cached profile files used by legacy installs and the Thunderstore package cache used for browsing. It will not uninstall mods from your games. Continue?'
+                                                : 'This will delete the Thunderstore package cache used for browsing and any leftover profile cache. It will not uninstall mods from your games. Continue?'
                                         );
                                         if (confirmed) {
                                             const result = await window.ipcRenderer.clearProfileCache();
-                                            localStorage.removeItem(MAC_PLATFORM_CACHE_KEY);
-                                            localStorage.removeItem(MAC_IMAGE_CACHE_KEY);
-                                            const sizeMB = (result.bytes_freed / 1024 / 1024).toFixed(1);
-                                            const chunksInfo = result.chunks_cleared ? `\nThunderstore chunks cleared: ${result.chunks_cleared}` : '';
+                                            const hadBrowserCache = localStorage.length > 0;
+                                            localStorage.clear();
+
+                                            const bytesFreed = result.bytes_freed ?? 0;
+                                            const clearedEntries = result.cleared + (result.chunks_cleared ?? 0);
+                                            const sizeMB = (bytesFreed / 1024 / 1024).toFixed(1);
+
+                                            if (clearedEntries === 0 && bytesFreed === 0 && !hadBrowserCache) {
+                                                await window.ipcRenderer.alert(
+                                                    'No cache found',
+                                                    'There was no profile cache, Thunderstore cache, or browser cache to clear.'
+                                                );
+                                                return;
+                                            }
+
+                                            const summary: string[] = [];
+                                            if (result.cleared > 0) {
+                                                summary.push(`Removed ${result.cleared} profile cache folder(s).`);
+                                            }
+                                            if ((result.chunks_cleared ?? 0) > 0) {
+                                                summary.push(`Removed ${result.chunks_cleared} Thunderstore chunk file(s).`);
+                                            }
+                                            if (bytesFreed > 0) {
+                                                summary.push(`Freed ${sizeMB} MB.`);
+                                            }
+                                            if (hadBrowserCache) {
+                                                summary.push('Cleared browser cache entries.');
+                                            }
+                                            summary.push('The app will reload now.');
+
                                             await window.ipcRenderer.alert(
-                                                'Cache Cleared',
-                                                `Cleared ${result.cleared} profile cache(s), freed ${sizeMB} MB.${chunksInfo}\n\nGame cache cleared. Reloading app now...`
+                                                'Cache cleared',
+                                                summary.join('\n')
                                             );
                                             window.location.reload();
                                         }
                                     }}
                                     className="px-4 py-2 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-500 hover:text-red-400 text-[13px] font-semibold border border-red-500/30 hover:border-red-500/50 transition-all duration-200 shrink-0 flex items-center justify-center gap-2"
                                 >
-                                    Clear Cache
+                                    Clear cache
                                 </button>
                             </div>
                         </div>
@@ -347,7 +374,7 @@ export default function PreferencesModal({
                         variant="primary" 
                         onClick={handleSave}
                     >
-                        Save Changes
+                        Save changes
                     </Button>
                 </div>
                 

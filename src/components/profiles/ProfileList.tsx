@@ -159,64 +159,104 @@ export function ProfileList({
         }
     };
 
+    const hasProfilesForGame = filteredProfiles.length > 0;
+
     return (
         <div className="flex-1 p-8 overflow-y-auto">
             <div className="max-w-4xl mx-auto">
-                <div className="flex items-center justify-between mb-8">
-                    <div>
+                <div className="flex items-start justify-between gap-6 mb-8">
+                    <div className="min-w-0">
                         <h1 className="text-3xl font-bold text-white mb-2">Select Profile</h1>
                         <p className="text-gray-400">Choose a profile to manage mods for {selectedGameIdentifier}</p>
                     </div>
+                    {hasProfilesForGame && (
+                        <div className="flex items-center gap-1.5 rounded-full border border-gray-700 bg-gray-800/85 p-1 shadow-sm backdrop-blur-sm shrink-0">
+                            <button
+                                onClick={() => {
+                                    setSelectedPlatform('windows');
+                                    setIsCreating(true);
+                                }}
+                                className="w-10 h-10 rounded-full flex items-center justify-center text-gray-300 hover:text-white hover:bg-blue-500/15 hover:border-blue-500/30 border border-transparent transition-colors"
+                                title="Create New Profile"
+                                aria-label="Create New Profile"
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                                </svg>
+                            </button>
+                            <button
+                                onClick={() => setIsImporting(true)}
+                                className="w-10 h-10 rounded-full flex items-center justify-center text-gray-300 hover:text-white hover:bg-purple-500/15 hover:border-purple-500/30 border border-transparent transition-colors"
+                                title="Import Profile"
+                                aria-label="Import Profile"
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+                                </svg>
+                            </button>
+                            <button
+                                onClick={onBrowseMods}
+                                className="w-10 h-10 rounded-full flex items-center justify-center text-gray-300 hover:text-white hover:bg-green-500/15 hover:border-green-500/30 border border-transparent transition-colors"
+                                title="Browse Mods"
+                                aria-label="Browse Mods"
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                                </svg>
+                            </button>
+                        </div>
+                    )}
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {/* Create New Profile Card */}
-                    <div
-                        className="bg-gray-800/50 border-2 border-dashed border-gray-700 rounded-xl p-6 flex flex-col items-center justify-center text-center hover:border-blue-500/50 hover:bg-gray-800 transition-all cursor-pointer min-h-[200px] group"
-                        onClick={() => {
-                            setSelectedPlatform('windows');
-                            setIsCreating(true);
-                        }}
-                    >
-                        <div className="w-16 h-16 bg-gray-900 rounded-full flex items-center justify-center mb-4 group-hover:bg-blue-500/20 transition-colors">
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-gray-500 group-hover:text-blue-400 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                            </svg>
+                {!hasProfilesForGame && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        <div
+                            className="bg-gray-800/50 border-2 border-dashed border-gray-700 rounded-xl p-6 flex flex-col items-center justify-center text-center hover:border-blue-500/50 hover:bg-gray-800 transition-all cursor-pointer min-h-[200px] group"
+                            onClick={() => {
+                                setSelectedPlatform('windows');
+                                setIsCreating(true);
+                            }}
+                        >
+                            <div className="w-16 h-16 bg-gray-900 rounded-full flex items-center justify-center mb-4 group-hover:bg-blue-500/20 transition-colors">
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-gray-500 group-hover:text-blue-400 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                                </svg>
+                            </div>
+                            <h3 className="text-lg font-bold text-white mb-1">Create New</h3>
+                            <p className="text-sm text-gray-500">Start fresh with a new profile</p>
                         </div>
-                        <h3 className="text-lg font-bold text-white mb-1">Create New</h3>
-                        <p className="text-sm text-gray-500">Start fresh with a new profile</p>
-                    </div>
 
-                    {/* Import Profile Card */}
-                    <div
-                        className="bg-gray-800/50 border-2 border-dashed border-gray-700 rounded-xl p-6 flex flex-col items-center justify-center text-center hover:border-purple-500/50 hover:bg-gray-800 transition-all cursor-pointer min-h-[200px] group"
-                        onClick={() => setIsImporting(true)}
-                    >
-                        <div className="w-16 h-16 bg-gray-900 rounded-full flex items-center justify-center mb-4 group-hover:bg-purple-500/20 transition-colors">
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-gray-500 group-hover:text-purple-400 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
-                            </svg>
+                        <div
+                            className="bg-gray-800/50 border-2 border-dashed border-gray-700 rounded-xl p-6 flex flex-col items-center justify-center text-center hover:border-purple-500/50 hover:bg-gray-800 transition-all cursor-pointer min-h-[200px] group"
+                            onClick={() => setIsImporting(true)}
+                        >
+                            <div className="w-16 h-16 bg-gray-900 rounded-full flex items-center justify-center mb-4 group-hover:bg-purple-500/20 transition-colors">
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-gray-500 group-hover:text-purple-400 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+                                </svg>
+                            </div>
+                            <h3 className="text-lg font-bold text-white mb-1">Import Profile</h3>
+                            <p className="text-sm text-gray-500">Use a code or file</p>
                         </div>
-                        <h3 className="text-lg font-bold text-white mb-1">Import Profile</h3>
-                        <p className="text-sm text-gray-500">Use a code or file</p>
-                    </div>
 
-                    {/* Browse Only Card */}
-                    <div
-                        className="bg-gray-800/50 border-2 border-dashed border-gray-700 rounded-xl p-6 flex flex-col items-center justify-center text-center hover:border-green-500/50 hover:bg-gray-800 transition-all cursor-pointer min-h-[200px] group"
-                        onClick={onBrowseMods}
-                    >
-                        <div className="w-16 h-16 bg-gray-900 rounded-full flex items-center justify-center mb-4 group-hover:bg-green-500/20 transition-colors">
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-gray-500 group-hover:text-green-400 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                            </svg>
+                        <div
+                            className="bg-gray-800/50 border-2 border-dashed border-gray-700 rounded-xl p-6 flex flex-col items-center justify-center text-center hover:border-green-500/50 hover:bg-gray-800 transition-all cursor-pointer min-h-[200px] group"
+                            onClick={onBrowseMods}
+                        >
+                            <div className="w-16 h-16 bg-gray-900 rounded-full flex items-center justify-center mb-4 group-hover:bg-green-500/20 transition-colors">
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-gray-500 group-hover:text-green-400 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                                </svg>
+                            </div>
+                            <h3 className="text-lg font-bold text-white mb-1">Browse Mods</h3>
+                            <p className="text-sm text-gray-500">Explore without a profile</p>
                         </div>
-                        <h3 className="text-lg font-bold text-white mb-1">Browse Mods</h3>
-                        <p className="text-sm text-gray-500">Explore without a profile</p>
                     </div>
+                )}
 
-                    {/* Existing Profiles */}
-                    {filteredProfiles.map(profile => (
+                {hasProfilesForGame && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        {filteredProfiles.map(profile => (
                         <div
                             key={profile.id}
                             onClick={() => onSelectProfile(profile.id)}
@@ -341,7 +381,8 @@ export function ProfileList({
                             </div>
                         </div>
                     ))}
-                </div>
+                    </div>
+                )}
             </div>
 
             {/* Create Profile Modal */}
