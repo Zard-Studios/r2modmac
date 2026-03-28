@@ -222,12 +222,14 @@ function App() {
     isOpen: boolean;
     pkg: Package | null;
     orphanDeps: { name: string; icon?: string }[];
+    allInstalledDepDetails: { name: string; icon?: string }[];
     allInstalledDeps: string[];
     profileId: string | null;
   }>({
     isOpen: false,
     pkg: null,
     orphanDeps: [],
+    allInstalledDepDetails: [],
     allInstalledDeps: [],
     profileId: null
   })

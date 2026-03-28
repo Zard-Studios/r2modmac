@@ -9,24 +9,32 @@ interface ProgressSetter {
     (updater: (prev: { isOpen: boolean; title: string; progress: number; currentTask: string }) => { isOpen: boolean; title: string; progress: number; currentTask: string }): void;
 }
 
+type DepDetail = {
+    name: string;
+    icon?: string;
+};
+
 interface UninstallModalSetter {
     (state: {
         isOpen: boolean;
         pkg: Package | null;
-        orphanDeps: { name: string; icon?: string }[];
+        orphanDeps: DepDetail[];
+        allInstalledDepDetails: DepDetail[];
         allInstalledDeps: string[];
         profileId: string | null;
     }): void;
     (updater: (prev: {
         isOpen: boolean;
         pkg: Package | null;
-        orphanDeps: { name: string; icon?: string }[];
+        orphanDeps: DepDetail[];
+        allInstalledDepDetails: DepDetail[];
         allInstalledDeps: string[];
         profileId: string | null;
     }) => {
         isOpen: boolean;
         pkg: Package | null;
-        orphanDeps: { name: string; icon?: string }[];
+        orphanDeps: DepDetail[];
+        allInstalledDepDetails: DepDetail[];
         allInstalledDeps: string[];
         profileId: string | null;
     }): void;
@@ -40,7 +48,8 @@ interface UseModActionsProps {
     uninstallModalState: {
         isOpen: boolean;
         pkg: Package | null;
-        orphanDeps: { name: string; icon?: string }[];
+        orphanDeps: DepDetail[];
+        allInstalledDepDetails: DepDetail[];
         allInstalledDeps: string[];
         profileId: string | null;
     };
@@ -250,7 +259,7 @@ export function useModActions({
 
         const version = pkg.versions[0];
         if (!version) {
-            setUninstallModalState({ isOpen: true, pkg, orphanDeps: [], allInstalledDeps: [], profileId: profileIdToUse });
+            setUninstallModalState({ isOpen: true, pkg, orphanDeps: [], allInstalledDepDetails: [], allInstalledDeps: [], profileId: profileIdToUse });
             return;
         }
 
@@ -263,7 +272,15 @@ export function useModActions({
                 .filter((dep) => !dep.toLowerCase().includes('bepinexpack'))
         ));
 
-        const orphanDepsDetails: { name: string; icon?: string }[] = [];
+        const allInstalledDepDetails = modDependencies
+            .map((dep) => {
+                const installedDep = profile.mods.find((m) => getPackageKey(m.fullName).toLowerCase() === dep.toLowerCase());
+                const detail: DepDetail | null = installedDep ? { name: dep, icon: installedDep.iconUrl } : null;
+                return detail;
+            })
+            .filter((dep): dep is DepDetail => dep !== null);
+
+        const orphanDepsDetails: DepDetail[] = [];
 
         if (modDependencies.length > 0 && selectedCommunity) {
             const otherMods = profile.mods.filter(m => !m.fullName.startsWith(pkg.full_name));
@@ -289,8 +306,8 @@ export function useModActions({
 
             for (const dep of modDependencies) {
                 if (!otherModsDeps.has(dep)) {
-                    const installedDep = profile.mods.find((m) => getPackageKey(m.fullName).toLowerCase() === dep.toLowerCase());
-                    if (installedDep) orphanDepsDetails.push({ name: dep, icon: installedDep.iconUrl });
+                    const installedDep = allInstalledDepDetails.find((item) => item.name.toLowerCase() === dep.toLowerCase());
+                    if (installedDep) orphanDepsDetails.push(installedDep);
                 }
             }
         }
@@ -316,7 +333,14 @@ export function useModActions({
             return;
         }
 
-        setUninstallModalState({ isOpen: true, pkg, orphanDeps: orphanDepsDetails, allInstalledDeps, profileId: profileIdToUse });
+        setUninstallModalState({
+            isOpen: true,
+            pkg,
+            orphanDeps: orphanDepsDetails,
+            allInstalledDepDetails,
+            allInstalledDeps,
+            profileId: profileIdToUse,
+        });
     };
 
     // ── Execute confirmed uninstall from modal ────────────────────────────────────

@@ -127,6 +127,7 @@ export function AppModals({
                 modName={uninstallModalState.pkg?.name || ''}
                 modIcon={uninstallModalState.pkg?.versions[0]?.icon}
                 orphanDeps={uninstallModalState.orphanDeps}
+                allDeps={uninstallModalState.allInstalledDepDetails}
                 allDepsCount={uninstallModalState.allInstalledDeps.length}
                 onCancel={() => setUninstallModalState((prev: any) => ({ ...prev, isOpen: false }))}
                 onModOnly={() => executeUninstall([])}

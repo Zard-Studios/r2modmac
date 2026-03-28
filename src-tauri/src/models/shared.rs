@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -203,6 +204,52 @@ pub fn clean_mod_name(name: &str, version: &str) -> String {
     }
 }
 
+pub fn normalize_zip_entry_path(name: &str) -> Option<PathBuf> {
+    let normalized = name.replace('\\', "/");
+    let trimmed = normalized.trim().trim_start_matches("./").trim_start_matches('/');
+
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let mut path = PathBuf::new();
+    for component in Path::new(trimmed).components() {
+        match component {
+            Component::Normal(value) => path.push(value),
+            Component::CurDir => {}
+            Component::ParentDir | Component::Prefix(_) | Component::RootDir => return None,
+        }
+    }
+
+    if path.as_os_str().is_empty() {
+        None
+    } else {
+        Some(path)
+    }
+}
+
+pub fn normalize_zip_entry_name(name: &str) -> Option<String> {
+    let path = normalize_zip_entry_path(name)?;
+    let normalized = path
+        .components()
+        .filter_map(|component| match component {
+            Component::Normal(value) => Some(value.to_string_lossy().to_string()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("/");
+
+    if normalized.is_empty() {
+        None
+    } else {
+        Some(normalized)
+    }
+}
+
+pub fn zip_entry_is_dir(name: &str) -> bool {
+    name.replace('\\', "/").ends_with('/')
+}
+
 pub fn detect_bepinex_structure<R: std::io::Read + std::io::Seek>(archive: &mut zip::ZipArchive<R>) -> (bool, Option<String>) {
     let mut found_bepinex_core = false;
     let mut found_root_level_dll = false;
@@ -210,9 +257,11 @@ pub fn detect_bepinex_structure<R: std::io::Read + std::io::Seek>(archive: &mut 
     
     for i in 0..archive.len() {
         if let Ok(file) = archive.by_index_raw(i) {
-            let name = file.name();
+            let Some(name) = normalize_zip_entry_name(file.name()) else {
+                continue;
+            };
             
-            if name.contains("BepInEx/core/") {
+            if name.contains("BepInEx/core/") || name.ends_with("BepInEx/core") {
                 found_bepinex_core = true;
                 if let Some(idx) = name.find("BepInEx/") {
                     let prefix = &name[..idx];

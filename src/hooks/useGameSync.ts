@@ -305,12 +305,6 @@ export function useGameSync({
 
             if (community === 'balatro' && message !== 'Profile already synced! No changes needed.') {
                 message += '\n\nBalatro macOS: mod files are synced to ~/Library/Application Support/Balatro/Mods. Launch the modded game with run_lovely_macos.sh.';
-            } else if (latestProfile.platform === 'mac' && message !== 'Profile already synced! No changes needed.') {
-                if (latestProfile.launchMode === 'direct') {
-                    message += '\n\nmacOS: direct launch mode is enabled, so the local wrapper will start the game without restarting Steam.';
-                } else {
-                    message += '\n\nmacOS: use the sidebar play button to launch this profile. Steam launch options are applied automatically when a valid Steam install is available.';
-                }
             }
 
             await window.ipcRenderer.alert('Success', message);

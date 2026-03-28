@@ -5,6 +5,7 @@ interface UninstallModalProps {
     modName: string;
     modIcon?: string;
     orphanDeps: { name: string; icon?: string }[];
+    allDeps: { name: string; icon?: string }[];
     allDepsCount: number;
     onCancel: () => void;
     onModOnly: () => void;
@@ -17,6 +18,7 @@ export function UninstallModal({
     modName,
     modIcon,
     orphanDeps,
+    allDeps,
     allDepsCount,
     onCancel,
     onModOnly,
@@ -26,6 +28,7 @@ export function UninstallModal({
     if (!isOpen) return null;
 
     const orphanCount = orphanDeps.length;
+    const orphanNames = new Set(orphanDeps.map((dep) => dep.name.toLowerCase()));
 
     return (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
@@ -51,15 +54,15 @@ export function UninstallModal({
                         </div>
                     </div>
 
-                    {orphanCount > 0 && (
+                    {allDeps.length > 0 && (
                         <div className="mb-6">
                             <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 pl-1">
-                                {orphanCount} dependencies installed
+                                Installed dependencies
                             </p>
                             <div className="bg-slate-900/50 rounded-lg p-3 border border-slate-700/50 overflow-x-auto">
                                 <div className="flex gap-3">
-                                    {orphanDeps.map((dep, i) => (
-                                        <div key={i} className="flex flex-col items-center w-16 flex-shrink-0 group relative">
+                                    {allDeps.map((dep, i) => (
+                                        <div key={i} className="flex flex-col items-center w-20 flex-shrink-0 group relative">
                                             <div className="w-11 h-11 rounded bg-slate-800 mb-1.5 overflow-hidden border border-slate-700 group-hover:border-slate-500 transition-colors shadow-sm">
                                                 {dep.icon ? (
                                                     <img src={dep.icon} alt={dep.name} className="w-full h-full object-cover" />
@@ -74,6 +77,11 @@ export function UninstallModal({
                                             <span className="text-[10px] text-slate-400 text-center truncate w-full px-0.5 group-hover:text-slate-300 transition-colors">
                                                 {dep.name}
                                             </span>
+                                            {orphanNames.has(dep.name.toLowerCase()) && (
+                                                <span className="mt-1 px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wide bg-indigo-500/20 text-indigo-200 border border-indigo-400/20">
+                                                    Unused
+                                                </span>
+                                            )}
                                         </div>
                                     ))}
                                 </div>

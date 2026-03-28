@@ -142,6 +142,86 @@ pub fn migrate_root_plugins_into_bepinex(game_path: &std::path::Path) -> Result<
     Ok(())
 }
 
+pub fn repair_backslash_named_entries(root: &std::path::Path) -> Result<(), String> {
+    if !root.exists() {
+        return Ok(());
+    }
+
+    let mut entries = walkdir::WalkDir::new(root)
+        .min_depth(1)
+        .into_iter()
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.into_path())
+        .filter(|path| {
+            path.file_name()
+                .map(|name| name.to_string_lossy().contains('\\'))
+                .unwrap_or(false)
+        })
+        .collect::<Vec<_>>();
+
+    entries.sort_by_key(|path| std::cmp::Reverse(path.components().count()));
+
+    for source in entries {
+        if !source.exists() {
+            continue;
+        }
+
+        let relative = source
+            .strip_prefix(root)
+            .map_err(|e| format!("Failed to normalize malformed entry {}: {}", source.display(), e))?;
+
+        let mut normalized_relative = std::path::PathBuf::new();
+        for component in relative.components() {
+            if let std::path::Component::Normal(value) = component {
+                for part in value.to_string_lossy().split('\\').filter(|part| !part.is_empty()) {
+                    normalized_relative.push(part);
+                }
+            }
+        }
+
+        if normalized_relative == relative {
+            continue;
+        }
+
+        let target = root.join(&normalized_relative);
+        if let Some(parent) = target.parent() {
+            fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create repaired path {}: {}", parent.display(), e))?;
+        }
+
+        if source.is_dir() {
+            if target.exists() {
+                copy_dir_recursive(&source, &target)
+                    .map_err(|e| format!("Failed to merge repaired directory {} -> {}: {}", source.display(), target.display(), e))?;
+                fs::remove_dir_all(&source)
+                    .map_err(|e| format!("Failed to remove malformed directory {}: {}", source.display(), e))?;
+            } else if let Err(rename_err) = fs::rename(&source, &target) {
+                copy_dir_recursive(&source, &target)
+                    .map_err(|e| format!("Failed to repair directory {} -> {} after rename error {}: {}", source.display(), target.display(), rename_err, e))?;
+                fs::remove_dir_all(&source)
+                    .map_err(|e| format!("Failed to remove malformed directory {}: {}", source.display(), e))?;
+            }
+        } else {
+            if target.exists() || target.is_symlink() {
+                if target.is_dir() && !target.is_symlink() {
+                    let _ = fs::remove_dir_all(&target);
+                } else {
+                    let _ = fs::remove_file(&target);
+                }
+            }
+
+            if let Err(rename_err) = fs::rename(&source, &target) {
+                fs::copy(&source, &target)
+                    .map_err(|e| format!("Failed to repair file {} -> {} after rename error {}: {}", source.display(), target.display(), rename_err, e))?;
+                fs::remove_file(&source)
+                    .map_err(|e| format!("Failed to remove malformed file {}: {}", source.display(), e))?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
 
 #[command]
 pub fn check_directory_exists(path: String) -> bool {

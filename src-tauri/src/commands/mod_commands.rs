@@ -54,7 +54,10 @@ fn detect_lovely_runtime_in_zip<R: std::io::Read + std::io::Seek>(
 
     for i in 0..archive.len() {
         if let Ok(file) = archive.by_index(i) {
-            let name = file.name().to_lowercase();
+            let Some(name) = normalize_zip_entry_name(file.name()) else {
+                continue;
+            };
+            let name = name.to_lowercase();
             if name.ends_with("run_lovely_macos.sh") || name.ends_with("liblovely.dylib") {
                 has_macos_runtime = true;
             }
@@ -78,12 +81,12 @@ fn extract_zip_directory_to_target<R: std::io::Read + std::io::Seek>(
 
     for i in 0..archive.len() {
         let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
-        let outpath = match file.enclosed_name() {
+        let outpath = match normalize_zip_entry_path(file.name()) {
             Some(path) => target_dir.join(path),
             None => continue,
         };
 
-        if (*file.name()).ends_with('/') {
+        if zip_entry_is_dir(file.name()) {
             fs::create_dir_all(&outpath).map_err(|e| e.to_string())?;
         } else {
             if let Some(parent) = outpath.parent() {
@@ -187,8 +190,8 @@ fn extract_regular_mod_to_root<R: std::io::Read + std::io::Seek>(
 ) -> Result<(), String> {
     for i in 0..archive.len() {
         let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
-        let enclosed = match file.enclosed_name() {
-            Some(path) => path.to_path_buf(),
+        let enclosed = match normalize_zip_entry_path(file.name()) {
+            Some(path) => path,
             None => continue,
         };
         let Some(relative_target) = normalize_regular_mod_entry(&enclosed, mod_name) else {
@@ -196,7 +199,7 @@ fn extract_regular_mod_to_root<R: std::io::Read + std::io::Seek>(
         };
         let outpath = target_root.join(relative_target);
 
-        if (*file.name()).ends_with('/') {
+        if zip_entry_is_dir(file.name()) {
             fs::create_dir_all(&outpath).map_err(|e| e.to_string())?;
             continue;
         }
@@ -220,12 +223,12 @@ fn collect_regular_mod_files<R: std::io::Read + std::io::Seek>(
 
     for i in 0..archive.len() {
         let file = archive.by_index(i).map_err(|e| e.to_string())?;
-        if file.name().ends_with('/') {
+        if zip_entry_is_dir(file.name()) {
             continue;
         }
 
-        let enclosed = match file.enclosed_name() {
-            Some(path) => path.to_path_buf(),
+        let enclosed = match normalize_zip_entry_path(file.name()) {
+            Some(path) => path,
             None => continue,
         };
         let Some(relative_target) = normalize_regular_mod_entry(&enclosed, mod_name) else {
@@ -245,9 +248,13 @@ fn extract_lovely_zip_to_game_root<R: std::io::Read + std::io::Seek>(
 ) -> Result<(), String> {
     for i in 0..archive.len() {
         let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
-        let file_name = std::path::Path::new(file.name())
-            .file_name()
-            .map(|name| name.to_string_lossy().to_string())
+        let file_name = normalize_zip_entry_path(file.name())
+            .and_then(|path| path.file_name().map(|name| name.to_string_lossy().to_string()))
+            .or_else(|| {
+                std::path::Path::new(file.name())
+                    .file_name()
+                    .map(|name| name.to_string_lossy().to_string())
+            })
             .unwrap_or_default();
         let lower = file_name.to_lowercase();
         if lower != "run_lovely_macos.sh" && lower != "liblovely.dylib" {
@@ -707,7 +714,9 @@ pub(crate) fn extract_bepinex_pack_to_root<R: std::io::Read + std::io::Seek>(
     let prefix = bepinex_prefix.unwrap_or_default();
     for i in 0..archive.len() {
         let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
-        let name = file.name().to_string();
+        let Some(name) = normalize_zip_entry_name(file.name()) else {
+            continue;
+        };
         let relative_path = if !prefix.is_empty() && name.starts_with(&prefix) {
             &name[prefix.len()..]
         } else {
@@ -723,7 +732,7 @@ pub(crate) fn extract_bepinex_pack_to_root<R: std::io::Read + std::io::Seek>(
         };
         let outpath = target_root.join(&normalized_relative_path);
 
-        if name.ends_with('/') {
+        if zip_entry_is_dir(file.name()) {
             fs::create_dir_all(&outpath).map_err(|e| e.to_string())?;
         } else {
             if let Some(parent) = outpath.parent() {
@@ -758,8 +767,10 @@ fn collect_bepinex_pack_files<R: std::io::Read + std::io::Seek>(
 
     for i in 0..archive.len() {
         let file = archive.by_index(i).map_err(|e| e.to_string())?;
-        let name = file.name().to_string();
-        if name.ends_with('/') {
+        let Some(name) = normalize_zip_entry_name(file.name()) else {
+            continue;
+        };
+        if zip_entry_is_dir(file.name()) {
             continue;
         }
 
@@ -997,7 +1008,10 @@ fn detect_bepinex_pack_platform<R: std::io::Read + std::io::Seek>(
 
     for i in 0..archive.len() {
         if let Ok(mut file) = archive.by_index(i) {
-            let name = file.name().to_lowercase();
+            let Some(name) = normalize_zip_entry_name(file.name()) else {
+                continue;
+            };
+            let name = name.to_lowercase();
             let file_name = std::path::Path::new(&name)
                 .file_name()
                 .map(|n| n.to_string_lossy().to_string())
