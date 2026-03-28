@@ -95,6 +95,7 @@ export function useGameSync({
             const skippedVersionMismatch: string[] = [];
             const failedInstalls: string[] = [];
             let actuallyInstalled = 0;
+            const hasSyncWork = syncResult.removed > 0 || syncResult.to_install.length > 0 || (syncResult.cached ?? 0) > 0;
 
             if (syncResult.to_install.length > 0) {
                 const concurrency = installInParallel ? MAX_PARALLEL_OPS : 1;
@@ -253,20 +254,24 @@ export function useGameSync({
             const latestProfile = useProfileStore.getState().profiles.find((p) => p.id === activeProfile.id) || activeProfile;
             const disabledMods = latestProfile.mods.filter((m) => !m.enabled).map((m) => m.fullName);
 
-            setProgressState({
-                isOpen: true,
-                title: 'Syncing to Game',
-                progress: 100,
-                currentTask: community === 'balatro'
-                    ? 'Finalizing Lovely runtime and Balatro Mods folder...'
-                    : latestProfile.platform === 'mac'
-                    ? 'Finalizing BepInEx and Steam launch options...'
-                    : 'Applying profile files to game...'
-            });
+            if (hasSyncWork) {
+                setProgressState({
+                    isOpen: true,
+                    title: 'Syncing to Game',
+                    progress: 100,
+                    currentTask: community === 'balatro'
+                        ? 'Finalizing Lovely runtime and Balatro Mods folder...'
+                        : latestProfile.platform === 'mac'
+                        ? 'Finalizing BepInEx and Steam launch options...'
+                        : 'Applying profile files to game...'
+                });
+            }
 
             await window.ipcRenderer.installToGame(community, latestProfile.id, disabledMods);
 
-            setProgressState(prev => ({ ...prev, isOpen: false }));
+            if (hasSyncWork) {
+                setProgressState(prev => ({ ...prev, isOpen: false }));
+            }
 
             updateProfile(latestProfile.id, {
                 needs_sync: false,
