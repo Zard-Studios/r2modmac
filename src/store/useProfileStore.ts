@@ -40,12 +40,18 @@ const normalizeProfile = (profile: Profile): Profile => {
         : (profile.launchMode === 'steam' || profile.launchMode === 'direct'
             ? profile.launchMode
             : 'auto');
+    const dateCreated = typeof profile.dateCreated === 'number' ? profile.dateCreated : Date.now();
+    const lastUsed = typeof profile.lastUsed === 'number' && profile.lastUsed > dateCreated
+        ? profile.lastUsed
+        : 0;
 
     return {
         ...profile,
         platform,
         distribution,
         launchMode,
+        dateCreated,
+        lastUsed,
     };
 };
 
@@ -85,7 +91,7 @@ export const useProfileStore = create<ProfileState>((set) => ({
             mods: [],
             needs_sync: false,
             dateCreated: Date.now(),
-            lastUsed: Date.now(),
+            lastUsed: 0,
         });
 
         set((state) => {

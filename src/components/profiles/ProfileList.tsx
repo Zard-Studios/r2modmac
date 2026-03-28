@@ -159,6 +159,39 @@ export function ProfileList({
         }
     };
 
+    const formatLastPlayed = (lastUsed: number) => {
+        if (!lastUsed) {
+            return 'Never played';
+        }
+
+        const now = new Date();
+        const playedAt = new Date(lastUsed);
+        const dayMs = 24 * 60 * 60 * 1000;
+        const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+        const startOfPlayedDay = new Date(playedAt.getFullYear(), playedAt.getMonth(), playedAt.getDate()).getTime();
+        const dayDiff = Math.floor((startOfToday - startOfPlayedDay) / dayMs);
+        const diffMs = Math.max(0, now.getTime() - playedAt.getTime());
+        const diffMinutes = Math.floor(diffMs / (60 * 1000));
+
+        if (dayDiff === 0) {
+            if (diffMinutes < 1) {
+                return 'Just now';
+            }
+            if (diffMinutes < 60) {
+                return `${diffMinutes} minute${diffMinutes === 1 ? '' : 's'} ago`;
+            }
+
+            const diffHours = Math.floor(diffMinutes / 60);
+            return `${diffHours} hour${diffHours === 1 ? '' : 's'} ago`;
+        }
+
+        if (dayDiff === 1) {
+            return 'Yesterday';
+        }
+
+        return playedAt.toLocaleDateString();
+    };
+
     const hasProfilesForGame = filteredProfiles.length > 0;
 
     return (
@@ -372,10 +405,12 @@ export function ProfileList({
                                         )}
                                     </div>
                                     <div className="flex items-center text-sm text-gray-400 gap-2">
-                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                        </svg>
-                                        <span>Last played {new Date(profile.lastUsed).toLocaleDateString()}</span>
+                                        <span title="Last played" aria-label="Last played" className="flex items-center justify-center cursor-help">
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                            </svg>
+                                        </span>
+                                        <span>{formatLastPlayed(profile.lastUsed)}</span>
                                     </div>
                                 </div>
                             </div>

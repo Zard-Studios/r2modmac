@@ -960,6 +960,10 @@ function App() {
     const activeProfile = profiles.find(p => p.id === activeProfileId);
     const currentCommunity = communities.find(c => c.identifier === selectedCommunity);
     const profileNeedsSync = !!activeProfile?.needs_sync || !!activeProfile?.mods.some((mod) => mod.pending_sync);
+    const markActiveProfileUsed = () => {
+      if (!activeProfile) return;
+      updateProfile(activeProfile.id, { lastUsed: Date.now() });
+    };
 
     const handleLaunchModdedDirect = async () => {
       if (!activeProfile) return;
@@ -974,6 +978,7 @@ function App() {
           await handleInstallToGameRequest();
         }
         await window.ipcRenderer.launchGameWithMods(activeProfile.gameIdentifier, activeProfile.id, activeProfile.platform);
+        markActiveProfileUsed();
         setIsGameRunning(true);
       } catch (error: any) {
         await window.ipcRenderer.alert(
@@ -991,6 +996,7 @@ function App() {
       try {
         setIsLaunchingProfile(true);
         await window.ipcRenderer.launchGameVanilla(activeProfile.gameIdentifier, activeProfile.id, activeProfile.platform);
+        markActiveProfileUsed();
         setIsGameRunning(true);
       } catch (error: any) {
         await window.ipcRenderer.alert(
