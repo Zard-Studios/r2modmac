@@ -579,7 +579,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
             <div className="p-4 border-t border-gray-800 bg-gray-900/50 backdrop-blur-sm space-y-3">
                 {/* Game Info - Always Show */}
                 {currentCommunity && (
-                    <div className="flex items-center gap-3 px-2">
+                    <div className="flex items-center gap-3">
                         <div className="w-8 h-8 rounded-lg overflow-hidden bg-gray-800 flex-shrink-0 border border-gray-700 shadow-sm">
                             {communityImage ? (
                                 <img
