@@ -317,7 +317,7 @@ fn lovely_asset_name_for_current_arch() -> &'static str {
 
 async fn download_official_lovely_runtime(version: &str) -> Result<Vec<u8>, String> {
     let client = reqwest::Client::builder()
-        .user_agent("r2modmac/0.5.2")
+        .user_agent("r2modmac/0.6.0")
         .build()
         .map_err(|e| format!("Failed to build Lovely client: {}", e))?;
     let desired_asset = lovely_asset_name_for_current_arch();
@@ -500,7 +500,7 @@ async fn download_bepinex_release_asset(
 async fn download_official_macos_bepinex_pack(thunderstore_version: &str) -> Result<Vec<u8>, String> {
     let version_candidates = official_bepinex_version_candidates(thunderstore_version);
     let client = reqwest::Client::builder()
-        .user_agent("r2modmac/0.5.2")
+        .user_agent("r2modmac/0.6.0")
         .build()
         .map_err(|e| format!("Failed to build GitHub client: {}", e))?;
 
@@ -591,7 +591,7 @@ async fn download_official_macos_bepinex6_pack(
         .nth(2)
         .ok_or_else(|| format!("Could not parse BepInEx 6 build number from {}", thunderstore_version))?;
     let client = reqwest::Client::builder()
-        .user_agent("r2modmac/0.5.2")
+        .user_agent("r2modmac/0.6.0")
         .build()
         .map_err(|e| format!("Failed to build GitHub client: {}", e))?;
 
@@ -1823,7 +1823,7 @@ pub async fn fetch_packages(app: AppHandle, state: tauri::State<'_, AppState>, g
     eprintln!("[fetch_packages] Fetching index from: {}", index_url);
     
     let client = reqwest::Client::builder()
-        .user_agent("r2modmac/0.5.2")
+        .user_agent("r2modmac/0.6.0")
         .connect_timeout(Duration::from_secs(8))
         .timeout(Duration::from_secs(25))
         .gzip(true)
