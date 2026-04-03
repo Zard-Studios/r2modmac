@@ -16,6 +16,8 @@ pub fn run() {
             use chrono::Datelike;
             use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
 
+            utils::volume_watcher::start_volume_watcher(app.handle().clone());
+
             if let Ok(new_data_dir) = app.path().app_data_dir() {
                 if let Some(parent_dir) = new_data_dir.parent() {
                     let old_data_dir = parent_dir.join("com.r2modmac.app");

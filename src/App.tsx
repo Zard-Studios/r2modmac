@@ -264,6 +264,7 @@ function App() {
   const activeProfile = profiles.find((profile) => profile.id === activeProfileId) ?? null
   const [activeProfileGamePath, setActiveProfileGamePath] = useState<string | null>(null)
   const [isCheckingActiveProfileGamePath, setIsCheckingActiveProfileGamePath] = useState(false)
+  const [storageVolumeEventCount, setStorageVolumeEventCount] = useState(0)
 
   useEffect(() => {
     if (!activeProfile) {
@@ -327,7 +328,7 @@ function App() {
     return () => {
       cancelled = true
     }
-  }, [activeProfile?.gameIdentifier, activeProfile?.platform, showSettings])
+  }, [activeProfile?.gameIdentifier, activeProfile?.platform, showSettings, storageVolumeEventCount])
 
   useEffect(() => {
     loadData()
@@ -351,8 +352,13 @@ function App() {
       setShowPreferences(true);
     });
 
+    const unlistenStorageVolumes = listen('storage-volumes-changed', () => {
+      setStorageVolumeEventCount((count) => count + 1);
+    });
+
     return () => {
       unlistenPrefs.then(fn => fn());
+      unlistenStorageVolumes.then(fn => fn());
     };
   }, [])
 

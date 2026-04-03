@@ -31,6 +31,7 @@ dirs = "5"
 tokio = { version = "1", features = ["full"] }
 futures-util = "0.3"
 regex = "1"
+notify = "6.1.1"
 tauri-plugin-dialog = "2.4.2"
 tauri-plugin-fs = "2.4.4"
 tauri-plugin-shell = "2.3.3"
