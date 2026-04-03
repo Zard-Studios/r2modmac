@@ -753,6 +753,78 @@ pub(crate) fn extract_bepinex_pack_to_root<R: std::io::Read + std::io::Seek>(
     Ok(())
 }
 
+fn normalize_macos_bepinex_loader_entry(relative_path: &str) -> Option<std::path::PathBuf> {
+    let normalized = normalize_bepinex_pack_entry(relative_path, true)?;
+    let lower = normalized.to_string_lossy().replace('\\', "/").to_lowercase();
+
+    if lower == "run_bepinex.sh"
+        || lower == "libdoorstop.dylib"
+        || lower == "doorstop_config.ini"
+        || lower == "doorstop_libs"
+        || lower.starts_with("doorstop_libs/")
+    {
+        Some(normalized)
+    } else {
+        None
+    }
+}
+
+fn extract_macos_bepinex_loader_to_root<R: std::io::Read + std::io::Seek>(
+    archive: &mut zip::ZipArchive<R>,
+    target_root: &std::path::Path,
+) -> Result<(), String> {
+    let (is_bepinex_pack, bepinex_prefix) = detect_bepinex_structure(archive);
+    if !is_bepinex_pack {
+        return Err("Archive does not look like a BepInEx runtime".to_string());
+    }
+
+    let prefix = bepinex_prefix.unwrap_or_default();
+    for i in 0..archive.len() {
+        let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
+        let Some(name) = normalize_zip_entry_name(file.name()) else {
+            continue;
+        };
+        let relative_path = if !prefix.is_empty() && name.starts_with(&prefix) {
+            &name[prefix.len()..]
+        } else {
+            &name
+        };
+
+        if relative_path.is_empty() {
+            continue;
+        }
+
+        let Some(normalized_relative_path) = normalize_macos_bepinex_loader_entry(relative_path) else {
+            continue;
+        };
+        let outpath = target_root.join(&normalized_relative_path);
+
+        if zip_entry_is_dir(file.name()) {
+            fs::create_dir_all(&outpath).map_err(|e| e.to_string())?;
+            continue;
+        }
+
+        if normalized_relative_path == std::path::PathBuf::from("doorstop_config.ini") && outpath.exists() {
+            continue;
+        }
+
+        if let Some(parent) = outpath.parent() {
+            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        let mut outfile = fs::File::create(&outpath).map_err(|e| e.to_string())?;
+        std::io::copy(&mut file, &mut outfile).map_err(|e| e.to_string())?;
+        if normalized_relative_path
+            .file_name()
+            .map(|name| is_bepinex_shell_script(&name.to_string_lossy()))
+            .unwrap_or(false)
+        {
+            set_script_executable(&outpath)?;
+        }
+    }
+
+    Ok(())
+}
+
 fn collect_bepinex_pack_files<R: std::io::Read + std::io::Seek>(
     archive: &mut zip::ZipArchive<R>,
     target_is_macos: bool,
@@ -787,6 +859,47 @@ fn collect_bepinex_pack_files<R: std::io::Read + std::io::Seek>(
         let Some(normalized_relative_path) =
             normalize_bepinex_pack_entry(relative_path, target_is_macos)
         else {
+            continue;
+        };
+        files.push(normalized_relative_path);
+    }
+
+    files.sort();
+    files.dedup();
+    Ok(files)
+}
+
+fn collect_macos_bepinex_loader_files<R: std::io::Read + std::io::Seek>(
+    archive: &mut zip::ZipArchive<R>,
+) -> Result<Vec<std::path::PathBuf>, String> {
+    let (is_bepinex_pack, bepinex_prefix) = detect_bepinex_structure(archive);
+    if !is_bepinex_pack {
+        return Err("Archive does not look like a BepInEx runtime".to_string());
+    }
+
+    let prefix = bepinex_prefix.unwrap_or_default();
+    let mut files = Vec::new();
+
+    for i in 0..archive.len() {
+        let file = archive.by_index(i).map_err(|e| e.to_string())?;
+        let Some(name) = normalize_zip_entry_name(file.name()) else {
+            continue;
+        };
+        if zip_entry_is_dir(file.name()) {
+            continue;
+        }
+
+        let relative_path = if !prefix.is_empty() && name.starts_with(&prefix) {
+            &name[prefix.len()..]
+        } else {
+            &name
+        };
+
+        if relative_path.is_empty() {
+            continue;
+        }
+
+        let Some(normalized_relative_path) = normalize_macos_bepinex_loader_entry(relative_path) else {
             continue;
         };
         files.push(normalized_relative_path);
@@ -1186,14 +1299,16 @@ pub async fn install_mod(app: AppHandle, profile_id: String, download_url: Strin
     let mut archive_for_detect = zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
     let (mut is_bepinex_pack, _) = detect_bepinex_structure(&mut archive_for_detect);
     let (mut has_macos_loader, mut has_windows_loader) = detect_bepinex_pack_platform(&mut archive_for_detect);
+    let mut macos_runtime_overlay_bytes: Option<Vec<u8>> = None;
 
     if is_bepinex_pack && target_is_macos && !has_macos_loader {
         let version_number = extract_version_number_from_full_name(&mod_name)
             .ok_or_else(|| format!("Could not parse BepInEx version from {}", mod_name))?;
         let runtime_kind = detect_unity_runtime_kind(game_dir);
-        runtime_bytes = download_official_macos_bepinex_runtime(&version_number, runtime_kind).await?;
+        let fallback_runtime_bytes =
+            download_official_macos_bepinex_runtime(&version_number, runtime_kind).await?;
 
-        let cursor = std::io::Cursor::new(&runtime_bytes);
+        let cursor = std::io::Cursor::new(&fallback_runtime_bytes);
         let mut fallback_archive = zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
         let (fallback_is_bepinex_pack, _) =
             detect_bepinex_structure(&mut fallback_archive);
@@ -1207,6 +1322,7 @@ pub async fn install_mod(app: AppHandle, profile_id: String, download_url: Strin
         is_bepinex_pack = fallback_is_bepinex_pack;
         has_macos_loader = fallback_has_macos_loader;
         has_windows_loader = fallback_has_windows_loader;
+        macos_runtime_overlay_bytes = Some(fallback_runtime_bytes);
     }
 
     // Install to game folder
@@ -1214,11 +1330,21 @@ pub async fn install_mod(app: AppHandle, profile_id: String, download_url: Strin
         let cursor = std::io::Cursor::new(&runtime_bytes);
         let mut manifest_archive = zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
 
-        if is_bepinex_pack {
+        let mut files = if is_bepinex_pack {
             collect_bepinex_pack_files(&mut manifest_archive, target_is_macos)?
         } else {
             collect_regular_mod_files(&mut manifest_archive, &mod_name)?
+        };
+
+        if let Some(overlay_bytes) = macos_runtime_overlay_bytes.as_ref() {
+            let cursor = std::io::Cursor::new(overlay_bytes);
+            let mut overlay_archive = zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
+            files.extend(collect_macos_bepinex_loader_files(&mut overlay_archive)?);
         }
+
+        files.sort();
+        files.dedup();
+        files
     };
     let backed_up_files = if managed_files.is_empty() {
         Vec::new()
@@ -1243,6 +1369,12 @@ pub async fn install_mod(app: AppHandle, profile_id: String, download_url: Strin
 
         eprintln!("[install_mod] Detected BepInExPack - installing to game root");
         extract_bepinex_pack_to_root(&mut archive, game_dir, target_is_macos)?;
+
+        if let Some(overlay_bytes) = macos_runtime_overlay_bytes.as_ref() {
+            let cursor = std::io::Cursor::new(overlay_bytes);
+            let mut overlay_archive = zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
+            extract_macos_bepinex_loader_to_root(&mut overlay_archive, game_dir)?;
+        }
 
         if target_is_macos {
             migrate_root_plugins_into_bepinex(game_dir)?;
@@ -1279,6 +1411,12 @@ pub async fn install_mod(app: AppHandle, profile_id: String, download_url: Strin
         if is_bepinex_pack {
             // Cache BepInExPack to profile root
             extract_bepinex_pack_to_root(&mut archive, &profile_dir, target_is_macos)?;
+
+            if let Some(overlay_bytes) = macos_runtime_overlay_bytes.as_ref() {
+                let cursor = std::io::Cursor::new(overlay_bytes);
+                let mut overlay_archive = zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
+                extract_macos_bepinex_loader_to_root(&mut overlay_archive, &profile_dir)?;
+            }
         } else {
             eprintln!("[install_mod] Updating profile cache root for {:?}", profile_dir);
             extract_regular_mod_to_root(&mut archive, &profile_dir, &mod_name)?;

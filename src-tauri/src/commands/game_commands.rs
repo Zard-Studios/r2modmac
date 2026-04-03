@@ -377,7 +377,7 @@ fn macos_steam_launch_option_is_managed(
 
     Ok(get_launch_options_for_app(&localconfig, &app_id)
         .as_deref()
-        .map(is_managed_macos_launch_option)
+        .map(|value| is_managed_macos_launch_option_for_game(value, game_path))
         .unwrap_or(false))
 }
 
@@ -737,6 +737,59 @@ fn find_macos_executable_path(game_path: &std::path::Path) -> Option<std::path::
         .filter_map(|entry| entry.ok())
         .find(|entry| entry.file_type().map(|t| t.is_file()).unwrap_or(false))
         .map(|entry| entry.path())
+}
+
+fn macos_executable_supports_x86_64(executable_path: &std::path::Path) -> Result<bool, String> {
+    let output = std::process::Command::new("/usr/bin/lipo")
+        .args(["-archs", &executable_path.to_string_lossy()])
+        .output()
+        .map_err(|e| format!("Failed to inspect macOS executable architectures: {}", e))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "Failed to inspect macOS executable architectures: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+
+    let archs = String::from_utf8_lossy(&output.stdout).to_lowercase();
+    Ok(archs.split_whitespace().any(|arch| arch == "x86_64"))
+}
+
+fn validate_macos_bepinex_support(game_path: &std::path::Path) -> Result<(), String> {
+    let Some(app_bundle) = find_macos_app_bundle(game_path) else {
+        if find_windows_executable_path(game_path).is_some() {
+            return Err(
+                "This looks like a Windows game build. Use a Windows/CrossOver profile with Windows BepInEx instead of macOS BepInEx."
+                    .to_string(),
+            );
+        }
+
+        return Err(
+            "macOS mod support currently requires a native macOS .app bundle inside the game directory."
+                .to_string(),
+        );
+    };
+
+    let data_dir = app_bundle.join("Contents").join("Resources").join("Data");
+    if !data_dir.is_dir() {
+        return Err(
+            "Could not find a Unity Data folder inside the macOS app bundle. Native macOS BepInEx currently supports Unity .app builds only."
+                .to_string(),
+        );
+    }
+
+    let executable_path = find_macos_executable_path(game_path)
+        .ok_or_else(|| "Could not find the macOS game executable inside the app bundle.".to_string())?;
+
+    if !macos_executable_supports_x86_64(&executable_path)? {
+        return Err(
+            "This macOS build is arm64-only. Current BepInEx macOS runtimes are x64-only, so this game cannot be launched modded natively on macOS right now. If the Windows build is moddable, use a Windows/CrossOver profile."
+                .to_string(),
+        );
+    }
+
+    Ok(())
 }
 
 fn is_windows_game_executable_name(name: &str) -> bool {
@@ -1326,7 +1379,10 @@ fn launch_macos_bepinex_wrapper(
 
     eprintln!("[{}] Launching via run_bepinex.sh at {:?}", context, run_script);
 
-    std::process::Command::new(&run_script)
+    std::process::Command::new("/usr/bin/arch")
+        .arg("-x86_64")
+        .arg("/bin/bash")
+        .arg(&run_script)
         .current_dir(game_path)
         .spawn()
         .map_err(|e| format!("Failed to launch run_bepinex.sh: {}", e))?;
@@ -1601,6 +1657,31 @@ fn is_managed_macos_launch_option(value: &str) -> bool {
     let lower = value.to_lowercase();
     let has_script = lower.contains("run_bepinex.sh") || lower.contains("bepinex.sh");
     has_script && lower.contains("%command%")
+}
+
+fn extract_macos_launch_script_path(value: &str) -> Option<std::path::PathBuf> {
+    let re = regex::Regex::new(r#""([^"]*(?:run_bepinex\.sh|bepinex\.sh))""#).ok()?;
+    re.captures(value)
+        .and_then(|captures| captures.get(1).map(|path| std::path::PathBuf::from(path.as_str())))
+}
+
+fn is_managed_macos_launch_option_for_game(value: &str, game_path: &std::path::Path) -> bool {
+    if !is_managed_macos_launch_option(value) {
+        return false;
+    }
+
+    let Some(script_path) = extract_macos_launch_script_path(value) else {
+        return false;
+    };
+
+    if script_path.is_relative() {
+        return true;
+    }
+
+    script_path
+        .parent()
+        .map(|script_dir| game_path_matches_install_root(script_dir, game_path))
+        .unwrap_or(false)
 }
 
 fn quit_steam_if_running() -> Result<bool, String> {
@@ -2698,6 +2779,10 @@ pub async fn install_to_game(app: AppHandle, game_identifier: String, profile_id
     let is_balatro_profile = is_mac_profile
         && (is_balatro_identifier(&game_identifier) || is_balatro_game_path(game_path));
 
+    if is_mac_profile && !is_vanilla && !is_balatro_profile {
+        validate_macos_bepinex_support(game_path)?;
+    }
+
     if is_balatro_profile {
         let mods_dir = get_balatro_mods_dir()
             .ok_or_else(|| "Could not resolve ~/Library/Application Support/Balatro/Mods".to_string())?;
@@ -3258,6 +3343,8 @@ pub async fn launch_game_with_mods(
         return Ok(());
     }
 
+    validate_macos_bepinex_support(&game_path)?;
+
     // Safety-net: before launching via Steam as MODDED, ensure the BepInEx launch
     // option is actually set in localconfig.vdf. This covers the case where the user
     // presses Play without having run "Apply to Game" first, or where a previous
@@ -3326,8 +3413,9 @@ pub async fn launch_game_vanilla(
     }
 
     let executable_path = find_macos_executable_path(&game_path);
+    let can_use_bepinex_wrapper = validate_macos_bepinex_support(&game_path).is_ok();
 
-    if use_direct_launch {
+    if use_direct_launch && can_use_bepinex_wrapper {
         if launch_macos_bepinex_wrapper(&game_path, executable_path.as_ref(), "launch_game_vanilla")? {
             return Ok(());
         }
@@ -3534,7 +3622,7 @@ pub async fn sync_profile_to_game(app: AppHandle, profile_id: String, game_ident
     let profile_platform = profile["platform"].as_str().unwrap_or("windows").to_string();
 
     // 2. Get game path for this specific profile platform
-    let game_path_str = get_game_path(app.clone(), game_identifier.clone(), Some(profile_platform)).await?
+    let game_path_str = get_game_path(app.clone(), game_identifier.clone(), Some(profile_platform.clone())).await?
         .ok_or("Game path not configured. Please set it in Settings.")?;
     let game_path = std::path::Path::new(&game_path_str);
     let game_plugins = game_path.join("BepInEx").join("plugins");
@@ -3556,6 +3644,17 @@ pub async fn sync_profile_to_game(app: AppHandle, profile_id: String, game_ident
         .filter(|m| m["enabled"].as_bool().unwrap_or(true)) // Only enabled mods (default true for backwards compat)
         .filter_map(|m| m["fullName"].as_str().map(|s| s.to_string()))
         .collect();
+
+    let is_mac_profile = profile_platform == "mac";
+    let is_balatro_profile = is_mac_profile
+        && (is_balatro_identifier(&game_identifier) || is_balatro_game_path(game_path));
+    let profile_requires_bepinex = profile_mod_full_names
+        .iter()
+        .any(|name| name.to_lowercase().contains("bepinexpack"));
+
+    if is_mac_profile && !is_balatro_profile && profile_requires_bepinex {
+        validate_macos_bepinex_support(game_path)?;
+    }
     
     let extract_mod_key = |name: &str| -> String {
         let parts: Vec<&str> = name.split('-').collect();

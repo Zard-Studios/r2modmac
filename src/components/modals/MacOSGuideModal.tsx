@@ -54,6 +54,7 @@ export const MacOSGuideModal: React.FC<MacOSGuideModalProps> = ({ isOpen, onClos
                         <div className="text-sm text-blue-200">
                             <p className="font-semibold mb-1">One-time Setup Required</p>
                             <p>To load mods on macOS, you must set a Steam launch option that injects BepInEx via <code className="bg-blue-900/50 px-1.5 py-0.5 rounded text-blue-100 font-mono text-xs">run_bepinex.sh</code> under Rosetta. This only needs to be done once per game.</p>
+                            <p className="mt-2 text-blue-100/90">Supported cases are native macOS Unity <code className="bg-blue-900/50 px-1.5 py-0.5 rounded text-blue-100 font-mono text-xs">.app</code> builds with an <code className="bg-blue-900/50 px-1.5 py-0.5 rounded text-blue-100 font-mono text-xs">x86_64</code> executable slice. Windows builds running through Wine/CrossOver need a Windows profile instead.</p>
                         </div>
                     </div>
 
