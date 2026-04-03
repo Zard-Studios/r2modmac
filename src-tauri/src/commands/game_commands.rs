@@ -1,4 +1,8 @@
-use std::fs;
+use std::{
+    collections::HashSet,
+    fs,
+    sync::{Mutex, OnceLock},
+};
 use tauri::{command, AppHandle, Manager};
 use crate::models::shared::*;
 use crate::utils::file_ops::*;
@@ -17,6 +21,7 @@ use crate::commands::mod_commands::{
 
 const CANONICAL_MAC_BEPINEX_SCRIPT: &str = "run_bepinex.sh";
 const BALATRO_LOVELY_SCRIPT: &str = "run_lovely_macos.sh";
+static LOGGED_GAME_PATH_OVERRIDES: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 
 fn is_bepinex_shell_script_name(name: &str) -> bool {
     let lower = name.to_lowercase();
@@ -36,6 +41,19 @@ fn manual_override_keys(game_identifier: &str, platform: Option<&str>) -> Vec<St
         vec![format!("{}::{}", game_identifier, p), game_identifier.to_string()]
     } else {
         vec![game_identifier.to_string()]
+    }
+}
+
+fn log_manual_override_once(key: &str, path: &str) {
+    let dedupe_key = format!("{}::{}", key, path);
+    let seen = LOGGED_GAME_PATH_OVERRIDES.get_or_init(|| Mutex::new(HashSet::new()));
+    let Ok(mut seen) = seen.lock() else {
+        eprintln!("[get_game_path] Found manual override (key={}): {}", key, path);
+        return;
+    };
+
+    if seen.insert(dedupe_key) {
+        eprintln!("[get_game_path] Found manual override (key={}): {}", key, path);
     }
 }
 
@@ -2592,7 +2610,7 @@ pub async fn get_game_path(app: AppHandle, game_identifier: String, platform: Op
                 eprintln!("[get_game_path] Ignoring legacy manual path due to platform mismatch: {}", path);
                 continue;
             }
-            eprintln!("[get_game_path] Found manual override (key={}): {}", key, path);
+            log_manual_override_once(&key, path);
             return Ok(Some(path.clone()));
         }
     }
