@@ -17,6 +17,8 @@ pub struct Settings {
     pub install_in_parallel: bool,
     #[serde(default)]
     pub confirm_before_apply_to_game: bool,
+    #[serde(default = "default_true")]
+    pub write_debug_logs_to_game: bool,
     #[serde(default = "default_mod_view_mode")]
     pub default_mod_view_mode: String,
     #[serde(default)]
@@ -35,6 +37,7 @@ impl Settings {
             ask_version_before_install: true,
             install_in_parallel: true,
             confirm_before_apply_to_game: false,
+            write_debug_logs_to_game: true,
             default_mod_view_mode: default_mod_view_mode(),
             hide_crossover_guide: false,
             hide_macos_guide: false,
