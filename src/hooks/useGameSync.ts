@@ -22,6 +22,10 @@ interface UseGameSyncProps {
     ) => Promise<void>;
 }
 
+interface SyncToGameOptions {
+    silentSuccess?: boolean;
+}
+
 export function useGameSync({
     activeProfileId,
     selectedCommunity,
@@ -39,10 +43,14 @@ export function useGameSync({
         return latestProfiles;
     };
 
-    const handleSyncToGame = async (isVanillaOverride?: boolean) => {
+    const handleSyncToGame = async (
+        isVanillaOverride?: boolean,
+        syncOptions?: SyncToGameOptions
+    ) => {
         const activeProfile = useProfileStore.getState().profiles.find(p => p.id === activeProfileId);
         const community = activeProfile?.gameIdentifier || selectedCommunity;
         if (!activeProfile || !community) return;
+        const silentSuccess = !!syncOptions?.silentSuccess;
 
         try {
             // Vanilla override — direct call, no BepInEx setup needed
@@ -312,7 +320,9 @@ export function useGameSync({
                 message += '\n\nBalatro macOS: mod files are synced to ~/Library/Application Support/Balatro/Mods. Launch the modded game with run_lovely_macos.sh.';
             }
 
-            await window.ipcRenderer.alert('Success', message);
+            if (!silentSuccess) {
+                await window.ipcRenderer.alert('Success', message);
+            }
 
             const syncedProfile = useProfileStore.getState().profiles.find(p => p.id === activeProfileId);
             const isCrossOverProfile = typeof gamePath === 'string' && gamePath.toLowerCase().includes('crossover');

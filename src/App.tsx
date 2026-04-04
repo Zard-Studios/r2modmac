@@ -214,6 +214,7 @@ function App() {
   const [isStoppingProfile, setIsStoppingProfile] = useState(false)
   const [isGameRunning, setIsGameRunning] = useState(false)
   const applyInFlightRef = useRef(false)
+  const profileActionLockRef = useRef(false)
   const [isApplyingToGame, setIsApplyingToGame] = useState(false)
   const [showExportModal, setShowExportModal] = useState(false)
   const [showCrossOverGuide, setShowCrossOverGuide] = useState(false)
@@ -241,10 +242,12 @@ function App() {
   const [askVersionBeforeInstall, setAskVersionBeforeInstall] = useState(true)
   const [installInParallel, setInstallInParallel] = useState(true)
   const [confirmBeforeApplyToGame, setConfirmBeforeApplyToGame] = useState(false)
+  const [writeDebugLogsToGame, setWriteDebugLogsToGame] = useState(true)
   const [defaultModViewMode, setDefaultModViewMode] = useState<'grid' | 'list'>('grid')
   const [isBrowsingMode, setIsBrowsingMode] = useState(false)
   const isInitialLoadRunningRef = useRef(false)
   const packagesLoadRequestRef = useRef(0)
+  const autoApplyProfileRef = useRef<string | null>(null)
 
   const {
     profiles,
@@ -341,6 +344,7 @@ function App() {
       setAskVersionBeforeInstall(s.ask_version_before_install ?? true);
       setInstallInParallel(s.install_in_parallel ?? true);
       setConfirmBeforeApplyToGame(!!s.confirm_before_apply_to_game);
+      setWriteDebugLogsToGame(s.write_debug_logs_to_game ?? true);
       const storedViewMode = s.default_mod_view_mode === 'list' ? 'list' : 'grid';
       setDefaultModViewMode(storedViewMode);
       setViewMode(storedViewMode);
@@ -356,9 +360,17 @@ function App() {
       setStorageVolumeEventCount((count) => count + 1);
     });
 
+    const unlistenSteamLaunchOptionsRestart = listen('steam-launch-options-restart', () => {
+      void window.ipcRenderer.alert(
+        'Restarting Steam',
+        'Steam is being restarted to apply the launch options for this profile. The game launch will continue automatically.'
+      );
+    });
+
     return () => {
       unlistenPrefs.then(fn => fn());
       unlistenStorageVolumes.then(fn => fn());
+      unlistenSteamLaunchOptionsRestart.then(fn => fn());
     };
   }, [])
 
@@ -732,15 +744,21 @@ function App() {
     await handleInstallMod(pkg, targetProfileId, selectedVersion);
   };
 
-  const handleInstallToGameRequest = async (isVanillaOverride?: boolean) => {
+  const handleInstallToGameRequest = async (
+    isVanillaOverride?: boolean,
+    options?: {
+      skipConfirm?: boolean;
+      silentSuccess?: boolean;
+    }
+  ) => {
     if (applyInFlightRef.current) return;
 
     applyInFlightRef.current = true;
     setIsApplyingToGame(true);
 
     try {
-      if (!confirmBeforeApplyToGame || isVanillaOverride !== undefined) {
-        await handleSyncToGame(isVanillaOverride);
+      if (options?.skipConfirm || !confirmBeforeApplyToGame || isVanillaOverride !== undefined) {
+        await handleSyncToGame(isVanillaOverride, { silentSuccess: options?.silentSuccess });
         return;
       }
 
@@ -750,20 +768,50 @@ function App() {
       );
       if (!confirmed) return;
 
-      await handleSyncToGame();
+      await handleSyncToGame(undefined, { silentSuccess: options?.silentSuccess });
     } finally {
       applyInFlightRef.current = false;
       setIsApplyingToGame(false);
     }
   };
 
+  useEffect(() => {
+    if (!activeProfileId || isBrowsingMode) {
+      autoApplyProfileRef.current = null;
+      return;
+    }
+
+    const selectedProfile = useProfileStore.getState().profiles.find((profile) => profile.id === activeProfileId);
+    if (!selectedProfile) {
+      return;
+    }
+
+    const profileNeedsSync = !!selectedProfile.needs_sync || selectedProfile.mods.some((mod) => mod.pending_sync);
+    if (!profileNeedsSync) {
+      return;
+    }
+
+    if (autoApplyProfileRef.current === activeProfileId) {
+      return;
+    }
+
+    autoApplyProfileRef.current = activeProfileId;
+    void handleInstallToGameRequest(
+      undefined,
+      { skipConfirm: true, silentSuccess: true }
+    );
+  }, [activeProfileId, isBrowsingMode]);
+
   const handleToggleProfileVanilla = async (profileId: string, newVanillaState: boolean) => {
+    if (profileActionLockRef.current || applyInFlightRef.current) return;
     const profile = profiles.find((p) => p.id === profileId);
     if (!profile) return;
 
     const disabledMods = profile.mods.filter((m) => !m.enabled).map((m) => m.fullName);
     const hadPendingSync = !!profile.needs_sync || profile.mods.some((m) => m.pending_sync);
 
+    profileActionLockRef.current = true;
+    applyInFlightRef.current = true;
     setIsApplyingToGame(true);
     updateProfile(profileId, { is_vanilla: newVanillaState });
 
@@ -796,6 +844,8 @@ function App() {
         String(error?.message || error || 'Failed to update the profile runtime state.')
       );
     } finally {
+      applyInFlightRef.current = false;
+      profileActionLockRef.current = false;
       setIsApplyingToGame(false);
     }
   };
@@ -805,6 +855,7 @@ function App() {
     setAskVersionBeforeInstall(newSettings.ask_version_before_install);
     setInstallInParallel(newSettings.install_in_parallel);
     setConfirmBeforeApplyToGame(newSettings.confirm_before_apply_to_game);
+    setWriteDebugLogsToGame(newSettings.write_debug_logs_to_game);
     setDefaultModViewMode(newSettings.default_mod_view_mode);
     setViewMode(newSettings.default_mod_view_mode);
 
@@ -815,6 +866,7 @@ function App() {
       ask_version_before_install: newSettings.ask_version_before_install,
       install_in_parallel: newSettings.install_in_parallel,
       confirm_before_apply_to_game: newSettings.confirm_before_apply_to_game,
+      write_debug_logs_to_game: newSettings.write_debug_logs_to_game,
       default_mod_view_mode: newSettings.default_mod_view_mode,
     });
   };
@@ -985,6 +1037,7 @@ function App() {
           profiles={profiles}
           selectedGameIdentifier={selectedCommunity}
           selectedGamePlatform={selectedCommunity ? communityPlatforms[selectedCommunity] : undefined}
+          isBusy={isApplyingToGame || isLaunchingProfile || isStoppingProfile}
           onSelectProfile={handleSelectProfile}
           onCreateProfile={(name, platform) => createProfile(name, selectedCommunity!, platform)}
           onImportProfile={handleImportProfile}
@@ -1007,43 +1060,51 @@ function App() {
 
     const handleLaunchModdedDirect = async () => {
       if (!activeProfile) return;
+      if (profileActionLockRef.current || applyInFlightRef.current) return;
       if (activeProfile.is_vanilla) {
         await window.ipcRenderer.alert('Mods Disabled', 'Enable the profile before launching the modded game.');
         return;
       }
 
       try {
+        profileActionLockRef.current = true;
         setIsLaunchingProfile(true);
         if (profileNeedsSync) {
           await handleInstallToGameRequest();
         }
         await window.ipcRenderer.launchGameWithMods(activeProfile.gameIdentifier, activeProfile.id, activeProfile.platform);
         markActiveProfileUsed();
-        setIsGameRunning(true);
+        const running = await window.ipcRenderer.isGameRunning(activeProfile.gameIdentifier, activeProfile.platform);
+        setIsGameRunning(running);
       } catch (error: any) {
         await window.ipcRenderer.alert(
           'Launch Failed',
           String(error?.message || error || 'Failed to launch the modded game.')
         );
       } finally {
+        profileActionLockRef.current = false;
         setIsLaunchingProfile(false);
       }
     };
 
     const handleLaunchVanillaDirect = async () => {
       if (!activeProfile) return;
+      if (profileActionLockRef.current || applyInFlightRef.current) return;
 
       try {
+        profileActionLockRef.current = true;
         setIsLaunchingProfile(true);
         await window.ipcRenderer.launchGameVanilla(activeProfile.gameIdentifier, activeProfile.id, activeProfile.platform);
         markActiveProfileUsed();
-        setIsGameRunning(true);
+        const running = await window.ipcRenderer.isGameRunning(activeProfile.gameIdentifier, activeProfile.platform);
+        setIsGameRunning(running);
       } catch (error: any) {
         await window.ipcRenderer.alert(
           'Launch Failed',
           String(error?.message || error || 'Failed to launch the vanilla game.')
         );
       } finally {
+        profileActionLockRef.current = false;
         setIsLaunchingProfile(false);
       }
     };
@@ -1059,8 +1120,10 @@ function App() {
 
     const handleStopProfileDirect = async () => {
       if (!activeProfile) return;
+      if (profileActionLockRef.current || applyInFlightRef.current) return;
 
       try {
+        profileActionLockRef.current = true;
         setIsStoppingProfile(true);
         await window.ipcRenderer.stopGame(activeProfile.gameIdentifier, activeProfile.platform);
         setIsGameRunning(false);
@@ -1070,6 +1133,7 @@ function App() {
           String(error?.message || error || 'Failed to stop the running game.')
         );
       } finally {
+        profileActionLockRef.current = false;
         setIsStoppingProfile(false);
       }
     };
@@ -1149,6 +1213,7 @@ function App() {
         onStopProfile={handleStopProfileDirect}
         isApplying={isApplyingToGame}
         isLaunching={isLaunchingProfile || isStoppingProfile}
+        isBusy={isApplyingToGame || isLaunchingProfile || isStoppingProfile}
         isGameRunning={isGameRunning}
         hasConfiguredGamePath={!!activeProfileGamePath}
         isCheckingGamePath={isCheckingActiveProfileGamePath}
@@ -1289,6 +1354,7 @@ function App() {
           ask_version_before_install: askVersionBeforeInstall,
           install_in_parallel: installInParallel,
           confirm_before_apply_to_game: confirmBeforeApplyToGame,
+          write_debug_logs_to_game: writeDebugLogsToGame,
           default_mod_view_mode: defaultModViewMode,
         }}
         onSavePreferences={handleSavePreferences}

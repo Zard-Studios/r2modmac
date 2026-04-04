@@ -11,6 +11,7 @@ export interface AppSettings {
     ask_version_before_install?: boolean;
     install_in_parallel?: boolean;
     confirm_before_apply_to_game?: boolean;
+    write_debug_logs_to_game?: boolean;
     default_mod_view_mode?: 'grid' | 'list';
     hide_crossover_guide?: boolean;
     hide_macos_guide?: boolean;

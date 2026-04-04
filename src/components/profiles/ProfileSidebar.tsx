@@ -22,6 +22,7 @@ interface ProfileSidebarProps {
     onStopProfile: () => Promise<void> | void;
     isApplying?: boolean;
     isLaunching?: boolean;
+    isBusy?: boolean;
     isGameRunning?: boolean;
     hasConfiguredGamePath?: boolean;
     isCheckingGamePath?: boolean;
@@ -49,6 +50,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
     onStopProfile,
     isApplying = false,
     isLaunching = false,
+    isBusy = false,
     isGameRunning = false,
     hasConfiguredGamePath = false,
     isCheckingGamePath = false,
@@ -379,6 +381,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                         </button>
                         <button
                             onClick={async () => {
+                                if (isBusy) return;
                                 if (activeProfile) {
                                     if (activeProfile.mods.length === 0 && !activeProfile.is_vanilla) {
                                         alert("No mods to disable!");
@@ -388,10 +391,12 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                                     await onToggleVanilla(activeProfile.id, newVanillaState);
                                 }
                             }}
+                            disabled={isBusy}
                             className={`p-1.5 rounded-lg transition-colors ${activeProfile?.is_vanilla
                                 ? 'text-yellow-500 bg-yellow-500/10 hover:bg-yellow-500/20'
                                 : 'text-gray-400 hover:text-yellow-500 hover:bg-yellow-500/10'
                                 }`}
+                            style={isBusy ? { opacity: 0.5, cursor: 'not-allowed' } : undefined}
                             title={activeProfile?.is_vanilla ? "Enable Mods" : "Disable All Mods (Vanilla)"}
                         >
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -425,7 +430,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
             </div>
 
             {/* Mod List */}
-            <div className={`flex-1 overflow-y-auto p-2 space-y-1 scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-transparent ${activeProfile?.is_vanilla ? 'grayscale opacity-75 pointer-events-none' : ''}`}>
+            <div className={`flex-1 overflow-y-auto p-2 space-y-1 scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-transparent ${activeProfile?.is_vanilla ? 'grayscale opacity-75' : ''}`}>
                 <div className="px-2 py-2 text-xs font-bold text-gray-500 uppercase tracking-wider flex justify-between items-center">
                     <div className="flex items-center gap-2">
                         <span>Profile Mods</span>
@@ -610,6 +615,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                                     ? 'bg-gray-700 border-gray-600 cursor-wait opacity-70'
                                     : 'bg-blue-600 border-blue-500'
                             }`}
+                            title={activeProfile.is_vanilla ? 'Sync mods into the disabled BepInEx runtime' : 'Apply mods to game'}
                         >
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
                                 <path d="M8.75 2.75a.75.75 0 0 0-1.5 0v5.69L5.03 6.22a.75.75 0 0 0-1.06 1.06l3.5 3.5a.75.75 0 0 0 1.06 0l3.5-3.5a.75.75 0 0 0-1.06-1.06L8.75 8.44V2.75Z" />

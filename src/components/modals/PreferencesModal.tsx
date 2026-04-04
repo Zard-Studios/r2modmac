@@ -6,6 +6,7 @@ export interface PreferencesSettings {
     ask_version_before_install: boolean;
     install_in_parallel: boolean;
     confirm_before_apply_to_game: boolean;
+    write_debug_logs_to_game: boolean;
     default_mod_view_mode: 'grid' | 'list';
 }
 
@@ -44,7 +45,7 @@ function IconBox({ children, colorClass }: { children: React.ReactNode; colorCla
     );
 }
 
-function RowIcon({ kind }: { kind: 'install' | 'version' | 'parallel' | 'apply' | 'layout' | 'warning' | 'cache' }) {
+function RowIcon({ kind }: { kind: 'install' | 'version' | 'parallel' | 'apply' | 'logs' | 'layout' | 'warning' | 'cache' }) {
     if (kind === 'install') return (
         <IconBox colorClass="text-blue-400">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -70,6 +71,13 @@ function RowIcon({ kind }: { kind: 'install' | 'version' | 'parallel' | 'apply' 
         <IconBox colorClass="text-emerald-400">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M5 13l4 4L19 7" />
+            </svg>
+        </IconBox>
+    );
+    if (kind === 'logs') return (
+        <IconBox colorClass="text-sky-400">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6M8 4h8a2 2 0 012 2v12a2 2 0 01-2 2H8a2 2 0 01-2-2V6a2 2 0 012-2z" />
             </svg>
         </IconBox>
     );
@@ -108,6 +116,7 @@ export default function PreferencesModal({
     const [askVersionBeforeInstall, setAskVersionBeforeInstall] = useState(settings.ask_version_before_install);
     const [installInParallel, setInstallInParallel] = useState(settings.install_in_parallel);
     const [confirmBeforeApply, setConfirmBeforeApply] = useState(settings.confirm_before_apply_to_game);
+    const [writeDebugLogsToGame, setWriteDebugLogsToGame] = useState(settings.write_debug_logs_to_game);
     const [defaultModViewMode, setDefaultModViewMode] = useState<'grid' | 'list'>(settings.default_mod_view_mode);
     const [restoringWarnings, setRestoringWarnings] = useState(false);
 
@@ -127,6 +136,7 @@ export default function PreferencesModal({
         setAskVersionBeforeInstall(settings.ask_version_before_install);
         setInstallInParallel(settings.install_in_parallel);
         setConfirmBeforeApply(settings.confirm_before_apply_to_game);
+        setWriteDebugLogsToGame(settings.write_debug_logs_to_game);
         setDefaultModViewMode(settings.default_mod_view_mode);
     }, [settings]);
 
@@ -138,6 +148,7 @@ export default function PreferencesModal({
             ask_version_before_install: askVersionBeforeInstall,
             install_in_parallel: installInParallel,
             confirm_before_apply_to_game: confirmBeforeApply,
+            write_debug_logs_to_game: writeDebugLogsToGame,
             default_mod_view_mode: defaultModViewMode,
         });
         onClose();
@@ -216,6 +227,17 @@ export default function PreferencesModal({
                                     </div>
                                 </div>
                                 <Toggle value={confirmBeforeApply} onChange={setConfirmBeforeApply} />
+                            </div>
+
+                            <div className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-gray-750">
+                                <div className="flex items-center gap-4">
+                                    <RowIcon kind="logs" />
+                                    <div>
+                                        <p className="text-[15px] font-medium text-white">Write debug logs to game folder</p>
+                                        <p className="text-[13px] text-gray-400 mt-0.5 leading-snug">Writes r2modmac bootstrap, dyld, and exec logs when launching supported games from the app.</p>
+                                    </div>
+                                </div>
+                                <Toggle value={writeDebugLogsToGame} onChange={setWriteDebugLogsToGame} />
                             </div>
 
                             <div className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-gray-750">

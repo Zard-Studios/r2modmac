@@ -9,6 +9,7 @@ interface ProfileListProps {
     profiles: Profile[];
     selectedGameIdentifier: string;
     selectedGamePlatform?: CommunityPlatformInfo;
+    isBusy?: boolean;
     onSelectProfile: (profileId: string) => void;
     onCreateProfile: (name: string, platform?: 'windows' | 'mac') => void;
     onImportProfile: (code: string, platform: 'windows' | 'mac') => void;
@@ -23,6 +24,7 @@ export function ProfileList({
     profiles,
     selectedGameIdentifier,
     selectedGamePlatform,
+    isBusy = false,
     onSelectProfile,
     onCreateProfile,
     onImportProfile,
@@ -328,6 +330,7 @@ export function ProfileList({
                                 <button
                                     onClick={async (e) => {
                                         e.stopPropagation();
+                                        if (isBusy) return;
                                         if (profile.mods.length === 0 && !profile.is_vanilla) {
                                             alert("No mods to disable!");
                                             return;
@@ -335,10 +338,12 @@ export function ProfileList({
                                         const newVanillaState = !profile.is_vanilla;
                                         onToggleVanilla(profile.id, newVanillaState);
                                     }}
+                                    disabled={isBusy}
                                     className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${profile.is_vanilla
                                         ? 'bg-yellow-500/20 text-yellow-500 border border-yellow-500/50'
                                         : 'bg-gray-700 hover:bg-yellow-500/10 text-gray-300 hover:text-yellow-500'
                                         }`}
+                                    style={isBusy ? { opacity: 0.5, cursor: 'not-allowed' } : undefined}
                                     title={profile.is_vanilla ? "Enable Mods" : "Disable All Mods (Vanilla)"}
                                 >
                                     <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
