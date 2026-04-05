@@ -1,5 +1,5 @@
 use std::{
-    collections::HashSet,
+    collections::{HashSet, VecDeque},
     fs,
     sync::{Mutex, OnceLock},
 };
@@ -820,25 +820,104 @@ fn get_all_localconfig_paths(steam_root: &std::path::Path) -> Vec<std::path::Pat
     paths
 }
 
-fn find_macos_app_bundle(game_path: &std::path::Path) -> Option<std::path::PathBuf> {
-    if game_path
-        .file_name()
+fn is_macos_app_bundle_path(path: &std::path::Path) -> bool {
+    path.file_name()
         .and_then(|name| name.to_str())
         .map(|name| name.ends_with(".app"))
         .unwrap_or(false)
-    {
-        return Some(game_path.to_path_buf());
+}
+
+fn macos_app_bundle_score(app_bundle: &std::path::Path) -> i32 {
+    let mut score = 0;
+    let contents = app_bundle.join("Contents");
+    if contents.join("MacOS").is_dir() {
+        score += 100;
+    }
+    if contents.join("Resources").join("Data").is_dir() {
+        score += 200;
+    }
+    if contents.join("Info.plist").is_file() || contents.join("Info").is_file() {
+        score += 20;
+    }
+    score
+}
+
+fn find_macos_app_bundles_in_dir(
+    root: &std::path::Path,
+    max_depth: usize,
+) -> Vec<(std::path::PathBuf, usize)> {
+    let mut found = Vec::new();
+    let mut queue = VecDeque::new();
+    queue.push_back((root.to_path_buf(), 0usize));
+
+    while let Some((dir, depth)) = queue.pop_front() {
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
+
+        for entry in entries.filter_map(|e| e.ok()) {
+            let path = entry.path();
+            let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+            if !is_dir {
+                continue;
+            }
+
+            if is_macos_app_bundle_path(&path) {
+                found.push((path, depth + 1));
+                continue;
+            }
+
+            if depth < max_depth {
+                let name = entry.file_name().to_string_lossy().to_lowercase();
+                if matches!(
+                    name.as_str(),
+                    "bepinex" | "doorstop_libs" | "plugins" | "__macosx"
+                ) {
+                    continue;
+                }
+                queue.push_back((path, depth + 1));
+            }
+        }
     }
 
-    if !game_path.is_dir() {
-        return None;
+    found
+}
+
+fn find_macos_app_bundle(game_path: &std::path::Path) -> Option<std::path::PathBuf> {
+    let mut candidates: Vec<(std::path::PathBuf, usize, i32)> = Vec::new();
+    let mut push_candidate = |candidate: std::path::PathBuf, depth: usize| {
+        if candidates.iter().any(|(existing, _, _)| *existing == candidate) {
+            return;
+        }
+        let score = macos_app_bundle_score(&candidate);
+        candidates.push((candidate, depth, score));
+    };
+
+    if is_macos_app_bundle_path(game_path) {
+        push_candidate(game_path.to_path_buf(), 0);
     }
 
-    fs::read_dir(game_path)
-        .ok()?
-        .filter_map(|entry| entry.ok())
-        .find(|entry| entry.file_name().to_string_lossy().ends_with(".app"))
-        .map(|entry| entry.path())
+    let is_contents_dir = game_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| name.eq_ignore_ascii_case("Contents"))
+        .unwrap_or(false);
+    if is_contents_dir {
+        if let Some(parent) = game_path.parent() {
+            if is_macos_app_bundle_path(parent) {
+                push_candidate(parent.to_path_buf(), 0);
+            }
+        }
+    }
+
+    if game_path.is_dir() {
+        for (bundle, depth) in find_macos_app_bundles_in_dir(game_path, 4) {
+            push_candidate(bundle, depth);
+        }
+    }
+
+    candidates.sort_by(|a, b| b.2.cmp(&a.2).then_with(|| a.1.cmp(&b.1)));
+    candidates.first().map(|(bundle, _, _)| bundle.clone())
 }
 
 fn find_macos_executable_path(game_path: &std::path::Path) -> Option<std::path::PathBuf> {
@@ -848,12 +927,15 @@ fn find_macos_executable_path(game_path: &std::path::Path) -> Option<std::path::
         return None;
     }
 
+    let info_plist = app_bundle.join("Contents").join("Info.plist");
+    let defaults_target = if info_plist.exists() {
+        info_plist
+    } else {
+        app_bundle.join("Contents").join("Info")
+    };
+
     let defaults_output = std::process::Command::new("/usr/bin/defaults")
-        .args([
-            "read",
-            &app_bundle.join("Contents").join("Info").to_string_lossy(),
-            "CFBundleExecutable",
-        ])
+        .args(["read", &defaults_target.to_string_lossy(), "CFBundleExecutable"])
         .output()
         .ok()?;
 
@@ -2518,28 +2600,9 @@ fn configure_macos_bepinex_script(
     fn resolve_macos_executable_path(
         game_path: &std::path::Path,
     ) -> Result<std::path::PathBuf, String> {
-        let app_bundle = if game_path
-            .file_name()
-            .map(|name| name.to_string_lossy().ends_with(".app"))
-            .unwrap_or(false)
-        {
-            game_path.to_path_buf()
-        } else {
-            fs::read_dir(game_path)
-                .map_err(|e| format!("Failed to scan macOS game directory: {}", e))?
-                .filter_map(|e| e.ok())
-                .find(|entry| entry.file_name().to_string_lossy().ends_with(".app"))
-                .map(|entry| entry.path())
-                .ok_or_else(|| "No .app bundle found in macOS game directory".to_string())?
-        };
-
-        let macos_dir = app_bundle.join("Contents").join("MacOS");
-        fs::read_dir(&macos_dir)
-            .map_err(|e| format!("Failed to inspect app bundle executable: {}", e))?
-            .filter_map(|e| e.ok())
-            .find(|entry| entry.file_type().map(|t| t.is_file()).unwrap_or(false))
-            .map(|entry| entry.path())
-            .ok_or_else(|| "No executable found inside .app/Contents/MacOS".to_string())
+        find_macos_executable_path(game_path).ok_or_else(|| {
+            "No macOS executable found (supported locations include nested .app bundles such as Contents/game/*.app).".to_string()
+        })
     }
 
     fn has_macos_doorstop_support(script: &str) -> bool {
@@ -2845,6 +2908,38 @@ fi
 
 log_bootstrap "loader_env LD_LIBRARY_PATH=${{LD_LIBRARY_PATH:-}} LD_PRELOAD=${{LD_PRELOAD:-}} DYLD_LIBRARY_PATH=${{DYLD_LIBRARY_PATH:-}} DYLD_INSERT_LIBRARIES=${{DYLD_INSERT_LIBRARIES:-}} DYLD_PRINT_TO_FILE=${{DYLD_PRINT_TO_FILE:-}}"
 
+# r2modmac: prepare Steam runtime emulation wrappers used by some manual macOS builds
+# (for example launchers that ship steam_appid.txt + ipcserver in Contents/MacOS).
+steamemu_macos_dir="$BASEDIR/MacOS"
+steamemu_appid_file="$steamemu_macos_dir/steam_appid.txt"
+if [ -x "$steamemu_macos_dir/ipcserver" ] && [ -f "$steamemu_appid_file" ]; then
+    steamemu_app_id=$(tr -d '[:space:]' < "$steamemu_appid_file" 2>/dev/null)
+    if [ -n "$steamemu_app_id" ]; then
+        export SteamAppId="$steamemu_app_id"
+        export SteamGameId="$steamemu_app_id"
+    fi
+
+    steamemu_config_dir="$BASEDIR/../Config"
+    if [ -d "$steamemu_config_dir" ]; then
+        export STEAMEMU_SETTINGS_DIR="$steamemu_config_dir"
+    fi
+
+    if [ -n "${{DYLD_LIBRARY_PATH:-}}" ]; then
+        export DYLD_LIBRARY_PATH="$steamemu_macos_dir:${{DYLD_LIBRARY_PATH}}"
+    else
+        export DYLD_LIBRARY_PATH="$steamemu_macos_dir"
+    fi
+
+    launchctl remove com.valvesoftware.steam.ipctool >/dev/null 2>&1 || true
+    pkill ipcserver >/dev/null 2>&1 || true
+    if [ -x "$steamemu_macos_dir/reset" ]; then
+        "$steamemu_macos_dir/reset" >/dev/null 2>&1 || true
+    fi
+    "$steamemu_macos_dir/ipcserver" >/dev/null 2>&1 &
+    steamemu_ipc_pid=$!
+    log_bootstrap "steamemu_runtime_prepared app_id=$steamemu_app_id ipcpid=$steamemu_ipc_pid settings_dir=${{STEAMEMU_SETTINGS_DIR:-}}"
+fi
+
 maybe_retry_x64_after_arm64_failure() {{
     failed_mode="$1"
     failed_status="$2"
@@ -2868,6 +2963,9 @@ maybe_retry_x64_after_arm64_failure() {{
         -e DOORSTOP_TARGET_ASSEMBLY="${{DOORSTOP_TARGET_ASSEMBLY}}" \
         -e DOORSTOP_CORLIB_OVERRIDE_PATH="${{DOORSTOP_CORLIB_OVERRIDE_PATH}}" \
         -e DOORSTOP_REDIRECT_OUTPUT_LOG="${{DOORSTOP_REDIRECT_OUTPUT_LOG}}" \
+        -e SteamAppId="${{SteamAppId:-}}" \
+        -e SteamGameId="${{SteamGameId:-}}" \
+        -e STEAMEMU_SETTINGS_DIR="${{STEAMEMU_SETTINGS_DIR:-}}" \
         -e LD_LIBRARY_PATH="${{LD_LIBRARY_PATH:-}}" \
         -e LD_PRELOAD="${{LD_PRELOAD:-}}" \
         -e DYLD_LIBRARY_PATH="${{DYLD_LIBRARY_PATH:-}}" \
@@ -2900,6 +2998,9 @@ if [ "$steam_launch_args_ready" = true ]; then
             -e DOORSTOP_TARGET_ASSEMBLY="${{DOORSTOP_TARGET_ASSEMBLY}}" \
             -e DOORSTOP_CORLIB_OVERRIDE_PATH="${{DOORSTOP_CORLIB_OVERRIDE_PATH}}" \
             -e DOORSTOP_REDIRECT_OUTPUT_LOG="${{DOORSTOP_REDIRECT_OUTPUT_LOG}}" \
+            -e SteamAppId="${{SteamAppId:-}}" \
+            -e SteamGameId="${{SteamGameId:-}}" \
+            -e STEAMEMU_SETTINGS_DIR="${{STEAMEMU_SETTINGS_DIR:-}}" \
             -e LD_LIBRARY_PATH="${{LD_LIBRARY_PATH:-}}" \
             -e LD_PRELOAD="${{LD_PRELOAD:-}}" \
             -e DYLD_LIBRARY_PATH="${{DYLD_LIBRARY_PATH:-}}" \
@@ -2922,6 +3023,9 @@ if [ "$steam_launch_args_ready" = true ]; then
             -e DOORSTOP_TARGET_ASSEMBLY="${{DOORSTOP_TARGET_ASSEMBLY}}" \
             -e DOORSTOP_CORLIB_OVERRIDE_PATH="${{DOORSTOP_CORLIB_OVERRIDE_PATH}}" \
             -e DOORSTOP_REDIRECT_OUTPUT_LOG="${{DOORSTOP_REDIRECT_OUTPUT_LOG}}" \
+            -e SteamAppId="${{SteamAppId:-}}" \
+            -e SteamGameId="${{SteamGameId:-}}" \
+            -e STEAMEMU_SETTINGS_DIR="${{STEAMEMU_SETTINGS_DIR:-}}" \
             -e LD_LIBRARY_PATH="${{LD_LIBRARY_PATH:-}}" \
             -e LD_PRELOAD="${{LD_PRELOAD:-}}" \
             -e DYLD_LIBRARY_PATH="${{DYLD_LIBRARY_PATH:-}}" \
@@ -2962,6 +3066,9 @@ if [ "$arch" = "arm64" ] && command -v /usr/bin/arch >/dev/null 2>&1; then
         -e DOORSTOP_TARGET_ASSEMBLY="${{DOORSTOP_TARGET_ASSEMBLY}}" \
         -e DOORSTOP_CORLIB_OVERRIDE_PATH="${{DOORSTOP_CORLIB_OVERRIDE_PATH}}" \
         -e DOORSTOP_REDIRECT_OUTPUT_LOG="${{DOORSTOP_REDIRECT_OUTPUT_LOG}}" \
+        -e SteamAppId="${{SteamAppId:-}}" \
+        -e SteamGameId="${{SteamGameId:-}}" \
+        -e STEAMEMU_SETTINGS_DIR="${{STEAMEMU_SETTINGS_DIR:-}}" \
         -e LD_LIBRARY_PATH="${{LD_LIBRARY_PATH:-}}" \
         -e LD_PRELOAD="${{LD_PRELOAD:-}}" \
         -e DYLD_LIBRARY_PATH="${{DYLD_LIBRARY_PATH:-}}" \
@@ -2986,6 +3093,9 @@ if [ "$arch" = "x64" ] && command -v /usr/bin/arch >/dev/null 2>&1; then
         -e DOORSTOP_TARGET_ASSEMBLY="${{DOORSTOP_TARGET_ASSEMBLY}}" \
         -e DOORSTOP_CORLIB_OVERRIDE_PATH="${{DOORSTOP_CORLIB_OVERRIDE_PATH}}" \
         -e DOORSTOP_REDIRECT_OUTPUT_LOG="${{DOORSTOP_REDIRECT_OUTPUT_LOG}}" \
+        -e SteamAppId="${{SteamAppId:-}}" \
+        -e SteamGameId="${{SteamGameId:-}}" \
+        -e STEAMEMU_SETTINGS_DIR="${{STEAMEMU_SETTINGS_DIR:-}}" \
         -e LD_LIBRARY_PATH="${{LD_LIBRARY_PATH:-}}" \
         -e LD_PRELOAD="${{LD_PRELOAD:-}}" \
         -e DYLD_LIBRARY_PATH="${{DYLD_LIBRARY_PATH:-}}" \
@@ -3079,6 +3189,12 @@ exit "$exec_status"
         && script.contains("DOORSTOP_TARGET_ASSEMBLY=")
         && script.contains("DOORSTOP_REDIRECT_OUTPUT_LOG=TRUE")
         && script.contains("-e DOORSTOP_TARGET_ASSEMBLY=");
+    let has_steamemu_runtime_prep =
+        script.contains("steamemu_runtime_prepared")
+            && script.contains("export SteamAppId=")
+            && script.contains("export SteamGameId=")
+            && script.contains("steamemu_macos_dir=\"$BASEDIR/MacOS\"")
+            && script.contains("-e SteamAppId=");
     let preserves_steam_dyld_hooks =
         script.contains("r2modmac: preserve Steam-provided DYLD hooks")
             && script.contains("DYLD_INSERT_LIBRARIES=\"${doorstop_dylib}:${DYLD_INSERT_LIBRARIES}\"");
@@ -3106,13 +3222,14 @@ exit "$exec_status"
             || !has_native_arm64_direct_exec
             || !has_arm64_x64_fallback_retry
             || !has_modern_doorstop_env_aliases
+            || !has_steamemu_runtime_prep
             || !preserves_steam_dyld_hooks
             || !steam_launch_exec_deferred
             || !has_expected_debug_log_setting
             || has_legacy_bepinex_bootstrap_log;
     if needs_regeneration {
         eprintln!(
-            "[configure_macos_bepinex_script] Regenerating script (has_doorstop={} early_exit_ok={} root_fallback_ok={} steam_launch_order_ok={} root_bootstrap_log_ok={} removes_codesign_signature={} logs_loader_environment={} has_arch_env_exec={} has_dyld_loader_logging={} has_exec_failure_logging={} modern_doorstop_env_aliases={} preserves_steam_dyld_hooks={} steam_launch_exec_deferred={} legacy_bepinex_bootstrap_log={}).",
+            "[configure_macos_bepinex_script] Regenerating script (has_doorstop={} early_exit_ok={} root_fallback_ok={} steam_launch_order_ok={} root_bootstrap_log_ok={} removes_codesign_signature={} logs_loader_environment={} has_arch_env_exec={} has_dyld_loader_logging={} has_exec_failure_logging={} modern_doorstop_env_aliases={} steamemu_runtime_prep={} preserves_steam_dyld_hooks={} steam_launch_exec_deferred={} legacy_bepinex_bootstrap_log={}).",
             has_macos_doorstop_support(&script),
             early_exit_before_dyld,
             has_root_doorstop_fallback,
@@ -3124,6 +3241,7 @@ exit "$exec_status"
             has_dyld_loader_logging,
             has_exec_failure_logging,
             has_modern_doorstop_env_aliases,
+            has_steamemu_runtime_prep,
             preserves_steam_dyld_hooks,
             steam_launch_exec_deferred,
             has_legacy_bepinex_bootstrap_log
@@ -3207,26 +3325,7 @@ exit "$exec_status"
 fn resolve_macos_app_executable_path(
     game_path: &std::path::Path,
 ) -> Option<std::path::PathBuf> {
-    let app_bundle = if game_path
-        .file_name()
-        .map(|name| name.to_string_lossy().ends_with(".app"))
-        .unwrap_or(false)
-    {
-        game_path.to_path_buf()
-    } else {
-        fs::read_dir(game_path)
-            .ok()?
-            .filter_map(|entry| entry.ok())
-            .find(|entry| entry.file_name().to_string_lossy().ends_with(".app"))
-            .map(|entry| entry.path())?
-    };
-
-    let macos_dir = app_bundle.join("Contents").join("MacOS");
-    fs::read_dir(&macos_dir)
-        .ok()?
-        .filter_map(|entry| entry.ok())
-        .find(|entry| entry.file_type().map(|t| t.is_file()).unwrap_or(false))
-        .map(|entry| entry.path())
+    find_macos_executable_path(game_path)
 }
 
 fn macho_file_supports_arm64(path: &std::path::Path) -> bool {
