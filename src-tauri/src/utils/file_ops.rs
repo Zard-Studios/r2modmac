@@ -1,5 +1,13 @@
 use std::fs;
+use std::{
+    collections::HashMap,
+    sync::{Mutex, OnceLock},
+    time::Instant,
+};
 use tauri::command;
+
+static DEQUARANTINE_LAST_RUN_MS: OnceLock<Mutex<HashMap<String, u128>>> = OnceLock::new();
+const DEQUARANTINE_COOLDOWN_MS: u128 = 10 * 60 * 1000;
 
 pub fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
     if !dst.exists() {
@@ -87,10 +95,82 @@ pub fn dequarantine_recursive(path: &std::path::Path) {
             return;
         }
 
-        let _ = std::process::Command::new("/usr/bin/xattr")
+        let path_key = path.to_string_lossy().to_string();
+        let now_ms = Instant::now();
+        let now_epoch_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_millis())
+            .unwrap_or(0);
+        let cache = DEQUARANTINE_LAST_RUN_MS.get_or_init(|| Mutex::new(HashMap::new()));
+        if let Ok(mut cache_guard) = cache.lock() {
+            if let Some(last_ms) = cache_guard.get(&path_key).copied() {
+                if now_epoch_ms.saturating_sub(last_ms) < DEQUARANTINE_COOLDOWN_MS {
+                    eprintln!(
+                        "[dequarantine_recursive] skip (cooldown) path={} elapsed_since_last_ms={}",
+                        path.display(),
+                        now_epoch_ms.saturating_sub(last_ms)
+                    );
+                    return;
+                }
+            }
+
+            let output = std::process::Command::new("/usr/bin/xattr")
+                .args(["-r", "-d", "com.apple.quarantine"])
+                .arg(path)
+                .output();
+
+            let elapsed_ms = now_ms.elapsed().as_millis();
+            match output {
+                Ok(result) => {
+                    eprintln!(
+                        "[dequarantine_recursive] path={} status={} elapsed_ms={} stdout_len={} stderr_len={}",
+                        path.display(),
+                        result.status.success(),
+                        elapsed_ms,
+                        result.stdout.len(),
+                        result.stderr.len()
+                    );
+                }
+                Err(error) => {
+                    eprintln!(
+                        "[dequarantine_recursive] path={} failed elapsed_ms={} error={}",
+                        path.display(),
+                        elapsed_ms,
+                        error
+                    );
+                }
+            }
+
+            cache_guard.insert(path_key, now_epoch_ms);
+            return;
+        }
+
+        // Fallback if cache lock fails: still execute once and log timing.
+        let output = std::process::Command::new("/usr/bin/xattr")
             .args(["-r", "-d", "com.apple.quarantine"])
             .arg(path)
             .output();
+        let elapsed_ms = now_ms.elapsed().as_millis();
+        match output {
+            Ok(result) => {
+                eprintln!(
+                    "[dequarantine_recursive] path={} status={} elapsed_ms={} stdout_len={} stderr_len={} cache_lock=false",
+                    path.display(),
+                    result.status.success(),
+                    elapsed_ms,
+                    result.stdout.len(),
+                    result.stderr.len()
+                );
+            }
+            Err(error) => {
+                eprintln!(
+                    "[dequarantine_recursive] path={} failed elapsed_ms={} error={} cache_lock=false",
+                    path.display(),
+                    elapsed_ms,
+                    error
+                );
+            }
+        }
     }
 }
 

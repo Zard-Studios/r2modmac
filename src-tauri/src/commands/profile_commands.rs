@@ -80,7 +80,7 @@ pub async fn delete_profile_folder(app: AppHandle, profile_id: String, game_iden
             }
 
             if is_mac_profile {
-                let _ = ensure_macos_steam_launch_options(&app, game_path, false);
+                let _ = ensure_macos_steam_launch_options(&app, game_path, false, true);
 
                 for dir_name in [
                     "doorstop_libs",

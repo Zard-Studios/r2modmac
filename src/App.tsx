@@ -213,8 +213,10 @@ function App() {
   const [isLaunchingProfile, setIsLaunchingProfile] = useState(false)
   const [isStoppingProfile, setIsStoppingProfile] = useState(false)
   const [isGameRunning, setIsGameRunning] = useState(false)
+  const [isSteamRestarting, setIsSteamRestarting] = useState(false)
   const applyInFlightRef = useRef(false)
   const profileActionLockRef = useRef(false)
+  const steamRestartingRef = useRef(false)
   const [isApplyingToGame, setIsApplyingToGame] = useState(false)
   const [showExportModal, setShowExportModal] = useState(false)
   const [showCrossOverGuide, setShowCrossOverGuide] = useState(false)
@@ -361,9 +363,11 @@ function App() {
     });
 
     const unlistenSteamLaunchOptionsRestart = listen('steam-launch-options-restart', () => {
+      steamRestartingRef.current = true;
+      setIsSteamRestarting(true);
       void window.ipcRenderer.alert(
         'Restarting Steam',
-        'Steam is being restarted to apply the launch options for this profile. The game launch will continue automatically.'
+        'Steam is being restarted to apply the launch options for this profile.'
       );
     });
 
@@ -373,6 +377,30 @@ function App() {
       unlistenSteamLaunchOptionsRestart.then(fn => fn());
     };
   }, [])
+
+  const clearSteamRestartingState = () => {
+    steamRestartingRef.current = false;
+    setIsSteamRestarting(false);
+  };
+
+  const waitForLaunchStateToSettle = async (
+    gameIdentifier: string,
+    platform?: 'windows' | 'mac'
+  ) => {
+    const shouldPoll = steamRestartingRef.current;
+    const deadline = Date.now() + (shouldPoll ? 8000 : 0);
+    let running = false;
+
+    while (true) {
+      running = await window.ipcRenderer.isGameRunning(gameIdentifier, platform);
+      if (running || !shouldPoll || Date.now() >= deadline) {
+        clearSteamRestartingState();
+        return running;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+  };
 
   useEffect(() => {
     const unlistenPackages = listen<{ game_id: string, total_count: number }>('packages-loaded', (event) => {
@@ -770,6 +798,7 @@ function App() {
 
       await handleSyncToGame(undefined, { silentSuccess: options?.silentSuccess });
     } finally {
+      clearSteamRestartingState();
       applyInFlightRef.current = false;
       setIsApplyingToGame(false);
     }
@@ -844,6 +873,7 @@ function App() {
         String(error?.message || error || 'Failed to update the profile runtime state.')
       );
     } finally {
+      clearSteamRestartingState();
       applyInFlightRef.current = false;
       profileActionLockRef.current = false;
       setIsApplyingToGame(false);
@@ -1037,7 +1067,7 @@ function App() {
           profiles={profiles}
           selectedGameIdentifier={selectedCommunity}
           selectedGamePlatform={selectedCommunity ? communityPlatforms[selectedCommunity] : undefined}
-          isBusy={isApplyingToGame || isLaunchingProfile || isStoppingProfile}
+          isBusy={isApplyingToGame || isLaunchingProfile || isStoppingProfile || isSteamRestarting}
           onSelectProfile={handleSelectProfile}
           onCreateProfile={(name, platform) => createProfile(name, selectedCommunity!, platform)}
           onImportProfile={handleImportProfile}
@@ -1074,9 +1104,10 @@ function App() {
         }
         await window.ipcRenderer.launchGameWithMods(activeProfile.gameIdentifier, activeProfile.id, activeProfile.platform);
         markActiveProfileUsed();
-        const running = await window.ipcRenderer.isGameRunning(activeProfile.gameIdentifier, activeProfile.platform);
+        const running = await waitForLaunchStateToSettle(activeProfile.gameIdentifier, activeProfile.platform);
         setIsGameRunning(running);
       } catch (error: any) {
+        clearSteamRestartingState();
         await window.ipcRenderer.alert(
           'Launch Failed',
           String(error?.message || error || 'Failed to launch the modded game.')
@@ -1096,9 +1127,10 @@ function App() {
         setIsLaunchingProfile(true);
         await window.ipcRenderer.launchGameVanilla(activeProfile.gameIdentifier, activeProfile.id, activeProfile.platform);
         markActiveProfileUsed();
-        const running = await window.ipcRenderer.isGameRunning(activeProfile.gameIdentifier, activeProfile.platform);
+        const running = await waitForLaunchStateToSettle(activeProfile.gameIdentifier, activeProfile.platform);
         setIsGameRunning(running);
       } catch (error: any) {
+        clearSteamRestartingState();
         await window.ipcRenderer.alert(
           'Launch Failed',
           String(error?.message || error || 'Failed to launch the vanilla game.')
@@ -1213,7 +1245,8 @@ function App() {
         onStopProfile={handleStopProfileDirect}
         isApplying={isApplyingToGame}
         isLaunching={isLaunchingProfile || isStoppingProfile}
-        isBusy={isApplyingToGame || isLaunchingProfile || isStoppingProfile}
+        isBusy={isApplyingToGame || isLaunchingProfile || isStoppingProfile || isSteamRestarting}
+        isSteamRestarting={isSteamRestarting}
         isGameRunning={isGameRunning}
         hasConfiguredGamePath={!!activeProfileGamePath}
         isCheckingGamePath={isCheckingActiveProfileGamePath}

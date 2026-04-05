@@ -460,11 +460,32 @@ fn macos_steam_launch_option_matches_desired(
             continue;
         };
 
-        if get_launch_options_for_app(&localconfig, &app_id).as_deref() == Some(desired.as_str()) {
+        let Some(current) = get_launch_options_for_app(&localconfig, &app_id) else {
+            continue;
+        };
+
+        if current == desired {
+            return Ok(true);
+        }
+
+        if is_managed_macos_launch_option_for_game(&current, game_path) {
+            eprintln!(
+                "[macos_steam_launch_option_matches_desired] accepting managed non-exact launch option for app_id={} localconfig={} current={:?} desired={:?}",
+                app_id,
+                localconfig_path.display(),
+                current,
+                desired
+            );
             return Ok(true);
         }
     }
 
+    eprintln!(
+        "[macos_steam_launch_option_matches_desired] no matching launch option for app_id={} game_path={} desired={:?}",
+        app_id,
+        game_path.display(),
+        desired
+    );
     Ok(false)
 }
 
@@ -1053,6 +1074,8 @@ fn build_windows_process_match_patterns(executable_path: &std::path::Path) -> Ve
 fn is_process_running_for_pattern(pattern: &str) -> bool {
     std::process::Command::new("/usr/bin/pgrep")
         .args(["-f", pattern])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
         .status()
         .map(|status| status.success())
         .unwrap_or(false)
@@ -1099,8 +1122,6 @@ fn wait_for_process_start(executable_path: &std::path::Path, timeout_ms: u64) ->
 }
 
 const MACOS_LAUNCH_OBSERVE_TIMEOUT_MS: u64 = 1_500;
-const MACOS_STEAM_POLITE_QUIT_TIMEOUT_MS: u64 = 3_000;
-const MACOS_STEAM_FORCE_QUIT_TIMEOUT_MS: u64 = 1_500;
 
 fn wait_for_process_exit_pattern(pattern: &str, timeout_ms: u64) -> bool {
     let poll_interval = 250u64;
@@ -1545,18 +1566,27 @@ fn launch_via_steam_for_game_path(
     app: &AppHandle,
     game_path: &std::path::Path,
 ) -> Result<(), String> {
+    let launch_start = std::time::Instant::now();
     let app_id = find_steam_app_id_for_game_path_any(app, game_path, false)
         .ok_or_else(|| "Couldn't determine the Steam app ID for this game".to_string())?;
     let executable_path = find_macos_executable_path(game_path);
+    eprintln!(
+        "[launch_via_steam_for_game_path] start app_id={} game_path={}",
+        app_id,
+        game_path.display()
+    );
 
-    let status = std::process::Command::new("/usr/bin/open")
+    let child = std::process::Command::new("/usr/bin/open")
         .arg(format!("steam://run/{}", app_id))
-        .status()
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
         .map_err(|e| format!("Failed to ask Steam to launch the game: {}", e))?;
-
-    if !status.success() {
-        return Err("Steam rejected the launch request.".to_string());
-    }
+    eprintln!(
+        "[launch_via_steam_for_game_path] open_dispatched pid={} elapsed_ms={}",
+        child.id(),
+        launch_start.elapsed().as_millis()
+    );
 
     if let Some(executable_path) = executable_path.as_ref() {
         if !wait_for_process_start(executable_path, MACOS_LAUNCH_OBSERVE_TIMEOUT_MS) {
@@ -1566,6 +1596,12 @@ fn launch_via_steam_for_game_path(
             );
         }
     }
+
+    eprintln!(
+        "[launch_via_steam_for_game_path] done app_id={} total_elapsed_ms={}",
+        app_id,
+        launch_start.elapsed().as_millis()
+    );
 
     Ok(())
 }
@@ -1865,11 +1901,33 @@ fn is_managed_macos_launch_option_for_game(value: &str, game_path: &std::path::P
         .unwrap_or(false)
 }
 
-fn is_steam_running_on_macos() -> bool {
+const MACOS_STEAM_APP_PROCESS_NAME: &str = "steam_osx";
+const MACOS_STEAM_HELPER_PROCESS_NAMES: &[&str] = &[
+    "Steam Helper",
+    "steamwebhelper",
+    "ipcserver",
+];
+const MACOS_STEAM_QUIT_PROCESS_NAMES: &[&str] = &[
+    MACOS_STEAM_APP_PROCESS_NAME,
+    "Steam Helper",
+    "steamwebhelper",
+    "ipcserver",
+];
+const MACOS_STEAM_KILL_FALLBACK_PATTERNS: &[&str] = &[
+    "steam_osx",
+    "steamwebhelper",
+    "Steam Helper",
+    "ipcserver",
+    "Steam.AppBundle",
+    "steam.sh",
+    "steam_monitor.sh",
+];
+
+fn is_named_process_running_on_macos(name: &str) -> bool {
     #[cfg(target_os = "macos")]
     {
         std::process::Command::new("/usr/bin/pgrep")
-            .args(["-x", "steam_osx"])
+            .args(["-x", name])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .status()
@@ -1883,56 +1941,142 @@ fn is_steam_running_on_macos() -> bool {
     }
 }
 
-fn quit_steam_if_running() -> Result<bool, String> {
+fn is_steam_app_running_on_macos() -> bool {
+    is_named_process_running_on_macos(MACOS_STEAM_APP_PROCESS_NAME)
+}
+
+fn is_steam_running_on_macos() -> bool {
+    is_steam_app_running_on_macos()
+        || MACOS_STEAM_HELPER_PROCESS_NAMES
+        .iter()
+        .any(|name| is_named_process_running_on_macos(name))
+}
+
+#[cfg(target_os = "macos")]
+fn collect_macos_steam_process_ids(steam_roots: &[std::path::PathBuf]) -> HashSet<u32> {
+    let mut pids = HashSet::new();
+
+    for steam_root in steam_roots {
+        let steam_app_root = steam_root.join("Steam.AppBundle").join("Steam");
+        if !steam_app_root.exists() {
+            continue;
+        }
+
+        let pattern = regex::escape(&steam_app_root.to_string_lossy());
+        let Ok(output) = std::process::Command::new("/usr/bin/pgrep")
+            .args(["-f", &pattern])
+            .output()
+        else {
+            continue;
+        };
+
+        for line in String::from_utf8_lossy(&output.stdout).lines() {
+            if let Ok(pid) = line.trim().parse::<u32>() {
+                pids.insert(pid);
+            }
+        }
+    }
+
+    pids
+}
+
+#[cfg(target_os = "macos")]
+fn has_macos_steam_processes(steam_roots: &[std::path::PathBuf]) -> bool {
+    is_steam_running_on_macos() || !collect_macos_steam_process_ids(steam_roots).is_empty()
+}
+
+#[cfg(target_os = "macos")]
+fn collect_macos_steam_process_snapshot() -> Vec<String> {
+    let Ok(output) = std::process::Command::new("/usr/bin/pgrep")
+        .args([
+            "-af",
+            "steam_osx|steamwebhelper|Steam Helper|ipcserver|Steam.AppBundle|steam.sh|steam_monitor.sh",
+        ])
+        .output()
+    else {
+        return Vec::new();
+    };
+
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(|line| line.trim().to_string())
+        .filter(|line| !line.is_empty())
+        .collect()
+}
+
+#[cfg(not(target_os = "macos"))]
+fn has_macos_steam_processes(_steam_roots: &[std::path::PathBuf]) -> bool {
+    false
+}
+
+fn quit_steam_if_running(steam_roots: &[std::path::PathBuf]) -> Result<bool, String> {
     #[cfg(target_os = "macos")]
     {
-        if !is_steam_running_on_macos() {
+        let steam_app_was_running = is_steam_app_running_on_macos();
+        if !has_macos_steam_processes(steam_roots) {
             return Ok(false);
         }
 
-        eprintln!("[quit_steam_if_running] Steam is running — closing briefly for one-time launch option setup...");
-
-        // Step 1: polite quit via AppleScript
-        let _ = std::process::Command::new("/usr/bin/osascript")
-            .args(["-e", "tell application \"Steam\" to quit"])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status();
-
-        // Wait briefly for polite quit
-        for _ in 0..(MACOS_STEAM_POLITE_QUIT_TIMEOUT_MS / 500) {
-            std::thread::sleep(std::time::Duration::from_millis(500));
-            if !is_steam_running_on_macos() {
-                eprintln!("[quit_steam_if_running] Steam closed (polite).");
-                return Ok(true);
-            }
+        if steam_app_was_running {
+            eprintln!(
+                "[quit_steam_if_running] Steam is running — force killing Steam processes to apply launch option changes immediately..."
+            );
+        } else {
+            eprintln!(
+                "[quit_steam_if_running] Steam.app is not running, but helper processes are still alive — clearing stale Steam helpers before launch option update..."
+            );
         }
 
-        // Step 2: force kill
-        eprintln!("[quit_steam_if_running] Polite quit timed out — force killing...");
-        let _ = std::process::Command::new("/usr/bin/killall")
-            .args(["-9", "steam_osx"])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status();
-        let _ = std::process::Command::new("/usr/bin/killall")
-            .args(["-9", "Steam Helper"])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status();
-
-        // Wait briefly for the forced shutdown to settle
-        for _ in 0..(MACOS_STEAM_FORCE_QUIT_TIMEOUT_MS / 500) {
-            std::thread::sleep(std::time::Duration::from_millis(500));
-            if !is_steam_running_on_macos() {
-                eprintln!("[quit_steam_if_running] Steam closed (force).");
-                return Ok(true);
-            }
+        // Force kill every process under Steam.AppBundle first, then fallback names.
+        for pid in collect_macos_steam_process_ids(steam_roots) {
+            let _ = std::process::Command::new("/bin/kill")
+                .args(["-9", &pid.to_string()])
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status();
         }
 
-        // Even if we can't confirm it's dead, report success — we did our best
-        eprintln!("[quit_steam_if_running] Steam may still be shutting down, proceeding anyway.");
-        return Ok(true);
+        for process_name in MACOS_STEAM_QUIT_PROCESS_NAMES {
+            let _ = std::process::Command::new("/usr/bin/killall")
+                .args(["-9", process_name])
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status();
+        }
+
+        for pattern in MACOS_STEAM_KILL_FALLBACK_PATTERNS {
+            let _ = std::process::Command::new("/usr/bin/pkill")
+                .args(["-9", "-f", pattern])
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status();
+        }
+
+        // Second sweep to catch orphan helpers that may survive the first kill.
+        for pid in collect_macos_steam_process_ids(steam_roots) {
+            let _ = std::process::Command::new("/bin/kill")
+                .args(["-9", &pid.to_string()])
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status();
+        }
+
+        if has_macos_steam_processes(steam_roots) {
+            let leftovers = collect_macos_steam_process_snapshot();
+            eprintln!(
+                "[quit_steam_if_running] Some Steam processes are still present after force-kill; proceeding anyway."
+            );
+            if !leftovers.is_empty() {
+                eprintln!(
+                    "[quit_steam_if_running] leftover_processes={}",
+                    leftovers.join(" | ")
+                );
+            }
+        } else {
+            eprintln!("[quit_steam_if_running] Steam processes terminated.");
+        }
+
+        return Ok(steam_app_was_running);
     }
 
     #[allow(unreachable_code)]
@@ -1942,6 +2086,32 @@ fn quit_steam_if_running() -> Result<bool, String> {
 fn emit_steam_launch_options_restart_event(app: &AppHandle) {
     let _ = app.emit(STEAM_LAUNCH_OPTIONS_RESTART_EVENT, true);
 }
+
+#[cfg(target_os = "macos")]
+fn relaunch_macos_steam_if_needed(steam_root: &std::path::Path) {
+    let steam_app_bundle = steam_root.join("Steam.AppBundle").join("Steam");
+    let mut command = std::process::Command::new("/usr/bin/open");
+    if steam_app_bundle.exists() {
+        command.arg(&steam_app_bundle);
+    } else {
+        command.args(["-a", "Steam"]);
+    }
+
+    let Ok(_) = command
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+    else {
+        eprintln!(
+            "[relaunch_macos_steam_if_needed] Failed to issue Steam relaunch request."
+        );
+        return;
+    };
+    eprintln!("[relaunch_macos_steam_if_needed] Steam relaunch requested.");
+}
+
+#[cfg(not(target_os = "macos"))]
+fn relaunch_macos_steam_if_needed(_steam_root: &std::path::Path) {}
 
 fn find_next_non_whitespace(text: &str, mut index: usize, end: usize) -> Option<usize> {
     while index < end {
@@ -3111,7 +3281,15 @@ pub(crate) fn ensure_macos_steam_launch_options(
     app: &AppHandle,
     game_path: &std::path::Path,
     enable_mods: bool,
+    relaunch_steam_after_update: bool,
 ) -> Result<(), String> {
+    let ensure_started = std::time::Instant::now();
+    eprintln!(
+        "[ensure_macos_steam_launch_options] start enable_mods={} relaunch_after_update={} game_path={}",
+        enable_mods,
+        relaunch_steam_after_update,
+        game_path.display()
+    );
     let steam_roots = get_steam_roots_for_platform(app, false);
     if steam_roots.is_empty() {
         return Err("No Steam installation found to configure macOS launch options".to_string());
@@ -3183,15 +3361,22 @@ pub(crate) fn ensure_macos_steam_launch_options(
     let mut steam_was_running: Option<bool> = None;
     let mut ensure_steam_stopped = || -> Result<(), String> {
         if steam_was_running.is_none() {
-            if is_steam_running_on_macos() {
+            let stop_started = std::time::Instant::now();
+            if is_steam_app_running_on_macos() {
                 emit_steam_launch_options_restart_event(app);
             }
-            steam_was_running = Some(quit_steam_if_running()?);
+            steam_was_running = Some(quit_steam_if_running(&steam_roots)?);
+            eprintln!(
+                "[ensure_macos_steam_launch_options] ensure_steam_stopped elapsed_ms={} steam_was_running={}",
+                stop_started.elapsed().as_millis(),
+                steam_was_running.unwrap_or(false)
+            );
         }
         Ok(())
     };
 
     for localconfig_path in localconfig_paths {
+        let localconfig_started = std::time::Instant::now();
         let localconfig = match fs::read_to_string(&localconfig_path) {
             Ok(localconfig) => localconfig,
             Err(error) => {
@@ -3258,6 +3443,7 @@ pub(crate) fn ensure_macos_steam_launch_options(
             }
 
             if updated_text != localconfig {
+                let write_started = std::time::Instant::now();
                 ensure_steam_stopped()?;
                 fs::write(&localconfig_path, updated_text)
                     .map_err(|e| format!("Failed to update Steam launch options: {}", e))?;
@@ -3272,6 +3458,11 @@ pub(crate) fn ensure_macos_steam_launch_options(
                         localconfig_path.display()
                     ));
                 }
+                eprintln!(
+                    "[ensure_macos_steam_launch_options] updated localconfig={} elapsed_ms={}",
+                    localconfig_path.display(),
+                    write_started.elapsed().as_millis()
+                );
             }
         } else if let Some(previous) = settings
             .steam_launch_option_backups
@@ -3281,6 +3472,7 @@ pub(crate) fn ensure_macos_steam_launch_options(
             let (restored_text, _) =
                 update_launch_options_in_localconfig(&localconfig, &app_id, Some(&previous))?;
             if restored_text != localconfig {
+                let write_started = std::time::Instant::now();
                 ensure_steam_stopped()?;
                 fs::write(&localconfig_path, restored_text)
                     .map_err(|e| format!("Failed to restore Steam launch options: {}", e))?;
@@ -3295,6 +3487,11 @@ pub(crate) fn ensure_macos_steam_launch_options(
                         localconfig_path.display()
                     ));
                 }
+                eprintln!(
+                    "[ensure_macos_steam_launch_options] restored localconfig={} elapsed_ms={}",
+                    localconfig_path.display(),
+                    write_started.elapsed().as_millis()
+                );
             }
             settings_changed = true;
         } else if current_launch_options
@@ -3303,6 +3500,7 @@ pub(crate) fn ensure_macos_steam_launch_options(
             .unwrap_or(false)
             && updated_text != localconfig
         {
+            let write_started = std::time::Instant::now();
             ensure_steam_stopped()?;
             fs::write(&localconfig_path, updated_text)
                 .map_err(|e| format!("Failed to clear Steam launch options: {}", e))?;
@@ -3319,7 +3517,18 @@ pub(crate) fn ensure_macos_steam_launch_options(
                     localconfig_path.display()
                 ));
             }
+            eprintln!(
+                "[ensure_macos_steam_launch_options] cleared localconfig={} elapsed_ms={}",
+                localconfig_path.display(),
+                write_started.elapsed().as_millis()
+            );
         }
+
+        eprintln!(
+            "[ensure_macos_steam_launch_options] processed localconfig={} total_elapsed_ms={}",
+            localconfig_path.display(),
+            localconfig_started.elapsed().as_millis()
+        );
     }
 
     if !processed_localconfig {
@@ -3342,10 +3551,28 @@ pub(crate) fn ensure_macos_steam_launch_options(
     }
 
     if steam_was_running.unwrap_or(false) {
-        eprintln!(
-            "[ensure_macos_steam_launch_options] Steam was closed to update launch options; leaving it closed so the upcoming steam://run launch starts Steam and the game together."
-        );
+        if relaunch_steam_after_update {
+            eprintln!(
+                "[ensure_macos_steam_launch_options] Steam was closed to update launch options; relaunching Steam now because no immediate steam://run launch follows."
+            );
+            let relaunch_started = std::time::Instant::now();
+            relaunch_macos_steam_if_needed(&steam_root_for_config);
+            eprintln!(
+                "[ensure_macos_steam_launch_options] relaunch_requested elapsed_ms={}",
+                relaunch_started.elapsed().as_millis()
+            );
+        } else {
+            eprintln!(
+                "[ensure_macos_steam_launch_options] Steam was closed to update launch options; leaving it closed so the upcoming steam://run launch starts Steam and the game together."
+            );
+        }
     }
+
+    eprintln!(
+        "[ensure_macos_steam_launch_options] done app_id={} total_elapsed_ms={}",
+        app_id,
+        ensure_started.elapsed().as_millis()
+    );
 
     Ok(())
 }
@@ -3782,11 +4009,13 @@ pub async fn install_to_game(app: AppHandle, game_identifier: String, profile_id
             )?;
             dequarantine_recursive(game_path);
         }
-        // Vanilla/modded is toggled entirely by the runtime_disabled mechanism
-        // in run_bepinex.sh (checks for _DISABLED files). No need to touch Steam
-        // launch options here — they are set once during modded "Apply to Game".
+        // Vanilla/modded is toggled by the runtime_disabled mechanism in
+        // run_bepinex.sh. Do not touch Steam launch options here, otherwise a
+        // profile disable would unexpectedly quit Steam before the user presses Play.
         sync_macos_runtime_disabled_state(game_path, true)?;
-        eprintln!("[install_to_game] macOS vanilla mode complete - runtime disabled while preserving the Steam wrapper.");
+        eprintln!(
+            "[install_to_game] macOS vanilla mode complete - runtime disabled while preserving the Steam wrapper."
+        );
         return Ok(());
     }
     
@@ -4150,7 +4379,7 @@ pub async fn launch_game_with_mods(
 
         if let Ok(false) = macos_steam_launch_option_matches_desired(&app, &game_path) {
             eprintln!("[launch_game_with_mods] Steam launch option differs from desired value — reconciling before modded launch.");
-            ensure_macos_steam_launch_options(&app, &game_path, true)?;
+            ensure_macos_steam_launch_options(&app, &game_path, true, false)?;
         }
         return launch_via_steam_for_game_path(&app, &game_path);
     }
@@ -4247,10 +4476,17 @@ pub async fn launch_game_vanilla(
             remove_r2modmac_debug_logs(&game_path);
         }
         if let Ok(true) = macos_steam_launch_option_is_managed(&app, &game_path) {
-            eprintln!(
-                "[launch_game_vanilla] Managed BepInEx launch option still set — removing it before vanilla Steam launch."
-            );
-            ensure_macos_steam_launch_options(&app, &game_path, false)?;
+            if let Err(error) = sync_macos_runtime_disabled_state(&game_path, true) {
+                eprintln!(
+                    "[launch_game_vanilla] Failed to enforce runtime_disabled state ({}). Falling back to clearing managed launch option before vanilla Steam launch.",
+                    error
+                );
+                ensure_macos_steam_launch_options(&app, &game_path, false, false)?;
+            } else {
+                eprintln!(
+                    "[launch_game_vanilla] Managed BepInEx launch option detected — keeping it and relying on runtime_disabled for vanilla Steam launch."
+                );
+            }
         }
 
         return launch_via_steam_for_game_path(&app, &game_path);

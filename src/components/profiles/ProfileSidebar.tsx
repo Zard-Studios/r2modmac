@@ -23,6 +23,7 @@ interface ProfileSidebarProps {
     isApplying?: boolean;
     isLaunching?: boolean;
     isBusy?: boolean;
+    isSteamRestarting?: boolean;
     isGameRunning?: boolean;
     hasConfiguredGamePath?: boolean;
     isCheckingGamePath?: boolean;
@@ -51,6 +52,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
     isApplying = false,
     isLaunching = false,
     isBusy = false,
+    isSteamRestarting = false,
     isGameRunning = false,
     hasConfiguredGamePath = false,
     isCheckingGamePath = false,
@@ -123,6 +125,8 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
     let launchActionTitle = 'Game directory is not configured. Open Settings and set the path before launching.';
     if (isGameRunning) {
         launchActionTitle = 'Stop Game';
+    } else if (isSteamRestarting) {
+        launchActionTitle = 'Steam is restarting to apply launch options...';
     } else if (isCheckingGamePath) {
         launchActionTitle = 'Checking game directory...';
     } else if (hasConfiguredGamePath && activeProfile) {
@@ -141,8 +145,8 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                 }
                 void onLaunchProfile();
             }}
-            disabled={isLaunching || isApplying || launchActionBlocked}
-            className={`w-14 flex items-center justify-center rounded-xl text-white border shadow-sm ${(isLaunching || isApplying)
+            disabled={isLaunching || isApplying || isSteamRestarting || launchActionBlocked}
+            className={`w-14 flex items-center justify-center rounded-xl text-white border shadow-sm ${(isLaunching || isApplying || isSteamRestarting)
                 ? 'bg-gray-700 border-gray-600 cursor-wait opacity-70'
                 : launchActionBlocked
                     ? 'bg-gray-700 border-gray-600 cursor-not-allowed opacity-60'
@@ -155,6 +159,11 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
             {isGameRunning ? (
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
                     <rect width="10" height="10" x="3" y="3" rx="1.5" />
+                </svg>
+            ) : isLaunching || isApplying || isSteamRestarting ? (
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 animate-spin" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <circle cx="8" cy="8" r="5.25" stroke="currentColor" strokeOpacity="0.25" strokeWidth="1.5" />
+                    <path d="M8 2.75a5.25 5.25 0 0 1 5.25 5.25" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
                 </svg>
             ) : (
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="currentColor" viewBox="0 0 16 16" aria-hidden="true">
