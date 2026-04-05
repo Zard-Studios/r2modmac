@@ -920,6 +920,14 @@ fn find_macos_app_bundle(game_path: &std::path::Path) -> Option<std::path::PathB
     candidates.first().map(|(bundle, _, _)| bundle.clone())
 }
 
+fn find_macos_launch_bundle(game_path: &std::path::Path) -> Option<std::path::PathBuf> {
+    // If the stored game path already lives inside an app bundle (for example
+    // `/Applications/Foo.app/Contents`), launch that enclosing bundle instead
+    // of a nested child app. Some standalone macOS wrappers prepare runtime
+    // state before handing off to the real game executable.
+    find_enclosing_app_bundle(game_path).or_else(|| find_macos_app_bundle(game_path))
+}
+
 fn find_macos_executable_path(game_path: &std::path::Path) -> Option<std::path::PathBuf> {
     let app_bundle = find_macos_app_bundle(game_path)?;
     let macos_dir = app_bundle.join("Contents").join("MacOS");
@@ -4486,14 +4494,9 @@ pub async fn launch_game_with_mods(
     if launch_macos_bepinex_wrapper(&app, &game_path, executable_path.as_ref(), "launch_game_with_mods")? {
         Ok(())
     } else {
-        // Fallback: open the .app directly
-        let app_bundle = fs::read_dir(&game_path)
-            .ok()
-            .and_then(|entries| {
-                entries.filter_map(|e| e.ok())
-                    .find(|e| e.file_name().to_string_lossy().ends_with(".app"))
-                    .map(|e| e.path())
-            });
+        // Fallback: open the resolved app bundle directly, even when the stored
+        // game path points to Contents/ or another nested directory.
+        let app_bundle = find_macos_launch_bundle(&game_path);
         if let Some(bundle) = app_bundle {
             if let Some(executable_path) = executable_path.as_ref() {
                 if is_process_running_for_executable(executable_path) {
@@ -4542,7 +4545,7 @@ pub async fn launch_game_vanilla(
     // signature (in case a previous modded session stripped the codesign) and
     // remove quarantine attributes.
     #[cfg(target_os = "macos")]
-    if let Some(app_bundle) = find_macos_app_bundle(&game_path) {
+    if let Some(app_bundle) = find_macos_launch_bundle(&game_path) {
         // Check if the app has NO valid signature (unsigned after mod removal)
         let needs_resign = std::process::Command::new("codesign")
             .args(["-v", "--strict", &app_bundle.to_string_lossy()])
@@ -4591,25 +4594,7 @@ pub async fn launch_game_vanilla(
         return launch_via_steam_for_game_path(&app, &game_path);
     }
 
-    let app_bundle = if game_path.is_dir() {
-        fs::read_dir(&game_path)
-            .ok()
-            .and_then(|entries| {
-                entries
-                    .filter_map(|e| e.ok())
-                    .find(|e| e.file_name().to_string_lossy().ends_with(".app"))
-                    .map(|e| e.path())
-            })
-    } else if game_path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .map(|name| name.ends_with(".app"))
-        .unwrap_or(false)
-    {
-        Some(game_path.clone())
-    } else {
-        None
-    };
+    let app_bundle = find_macos_launch_bundle(&game_path);
 
     if let Some(bundle) = app_bundle {
         if !settings.write_debug_logs_to_game {
