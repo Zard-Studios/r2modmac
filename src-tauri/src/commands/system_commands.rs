@@ -13,7 +13,7 @@ pub async fn fetch_communities() -> Result<Vec<serde_json::Value>, String> {
     while let Some(current_url) = url {
         let resp = reqwest::get(&current_url).await.map_err(|e| e.to_string())?;
         let json: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
-        
+
         if let Some(results) = json.get("results").and_then(|v| v.as_array()) {
             eprintln!("[fetch_communities] Fetched {} communities from {}", results.len(), current_url);
             all_results.extend(results.clone());
@@ -25,7 +25,7 @@ pub async fn fetch_communities() -> Result<Vec<serde_json::Value>, String> {
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
     }
-    
+
     eprintln!("[fetch_communities] Total communities fetched: {}", all_results.len());
     Ok(all_results)
 }
@@ -35,14 +35,14 @@ pub async fn fetch_community_images() -> Result<std::collections::HashMap<String
     let url = "https://thunderstore.io/communities/";
     let resp = reqwest::get(url).await.map_err(|e| e.to_string())?;
     let html = resp.text().await.map_err(|e| e.to_string())?;
-    
+
     let mut images = std::collections::HashMap::new();
-    
+
     // Regex for preload links
     // Matches: <link rel="preload" href="https://gcdn.thunderstore.io/live/community/risk-of-rain-2/..." as="image">
     let re_preload = regex::Regex::new(r#"<link rel="preload" href="(https://gcdn\.thunderstore\.io/live/community/([^/]+)/[^"]+)" as="image">"#)
         .map_err(|e| e.to_string())?;
-    
+
     for cap in re_preload.captures_iter(&html) {
         if let (Some(url), Some(id)) = (cap.get(1), cap.get(2)) {
             images.insert(id.as_str().to_string(), url.as_str().to_string());
@@ -53,13 +53,13 @@ pub async fn fetch_community_images() -> Result<std::collections::HashMap<String
     // Matches: <img ... src="https://gcdn.thunderstore.io/live/community/risk-of-rain-2/..." ...>
     let re_img = regex::Regex::new(r#"src="(https://gcdn\.thunderstore\.io/live/community/([^/]+)/[^"]+)""#)
         .map_err(|e| e.to_string())?;
-        
+
     for cap in re_img.captures_iter(&html) {
         if let (Some(url), Some(id)) = (cap.get(1), cap.get(2)) {
              images.entry(id.as_str().to_string()).or_insert(url.as_str().to_string());
         }
     }
-    
+
     Ok(images)
 }
 
@@ -788,7 +788,7 @@ pub async fn resolve_community_platforms(
 pub async fn confirm_dialog(app: AppHandle, title: String, message: String) -> Result<bool, String> {
     use tauri_plugin_dialog::DialogExt;
     use tauri_plugin_dialog::MessageDialogButtons;
-    
+
     let window = app.get_webview_window("main").ok_or("Main window not found")?;
 
     let ans = app.dialog()
@@ -797,7 +797,7 @@ pub async fn confirm_dialog(app: AppHandle, title: String, message: String) -> R
         .buttons(MessageDialogButtons::OkCancel)
         .parent(&window)
         .blocking_show();
-        
+
     Ok(ans)
 }
 
@@ -805,16 +805,16 @@ pub async fn confirm_dialog(app: AppHandle, title: String, message: String) -> R
 pub async fn alert_dialog(app: AppHandle, title: String, message: String) -> Result<(), String> {
     use tauri_plugin_dialog::DialogExt;
     use tauri_plugin_dialog::MessageDialogButtons;
-    
+
     let window = app.get_webview_window("main").ok_or("Main window not found")?;
-    
+
     app.dialog()
         .message(message)
         .title(title)
         .buttons(MessageDialogButtons::Ok)
         .parent(&window)
         .blocking_show();
-        
+
     Ok(())
 }
 
@@ -852,10 +852,10 @@ pub async fn read_image(path: String) -> Result<Option<String>, String> {
     if !path_buf.exists() {
         return Ok(None);
     }
-    
+
     let bytes = fs::read(&path_buf).map_err(|e| e.to_string())?;
     let base64_str = base64::engine::general_purpose::STANDARD.encode(&bytes);
-    
+
     // Determine mime type based on extension
     let extension = path_buf.extension().and_then(|e| e.to_str()).unwrap_or("png").to_lowercase();
     let mime = match extension.as_str() {
@@ -865,7 +865,7 @@ pub async fn read_image(path: String) -> Result<Option<String>, String> {
         "gif" => "image/gif",
         _ => "application/octet-stream"
     };
-    
+
     Ok(Some(format!("data:{};base64,{}", mime, base64_str)))
 }
 
@@ -907,25 +907,25 @@ pub async fn check_update(current_version: String) -> Result<UpdateInfo, String>
     }
 
     let release: GithubRelease = resp.json().await.map_err(|e| format!("Parse error: {}", e))?;
-    
+
     // Simple version comparison (naive string compare for now, ideally use semver)
     // Assume tag_name is "vX.X.X" and current_version is "X.X.X"
     let clean_tag = release.tag_name.trim_start_matches('v');
-    
+
     // Use semver crate if available, or simple split compare
     let is_newer = compare_versions(clean_tag, &current_version);
-    
+
     // Detect system architecture
     let arch = std::env::consts::ARCH; // "aarch64" for Apple Silicon, "x86_64" for Intel
     eprintln!("[check_update] Detected architecture: {}", arch);
-    
+
     // Map architecture to expected asset name patterns
     let arch_pattern = match arch {
         "aarch64" => "aarch64",
         "x86_64" => "x64",
         _ => "universal", // Fallback to universal for unknown archs
     };
-    
+
     // Find matching DMG/archive: prioritize exact arch match, fallback to universal
     let asset = release.assets.iter()
         .find(|a| {
@@ -941,7 +941,7 @@ pub async fn check_update(current_version: String) -> Result<UpdateInfo, String>
                     && name.contains("universal")
             })
         });
-    
+
     eprintln!("[check_update] Selected asset: {:?}", asset.map(|a| &a.name));
 
     Ok(UpdateInfo {
@@ -954,7 +954,9 @@ pub async fn check_update(current_version: String) -> Result<UpdateInfo, String>
 
 #[command]
 pub async fn install_update(app: AppHandle, download_url: String) -> Result<(), String> {
+	#[cfg(unix)] {
     use std::os::unix::fs::PermissionsExt;
+	}
     use std::process::Command;
 
     // 1. Download
@@ -968,14 +970,14 @@ pub async fn install_update(app: AppHandle, download_url: String) -> Result<(), 
     let file_path = temp_dir.join(filename);
 
     eprintln!("[install_update] Downloading to {:?}", file_path);
-    
+
     // Stream download to calculate progress
     use std::io::Write;
     use futures_util::StreamExt;
 
     let response = reqwest::get(&download_url).await.map_err(|e| e.to_string())?;
     let total_size = response.content_length().unwrap_or(0);
-    
+
     let mut file = fs::File::create(&file_path).map_err(|e| e.to_string())?;
     let mut downloaded: u64 = 0;
     let mut stream = response.bytes_stream();
@@ -983,9 +985,9 @@ pub async fn install_update(app: AppHandle, download_url: String) -> Result<(), 
     while let Some(item) = stream.next().await {
         let chunk = item.map_err(|e| e.to_string())?;
         file.write_all(&chunk).map_err(|e| e.to_string())?;
-        
+
         downloaded += chunk.len() as u64;
-        
+
         if total_size > 0 {
             let percent = (downloaded as f64 / total_size as f64 * 100.0) as u8;
             // Emit progress event
@@ -995,7 +997,7 @@ pub async fn install_update(app: AppHandle, download_url: String) -> Result<(), 
 
     // 2. Prepare Update Script
     let script_path = temp_dir.join("update.sh");
-    
+
     // GUARD: Check if we are in dev mode or not in a standard .app bundle
     // If current_exe is inside "target/debug" or "target/release", we are likely in dev/build.
     // Abort update to prevent deleting source code!
@@ -1036,7 +1038,7 @@ pub async fn install_update(app: AppHandle, download_url: String) -> Result<(), 
     let mount_point = format!("{}/dmg_mount", temp_dir.to_string_lossy());
 
     // Navigate up from Contents/MacOS/executable to .app
-    // Bundle path usually ends in .app. 
+    // Bundle path usually ends in .app.
     // Guard ensured we are likely safe, but let's defaulting to /Applications just in case.
     let current_app_path = current_exe
         .parent().and_then(|p| p.parent()).and_then(|p| p.parent())
@@ -1091,8 +1093,9 @@ rm -rf "$UPDATE_DIR"
     );
 
     fs::write(&script_path, script).map_err(|e| e.to_string())?;
-    fs::set_permissions(&script_path, fs::Permissions::from_mode(0o755)).map_err(|e| e.to_string())?;
-
+    #[cfg(unix)] {
+        fs::set_permissions(&script_path, fs::Permissions::from_mode(0o755)).map_err(|e| e.to_string())?;
+    }
     // 3. Launch Script detached
     eprintln!("[install_update] Launching update script...");
     Command::new("sh")
@@ -1110,7 +1113,7 @@ rm -rf "$UPDATE_DIR"
 pub fn compare_versions(v1: &str, v2: &str) -> bool {
     let v1_parts: Vec<u32> = v1.split('.').filter_map(|s| s.parse().ok()).collect();
     let v2_parts: Vec<u32> = v2.split('.').filter_map(|s| s.parse().ok()).collect();
-    
+
     for i in 0..std::cmp::max(v1_parts.len(), v2_parts.len()) {
         let p1 = v1_parts.get(i).unwrap_or(&0);
         let p2 = v2_parts.get(i).unwrap_or(&0);
