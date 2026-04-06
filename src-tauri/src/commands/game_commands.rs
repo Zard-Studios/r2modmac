@@ -415,8 +415,9 @@ fn macos_steam_launch_option_is_managed(
 fn managed_macos_launch_option_for_game(
     game_path: &std::path::Path,
 ) -> Result<String, String> {
-    let script_path = canonicalize_macos_bepinex_script(game_path)?;
-    if should_use_native_macos_bepinex_launcher(game_path) {
+    let runtime_root = resolve_macos_runtime_root(game_path);
+    let script_path = canonicalize_macos_bepinex_script(&runtime_root)?;
+    if should_use_native_macos_bepinex_launcher(&runtime_root) {
         Ok(format!(
             "/usr/bin/arch -arm64 /bin/bash \"{}\" %command%",
             script_path.display()
@@ -928,6 +929,20 @@ fn find_macos_launch_bundle(game_path: &std::path::Path) -> Option<std::path::Pa
     find_enclosing_app_bundle(game_path).or_else(|| find_macos_app_bundle(game_path))
 }
 
+fn find_macos_wrapper_launcher_path(game_path: &std::path::Path) -> Option<std::path::PathBuf> {
+    let launch_bundle = find_macos_launch_bundle(game_path)?;
+    let macos_dir = launch_bundle.join("Contents").join("MacOS");
+    let load_script = macos_dir.join("load");
+    let steam_appid = macos_dir.join("steam_appid.txt");
+    let ipcserver = macos_dir.join("ipcserver");
+
+    if load_script.is_file() && steam_appid.is_file() && ipcserver.exists() {
+        Some(load_script)
+    } else {
+        None
+    }
+}
+
 fn find_macos_executable_path(game_path: &std::path::Path) -> Option<std::path::PathBuf> {
     let app_bundle = find_macos_app_bundle(game_path)?;
     let macos_dir = app_bundle.join("Contents").join("MacOS");
@@ -962,6 +977,21 @@ fn find_macos_executable_path(game_path: &std::path::Path) -> Option<std::path::
         .filter_map(|entry| entry.ok())
         .find(|entry| entry.file_type().map(|t| t.is_file()).unwrap_or(false))
         .map(|entry| entry.path())
+}
+
+pub(crate) fn resolve_macos_runtime_root(game_path: &std::path::Path) -> std::path::PathBuf {
+    let Some(app_bundle) = find_macos_app_bundle(game_path) else {
+        return game_path.to_path_buf();
+    };
+    let Some(parent_dir) = app_bundle.parent() else {
+        return game_path.to_path_buf();
+    };
+
+    if parent_dir != game_path && parent_dir.starts_with(game_path) {
+        parent_dir.to_path_buf()
+    } else {
+        game_path.to_path_buf()
+    }
 }
 
 fn macos_executable_supports_x86_64(executable_path: &std::path::Path) -> Result<bool, String> {
@@ -1587,18 +1617,19 @@ fn launch_windows_game(app: &AppHandle, game_path: &std::path::Path) -> Result<(
 }
 
 fn remove_r2modmac_debug_logs(game_path: &std::path::Path) {
+    let runtime_root = resolve_macos_runtime_root(game_path);
     for log_name in [
         "r2modmac_bootstrap.log",
         "r2modmac_dyld.log",
         "r2modmac_exec.log",
     ] {
-        let log_path = game_path.join(log_name);
+        let log_path = runtime_root.join(log_name);
         if log_path.exists() {
             let _ = fs::remove_file(&log_path);
         }
     }
 
-    let legacy_bootstrap_log = game_path.join("BepInEx").join("r2modmac_bootstrap.log");
+    let legacy_bootstrap_log = runtime_root.join("BepInEx").join("r2modmac_bootstrap.log");
     if legacy_bootstrap_log.exists() {
         let _ = fs::remove_file(&legacy_bootstrap_log);
     }
@@ -1610,11 +1641,13 @@ fn launch_macos_bepinex_wrapper(
     executable_path: Option<&std::path::PathBuf>,
     context: &str,
 ) -> Result<bool, String> {
-    if find_bepinex_script_in_dir(game_path).is_none() {
+    let runtime_root = resolve_macos_runtime_root(game_path);
+
+    if find_bepinex_script_in_dir(&runtime_root).is_none() {
         return Ok(false);
     }
 
-    let run_script = canonicalize_macos_bepinex_script(game_path)?;
+    let run_script = canonicalize_macos_bepinex_script(&runtime_root)?;
 
     if let Some(executable_path) = executable_path.as_ref() {
         if is_process_running_for_executable(executable_path) {
@@ -1624,11 +1657,11 @@ fn launch_macos_bepinex_wrapper(
 
     let write_debug_logs_to_game = load_settings_impl(app).write_debug_logs_to_game;
     if !write_debug_logs_to_game {
-        remove_r2modmac_debug_logs(game_path);
+        remove_r2modmac_debug_logs(&runtime_root);
     }
 
-    configure_macos_bepinex_script(&run_script, game_path, write_debug_logs_to_game)?;
-    dequarantine_recursive(game_path);
+    configure_macos_bepinex_script(&run_script, &runtime_root, write_debug_logs_to_game)?;
+    dequarantine_recursive(&runtime_root);
 
     eprintln!("[{}] Launching via run_bepinex.sh at {:?}", context, run_script);
 
@@ -1636,7 +1669,7 @@ fn launch_macos_bepinex_wrapper(
         .arg("-x86_64")
         .arg("/bin/bash")
         .arg(&run_script)
-        .current_dir(game_path)
+        .current_dir(&runtime_root)
         .spawn()
         .map_err(|e| format!("Failed to launch run_bepinex.sh: {}", e))?;
 
@@ -1744,19 +1777,21 @@ fn canonicalize_macos_bepinex_script(dir: &std::path::Path) -> Result<std::path:
 }
 
 fn has_complete_macos_bepinex_runtime(game_path: &std::path::Path) -> bool {
-    let has_core = game_path.join("BepInEx").join("core").is_dir();
-    let has_doorstop_payload = game_path.join("doorstop_libs").is_dir()
-        || game_path.join("libdoorstop.dylib").exists();
-    let has_script = find_bepinex_script_in_dir(game_path).is_some();
+    let runtime_root = resolve_macos_runtime_root(game_path);
+    let has_core = runtime_root.join("BepInEx").join("core").is_dir();
+    let has_doorstop_payload = runtime_root.join("doorstop_libs").is_dir()
+        || runtime_root.join("libdoorstop.dylib").exists();
+    let has_script = find_bepinex_script_in_dir(&runtime_root).is_some();
 
     has_core && has_doorstop_payload && has_script
 }
 
 fn has_complete_disabled_macos_bepinex_runtime(game_path: &std::path::Path) -> bool {
-    let has_core = game_path.join("BepInEx_DISABLED").join("core").is_dir();
-    let has_doorstop_payload = game_path.join("doorstop_libs_DISABLED").is_dir()
-        || game_path.join("libdoorstop.dylib_DISABLED").exists();
-    let has_script = find_bepinex_script_in_dir(game_path).is_some();
+    let runtime_root = resolve_macos_runtime_root(game_path);
+    let has_core = runtime_root.join("BepInEx_DISABLED").join("core").is_dir();
+    let has_doorstop_payload = runtime_root.join("doorstop_libs_DISABLED").is_dir()
+        || runtime_root.join("libdoorstop.dylib_DISABLED").exists();
+    let has_script = find_bepinex_script_in_dir(&runtime_root).is_some();
 
     has_core && has_doorstop_payload && has_script
 }
@@ -1810,6 +1845,7 @@ fn sync_macos_runtime_disabled_state(
     game_path: &std::path::Path,
     disable: bool,
 ) -> Result<(), String> {
+    let runtime_root = resolve_macos_runtime_root(game_path);
     let dir_items = ["BepInEx", "doorstop_libs"];
     let file_items = [
         "doorstop_config.ini",
@@ -1818,7 +1854,7 @@ fn sync_macos_runtime_disabled_state(
     ];
 
     if disable {
-        let stale_bepinex = game_path.join("BepInEx");
+        let stale_bepinex = runtime_root.join("BepInEx");
         if stale_bepinex.is_dir() {
             let mut can_remove = true;
             if let Ok(entries) = fs::read_dir(&stale_bepinex) {
@@ -1840,8 +1876,8 @@ fn sync_macos_runtime_disabled_state(
     }
 
     for item in dir_items {
-        let active = game_path.join(item);
-        let disabled = game_path.join(format!("{}_DISABLED", item));
+        let active = runtime_root.join(item);
+        let disabled = runtime_root.join(format!("{}_DISABLED", item));
         if disable {
             if active.is_dir() && disabled.is_dir() {
                 let _ = fs::remove_dir_all(&active);
@@ -1860,8 +1896,8 @@ fn sync_macos_runtime_disabled_state(
     }
 
     for item in file_items {
-        let active = game_path.join(item);
-        let disabled = game_path.join(format!("{}_DISABLED", item));
+        let active = runtime_root.join(item);
+        let disabled = runtime_root.join(format!("{}_DISABLED", item));
         if disable {
             if (active.exists() || active.is_symlink()) && (disabled.exists() || disabled.is_symlink()) {
                 let _ = fs::remove_file(&active);
@@ -1877,8 +1913,8 @@ fn sync_macos_runtime_disabled_state(
         }
     }
 
-    let active_script = game_path.join(CANONICAL_MAC_BEPINEX_SCRIPT);
-    let disabled_script = game_path.join(format!("{}_DISABLED", CANONICAL_MAC_BEPINEX_SCRIPT));
+    let active_script = runtime_root.join(CANONICAL_MAC_BEPINEX_SCRIPT);
+    let disabled_script = runtime_root.join(format!("{}_DISABLED", CANONICAL_MAC_BEPINEX_SCRIPT));
     if !active_script.exists() && disabled_script.exists() {
         rename_path_if_present(&disabled_script, &active_script)?;
     } else if active_script.exists() && disabled_script.exists() {
@@ -1889,20 +1925,20 @@ fn sync_macos_runtime_disabled_state(
         }
     }
 
-    if let Ok(entries) = fs::read_dir(game_path) {
+    if let Ok(entries) = fs::read_dir(&runtime_root) {
         for entry in entries.filter_map(|e| e.ok()) {
             let name = entry.file_name().to_string_lossy().to_string();
             let path = entry.path();
 
             if disable {
                 if path.is_file() && is_bepinex_shell_script_name(&name) && name != CANONICAL_MAC_BEPINEX_SCRIPT {
-                    let disabled = game_path.join(format!("{}_DISABLED", name));
+                    let disabled = runtime_root.join(format!("{}_DISABLED", name));
                     rename_path_if_present(&path, &disabled)?;
                 }
             } else if name.ends_with("_DISABLED") {
                 let active_name = name.trim_end_matches("_DISABLED").to_string();
                 if is_bepinex_shell_script_name(&active_name) {
-                    let active_path = game_path.join(&active_name);
+                    let active_path = runtime_root.join(&active_name);
                     if !active_path.exists() {
                         rename_path_if_present(&path, &active_path)?;
                     } else if path.is_dir() && !path.is_symlink() {
@@ -2516,7 +2552,50 @@ fn copy_macos_bepinex_runtime_root(
         fs::copy(&src, &dst).map_err(|e| format!("Failed to copy {}: {}", item, e))?;
         if item == "doorstop_config.ini" {
             normalize_macos_doorstop_config_file(&dst)?;
+            configure_macos_doorstop_target_assembly(&dst, game_path)?;
         }
+    }
+
+    Ok(())
+}
+
+fn configure_macos_doorstop_target_assembly(
+    config_path: &std::path::Path,
+    game_path: &std::path::Path,
+) -> Result<(), String> {
+    if !config_path.exists() {
+        return Ok(());
+    }
+
+    let preloader_path = game_path
+        .join("BepInEx")
+        .join("core")
+        .join("BepInEx.Preloader.dll")
+        .to_string_lossy()
+        .replace('\\', "/");
+    let core_path = game_path
+        .join("BepInEx")
+        .join("core")
+        .to_string_lossy()
+        .replace('\\', "/");
+    let content = fs::read_to_string(config_path).map_err(|e| e.to_string())?;
+    let target_line = format!("targetAssembly={}", preloader_path);
+    let dll_search_path_line = format!("dllSearchPathOverride={}", core_path);
+
+    let mut updated = if let Ok(target_re) = regex::Regex::new(r"(?m)^targetAssembly=.*$") {
+        target_re.replace(&content, target_line.as_str()).into_owned()
+    } else {
+        content.clone()
+    };
+
+    if let Ok(dll_search_re) = regex::Regex::new(r"(?m)^dllSearchPathOverride=.*$") {
+        updated = dll_search_re
+            .replace(&updated, dll_search_path_line.as_str())
+            .into_owned();
+    }
+
+    if updated != content {
+        fs::write(config_path, updated).map_err(|e| e.to_string())?;
     }
 
     Ok(())
@@ -2527,8 +2606,14 @@ async fn ensure_macos_bepinex_runtime_present(
     profile_id: &str,
     game_path: &std::path::Path,
 ) -> Result<(), String> {
-    if has_complete_macos_bepinex_runtime(game_path) {
-        normalize_macos_doorstop_config_file(&game_path.join("doorstop_config.ini"))?;
+    let runtime_root = resolve_macos_runtime_root(game_path);
+
+    if has_complete_macos_bepinex_runtime(&runtime_root) {
+        normalize_macos_doorstop_config_file(&runtime_root.join("doorstop_config.ini"))?;
+        configure_macos_doorstop_target_assembly(
+            &runtime_root.join("doorstop_config.ini"),
+            &runtime_root,
+        )?;
         return Ok(());
     }
 
@@ -2541,9 +2626,9 @@ async fn ensure_macos_bepinex_runtime_present(
 
     if has_complete_macos_bepinex_runtime(&profile_dir) {
         normalize_macos_doorstop_config_file(&profile_dir.join("doorstop_config.ini"))?;
-        copy_macos_bepinex_runtime_root(&profile_dir, game_path)?;
-        dequarantine_recursive(game_path);
-        if has_complete_macos_bepinex_runtime(game_path) {
+        copy_macos_bepinex_runtime_root(&profile_dir, &runtime_root)?;
+        dequarantine_recursive(&runtime_root);
+        if has_complete_macos_bepinex_runtime(&runtime_root) {
             return Ok(());
         }
     }
@@ -2576,24 +2661,28 @@ async fn ensure_macos_bepinex_runtime_present(
 
     let version_number = extract_version_number_from_full_name(&bepinex_full_name)
         .ok_or_else(|| format!("Could not parse BepInEx version from {}", bepinex_full_name))?;
-    let runtime_kind = detect_unity_runtime_kind(game_path);
+    let runtime_kind = detect_unity_runtime_kind(&runtime_root);
     let runtime_bytes = download_official_macos_bepinex_runtime(&version_number, runtime_kind).await?;
 
     fs::create_dir_all(&profile_dir).map_err(|e| e.to_string())?;
 
     let cursor = std::io::Cursor::new(&runtime_bytes);
     let mut game_archive = zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
-    extract_bepinex_pack_to_root(&mut game_archive, game_path, true, false)?;
-    normalize_macos_doorstop_config_file(&game_path.join("doorstop_config.ini"))?;
+    extract_bepinex_pack_to_root(&mut game_archive, &runtime_root, true, false)?;
+    normalize_macos_doorstop_config_file(&runtime_root.join("doorstop_config.ini"))?;
+    configure_macos_doorstop_target_assembly(
+        &runtime_root.join("doorstop_config.ini"),
+        &runtime_root,
+    )?;
 
     let cursor = std::io::Cursor::new(&runtime_bytes);
     let mut profile_archive = zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
     extract_bepinex_pack_to_root(&mut profile_archive, &profile_dir, true, false)?;
     normalize_macos_doorstop_config_file(&profile_dir.join("doorstop_config.ini"))?;
 
-    dequarantine_recursive(game_path);
+    dequarantine_recursive(&runtime_root);
 
-    if has_complete_macos_bepinex_runtime(game_path) {
+    if has_complete_macos_bepinex_runtime(&runtime_root) {
         Ok(())
     } else {
         Err("No macOS BepInEx startup script found".to_string())
@@ -2613,6 +2702,16 @@ fn configure_macos_bepinex_script(
         })
     }
 
+    fn resolve_macos_launch_entry_path(
+        game_path: &std::path::Path,
+    ) -> Result<std::path::PathBuf, String> {
+        find_macos_wrapper_launcher_path(game_path)
+            .or_else(|| find_macos_executable_path(game_path))
+            .ok_or_else(|| {
+                "No macOS launch entry found (supported locations include wrapper launchers such as Contents/MacOS/load and nested .app bundles such as Contents/game/*.app).".to_string()
+            })
+    }
+
     fn has_macos_doorstop_support(script: &str) -> bool {
         let lower = script.to_lowercase();
         lower.contains("dyld_insert_libraries")
@@ -2622,13 +2721,18 @@ fn configure_macos_bepinex_script(
 
     fn build_generated_macos_bepinex_script(
         relative_exec: &str,
+        relative_launch_entry: &str,
+        launch_entry_uses_wrapper: bool,
         write_debug_logs_to_game: bool,
     ) -> String {
         let write_debug_logs = if write_debug_logs_to_game { 1 } else { 0 };
+        let launch_entry_uses_wrapper = if launch_entry_uses_wrapper { 1 } else { 0 };
         format!(
             r#"#!/bin/sh
 # r2modmac generated macOS BepInEx launcher
 executable_name="{relative_exec}"
+launch_entry_name="{relative_launch_entry}"
+launch_entry_uses_wrapper={launch_entry_uses_wrapper}
 write_debug_logs={write_debug_logs}
 
 a="/$0"; a=${{a%/*}}; a=${{a#/}}; a=${{a:-.}}; BASEDIR=$(cd "$a"; pwd -P)
@@ -2680,15 +2784,24 @@ else
 fi
 
 if command -v xattr >/dev/null 2>&1; then
-  xattr -dr com.apple.quarantine "$BASEDIR/run_bepinex.sh" "$BASEDIR/doorstop_libs" "$BASEDIR/BepInEx" "$BASEDIR"/*.dylib 2>/dev/null || true
+  /usr/bin/xattr -d com.apple.quarantine "$BASEDIR/run_bepinex.sh" "$BASEDIR/doorstop_libs" "$BASEDIR/BepInEx" "$BASEDIR"/*.dylib 2>/dev/null || true
 fi
 
-export DOORSTOP_ENABLE=TRUE
-export DOORSTOP_ENABLED=TRUE
+export DOORSTOP_ENABLE=1
+export DOORSTOP_ENABLED=1
 export DOORSTOP_INVOKE_DLL_PATH="$BASEDIR/BepInEx/core/BepInEx.Preloader.dll"
 export DOORSTOP_TARGET_ASSEMBLY="$DOORSTOP_INVOKE_DLL_PATH"
+export DOORSTOP_BOOT_CONFIG_OVERRIDE=""
+export DOORSTOP_IGNORE_DISABLED_ENV=0
+export DOORSTOP_MONO_DLL_SEARCH_PATH_OVERRIDE="$BASEDIR/BepInEx/core"
+export DOORSTOP_MONO_DEBUG_ENABLED=0
+export DOORSTOP_MONO_DEBUG_START_SERVER=0
+export DOORSTOP_MONO_DEBUG_ADDRESS="127.0.0.1:10000"
+export DOORSTOP_MONO_DEBUG_SUSPEND=0
+export DOORSTOP_CLR_RUNTIME_CORECLR_PATH=""
+export DOORSTOP_CLR_CORLIB_DIR=""
 export DOORSTOP_CORLIB_OVERRIDE_PATH=""
-export DOORSTOP_REDIRECT_OUTPUT_LOG=TRUE
+export DOORSTOP_REDIRECT_OUTPUT_LOG=1
 
 steam_arg_helper() {{
     if [ "$executable_name" != "" ] && [ "$1" != "${{1%"$executable_name"}}" ]; then
@@ -2734,7 +2847,30 @@ for a in "$@"; do
     fi
 done
 
-executable_path="$BASEDIR/$executable_name"
+case "$executable_name" in
+    *.app|/*.app)
+        real_executable_name="$executable_name"
+        case "$real_executable_name" in
+            /*) ;;
+            *) real_executable_name="$BASEDIR/$real_executable_name" ;;
+        esac
+        inner_executable_name=$(defaults read "${{real_executable_name}}/Contents/Info" CFBundleExecutable 2>/dev/null || defaults read "${{real_executable_name}}/Contents/Info.plist" CFBundleExecutable 2>/dev/null)
+        executable_path="${{real_executable_name}}/Contents/MacOS/${{inner_executable_name}}"
+        ;;
+    *.app/Contents/MacOS/*|/*.app/Contents/MacOS/*)
+        case "$executable_name" in
+            /*) executable_path="$executable_name" ;;
+            *) executable_path="$BASEDIR/$executable_name" ;;
+        esac
+        ;;
+    /*) executable_path="$executable_name" ;;
+    *) executable_path="$BASEDIR/$executable_name" ;;
+esac
+
+case "$launch_entry_name" in
+    /*) launch_entry_path="$launch_entry_name" ;;
+    *) launch_entry_path="$BASEDIR/$launch_entry_name" ;;
+esac
 
 if [ -n "$1" ]; then
     case "$1" in
@@ -2771,7 +2907,9 @@ resolve_executable_path() {{
 }}
 
 executable_path=$(resolve_executable_path "${{executable_path}}")
+launch_entry_path=$(resolve_executable_path "${{launch_entry_path}}")
 log_bootstrap "resolved_executable_path=$executable_path"
+log_bootstrap "resolved_launch_entry_path=$launch_entry_path wrapper=$launch_entry_uses_wrapper"
 
 app_path="${{executable_path%/Contents/MacOS*}}"
 if command -v codesign >/dev/null 2>&1 && [ -d "$app_path" ] && codesign -d "$app_path" >/dev/null 2>&1; then
@@ -2805,17 +2943,11 @@ if [ -f "$root_doorstop_dylib" ] && [ ! -d "$BASEDIR/doorstop_libs" ]; then
     export DOORSTOP_ENABLE=1
     export DOORSTOP_ENABLED=1
     export DOORSTOP_TARGET_ASSEMBLY="$DOORSTOP_INVOKE_DLL_PATH"
-    export DOORSTOP_BOOT_CONFIG_OVERRIDE=""
-    export DOORSTOP_IGNORE_DISABLED_ENV=0
-    export DOORSTOP_MONO_DLL_SEARCH_PATH_OVERRIDE=""
-    export DOORSTOP_MONO_DEBUG_ENABLED=0
-    export DOORSTOP_MONO_DEBUG_ADDRESS="127.0.0.1:10000"
-    export DOORSTOP_MONO_DEBUG_SUSPEND=0
     export DOORSTOP_CLR_RUNTIME_CORECLR_PATH=""
     export DOORSTOP_CLR_CORLIB_DIR=""
     export DOORSTOP_REDIRECT_OUTPUT_LOG=1
 fi
-log_bootstrap "doorstop_env_prepared root_loader_mode=$root_loader_mode DOORSTOP_ENABLE=$DOORSTOP_ENABLE DOORSTOP_ENABLED=$DOORSTOP_ENABLED DOORSTOP_INVOKE_DLL_PATH=$DOORSTOP_INVOKE_DLL_PATH DOORSTOP_TARGET_ASSEMBLY=$DOORSTOP_TARGET_ASSEMBLY DOORSTOP_REDIRECT_OUTPUT_LOG=$DOORSTOP_REDIRECT_OUTPUT_LOG"
+log_bootstrap "doorstop_env_prepared root_loader_mode=$root_loader_mode DOORSTOP_ENABLE=$DOORSTOP_ENABLE DOORSTOP_ENABLED=$DOORSTOP_ENABLED DOORSTOP_INVOKE_DLL_PATH=$DOORSTOP_INVOKE_DLL_PATH DOORSTOP_TARGET_ASSEMBLY=$DOORSTOP_TARGET_ASSEMBLY DOORSTOP_MONO_DLL_SEARCH_PATH_OVERRIDE=$DOORSTOP_MONO_DLL_SEARCH_PATH_OVERRIDE DOORSTOP_REDIRECT_OUTPUT_LOG=$DOORSTOP_REDIRECT_OUTPUT_LOG"
 
 can_retry_x64=false
 if echo "$executable_type" | grep -q "x86_64" && echo "$root_doorstop_type" | grep -q "x86_64"; then
@@ -2843,6 +2975,11 @@ case $executable_type in
         ;;
 esac
 
+if [ "$launch_entry_uses_wrapper" = "1" ] && [ "$native_macos_arch" = "arm64" ]; then
+    arch="x64"
+    log_bootstrap "forcing_x64_for_wrapper_game launch_entry=$launch_entry_path"
+fi
+
 doorstop_libname="libdoorstop_${{arch}}.dylib"
 doorstop_dylib="$BASEDIR/doorstop_libs/${{doorstop_libname}}"
 doorstop_libs="$BASEDIR/doorstop_libs"
@@ -2867,6 +3004,10 @@ if [ "$runtime_disabled" = true ]; then
     if [ "$steam_launch_args_ready" = true ]; then
         log_bootstrap "steam_launch_exec_vanilla argv=$*"
         exec "$@"
+    fi
+    if [ "$launch_entry_uses_wrapper" = "1" ]; then
+        log_bootstrap "exec_vanilla_wrapper=$launch_entry_path"
+        exec /bin/bash "${{launch_entry_path}}"
     fi
     log_bootstrap "exec_vanilla=$executable_path"
     exec "${{executable_path}}"
@@ -2918,7 +3059,11 @@ log_bootstrap "loader_env LD_LIBRARY_PATH=${{LD_LIBRARY_PATH:-}} LD_PRELOAD=${{L
 
 # r2modmac: prepare Steam runtime emulation wrappers used by some manual macOS builds
 # (for example launchers that ship steam_appid.txt + ipcserver in Contents/MacOS).
-steamemu_macos_dir="$BASEDIR/MacOS"
+if [ "$launch_entry_uses_wrapper" = "1" ]; then
+    steamemu_macos_dir=$(dirname "$launch_entry_path")
+else
+    steamemu_macos_dir="$BASEDIR/MacOS"
+fi
 steamemu_appid_file="$steamemu_macos_dir/steam_appid.txt"
 if [ -x "$steamemu_macos_dir/ipcserver" ] && [ -f "$steamemu_appid_file" ]; then
     steamemu_app_id=$(tr -d '[:space:]' < "$steamemu_appid_file" 2>/dev/null)
@@ -2954,6 +3099,10 @@ maybe_retry_x64_after_arm64_failure() {{
     shift 2
     bepinex_log="$BASEDIR/BepInEx/LogOutput.log"
 
+    if [ "$failed_status" = "0" ]; then
+        return 1
+    fi
+
     if [ "$arch" != "arm64" ] || [ "$can_retry_x64" != true ]; then
         return 1
     fi
@@ -2969,6 +3118,12 @@ maybe_retry_x64_after_arm64_failure() {{
         -e DOORSTOP_ENABLED="${{DOORSTOP_ENABLED}}" \
         -e DOORSTOP_INVOKE_DLL_PATH="${{DOORSTOP_INVOKE_DLL_PATH}}" \
         -e DOORSTOP_TARGET_ASSEMBLY="${{DOORSTOP_TARGET_ASSEMBLY}}" \
+        -e DOORSTOP_BOOT_CONFIG_OVERRIDE="${{DOORSTOP_BOOT_CONFIG_OVERRIDE}}" \
+        -e DOORSTOP_IGNORE_DISABLED_ENV="${{DOORSTOP_IGNORE_DISABLED_ENV}}" \
+        -e DOORSTOP_MONO_DLL_SEARCH_PATH_OVERRIDE="${{DOORSTOP_MONO_DLL_SEARCH_PATH_OVERRIDE}}" \
+        -e DOORSTOP_MONO_DEBUG_ENABLED="${{DOORSTOP_MONO_DEBUG_ENABLED}}" \
+        -e DOORSTOP_MONO_DEBUG_ADDRESS="${{DOORSTOP_MONO_DEBUG_ADDRESS}}" \
+        -e DOORSTOP_MONO_DEBUG_SUSPEND="${{DOORSTOP_MONO_DEBUG_SUSPEND}}" \
         -e DOORSTOP_CORLIB_OVERRIDE_PATH="${{DOORSTOP_CORLIB_OVERRIDE_PATH}}" \
         -e DOORSTOP_REDIRECT_OUTPUT_LOG="${{DOORSTOP_REDIRECT_OUTPUT_LOG}}" \
         -e SteamAppId="${{SteamAppId:-}}" \
@@ -3004,6 +3159,12 @@ if [ "$steam_launch_args_ready" = true ]; then
             -e DOORSTOP_ENABLED="${{DOORSTOP_ENABLED}}" \
             -e DOORSTOP_INVOKE_DLL_PATH="${{DOORSTOP_INVOKE_DLL_PATH}}" \
             -e DOORSTOP_TARGET_ASSEMBLY="${{DOORSTOP_TARGET_ASSEMBLY}}" \
+            -e DOORSTOP_BOOT_CONFIG_OVERRIDE="${{DOORSTOP_BOOT_CONFIG_OVERRIDE}}" \
+            -e DOORSTOP_IGNORE_DISABLED_ENV="${{DOORSTOP_IGNORE_DISABLED_ENV}}" \
+            -e DOORSTOP_MONO_DLL_SEARCH_PATH_OVERRIDE="${{DOORSTOP_MONO_DLL_SEARCH_PATH_OVERRIDE}}" \
+            -e DOORSTOP_MONO_DEBUG_ENABLED="${{DOORSTOP_MONO_DEBUG_ENABLED}}" \
+            -e DOORSTOP_MONO_DEBUG_ADDRESS="${{DOORSTOP_MONO_DEBUG_ADDRESS}}" \
+            -e DOORSTOP_MONO_DEBUG_SUSPEND="${{DOORSTOP_MONO_DEBUG_SUSPEND}}" \
             -e DOORSTOP_CORLIB_OVERRIDE_PATH="${{DOORSTOP_CORLIB_OVERRIDE_PATH}}" \
             -e DOORSTOP_REDIRECT_OUTPUT_LOG="${{DOORSTOP_REDIRECT_OUTPUT_LOG}}" \
             -e SteamAppId="${{SteamAppId:-}}" \
@@ -3029,6 +3190,12 @@ if [ "$steam_launch_args_ready" = true ]; then
             -e DOORSTOP_ENABLED="${{DOORSTOP_ENABLED}}" \
             -e DOORSTOP_INVOKE_DLL_PATH="${{DOORSTOP_INVOKE_DLL_PATH}}" \
             -e DOORSTOP_TARGET_ASSEMBLY="${{DOORSTOP_TARGET_ASSEMBLY}}" \
+            -e DOORSTOP_BOOT_CONFIG_OVERRIDE="${{DOORSTOP_BOOT_CONFIG_OVERRIDE}}" \
+            -e DOORSTOP_IGNORE_DISABLED_ENV="${{DOORSTOP_IGNORE_DISABLED_ENV}}" \
+            -e DOORSTOP_MONO_DLL_SEARCH_PATH_OVERRIDE="${{DOORSTOP_MONO_DLL_SEARCH_PATH_OVERRIDE}}" \
+            -e DOORSTOP_MONO_DEBUG_ENABLED="${{DOORSTOP_MONO_DEBUG_ENABLED}}" \
+            -e DOORSTOP_MONO_DEBUG_ADDRESS="${{DOORSTOP_MONO_DEBUG_ADDRESS}}" \
+            -e DOORSTOP_MONO_DEBUG_SUSPEND="${{DOORSTOP_MONO_DEBUG_SUSPEND}}" \
             -e DOORSTOP_CORLIB_OVERRIDE_PATH="${{DOORSTOP_CORLIB_OVERRIDE_PATH}}" \
             -e DOORSTOP_REDIRECT_OUTPUT_LOG="${{DOORSTOP_REDIRECT_OUTPUT_LOG}}" \
             -e SteamAppId="${{SteamAppId:-}}" \
@@ -3072,6 +3239,12 @@ if [ "$arch" = "arm64" ] && command -v /usr/bin/arch >/dev/null 2>&1; then
         -e DOORSTOP_ENABLED="${{DOORSTOP_ENABLED}}" \
         -e DOORSTOP_INVOKE_DLL_PATH="${{DOORSTOP_INVOKE_DLL_PATH}}" \
         -e DOORSTOP_TARGET_ASSEMBLY="${{DOORSTOP_TARGET_ASSEMBLY}}" \
+        -e DOORSTOP_BOOT_CONFIG_OVERRIDE="${{DOORSTOP_BOOT_CONFIG_OVERRIDE}}" \
+        -e DOORSTOP_IGNORE_DISABLED_ENV="${{DOORSTOP_IGNORE_DISABLED_ENV}}" \
+        -e DOORSTOP_MONO_DLL_SEARCH_PATH_OVERRIDE="${{DOORSTOP_MONO_DLL_SEARCH_PATH_OVERRIDE}}" \
+        -e DOORSTOP_MONO_DEBUG_ENABLED="${{DOORSTOP_MONO_DEBUG_ENABLED}}" \
+        -e DOORSTOP_MONO_DEBUG_ADDRESS="${{DOORSTOP_MONO_DEBUG_ADDRESS}}" \
+        -e DOORSTOP_MONO_DEBUG_SUSPEND="${{DOORSTOP_MONO_DEBUG_SUSPEND}}" \
         -e DOORSTOP_CORLIB_OVERRIDE_PATH="${{DOORSTOP_CORLIB_OVERRIDE_PATH}}" \
         -e DOORSTOP_REDIRECT_OUTPUT_LOG="${{DOORSTOP_REDIRECT_OUTPUT_LOG}}" \
         -e SteamAppId="${{SteamAppId:-}}" \
@@ -3099,6 +3272,12 @@ if [ "$arch" = "x64" ] && command -v /usr/bin/arch >/dev/null 2>&1; then
         -e DOORSTOP_ENABLED="${{DOORSTOP_ENABLED}}" \
         -e DOORSTOP_INVOKE_DLL_PATH="${{DOORSTOP_INVOKE_DLL_PATH}}" \
         -e DOORSTOP_TARGET_ASSEMBLY="${{DOORSTOP_TARGET_ASSEMBLY}}" \
+        -e DOORSTOP_BOOT_CONFIG_OVERRIDE="${{DOORSTOP_BOOT_CONFIG_OVERRIDE}}" \
+        -e DOORSTOP_IGNORE_DISABLED_ENV="${{DOORSTOP_IGNORE_DISABLED_ENV}}" \
+        -e DOORSTOP_MONO_DLL_SEARCH_PATH_OVERRIDE="${{DOORSTOP_MONO_DLL_SEARCH_PATH_OVERRIDE}}" \
+        -e DOORSTOP_MONO_DEBUG_ENABLED="${{DOORSTOP_MONO_DEBUG_ENABLED}}" \
+        -e DOORSTOP_MONO_DEBUG_ADDRESS="${{DOORSTOP_MONO_DEBUG_ADDRESS}}" \
+        -e DOORSTOP_MONO_DEBUG_SUSPEND="${{DOORSTOP_MONO_DEBUG_SUSPEND}}" \
         -e DOORSTOP_CORLIB_OVERRIDE_PATH="${{DOORSTOP_CORLIB_OVERRIDE_PATH}}" \
         -e DOORSTOP_REDIRECT_OUTPUT_LOG="${{DOORSTOP_REDIRECT_OUTPUT_LOG}}" \
         -e SteamAppId="${{SteamAppId:-}}" \
@@ -3132,12 +3311,22 @@ exit "$exec_status"
     }
 
     let executable_path = resolve_macos_executable_path(game_path)?;
-    let relative_executable = executable_path
+    let executable_bundle = find_macos_app_bundle(game_path);
+    let launch_entry_path = resolve_macos_launch_entry_path(game_path)?;
+    let executable_entry = executable_bundle.as_deref().unwrap_or(executable_path.as_path());
+    let relative_executable = executable_entry
         .strip_prefix(game_path)
         .ok()
-        .unwrap_or(executable_path.as_path())
+        .unwrap_or(executable_entry)
         .to_string_lossy()
         .replace('\\', "/");
+    let relative_launch_entry = launch_entry_path
+        .strip_prefix(game_path)
+        .ok()
+        .unwrap_or(launch_entry_path.as_path())
+        .to_string_lossy()
+        .replace('\\', "/");
+    let launch_entry_uses_wrapper = launch_entry_path != executable_path;
 
     let mut script = fs::read_to_string(script_path).map_err(|e| e.to_string())?;
     let original = script.clone();
@@ -3170,7 +3359,8 @@ exit "$exec_status"
     let logs_loader_environment = script.contains("wrapper_arch=") && script.contains("loader_env LD_LIBRARY_PATH=");
     let has_root_loader_mode_env = script.contains("root_loader_mode=false")
         && script.contains("DOORSTOP_IGNORE_DISABLED_ENV=0")
-        && script.contains("DOORSTOP_MONO_DLL_SEARCH_PATH_OVERRIDE=")
+        && script.contains("DOORSTOP_MONO_DLL_SEARCH_PATH_OVERRIDE=\"$BASEDIR/BepInEx/core\"")
+        && script.contains("-e DOORSTOP_MONO_DLL_SEARCH_PATH_OVERRIDE=")
         && script.contains("root_loader_mode=$root_loader_mode")
         && script.contains("export DYLD_INSERT_LIBRARIES=\"libdoorstop.dylib");
     let has_arch_env_exec = script.contains("exec_modded_arch_env=")
@@ -3193,10 +3383,17 @@ exit "$exec_status"
         && script.contains("can_retry_x64=true")
         && script.contains("retrying_x64_fallback status=")
         && script.contains("x64_fallback_failed status=$retry_status");
-    let has_modern_doorstop_env_aliases = script.contains("DOORSTOP_ENABLED=TRUE")
+    let has_modern_doorstop_env_aliases = script.contains("DOORSTOP_ENABLED=1")
         && script.contains("DOORSTOP_TARGET_ASSEMBLY=")
-        && script.contains("DOORSTOP_REDIRECT_OUTPUT_LOG=TRUE")
-        && script.contains("-e DOORSTOP_TARGET_ASSEMBLY=");
+        && script.contains("DOORSTOP_BOOT_CONFIG_OVERRIDE=")
+        && script.contains("DOORSTOP_IGNORE_DISABLED_ENV=0")
+        && script.contains("DOORSTOP_MONO_DLL_SEARCH_PATH_OVERRIDE=\"$BASEDIR/BepInEx/core\"")
+        && script.contains("DOORSTOP_REDIRECT_OUTPUT_LOG=1")
+        && script.contains("-e DOORSTOP_TARGET_ASSEMBLY=")
+        && script.contains("-e DOORSTOP_MONO_DLL_SEARCH_PATH_OVERRIDE=");
+    let has_launch_entry_support = script.contains("launch_entry_name=")
+        && script.contains("launch_entry_uses_wrapper=")
+        && script.contains("resolved_launch_entry_path=");
     let has_steamemu_runtime_prep =
         script.contains("steamemu_runtime_prepared")
             && script.contains("export SteamAppId=")
@@ -3230,6 +3427,7 @@ exit "$exec_status"
             || !has_native_arm64_direct_exec
             || !has_arm64_x64_fallback_retry
             || !has_modern_doorstop_env_aliases
+            || !has_launch_entry_support
             || !has_steamemu_runtime_prep
             || !preserves_steam_dyld_hooks
             || !steam_launch_exec_deferred
@@ -3237,7 +3435,7 @@ exit "$exec_status"
             || has_legacy_bepinex_bootstrap_log;
     if needs_regeneration {
         eprintln!(
-            "[configure_macos_bepinex_script] Regenerating script (has_doorstop={} early_exit_ok={} root_fallback_ok={} steam_launch_order_ok={} root_bootstrap_log_ok={} removes_codesign_signature={} logs_loader_environment={} has_arch_env_exec={} has_dyld_loader_logging={} has_exec_failure_logging={} modern_doorstop_env_aliases={} steamemu_runtime_prep={} preserves_steam_dyld_hooks={} steam_launch_exec_deferred={} legacy_bepinex_bootstrap_log={}).",
+            "[configure_macos_bepinex_script] Regenerating script (has_doorstop={} early_exit_ok={} root_fallback_ok={} steam_launch_order_ok={} root_bootstrap_log_ok={} removes_codesign_signature={} logs_loader_environment={} has_arch_env_exec={} has_dyld_loader_logging={} has_exec_failure_logging={} modern_doorstop_env_aliases={} launch_entry_support={} steamemu_runtime_prep={} preserves_steam_dyld_hooks={} steam_launch_exec_deferred={} legacy_bepinex_bootstrap_log={}).",
             has_macos_doorstop_support(&script),
             early_exit_before_dyld,
             has_root_doorstop_fallback,
@@ -3249,6 +3447,7 @@ exit "$exec_status"
             has_dyld_loader_logging,
             has_exec_failure_logging,
             has_modern_doorstop_env_aliases,
+            has_launch_entry_support,
             has_steamemu_runtime_prep,
             preserves_steam_dyld_hooks,
             steam_launch_exec_deferred,
@@ -3256,13 +3455,35 @@ exit "$exec_status"
         );
         script = build_generated_macos_bepinex_script(
             &relative_executable,
+            &relative_launch_entry,
+            launch_entry_uses_wrapper,
             write_debug_logs_to_game,
         );
-    } else if script.contains("\nexecutable_name=\"\"") {
-        script = script.replace(
-            "\nexecutable_name=\"\"",
-            &format!("\nexecutable_name=\"{}\"", relative_executable),
-        );
+    } else {
+        if let Ok(executable_re) = regex::Regex::new(r#"(?m)^executable_name=".*"$"#) {
+            script = executable_re
+                .replace(&script, format!("executable_name=\"{}\"", relative_executable))
+                .into_owned();
+        }
+        if let Ok(launch_entry_re) = regex::Regex::new(r#"(?m)^launch_entry_name=".*"$"#) {
+            script = launch_entry_re
+                .replace(
+                    &script,
+                    format!("launch_entry_name=\"{}\"", relative_launch_entry),
+                )
+                .into_owned();
+        }
+        if let Ok(wrapper_flag_re) = regex::Regex::new(r#"(?m)^launch_entry_uses_wrapper=.*$"#) {
+            script = wrapper_flag_re
+                .replace(
+                    &script,
+                    format!(
+                        "launch_entry_uses_wrapper={}",
+                        if launch_entry_uses_wrapper { 1 } else { 0 }
+                    ),
+                )
+                .into_owned();
+        }
     }
 
     if let Some(idx) = script.find("BASEDIR=") {
@@ -3298,7 +3519,7 @@ exit "$exec_status"
     );
 
     if !script.contains("com.apple.quarantine") {
-        let dequarantine_block = "\n# r2modmac: best-effort de-quarantine for Doorstop/BepInEx payloads\nif command -v xattr >/dev/null 2>&1; then\n  xattr -dr com.apple.quarantine \"$BASEDIR/run_bepinex.sh\" \"$BASEDIR/doorstop_libs\" \"$BASEDIR/BepInEx\" \"$BASEDIR\"/*.dylib 2>/dev/null || true\nfi\n";
+        let dequarantine_block = "\n# r2modmac: best-effort de-quarantine for Doorstop/BepInEx payloads\nif command -v xattr >/dev/null 2>&1; then\n  /usr/bin/xattr -d com.apple.quarantine \"$BASEDIR/run_bepinex.sh\" \"$BASEDIR/doorstop_libs\" \"$BASEDIR/BepInEx\" \"$BASEDIR\"/*.dylib 2>/dev/null || true\nfi\n";
         if let Some(idx) = script.find("BASEDIR=") {
             let insert_at = script[idx..]
                 .find('\n')
@@ -3374,11 +3595,12 @@ fn should_use_native_macos_bepinex_launcher(game_path: &std::path::Path) -> bool
         return false;
     }
 
+    let runtime_root = resolve_macos_runtime_root(game_path);
     let Some(executable_path) = resolve_macos_app_executable_path(game_path) else {
         return false;
     };
 
-    let root_doorstop = game_path.join("libdoorstop.dylib");
+    let root_doorstop = runtime_root.join("libdoorstop.dylib");
     root_doorstop.is_file()
         && macho_file_supports_arm64(&executable_path)
         && macho_file_supports_arm64(&root_doorstop)
@@ -3892,9 +4114,27 @@ pub async fn install_to_game(app: AppHandle, game_identifier: String, profile_id
 
     let is_balatro_profile = is_mac_profile
         && (is_balatro_identifier(&game_identifier) || is_balatro_game_path(game_path));
+    let runtime_game_path_buf = if is_mac_profile && !is_balatro_profile {
+        let resolved = resolve_macos_runtime_root(game_path);
+        if resolved != game_path {
+            eprintln!(
+                "[install_to_game] Resolved macOS runtime root {} -> {}",
+                game_path.display(),
+                resolved.display()
+            );
+        }
+        resolved
+    } else {
+        game_path.to_path_buf()
+    };
+    let runtime_game_path = runtime_game_path_buf.as_path();
+    let mac_runtime_present_before_sync = is_mac_profile
+        && !is_vanilla
+        && !is_balatro_profile
+        && has_complete_macos_bepinex_runtime(runtime_game_path);
 
     if is_mac_profile && !is_vanilla && !is_balatro_profile {
-        validate_macos_bepinex_support(game_path)?;
+        validate_macos_bepinex_support(runtime_game_path)?;
     }
 
     if is_balatro_profile {
@@ -4095,11 +4335,16 @@ pub async fn install_to_game(app: AppHandle, game_identifier: String, profile_id
     } // End if !is_vanilla
     // --- FIX BEPINEX STRUCTURE END ---
 
-    eprintln!("[install_to_game] Installing profile {} to game {}", profile_id, game_path.display());
+    eprintln!(
+        "[install_to_game] Installing profile {} to game {} (runtime root {})",
+        profile_id,
+        game_path.display(),
+        runtime_game_path.display()
+    );
 
     // --- SYNC: Remove mods from game that are not in profile OR are disabled ---
     let profile_plugins = profile_dir.join("BepInEx").join("plugins");
-    let game_plugins = game_path.join("BepInEx").join("plugins");
+    let game_plugins = runtime_game_path.join("BepInEx").join("plugins");
     
     // Create set of enabled mod names (lowercase for comparison)
     let disabled_set: std::collections::HashSet<String> = disabled_mods.iter()
@@ -4107,19 +4352,19 @@ pub async fn install_to_game(app: AppHandle, game_identifier: String, profile_id
         .collect();
 
     if is_mac_profile && is_vanilla {
-        if find_bepinex_script_in_dir(game_path).is_some() {
-            let run_script = canonicalize_macos_bepinex_script(game_path)?;
+        if find_bepinex_script_in_dir(runtime_game_path).is_some() {
+            let run_script = canonicalize_macos_bepinex_script(runtime_game_path)?;
             configure_macos_bepinex_script(
                 &run_script,
-                game_path,
+                runtime_game_path,
                 load_settings_impl(&app).write_debug_logs_to_game,
             )?;
-            dequarantine_recursive(game_path);
+            dequarantine_recursive(runtime_game_path);
         }
         // Vanilla/modded is toggled by the runtime_disabled mechanism in
         // run_bepinex.sh. Do not touch Steam launch options here, otherwise a
         // profile disable would unexpectedly quit Steam before the user presses Play.
-        sync_macos_runtime_disabled_state(game_path, true)?;
+        sync_macos_runtime_disabled_state(runtime_game_path, true)?;
         eprintln!(
             "[install_to_game] macOS vanilla mode complete - runtime disabled while preserving the Steam wrapper."
         );
@@ -4199,7 +4444,7 @@ pub async fn install_to_game(app: AppHandle, game_identifier: String, profile_id
     if use_legacy_plugin_cache && !is_vanilla {
     // 3. Copy BepInEx structure with filtering for disabled mods
     let source_bepinex = profile_dir.join("BepInEx");
-    let dest_bepinex = game_path.join("BepInEx");
+    let dest_bepinex = runtime_game_path.join("BepInEx");
     
     if source_bepinex.exists() {
         // Create BepInEx dir if needed
@@ -4290,6 +4535,11 @@ pub async fn install_to_game(app: AppHandle, game_identifier: String, profile_id
                             }
                         }
                     }
+                } else if is_mac_profile && mac_runtime_present_before_sync {
+                    eprintln!(
+                        "[install_to_game] Keeping existing macOS runtime payload: {}",
+                        name
+                    );
                 } else {
                     // Copy other BepInEx folders normally
                     if src_path.is_dir() {
@@ -4312,13 +4562,15 @@ pub async fn install_to_game(app: AppHandle, game_identifier: String, profile_id
     // 4. Sync platform-specific root payloads
     if is_mac_profile {
         if !is_vanilla && !is_balatro_profile {
-            sync_macos_runtime_disabled_state(game_path, false)?;
-            ensure_macos_bepinex_runtime_present(&app, &profile_id, game_path).await?;
+            sync_macos_runtime_disabled_state(runtime_game_path, false)?;
+            ensure_macos_bepinex_runtime_present(&app, &profile_id, runtime_game_path).await?;
         }
 
-        let leaked_windows_loader = game_path.join("winhttp.dll");
-        if leaked_windows_loader.exists() {
-            let _ = fs::remove_file(&leaked_windows_loader);
+        for root in [game_path, runtime_game_path] {
+            let leaked_windows_loader = root.join("winhttp.dll");
+            if leaked_windows_loader.exists() {
+                let _ = fs::remove_file(&leaked_windows_loader);
+            }
         }
 
         let root_items = [
@@ -4329,9 +4581,17 @@ pub async fn install_to_game(app: AppHandle, game_identifier: String, profile_id
 
         for (item_name, is_dir) in root_items {
             let source = profile_dir.join(item_name);
-            let dest = game_path.join(item_name);
+            let dest = runtime_game_path.join(item_name);
 
             if !source.exists() {
+                continue;
+            }
+
+            if mac_runtime_present_before_sync {
+                eprintln!(
+                    "[install_to_game] Keeping existing macOS root payload: {}",
+                    item_name
+                );
                 continue;
             }
 
@@ -4349,24 +4609,36 @@ pub async fn install_to_game(app: AppHandle, game_identifier: String, profile_id
         }
 
         if let Some(source_script) = find_bepinex_script_in_dir(&profile_dir) {
-            let dest_script = game_path.join(CANONICAL_MAC_BEPINEX_SCRIPT);
-            if dest_script.exists() {
-                let _ = fs::remove_file(&dest_script);
+            let dest_script = runtime_game_path.join(CANONICAL_MAC_BEPINEX_SCRIPT);
+            if mac_runtime_present_before_sync {
+                eprintln!(
+                    "[install_to_game] Keeping existing macOS launcher script: {}",
+                    CANONICAL_MAC_BEPINEX_SCRIPT
+                );
+            } else {
+                if dest_script.exists() {
+                    let _ = fs::remove_file(&dest_script);
+                }
+                fs::copy(&source_script, &dest_script)
+                    .map_err(|e| format!("Failed to copy {}: {}", CANONICAL_MAC_BEPINEX_SCRIPT, e))?;
+                eprintln!("[install_to_game] Synced {} to game folder", CANONICAL_MAC_BEPINEX_SCRIPT);
             }
-            fs::copy(&source_script, &dest_script)
-                .map_err(|e| format!("Failed to copy {}: {}", CANONICAL_MAC_BEPINEX_SCRIPT, e))?;
-            eprintln!("[install_to_game] Synced {} to game folder", CANONICAL_MAC_BEPINEX_SCRIPT);
         }
 
-        migrate_root_plugins_into_bepinex(game_path)?;
-        let run_script = canonicalize_macos_bepinex_script(game_path)?;
+        migrate_root_plugins_into_bepinex(runtime_game_path)?;
+        normalize_macos_doorstop_config_file(&runtime_game_path.join("doorstop_config.ini"))?;
+        configure_macos_doorstop_target_assembly(
+            &runtime_game_path.join("doorstop_config.ini"),
+            runtime_game_path,
+        )?;
+        let run_script = canonicalize_macos_bepinex_script(runtime_game_path)?;
         configure_macos_bepinex_script(
             &run_script,
-            game_path,
+            runtime_game_path,
             load_settings_impl(&app).write_debug_logs_to_game,
         )?;
-        sync_macos_runtime_disabled_state(game_path, false)?;
-        dequarantine_recursive(game_path);
+        sync_macos_runtime_disabled_state(runtime_game_path, false)?;
+        dequarantine_recursive(runtime_game_path);
         if manage_steam_launch {
             eprintln!(
                 "[install_to_game] macOS Steam launch options deferred until Play to avoid restarting Steam during Apply."
@@ -4431,7 +4703,20 @@ pub async fn launch_game_with_mods(
         return launch_windows_game(&app, &game_path);
     }
 
-    let executable_path = find_macos_executable_path(&game_path);
+    let runtime_game_path = if is_balatro_identifier(&game_identifier) || is_balatro_game_path(&game_path) {
+        game_path.clone()
+    } else {
+        let resolved = resolve_macos_runtime_root(&game_path);
+        if resolved != game_path {
+            eprintln!(
+                "[launch_game_with_mods] Resolved macOS runtime root {} -> {}",
+                game_path.display(),
+                resolved.display()
+            );
+        }
+        resolved
+    };
+    let executable_path = find_macos_executable_path(&runtime_game_path);
 
     if is_balatro_identifier(&game_identifier) || is_balatro_game_path(&game_path) {
         let run_script = game_path.join(BALATRO_LOVELY_SCRIPT);
@@ -4465,7 +4750,7 @@ pub async fn launch_game_with_mods(
         return Ok(());
     }
 
-    validate_macos_bepinex_support(&game_path)?;
+    validate_macos_bepinex_support(&runtime_game_path)?;
 
     // STEAM LAUNCH STRATEGY: Launch via steam://run/ so Steam services work
     // (overlay, multiplayer, achievements). The BepInEx script is configured as
@@ -4474,15 +4759,15 @@ pub async fn launch_game_with_mods(
     let dist = infer_distribution_from_game_path(&app, &game_path, false);
     if dist == "steam" && !use_direct_launch {
         if !settings.write_debug_logs_to_game {
-            remove_r2modmac_debug_logs(&game_path);
+            remove_r2modmac_debug_logs(&runtime_game_path);
         }
-        let run_script = canonicalize_macos_bepinex_script(&game_path)?;
+        let run_script = canonicalize_macos_bepinex_script(&runtime_game_path)?;
         configure_macos_bepinex_script(
             &run_script,
-            &game_path,
+            &runtime_game_path,
             settings.write_debug_logs_to_game,
         )?;
-        dequarantine_recursive(&game_path);
+        dequarantine_recursive(&runtime_game_path);
 
         if let Ok(false) = macos_steam_launch_option_matches_desired(&app, &game_path) {
             eprintln!("[launch_game_with_mods] Steam launch option differs from desired value — reconciling before modded launch.");
@@ -4491,7 +4776,7 @@ pub async fn launch_game_with_mods(
         return launch_via_steam_for_game_path(&app, &game_path);
     }
 
-    if launch_macos_bepinex_wrapper(&app, &game_path, executable_path.as_ref(), "launch_game_with_mods")? {
+    if launch_macos_bepinex_wrapper(&app, &runtime_game_path, executable_path.as_ref(), "launch_game_with_mods")? {
         Ok(())
     } else {
         // Fallback: open the resolved app bundle directly, even when the stored
@@ -4526,7 +4811,7 @@ pub async fn launch_game_vanilla(
     platform: Option<String>
 ) -> Result<(), String> {
     let is_windows_profile = normalized_platform(platform.as_deref()) == Some("windows");
-    let game_path_str = get_game_path(app.clone(), game_identifier, platform)
+    let game_path_str = get_game_path(app.clone(), game_identifier.clone(), platform)
         .await?
         .ok_or_else(|| "Game path not found".to_string())?;
     let game_path = std::path::PathBuf::from(&game_path_str);
@@ -4538,7 +4823,20 @@ pub async fn launch_game_vanilla(
         return launch_windows_game(&app, &game_path);
     }
 
-    let executable_path = find_macos_executable_path(&game_path);
+    let runtime_game_path = if is_balatro_identifier(&game_identifier) || is_balatro_game_path(&game_path) {
+        game_path.clone()
+    } else {
+        let resolved = resolve_macos_runtime_root(&game_path);
+        if resolved != game_path {
+            eprintln!(
+                "[launch_game_vanilla] Resolved macOS runtime root {} -> {}",
+                game_path.display(),
+                resolved.display()
+            );
+        }
+        resolved
+    };
+    let executable_path = find_macos_executable_path(&runtime_game_path);
 
     // VANILLA: Launch the game directly without the BepInEx wrapper.
     // Before launching, ensure the app bundle is runnable: re-sign with ad-hoc
@@ -4575,10 +4873,10 @@ pub async fn launch_game_vanilla(
     let dist = infer_distribution_from_game_path(&app, &game_path, false);
     if dist == "steam" && !use_direct_launch {
         if !settings.write_debug_logs_to_game {
-            remove_r2modmac_debug_logs(&game_path);
+            remove_r2modmac_debug_logs(&runtime_game_path);
         }
         if let Ok(true) = macos_steam_launch_option_is_managed(&app, &game_path) {
-            if let Err(error) = sync_macos_runtime_disabled_state(&game_path, true) {
+            if let Err(error) = sync_macos_runtime_disabled_state(&runtime_game_path, true) {
                 eprintln!(
                     "[launch_game_vanilla] Failed to enforce runtime_disabled state ({}). Falling back to clearing managed launch option before vanilla Steam launch.",
                     error
@@ -4598,7 +4896,7 @@ pub async fn launch_game_vanilla(
 
     if let Some(bundle) = app_bundle {
         if !settings.write_debug_logs_to_game {
-            remove_r2modmac_debug_logs(&game_path);
+            remove_r2modmac_debug_logs(&runtime_game_path);
         }
         if let Some(executable_path) = executable_path.as_ref() {
             if is_process_running_for_executable(executable_path) {
@@ -4769,13 +5067,30 @@ pub async fn sync_profile_to_game(app: AppHandle, profile_id: String, game_ident
     let game_path_str = get_game_path(app.clone(), game_identifier.clone(), Some(profile_platform.clone())).await?
         .ok_or("Game path not configured. Please set it in Settings.")?;
     let game_path = std::path::Path::new(&game_path_str);
+    let runtime_game_path_buf = if profile_platform == "mac"
+        && !is_balatro_identifier(&game_identifier)
+        && !is_balatro_game_path(game_path)
+    {
+        let resolved = resolve_macos_runtime_root(game_path);
+        if resolved != game_path {
+            eprintln!(
+                "[sync_profile_to_game] Resolved macOS runtime root {} -> {}",
+                game_path.display(),
+                resolved.display()
+            );
+        }
+        resolved
+    } else {
+        game_path.to_path_buf()
+    };
+    let runtime_game_path = runtime_game_path_buf.as_path();
     let game_plugins = if profile_platform == "mac"
         && profile_is_vanilla
-        && game_path.join("BepInEx_DISABLED").is_dir()
+        && runtime_game_path.join("BepInEx_DISABLED").is_dir()
     {
-        game_path.join("BepInEx_DISABLED").join("plugins")
+        runtime_game_path.join("BepInEx_DISABLED").join("plugins")
     } else {
-        game_path.join("BepInEx").join("plugins")
+        runtime_game_path.join("BepInEx").join("plugins")
     };
     
     // Profile cache path
@@ -4783,7 +5098,13 @@ pub async fn sync_profile_to_game(app: AppHandle, profile_id: String, game_ident
         .join("profiles").join(&profile_id);
     let profile_plugins = profile_dir.join("BepInEx").join("plugins");
 
-    eprintln!("[sync_profile_to_game] Syncing profile {} to game {:?} (legacy_cache: {})", profile_id, game_path, use_cache);
+    eprintln!(
+        "[sync_profile_to_game] Syncing profile {} to game {:?} (runtime root {:?}, legacy_cache: {})",
+        profile_id,
+        game_path,
+        runtime_game_path,
+        use_cache
+    );
     
     // Get list of mod names from profile (format: "Author-ModName-Version")
     // We keep the full name for matching
@@ -4804,7 +5125,7 @@ pub async fn sync_profile_to_game(app: AppHandle, profile_id: String, game_ident
         .any(|name| name.to_lowercase().contains("bepinexpack"));
 
     if is_mac_profile && !is_balatro_profile && profile_requires_bepinex {
-        validate_macos_bepinex_support(game_path)?;
+        validate_macos_bepinex_support(runtime_game_path)?;
     }
     
     let extract_mod_key = |name: &str| -> String {
@@ -4971,7 +5292,7 @@ pub async fn sync_profile_to_game(app: AppHandle, profile_id: String, game_ident
 
     let stored_manifests = load_owned_mod_manifests(&app, &profile_id, GAME_MANIFEST_SCOPE)?
         .into_iter()
-        .filter(|entry| manifest_matches_target_root(&entry.manifest, game_path))
+        .filter(|entry| manifest_matches_target_root(&entry.manifest, runtime_game_path))
         .collect::<Vec<_>>();
     let (manifests_to_remove, manifests_to_keep): (Vec<_>, Vec<_>) =
         stored_manifests.into_iter().partition(|entry| {
@@ -4985,10 +5306,13 @@ pub async fn sync_profile_to_game(app: AppHandle, profile_id: String, game_ident
         .iter()
         .map(|entry| entry.manifest.mod_key.clone())
         .collect::<std::collections::HashSet<_>>();
-    let removed_by_manifest =
-        cleanup_owned_mod_manifests(game_path, &manifests_to_remove, &manifests_to_keep)?;
+    let removed_by_manifest = cleanup_owned_mod_manifests(
+        runtime_game_path,
+        &manifests_to_remove,
+        &manifests_to_keep,
+    )?;
     let stale_generated_removed =
-        cleanup_stale_generated_mod_artifacts(game_path, &profile_mod_full_names)?;
+        cleanup_stale_generated_mod_artifacts(runtime_game_path, &profile_mod_full_names)?;
     if removed_by_manifest > 0 || stale_generated_removed > 0 {
         eprintln!(
             "[sync_profile_to_game] Cleaned {} tracked manifests and {} stale generated artifacts",
@@ -5066,10 +5390,10 @@ pub async fn sync_profile_to_game(app: AppHandle, profile_id: String, game_ident
     // Special case: BepInExPack installs to game root, not plugins - check if BepInEx folder exists
     let bepinex_installed = if profile["platform"].as_str() == Some("mac") {
         if profile_is_vanilla {
-            has_complete_disabled_macos_bepinex_runtime(game_path)
-                || has_complete_macos_bepinex_runtime(game_path)
+            has_complete_disabled_macos_bepinex_runtime(runtime_game_path)
+                || has_complete_macos_bepinex_runtime(runtime_game_path)
         } else {
-            has_complete_macos_bepinex_runtime(game_path)
+            has_complete_macos_bepinex_runtime(runtime_game_path)
         }
     } else {
         game_path.join("BepInEx").join("core").exists()
