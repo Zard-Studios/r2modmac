@@ -1198,13 +1198,29 @@ fn build_windows_process_match_patterns(executable_path: &std::path::Path) -> Ve
 }
 
 fn is_process_running_for_pattern(pattern: &str) -> bool {
-    std::process::Command::new("/usr/bin/pgrep")
-        .args(["-f", pattern])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map(|status| status.success())
-        .unwrap_or(false)
+	#[cfg(unix)] {
+		std::process::Command::new("/usr/bin/pgrep")
+			.args(["-f", pattern])
+			.stdout(std::process::Stdio::null())
+			.stderr(std::process::Stdio::null())
+			.status()
+			.map(|status| status.success())
+			.unwrap_or(false)
+	}
+
+	#[cfg(windows)] {
+		let gamefile_name = pattern.replace("\\", "");
+
+		std::process::Command::new("tasklist")
+		.args(["/FI", &format!("IMAGENAME eq {}", gamefile_name), "/NH", "/FO", "CSV"])
+		.output()
+		.map(|out| {
+			// tasklist fa schifo quindi va per forza controllato l'output
+			let text = String::from_utf8_lossy(&out.stdout);
+			text.to_lowercase().contains(&gamefile_name.to_lowercase())
+		})
+		.unwrap_or(false)
+	}
 }
 
 fn is_process_running_for_patterns(patterns: &[String]) -> bool {
@@ -1580,28 +1596,43 @@ fn launch_windows_steam_game(
         ));
     }
 
-    let prefix_root = find_wine_prefix_root(&steam_executable)
-        .or_else(|| find_wine_prefix_root(&executable_path))
-        .or_else(|| find_wine_prefix_root(game_path));
-    let runner_path = find_wine_runner_binary(prefix_root.as_deref(), &steam_executable)
-        .ok_or_else(|| {
-            "No compatible Wine launcher was found for this Steam installation. Set the game path inside Wine/CrossOver/Wineskin/Whisky and try again."
-                .to_string()
-        })?;
+    #[cfg(unix)] {
+		let prefix_root = find_wine_prefix_root(&steam_executable)
+			.or_else(|| find_wine_prefix_root(&executable_path))
+			.or_else(|| find_wine_prefix_root(game_path));
+		let runner_path = find_wine_runner_binary(prefix_root.as_deref(), &steam_executable)
+			.ok_or_else(|| {
+				"No compatible Wine launcher was found for this Steam installation. Set the game path inside Wine/CrossOver/Wineskin/Whisky and try again."
+					.to_string()
+			})?;
 
-    let mut command = std::process::Command::new(&runner_path);
-    configure_windows_runner_command(&mut command, &runner_path, prefix_root.as_deref())?;
-    eprintln!(
-        "[launch_windows_steam_game] Launching Steam app {} via {:?} using steam executable {:?}",
-        app_id, runner_path, steam_executable
-    );
-    command
-        .arg(&steam_executable)
-        .arg("-applaunch")
-        .arg(&app_id)
-        .current_dir(&steam_root)
-        .spawn()
-        .map_err(|e| format!("Failed to launch Steam app {}: {}", app_id, e))?;
+		let mut command = std::process::Command::new(&runner_path);
+		configure_windows_runner_command(&mut command, &runner_path, prefix_root.as_deref())?;
+		eprintln!(
+			"[launch_windows_steam_game] Launching Steam app {} via {:?} using steam executable {:?}",
+			app_id, runner_path, steam_executable
+		);
+		command
+			.arg(&steam_executable)
+			.arg("-applaunch")
+			.arg(&app_id)
+			.current_dir(&steam_root)
+			.spawn()
+			.map_err(|e| format!("Failed to launch Steam app {}: {}", app_id, e))?;
+	}
+
+	#[cfg(windows)] {
+		eprintln!(
+			"[launch_windows_steam_game] Launching Steam app {} via {:?}",
+			app_id, steam_executable
+		);
+		std::process::Command::new(&steam_executable)
+		.arg("-applaunch")
+		.arg(&app_id)
+		.current_dir(&steam_root)
+		.spawn()
+		.map_err(|e| format!("Failed to launch Steam app {}: {}", app_id, e))?;
+	}
 
     if !wait_for_process_start_patterns(&process_patterns, 60_000) {
         eprintln!(
@@ -4119,10 +4150,10 @@ pub async fn get_game_path(app: AppHandle, game_identifier: String, platform: Op
                 for entry in entries.filter_map(|e| e.ok()) {
                     let folder_name = entry.file_name().to_string_lossy().to_string();
                     let normalized_folder = normalize_for_matching(&folder_name);
-                    
+
                     // Check for match (exact or high similarity)
-                    if normalized_folder == normalized_id || 
-                       normalized_folder.contains(&normalized_id) || 
+                    if normalized_folder == normalized_id ||
+                       normalized_folder.contains(&normalized_id) ||
                        normalized_id.contains(&normalized_folder) {
                         let game_path = entry.path().to_string_lossy().to_string();
                         eprintln!("[get_game_path] Found match: {} -> {}", folder_name, game_path);
@@ -4187,7 +4218,7 @@ pub async fn open_game_folder(app: AppHandle, game_identifier: String, platform:
 #[command]
 pub async fn find_game_executable(game_path: String) -> Result<Option<String>, String> {
     let path = std::path::Path::new(&game_path);
-    
+
     // On macOS, look for .app bundles first
     if let Ok(entries) = fs::read_dir(path) {
         for entry in entries.filter_map(|e| e.ok()) {
@@ -4197,12 +4228,12 @@ pub async fn find_game_executable(game_path: String) -> Result<Option<String>, S
             }
         }
     }
-    
+
     // Fallback: look for .exe (for Wine/Proton)
     if let Some(executable_path) = find_windows_executable_path(path) {
         return Ok(Some(executable_path.to_string_lossy().to_string()));
     }
-    
+
     Ok(None)
 }
 
@@ -4342,9 +4373,9 @@ pub async fn install_to_game(app: AppHandle, game_identifier: String, profile_id
     if plugins_dir.exists() {
         let bepinex_sentinel_file = if is_mac_profile { "doorstop_libs" } else { "winhttp.dll" };
         let sentinel_is_dir = is_mac_profile; // doorstop_libs is a directory, winhttp.dll is a file
-        
+
         let mut best_candidate: Option<(std::path::PathBuf, i32)> = None;
-        
+
         if let Ok(entries) = fs::read_dir(&plugins_dir) {
             for entry in entries.filter_map(|e| e.ok()) {
                 let path = entry.path();
@@ -4354,7 +4385,7 @@ pub async fn install_to_game(app: AppHandle, game_identifier: String, profile_id
                     .and_then(|n| n.to_str())
                     .unwrap_or("")
                     .to_lowercase();
-                
+
                 // Pattern 1: Nested BepInExPack (Standard Thunderstore structure)
                 let nested_pack = path.join("BepInExPack");
                 let sentinel_exists = if sentinel_is_dir {
@@ -4368,9 +4399,9 @@ pub async fn install_to_game(app: AppHandle, game_identifier: String, profile_id
                     if best_candidate.as_ref().map_or(true, |(_, s)| score > *s) {
                         best_candidate = Some((nested_pack, score));
                     }
-                    continue; 
+                    continue;
                 }
-                
+
                 // Pattern 2: Direct folder
                 let direct_sentinel_exists = if sentinel_is_dir {
                     path.join(bepinex_sentinel_file).is_dir()
@@ -4411,7 +4442,7 @@ pub async fn install_to_game(app: AppHandle, game_identifier: String, profile_id
 
         if let Some((pack_dir, score)) = best_candidate {
             eprintln!("[install_to_game] Selected BepInExPack: {:?} (score: {})", pack_dir, score);
-            
+
             if is_mac_profile {
                 // === macOS: copy doorstop_libs/ + run_bepinex.sh + doorstop_config.ini ===
                 // The actual BepInEx Unix pack structure:
@@ -4425,7 +4456,7 @@ pub async fn install_to_game(app: AppHandle, game_identifier: String, profile_id
                     copy_dir_recursive(&doorstop_libs_src, &doorstop_libs_dst)
                         .map_err(|e| format!("Failed to copy doorstop_libs: {}", e))?;
                 }
-                
+
                 if let Some(run_script_src) = find_bepinex_script_in_dir(&pack_dir) {
                     let run_script_dst = profile_dir.join("run_bepinex.sh");
                     if !run_script_dst.exists() {
@@ -4462,7 +4493,7 @@ pub async fn install_to_game(app: AppHandle, game_identifier: String, profile_id
                     fs::copy(&winhttp_src, &winhttp_dst)
                         .map_err(|e| format!("Failed to copy winhttp.dll: {}", e))?;
                 }
-                
+
                 let doorstop_src = pack_dir.join("doorstop_config.ini");
                 let doorstop_dst = profile_dir.join("doorstop_config.ini");
                 if doorstop_src.exists() && !doorstop_dst.exists() {
@@ -4507,7 +4538,7 @@ pub async fn install_to_game(app: AppHandle, game_identifier: String, profile_id
     // --- SYNC: Remove mods from game that are not in profile OR are disabled ---
     let profile_plugins = profile_dir.join("BepInEx").join("plugins");
     let game_plugins = runtime_game_path.join("BepInEx").join("plugins");
-    
+
     // Create set of enabled mod names (lowercase for comparison)
     let disabled_set: std::collections::HashSet<String> = disabled_mods.iter()
         .map(|s| s.to_lowercase())
@@ -4532,12 +4563,12 @@ pub async fn install_to_game(app: AppHandle, game_identifier: String, profile_id
         );
         return Ok(());
     }
-    
+
     if !is_mac_profile && is_vanilla {
         // Vanilla mode: RENAME BepInEx folder to BepInEx_DISABLED (preserves mods!)
         let bepinex_folder = game_path.join("BepInEx");
         let bepinex_disabled = game_path.join("BepInEx_DISABLED");
-        
+
         if bepinex_folder.exists() {
             // If disabled folder already exists, remove it first
             if bepinex_disabled.exists() {
@@ -4552,14 +4583,14 @@ pub async fn install_to_game(app: AppHandle, game_identifier: String, profile_id
         // Normal mode: Check if BepInEx_DISABLED exists and restore it
         let bepinex_folder = game_path.join("BepInEx");
         let bepinex_disabled = game_path.join("BepInEx_DISABLED");
-        
+
         if bepinex_disabled.exists() && !bepinex_folder.exists() {
             eprintln!("[install_to_game] Restoring BepInEx_DISABLED -> BepInEx");
             fs::rename(&bepinex_disabled, &bepinex_folder)
                 .map_err(|e| format!("Failed to restore BepInEx: {}", e))?;
         }
     }
-    
+
     if use_legacy_plugin_cache && !is_vanilla && profile_plugins.exists() && game_plugins.exists() {
         // Get list of ENABLED mod folders in profile
         let enabled_profile_mods: std::collections::HashSet<String> = fs::read_dir(&profile_plugins)
@@ -4581,19 +4612,19 @@ pub async fn install_to_game(app: AppHandle, game_identifier: String, profile_id
                     .collect()
             })
             .unwrap_or_default();
-        
+
         // Check game plugins and remove those not in profile OR disabled
         if let Ok(game_entries) = fs::read_dir(&game_plugins) {
             for entry in game_entries.filter_map(|e| e.ok()) {
                 if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
                     let folder_name = entry.file_name().to_string_lossy().to_string();
-                    
+
                     // Check if mod is disabled or not in enabled list
                     let is_disabled = disabled_set.iter().any(|d| folder_name.to_lowercase().contains(d));
                     let not_in_profile = !enabled_profile_mods.contains(&folder_name);
-                    
+
                     if is_disabled || not_in_profile {
-                        eprintln!("[install_to_game] Removing mod from game (disabled={}, orphan={}): {}", 
+                        eprintln!("[install_to_game] Removing mod from game (disabled={}, orphan={}): {}",
                                   is_disabled, not_in_profile, folder_name);
                         let _ = fs::remove_dir_all(entry.path());
                     }
@@ -4607,33 +4638,33 @@ pub async fn install_to_game(app: AppHandle, game_identifier: String, profile_id
     // 3. Copy BepInEx structure with filtering for disabled mods
     let source_bepinex = profile_dir.join("BepInEx");
     let dest_bepinex = runtime_game_path.join("BepInEx");
-    
+
     if source_bepinex.exists() {
         // Create BepInEx dir if needed
         if !dest_bepinex.exists() {
             fs::create_dir_all(&dest_bepinex).map_err(|e| e.to_string())?;
         }
-        
+
         // Copy everything except plugins (we'll handle that specially)
         if let Ok(entries) = fs::read_dir(&source_bepinex) {
             for entry in entries.filter_map(|e| e.ok()) {
                 let name = entry.file_name().to_string_lossy().to_string();
                 let src_path = entry.path();
                 let dst_path = dest_bepinex.join(&name);
-                
+
                 if name == "plugins" {
                     // Handle plugins specially - use SYMLINKS to save disk space!
                     if !dst_path.exists() {
                         fs::create_dir_all(&dst_path).map_err(|e| e.to_string())?;
                     }
-                    
+
                     // First, clean up any plugins in destination that are no longer in source or are disabled
                     if let Ok(dest_entries) = fs::read_dir(&dst_path) {
                         for dest_entry in dest_entries.filter_map(|e| e.ok()) {
                             let dest_plugin_name = dest_entry.file_name().to_string_lossy().to_string();
                             let source_plugin_path = src_path.join(&dest_plugin_name);
                             let is_disabled = disabled_set.iter().any(|d| dest_plugin_name.to_lowercase().contains(d));
-                            
+
                             // Remove if disabled or not in source
                             if is_disabled || !source_plugin_path.exists() {
                                 let dest_plugin_path = dest_entry.path();
@@ -4648,23 +4679,23 @@ pub async fn install_to_game(app: AppHandle, game_identifier: String, profile_id
                             }
                         }
                     }
-                    
+
                     // Now create symlinks for enabled plugins
                     if let Ok(plugin_entries) = fs::read_dir(&src_path) {
                         for plugin_entry in plugin_entries.filter_map(|e| e.ok()) {
                             let plugin_name = plugin_entry.file_name().to_string_lossy().to_string();
-                            
+
                             // Check if this plugin is disabled
                             let is_disabled = disabled_set.iter().any(|d| plugin_name.to_lowercase().contains(d));
-                            
+
                             if is_disabled {
                                 eprintln!("[install_to_game] Skipping disabled plugin: {}", plugin_name);
                                 continue;
                             }
-                            
+
                             let plugin_dst = dst_path.join(&plugin_name);
                             let plugin_src = plugin_entry.path();
-                            
+
                             // Remove existing file/dir/symlink if present
                             if plugin_dst.exists() || plugin_dst.is_symlink() {
                                 if plugin_dst.is_symlink() {
@@ -4675,7 +4706,7 @@ pub async fn install_to_game(app: AppHandle, game_identifier: String, profile_id
                                     let _ = fs::remove_file(&plugin_dst);
                                 }
                             }
-                            
+
                             // Create symlink instead of copying
                             #[cfg(unix)]
                             {
@@ -4683,7 +4714,7 @@ pub async fn install_to_game(app: AppHandle, game_identifier: String, profile_id
                                     .map_err(|e| format!("Failed to create symlink for {}: {}", plugin_name, e))?;
                                 eprintln!("[install_to_game] Created symlink: {} -> {:?}", plugin_name, plugin_src);
                             }
-                            
+
                             #[cfg(windows)]
                             {
                                 // Fallback to copy on Windows (symlinks require admin)
@@ -4813,7 +4844,7 @@ pub async fn install_to_game(app: AppHandle, game_identifier: String, profile_id
             let dest = game_path.join(item_name);
             let disabled_name = format!("{}_DISABLED", item_name);
             let disabled_dest = game_path.join(&disabled_name);
-            
+
             if is_vanilla {
                 if dest.exists() {
                     if disabled_dest.exists() {
@@ -5164,11 +5195,20 @@ pub async fn stop_game(
         }
 
         for pattern in &process_patterns {
-            let _ = std::process::Command::new("/usr/bin/pkill")
-                .args(["-TERM", "-f", pattern])
-                .status()
-                .map_err(|e| format!("Failed to stop the game: {}", e))?;
-        }
+			#[cfg(unix)] {
+				let _ = std::process::Command::new("/usr/bin/pkill")
+					.args(["-TERM", "-f", pattern])
+					.status()
+					.map_err(|e| format!("Failed to stop the game: {}", e))?;
+			}
+
+			#[cfg(windows)] {
+			let _ = std::process::Command::new("taskkill")
+			.args([ "/IM", &pattern.replace("\\", "")])
+			.status()
+			.map_err(|e| format!("Failed to stop the game: {}", e))?;
+			}
+		}
 
         if wait_for_process_exit_patterns(&process_patterns, 5_000) {
             return Ok(());
@@ -5227,7 +5267,7 @@ pub async fn sync_profile_to_game(app: AppHandle, profile_id: String, game_ident
     let profiles_path = app.path().app_data_dir().unwrap().join("profiles.json");
     let profiles_data = fs::read_to_string(&profiles_path).map_err(|e| e.to_string())?;
     let profiles: Vec<serde_json::Value> = serde_json::from_str(&profiles_data).map_err(|e| e.to_string())?;
-    
+
     let profile = profiles.iter()
         .find(|p| p["id"].as_str() == Some(&profile_id))
         .ok_or("Profile not found")?;
@@ -5263,7 +5303,7 @@ pub async fn sync_profile_to_game(app: AppHandle, profile_id: String, game_ident
     } else {
         runtime_game_path.join("BepInEx").join("plugins")
     };
-    
+
     // Profile cache path
     let profile_dir = app.path().app_data_dir().map_err(|e| e.to_string())?
         .join("profiles").join(&profile_id);
@@ -5276,7 +5316,7 @@ pub async fn sync_profile_to_game(app: AppHandle, profile_id: String, game_ident
         runtime_game_path,
         use_cache
     );
-    
+
     // Get list of mod names from profile (format: "Author-ModName-Version")
     // We keep the full name for matching
     // IMPORTANT: Only include ENABLED mods (disabled mods should not be installed)
@@ -5298,7 +5338,7 @@ pub async fn sync_profile_to_game(app: AppHandle, profile_id: String, game_ident
     if is_mac_profile && !is_balatro_profile && profile_requires_bepinex {
         validate_macos_bepinex_support(runtime_game_path)?;
     }
-    
+
     let extract_mod_key = |name: &str| -> String {
         let parts: Vec<&str> = name.split('-').collect();
         if parts.len() >= 2 {
@@ -5629,14 +5669,14 @@ pub async fn sync_profile_to_game(app: AppHandle, profile_id: String, game_ident
         if !profile_plugins.exists() {
             let _ = fs::create_dir_all(&profile_plugins);
         }
-        
+
         // Iterate game mods and copy to cache if not present
         if let Ok(entries) = fs::read_dir(&game_plugins) {
             for entry in entries.filter_map(|e| e.ok()) {
                 if entry.path().is_dir() {
                     let folder_name = entry.file_name().to_string_lossy().to_string();
                     let cache_path = profile_plugins.join(&folder_name);
-                    
+
                     // Only copy if not already cached
                     if !cache_path.exists() {
                         eprintln!("[sync_profile_to_game] Caching mod from game: {}", folder_name);
@@ -5647,7 +5687,7 @@ pub async fn sync_profile_to_game(app: AppHandle, profile_id: String, game_ident
                 }
             }
         }
-        
+
         if cached > 0 {
             eprintln!("[sync_profile_to_game] Cached {} mods from game to profile", cached);
         }
