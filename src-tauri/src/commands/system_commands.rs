@@ -4,6 +4,8 @@ use futures_util::stream::{self, StreamExt};
 use tauri::{command, AppHandle, Emitter, Manager, State};
 use crate::models::shared::*;
 use serde::{Deserialize, Serialize};
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 
 #[command]
 pub async fn fetch_communities() -> Result<Vec<serde_json::Value>, String> {
@@ -954,9 +956,6 @@ pub async fn check_update(current_version: String) -> Result<UpdateInfo, String>
 
 #[command]
 pub async fn install_update(app: AppHandle, download_url: String) -> Result<(), String> {
-	#[cfg(unix)] {
-    use std::os::unix::fs::PermissionsExt;
-	}
     use std::process::Command;
 
     // 1. Download
