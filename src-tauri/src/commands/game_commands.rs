@@ -1540,30 +1540,46 @@ fn launch_windows_direct_game(game_path: &std::path::Path) -> Result<(), String>
         return Err("Game is already running.".to_string());
     }
 
-    let prefix_root = find_wine_prefix_root(&executable_path).or_else(|| find_wine_prefix_root(game_path));
+    let executable_dir = executable_path.parent().unwrap_or(game_path);
 
-    if let Some(runner_path) = find_wine_runner_binary(prefix_root.as_deref(), &executable_path) {
-        let mut command = std::process::Command::new(&runner_path);
-        let executable_dir = executable_path.parent().unwrap_or(game_path);
-        configure_windows_runner_command(&mut command, &runner_path, prefix_root.as_deref())?;
-        eprintln!(
-            "[launch_windows_direct_game] Launching Windows executable directly: {:?}",
-            executable_path
-        );
-        command
-            .arg(&executable_path)
-            .current_dir(executable_dir)
-            .spawn()
-            .map_err(|e| format!("Failed to launch the Windows game via {}: {}", runner_path.display(), e))?;
-    } else if let Some(app_bundle) = find_enclosing_app_bundle(game_path) {
-        open::that(&app_bundle)
-            .map_err(|e| format!("Failed to launch the Windows wrapper app: {}", e))?;
-    } else {
-        return Err(
-            "No compatible Wine launcher was found. Install a Wine-compatible launcher or point the game path inside a Wine/CrossOver/Wineskin prefix."
-                .to_string(),
-        );
+    #[cfg(unix)] {
+	    let prefix_root = find_wine_prefix_root(&executable_path).or_else(|| find_wine_prefix_root(game_path));
+
+	    if let Some(runner_path) = find_wine_runner_binary(prefix_root.as_deref(), &executable_path) {
+	        let mut command = std::process::Command::new(&runner_path);
+	        configure_windows_runner_command(&mut command, &runner_path, prefix_root.as_deref())?;
+	        eprintln!(
+	            "[launch_windows_direct_game] Launching Windows executable directly: {:?}",
+	            executable_path
+	        );
+	        command
+	            .arg(&executable_path)
+	            .current_dir(executable_dir)
+	            .spawn()
+	            .map_err(|e| format!("Failed to launch the Windows game via {}: {}", runner_path.display(), e))?;
+	    } else if let Some(app_bundle) = find_enclosing_app_bundle(game_path) {
+	        open::that(&app_bundle)
+	            .map_err(|e| format!("Failed to launch the Windows wrapper app: {}", e))?;
+	    } else {
+	        return Err(
+	            "No compatible Wine launcher was found. Install a Wine-compatible launcher or point the game path inside a Wine/CrossOver/Wineskin prefix."
+	                .to_string(),
+	        );
+	    }
     }
+
+    #[cfg(windows)] {
+		eprintln!(
+			"[launch_windows_direct_game] Launching Windows executable directly: {:?}",
+			executable_path
+		);
+		std::process::Command::new(&executable_path)
+		//.arg("-applaunch")
+		.arg(&executable_path)
+		.current_dir(executable_dir)
+		.spawn()
+		.map_err(|e| format!("Failed to launch the Windows game via {}: {}", executable_path.display(), e))?;
+	}
 
     if !wait_for_process_start_patterns(&process_patterns, 20_000) {
         return Err("Game did not start in time.".to_string());

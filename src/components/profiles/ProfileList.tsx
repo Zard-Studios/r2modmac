@@ -353,7 +353,7 @@ export function ProfileList({
                                 <button
                                     onClick={async (e) => {
                                         e.stopPropagation();
-                                        const confirmed = await window.ipcRenderer.confirm('Delete Profile', 'Are you sure you want to delete this profile?');
+                                        const confirmed = await window.ipcRenderer.confirm('Delete Profile', 'Are you sure you want to delete this profile?\nALL THE INSTALLED MODS WILL BE DELETED TOO!');
                                         if (confirmed) {
                                             await onDeleteProfile(profile.id, selectedGameIdentifier);
                                         }

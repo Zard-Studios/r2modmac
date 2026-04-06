@@ -84,77 +84,77 @@ pub fn run() {
                 if !bin_dir.exists() {
                     let _ = fs::create_dir_all(&bin_dir);
                 }
-                
+
                 let run_sh_path = bin_dir.join("run_bepinex.sh");
                 if run_sh_path.exists() {
                     let mut perms = fs::metadata(&run_sh_path).unwrap().permissions();
                     perms.set_mode(0o755);
                     let _ = fs::set_permissions(&run_sh_path, perms);
                 }
+
+	            let current_year = chrono::Local::now().year();
+	            let copyright_text = format!("Copyright © {} Zard Studios", current_year);
+
+	            let report_issue = MenuItemBuilder::with_id("report_issue", "Report an Issue").build(app)?;
+	            let github = MenuItemBuilder::with_id("github", "GitHub Repository").build(app)?;
+	            let kofi = MenuItemBuilder::with_id("kofi", "Support my project").build(app)?;
+
+	            let help_menu = SubmenuBuilder::new(app, "Help")
+	                .item(&report_issue)
+	                .item(&github)
+	                .separator()
+	                .item(&kofi)
+	                .build()?;
+
+	            let preferences_item = MenuItemBuilder::with_id("preferences", "Preferences...")
+	                .accelerator("CommandOrControl+,")
+	                .build(app)?;
+
+	            let app_menu = SubmenuBuilder::new(app, "r2modmac")
+	                .item(&PredefinedMenuItem::about(
+	                    app,
+	                    Some("About r2modmac"),
+	                    Some(
+	                        tauri::menu::AboutMetadataBuilder::new()
+	                            .copyright(Some(copyright_text))
+	                            .authors(Some(vec!["Zard Studios".to_string()]))
+	                            .build(),
+	                    ),
+	                )?)
+	                .separator()
+	                .item(&preferences_item)
+	                .separator()
+	                .item(&PredefinedMenuItem::hide(app, Some("Hide r2modmac"))?)
+	                .item(&PredefinedMenuItem::hide_others(app, Some("Hide Others"))?)
+	                .item(&PredefinedMenuItem::show_all(app, Some("Show All"))?)
+	                .separator()
+	                .item(&PredefinedMenuItem::quit(app, Some("Quit r2modmac"))?)
+	                .build()?;
+
+	            let edit_menu = SubmenuBuilder::new(app, "Edit")
+	                .item(&PredefinedMenuItem::undo(app, None)?)
+	                .item(&PredefinedMenuItem::redo(app, None)?)
+	                .separator()
+	                .item(&PredefinedMenuItem::cut(app, None)?)
+	                .item(&PredefinedMenuItem::copy(app, None)?)
+	                .item(&PredefinedMenuItem::paste(app, None)?)
+	                .item(&PredefinedMenuItem::select_all(app, None)?)
+	                .build()?;
+
+	            let window_menu = SubmenuBuilder::new(app, "Window")
+	                .item(&PredefinedMenuItem::minimize(app, None)?)
+	                .item(&PredefinedMenuItem::close_window(app, Some("Close"))?)
+	                .build()?;
+
+	            let menu = MenuBuilder::new(app)
+	                .item(&app_menu)
+	                .item(&edit_menu)
+	                .item(&window_menu)
+	                .item(&help_menu)
+	                .build()?;
+
+	            app.set_menu(menu)?;
             }
-
-            let current_year = chrono::Local::now().year();
-            let copyright_text = format!("Copyright © {} Zard Studios", current_year);
-
-            let report_issue = MenuItemBuilder::with_id("report_issue", "Report an Issue").build(app)?;
-            let github = MenuItemBuilder::with_id("github", "GitHub Repository").build(app)?;
-            let kofi = MenuItemBuilder::with_id("kofi", "Support my project").build(app)?;
-
-            let help_menu = SubmenuBuilder::new(app, "Help")
-                .item(&report_issue)
-                .item(&github)
-                .separator()
-                .item(&kofi)
-                .build()?;
-
-            let preferences_item = MenuItemBuilder::with_id("preferences", "Preferences...")
-                .accelerator("CommandOrControl+,")
-                .build(app)?;
-
-            let app_menu = SubmenuBuilder::new(app, "r2modmac")
-                .item(&PredefinedMenuItem::about(
-                    app,
-                    Some("About r2modmac"),
-                    Some(
-                        tauri::menu::AboutMetadataBuilder::new()
-                            .copyright(Some(copyright_text))
-                            .authors(Some(vec!["Zard Studios".to_string()]))
-                            .build(),
-                    ),
-                )?)
-                .separator()
-                .item(&preferences_item)
-                .separator()
-                .item(&PredefinedMenuItem::hide(app, Some("Hide r2modmac"))?)
-                .item(&PredefinedMenuItem::hide_others(app, Some("Hide Others"))?)
-                .item(&PredefinedMenuItem::show_all(app, Some("Show All"))?)
-                .separator()
-                .item(&PredefinedMenuItem::quit(app, Some("Quit r2modmac"))?)
-                .build()?;
-
-            let edit_menu = SubmenuBuilder::new(app, "Edit")
-                .item(&PredefinedMenuItem::undo(app, None)?)
-                .item(&PredefinedMenuItem::redo(app, None)?)
-                .separator()
-                .item(&PredefinedMenuItem::cut(app, None)?)
-                .item(&PredefinedMenuItem::copy(app, None)?)
-                .item(&PredefinedMenuItem::paste(app, None)?)
-                .item(&PredefinedMenuItem::select_all(app, None)?)
-                .build()?;
-
-            let window_menu = SubmenuBuilder::new(app, "Window")
-                .item(&PredefinedMenuItem::minimize(app, None)?)
-                .item(&PredefinedMenuItem::close_window(app, Some("Close"))?)
-                .build()?;
-
-            let menu = MenuBuilder::new(app)
-                .item(&app_menu)
-                .item(&edit_menu)
-                .item(&window_menu)
-                .item(&help_menu)
-                .build()?;
-
-            app.set_menu(menu)?;
             Ok(())
         })
         .on_menu_event(|app, event| match event.id().as_ref() {
@@ -179,7 +179,7 @@ pub fn run() {
             commands::profile_commands::open_profile_folder,
             commands::profile_commands::clear_profile_cache,
             commands::profile_commands::toggle_profile_vanilla_mode,
-            
+
             commands::system_commands::fetch_communities,
             commands::system_commands::fetch_community_images,
             commands::system_commands::fetch_text_content,
@@ -191,10 +191,10 @@ pub fn run() {
             commands::system_commands::read_image,
             commands::system_commands::check_update,
             commands::system_commands::install_update,
-            
+
             commands::settings_commands::get_settings,
             commands::settings_commands::save_settings,
-            
+
             commands::game_commands::get_game_path,
             commands::game_commands::get_game_source,
             commands::game_commands::set_game_path,
@@ -206,7 +206,7 @@ pub fn run() {
             commands::game_commands::launch_game_vanilla,
             commands::game_commands::stop_game,
             commands::game_commands::sync_profile_to_game,
-            
+
             commands::mod_commands::install_mod,
             commands::mod_commands::open_mod_folder,
             commands::mod_commands::remove_mod,
@@ -217,7 +217,7 @@ pub fn run() {
             commands::mod_commands::get_packages,
             commands::mod_commands::lookup_packages_by_names,
             commands::mod_commands::fetch_package_by_name,
-            
+
             commands::export_import::export_profile,
             commands::export_import::share_profile,
             commands::export_import::import_profile,
