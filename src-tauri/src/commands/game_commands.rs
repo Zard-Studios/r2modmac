@@ -3153,8 +3153,8 @@ if command -v xattr >/dev/null 2>&1; then
   /usr/bin/xattr -d com.apple.quarantine "$BASEDIR/run_bepinex.sh" "$BASEDIR/doorstop_libs" "$BASEDIR/BepInEx" "$BASEDIR"/*.dylib 2>/dev/null || true
 fi
 
-export DOORSTOP_ENABLE=1
-export DOORSTOP_ENABLED=1
+export DOORSTOP_ENABLE=TRUE
+export DOORSTOP_ENABLED=TRUE
 export DOORSTOP_INVOKE_DLL_PATH="$BASEDIR/BepInEx/core/BepInEx.Preloader.dll"
 export DOORSTOP_TARGET_ASSEMBLY="$DOORSTOP_INVOKE_DLL_PATH"
 export DOORSTOP_BOOT_CONFIG_OVERRIDE=""
@@ -3467,8 +3467,8 @@ fi
 root_loader_mode=false
 if [ -f "$root_doorstop_dylib" ] && [ ! -d "$BASEDIR/doorstop_libs" ]; then
     root_loader_mode=true
-    export DOORSTOP_ENABLE=1
-    export DOORSTOP_ENABLED=1
+    export DOORSTOP_ENABLE=TRUE
+    export DOORSTOP_ENABLED=TRUE
     export DOORSTOP_TARGET_ASSEMBLY="$DOORSTOP_INVOKE_DLL_PATH"
     export DOORSTOP_CLR_RUNTIME_CORECLR_PATH=""
     export DOORSTOP_CLR_CORLIB_DIR=""
@@ -4214,7 +4214,7 @@ exit "$exec_status"
         && script.contains("can_retry_x64=true")
         && script.contains("retrying_x64_fallback status=")
         && script.contains("x64_fallback_failed status=$retry_status");
-    let has_modern_doorstop_env_aliases = script.contains("DOORSTOP_ENABLED=1")
+    let has_modern_doorstop_env_aliases = script.contains("DOORSTOP_ENABLED=TRUE")
         && script.contains("DOORSTOP_TARGET_ASSEMBLY=")
         && script.contains("DOORSTOP_BOOT_CONFIG_OVERRIDE=")
         && script.contains("DOORSTOP_IGNORE_DISABLED_ENV=0")
