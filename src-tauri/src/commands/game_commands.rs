@@ -3,6 +3,7 @@ use std::{
     fs,
     sync::{Mutex, OnceLock},
 };
+use sysinfo::{ProcessesToUpdate, System};
 use tauri::{command, AppHandle, Emitter, Manager};
 use crate::models::shared::*;
 use crate::utils::file_ops::*;
@@ -1134,6 +1135,51 @@ fn push_unique_pattern(patterns: &mut Vec<String>, pattern: String) {
     }
 }
 
+#[cfg(target_os = "macos")]
+fn push_macos_path_process_patterns(
+    patterns: &mut Vec<String>,
+    executable_path: &std::path::Path,
+) {
+    let mut push_path = |path_text: String| {
+        push_unique_pattern(patterns, regex::escape(&path_text));
+        for (from, to) in [
+            ("/Contents/game/", "/Contents/Game/"),
+            ("/Contents/Game/", "/Contents/game/"),
+        ] {
+            if path_text.contains(from) {
+                push_unique_pattern(patterns, regex::escape(&path_text.replace(from, to)));
+            }
+        }
+    };
+
+    push_path(executable_path.to_string_lossy().to_string());
+
+    let canonical = canonicalize_or_original(executable_path);
+    if canonical != executable_path {
+        push_path(canonical.to_string_lossy().to_string());
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn build_macos_process_match_patterns(executable_path: &std::path::Path) -> Vec<String> {
+    let mut patterns = Vec::new();
+    push_macos_path_process_patterns(&mut patterns, executable_path);
+
+    // macOS app processes may expose only the CFBundleExecutable name in ps/pgrep.
+    if let Some(file_name) = executable_path.file_name().and_then(|value| value.to_str()) {
+        push_unique_pattern(&mut patterns, regex::escape(file_name));
+    }
+
+    patterns
+}
+
+#[cfg(target_os = "macos")]
+fn build_macos_process_kill_patterns(executable_path: &std::path::Path) -> Vec<String> {
+    let mut patterns = Vec::new();
+    push_macos_path_process_patterns(&mut patterns, executable_path);
+    patterns
+}
+
 fn map_native_path_to_wine_path(
     prefix_root: &std::path::Path,
     native_path: &std::path::Path,
@@ -1197,42 +1243,145 @@ fn build_windows_process_match_patterns(executable_path: &std::path::Path) -> Ve
     patterns
 }
 
+fn process_text_candidates(process: &sysinfo::Process) -> Vec<String> {
+    let mut candidates = Vec::new();
+
+    let name = process.name().to_string_lossy();
+    if !name.is_empty() {
+        candidates.push(name.into_owned());
+    }
+
+    if let Some(exe_path) = process.exe() {
+        let exe_text = exe_path.to_string_lossy();
+        if !exe_text.is_empty() {
+            candidates.push(exe_text.into_owned());
+        }
+    }
+
+    let command_line = process
+        .cmd()
+        .iter()
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect::<Vec<_>>()
+        .join(" ");
+    if !command_line.is_empty() {
+        candidates.push(command_line);
+    }
+
+    candidates
+}
+
+#[cfg(windows)]
+fn unescape_regex_literal(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut escaped = false;
+
+    for ch in text.chars() {
+        if escaped {
+            out.push(ch);
+            escaped = false;
+        } else if ch == '\\' {
+            escaped = true;
+        } else {
+            out.push(ch);
+        }
+    }
+
+    out
+}
+
+#[cfg(windows)]
+fn windows_image_name_from_pattern(pattern: &str) -> Option<String> {
+    let literal = unescape_regex_literal(pattern);
+    let image_name = literal
+        .rsplit(['\\', '/'])
+        .next()
+        .unwrap_or(literal.as_str())
+        .trim_matches('"')
+        .trim();
+
+    if image_name.is_empty() {
+        None
+    } else {
+        Some(image_name.to_string())
+    }
+}
+
+#[cfg(windows)]
+fn is_windows_process_running_tasklist(image_name: &str) -> bool {
+    use std::os::windows::process::CommandExt;
+
+    std::process::Command::new("tasklist")
+        .creation_flags(0x08000000)
+        .args(["/FI", &format!("IMAGENAME eq {}", image_name), "/NH", "/FO", "CSV"])
+        .output()
+        .map(|out| {
+            if !out.status.success() {
+                return false;
+            }
+            let text = String::from_utf8_lossy(&out.stdout).to_lowercase();
+            text.contains(&image_name.to_lowercase())
+        })
+        .unwrap_or(false)
+}
+
+#[cfg(not(target_os = "macos"))]
 fn is_process_running_for_pattern(pattern: &str) -> bool {
-	#[cfg(unix)] {
-		std::process::Command::new("/usr/bin/pgrep")
-			.args(["-f", pattern])
-			.stdout(std::process::Stdio::null())
-			.stderr(std::process::Stdio::null())
-			.status()
-			.map(|status| status.success())
-			.unwrap_or(false)
-	}
-
-	#[cfg(windows)] {
-		use std::os::windows::process::CommandExt;
-		let gamefile_name = pattern.replace("\\", "");
-
-		std::process::Command::new("tasklist")
-		.creation_flags(0x08000000)
-		.args(["/FI", &format!("IMAGENAME eq {}", gamefile_name), "/NH", "/FO", "CSV"])
-		.output()
-		.map(|out| {
-			// tasklist fa schifo quindi va per forza controllato l'output
-			let text = String::from_utf8_lossy(&out.stdout);
-			text.to_lowercase().contains(&gamefile_name.to_lowercase())
-		})
-		.unwrap_or(false)
-	}
+    is_process_running_for_patterns(&[pattern.to_string()])
 }
 
 fn is_process_running_for_patterns(patterns: &[String]) -> bool {
-    patterns.iter().any(|pattern| is_process_running_for_pattern(pattern))
+    if patterns.is_empty() {
+        return false;
+    }
+
+    let compiled_patterns: Vec<regex::Regex> = patterns
+        .iter()
+        .filter_map(|pattern| regex::Regex::new(pattern).ok())
+        .collect();
+    if compiled_patterns.is_empty() {
+        return false;
+    }
+
+    let mut system = System::new();
+    system.refresh_processes(ProcessesToUpdate::All, true);
+
+    let matched_by_sysinfo = system.processes().values().any(|process| {
+        let candidates = process_text_candidates(process);
+        candidates
+            .iter()
+            .any(|candidate| compiled_patterns.iter().any(|re| re.is_match(candidate)))
+    });
+
+    if matched_by_sysinfo {
+        return true;
+    }
+
+    #[cfg(windows)]
+    {
+        for image_name in patterns.iter().filter_map(|pattern| windows_image_name_from_pattern(pattern)) {
+            if is_windows_process_running_tasklist(&image_name) {
+                return true;
+            }
+        }
+    }
+
+    false
 }
 
 fn is_process_running_for_executable(executable_path: &std::path::Path) -> bool {
-    is_process_running_for_pattern(&build_process_match_pattern(executable_path))
+    #[cfg(target_os = "macos")]
+    {
+        is_process_running_for_patterns(&build_macos_process_match_patterns(executable_path))
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        is_process_running_for_pattern(&build_process_match_pattern(executable_path))
+    }
 }
 
+#[cfg(not(target_os = "macos"))]
 fn wait_for_process_start_pattern(pattern: &str, timeout_ms: u64) -> bool {
     let poll_interval = 250u64;
     let attempts = std::cmp::max(1, timeout_ms / poll_interval);
@@ -1262,24 +1411,21 @@ fn wait_for_process_start_patterns(patterns: &[String], timeout_ms: u64) -> bool
 }
 
 fn wait_for_process_start(executable_path: &std::path::Path, timeout_ms: u64) -> bool {
-    wait_for_process_start_pattern(&build_process_match_pattern(executable_path), timeout_ms)
+    #[cfg(target_os = "macos")]
+    {
+        wait_for_process_start_patterns(
+            &build_macos_process_match_patterns(executable_path),
+            timeout_ms,
+        )
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        wait_for_process_start_pattern(&build_process_match_pattern(executable_path), timeout_ms)
+    }
 }
 
 const MACOS_LAUNCH_OBSERVE_TIMEOUT_MS: u64 = 1_500;
-
-fn wait_for_process_exit_pattern(pattern: &str, timeout_ms: u64) -> bool {
-    let poll_interval = 250u64;
-    let attempts = std::cmp::max(1, timeout_ms / poll_interval);
-
-    for _ in 0..attempts {
-        if !is_process_running_for_pattern(pattern) {
-            return true;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(poll_interval));
-    }
-
-    !is_process_running_for_pattern(pattern)
-}
 
 fn wait_for_process_exit_patterns(patterns: &[String], timeout_ms: u64) -> bool {
     let poll_interval = 250u64;
@@ -1720,9 +1866,7 @@ fn launch_macos_bepinex_wrapper(
 
     eprintln!("[{}] Launching via run_bepinex.sh at {:?}", context, run_script);
 
-    std::process::Command::new("/usr/bin/arch")
-        .arg("-x86_64")
-        .arg("/bin/bash")
+    std::process::Command::new("/bin/bash")
         .arg(&run_script)
         .current_dir(&runtime_root)
         .spawn()
@@ -1763,8 +1907,9 @@ fn macos_steam_binary_candidates() -> Vec<std::path::PathBuf> {
 }
 
 #[cfg(target_os = "macos")]
-fn ensure_macos_steam_running_for_launch() {
-    if is_steam_app_running_on_macos() {
+fn ensure_macos_steam_running_for_launch(app: &AppHandle) {
+    let steam_roots = get_steam_roots_for_platform(app, false);
+    if is_steam_app_running_on_macos() && !collect_macos_steam_process_ids(&steam_roots).is_empty() {
         return;
     }
 
@@ -1835,12 +1980,12 @@ fn ensure_macos_steam_running_for_launch() {
         return;
     }
 
-    let started = std::time::Instant::now();
-    while started.elapsed().as_millis() < 10_000 {
-        if is_steam_app_running_on_macos() {
+    let observe_started = std::time::Instant::now();
+    while observe_started.elapsed().as_millis() < 10_000 {
+        if is_steam_app_running_on_macos() && !collect_macos_steam_process_ids(&steam_roots).is_empty() {
             eprintln!(
-                "[launch_via_steam_for_game_path] Steam.app startup observed elapsed_ms={}",
-                started.elapsed().as_millis()
+                "[launch_via_steam_for_game_path] Steam startup observed elapsed_ms={}",
+                observe_started.elapsed().as_millis()
             );
             return;
         }
@@ -1848,12 +1993,12 @@ fn ensure_macos_steam_running_for_launch() {
     }
 
     eprintln!(
-        "[launch_via_steam_for_game_path] Steam.app startup not observed within timeout; continuing with steam://run dispatch."
+        "[launch_via_steam_for_game_path] Steam startup not fully observed; continuing with steam://run dispatch."
     );
 }
 
 #[cfg(not(target_os = "macos"))]
-fn ensure_macos_steam_running_for_launch() {}
+fn ensure_macos_steam_running_for_launch(_app: &AppHandle) {}
 
 fn dispatch_macos_steam_run_url(app_id: &str) -> Result<std::process::Child, String> {
     let steam_url = format!("steam://run/{}", app_id);
@@ -1916,7 +2061,7 @@ fn launch_via_steam_for_game_path(
         game_path.display()
     );
 
-    ensure_macos_steam_running_for_launch();
+    ensure_macos_steam_running_for_launch(app);
     let child = dispatch_macos_steam_run_url(&app_id)?;
     eprintln!(
         "[launch_via_steam_for_game_path] open_dispatched pid={} elapsed_ms={}",
@@ -2244,19 +2389,16 @@ const MACOS_STEAM_APP_PROCESS_NAME: &str = "steam_osx";
 const MACOS_STEAM_HELPER_PROCESS_NAMES: &[&str] = &[
     "Steam Helper",
     "steamwebhelper",
-    "ipcserver",
 ];
 const MACOS_STEAM_QUIT_PROCESS_NAMES: &[&str] = &[
     MACOS_STEAM_APP_PROCESS_NAME,
     "Steam Helper",
     "steamwebhelper",
-    "ipcserver",
 ];
 const MACOS_STEAM_KILL_FALLBACK_PATTERNS: &[&str] = &[
     "steam_osx",
     "steamwebhelper",
     "Steam Helper",
-    "ipcserver",
     "Steam.AppBundle",
     "steam.sh",
     "steam_monitor.sh",
@@ -2329,7 +2471,7 @@ fn collect_macos_steam_process_snapshot() -> Vec<String> {
     let Ok(output) = std::process::Command::new("/usr/bin/pgrep")
         .args([
             "-af",
-            "steam_osx|steamwebhelper|Steam Helper|ipcserver|Steam.AppBundle|steam.sh|steam_monitor.sh",
+            "steam_osx|steamwebhelper|Steam Helper|Steam.AppBundle|steam.sh|steam_monitor.sh",
         ])
         .output()
     else {
@@ -2949,21 +3091,35 @@ cd "$BASEDIR"
 if [ "$write_debug_logs" = "1" ]; then
     bootstrap_log="$BASEDIR/r2modmac_bootstrap.log"
     if [ -z "${{R2MODMAC_BOOTSTRAP_LOG_READY:-}}" ]; then
-        : > "$bootstrap_log"
+        touch "$bootstrap_log"
         export R2MODMAC_BOOTSTRAP_LOG_READY=1
     fi
 
     dyld_log="$BASEDIR/r2modmac_dyld.log"
     if [ -z "${{R2MODMAC_DYLD_LOG_READY:-}}" ]; then
-        : > "$dyld_log"
+        touch "$dyld_log"
         export R2MODMAC_DYLD_LOG_READY=1
     fi
 
     exec_log="$BASEDIR/r2modmac_exec.log"
     if [ -z "${{R2MODMAC_EXEC_LOG_READY:-}}" ]; then
-        : > "$exec_log"
+        touch "$exec_log"
         export R2MODMAC_EXEC_LOG_READY=1
     fi
+
+    ipc_log="$BASEDIR/r2modmac_ipcserver.log"
+    if [ -z "${{R2MODMAC_IPC_LOG_READY:-}}" ]; then
+        touch "$ipc_log"
+        export R2MODMAC_IPC_LOG_READY=1
+    fi
+
+    reset_log="$BASEDIR/r2modmac_reset.log"
+    if [ -z "${{R2MODMAC_RESET_LOG_READY:-}}" ]; then
+        touch "$reset_log"
+        export R2MODMAC_RESET_LOG_READY=1
+    fi
+
+    printf '\n[%s] ---- r2modmac session pid=%s ----\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$$" >> "$bootstrap_log"
 
     log_bootstrap() {{
         printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$1" >> "$bootstrap_log"
@@ -2972,6 +3128,8 @@ else
     bootstrap_log="/dev/null"
     dyld_log="/dev/null"
     exec_log="/dev/null"
+    ipc_log="/dev/null"
+    reset_log="/dev/null"
     log_bootstrap() {{
         :
     }}
@@ -3119,10 +3277,168 @@ launch_entry_path=$(resolve_executable_path "${{launch_entry_path}}")
 log_bootstrap "resolved_executable_path=$executable_path"
 log_bootstrap "resolved_launch_entry_path=$launch_entry_path wrapper=$launch_entry_uses_wrapper"
 
+steamemu_ipc_pid=""
+steamemu_paused_real_steam=0
+steamemu_ipctool_paused=0
+steamemu_ipctool_label="com.valvesoftware.steam.ipctool"
+steamemu_ipctool_uid=$(id -u 2>/dev/null || printf "")
+steamemu_ipctool_plist="$HOME/Library/Application Support/Steam/com.valvesoftware.steam.ipctool.plist"
+cleanup_steamemu_runtime() {{
+    if [ -n "$steamemu_ipc_pid" ]; then
+        kill "$steamemu_ipc_pid" >/dev/null 2>&1 || true
+        wait "$steamemu_ipc_pid" >/dev/null 2>&1 || true
+        log_bootstrap "steamemu_runtime_cleanup ipcpid=$steamemu_ipc_pid"
+        steamemu_ipc_pid=""
+    fi
+    if [ -n "${{steamemu_macos_dir:-}}" ]; then
+        kill_steamemu_ipcserver_for_dir "$steamemu_macos_dir"
+    fi
+    restore_steam_ipctool_after_steamemu
+    restore_real_steam_after_steamemu
+}}
+trap cleanup_steamemu_runtime EXIT INT TERM
+
+is_real_steam_running() {{
+    pgrep -f '/Steam\\.app/Contents/MacOS/steam_osx|/Steam\\.AppBundle/Steam/Contents/MacOS/steam_osx' >/dev/null 2>&1
+}}
+
+pause_real_steam_for_steamemu() {{
+    if ! is_real_steam_running; then
+        return 0
+    fi
+
+    steamemu_paused_real_steam=1
+    log_bootstrap "steamemu_real_steam_pause_requested"
+    env -u LD_PRELOAD -u DYLD_INSERT_LIBRARIES osascript -e 'tell application "Steam" to quit' >/dev/null 2>&1 || true
+
+    for _steam_wait in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do
+        if ! is_real_steam_running; then
+            log_bootstrap "steamemu_real_steam_paused"
+            return 0
+        fi
+        sleep 0.5
+    done
+
+    log_bootstrap "steamemu_real_steam_pause_failed still_running=1"
+    echo "Steam is still running; cannot start bundled Steam emulator safely." >&2
+    exit 1
+}}
+
+restore_real_steam_after_steamemu() {{
+    if [ "$steamemu_paused_real_steam" = "1" ]; then
+        steamemu_paused_real_steam=0
+        env -u LD_PRELOAD -u DYLD_INSERT_LIBRARIES open -a Steam >/dev/null 2>&1 || true
+        log_bootstrap "steamemu_real_steam_restore_requested"
+    fi
+}}
+
+pause_steam_ipctool_for_steamemu() {{
+    if ! command -v launchctl >/dev/null 2>&1; then
+        log_bootstrap "steamemu_launchctl_unavailable"
+        return 0
+    fi
+    if [ -z "$steamemu_ipctool_uid" ]; then
+        log_bootstrap "steamemu_launchctl_skip_missing_uid"
+        return 0
+    fi
+
+    if launchctl asuser "$steamemu_ipctool_uid" launchctl remove "$steamemu_ipctool_label" >/dev/null 2>&1; then
+        steamemu_ipctool_paused=1
+        log_bootstrap "steamemu_launchctl_removed label=$steamemu_ipctool_label uid=$steamemu_ipctool_uid"
+        return 0
+    fi
+    if launchctl remove "$steamemu_ipctool_label" >/dev/null 2>&1; then
+        steamemu_ipctool_paused=1
+        log_bootstrap "steamemu_launchctl_removed label=$steamemu_ipctool_label uid=$steamemu_ipctool_uid"
+        return 0
+    fi
+
+    log_bootstrap "steamemu_launchctl_not_present label=$steamemu_ipctool_label uid=$steamemu_ipctool_uid"
+    return 0
+}}
+
+restore_steam_ipctool_after_steamemu() {{
+    if [ "$steamemu_ipctool_paused" != "1" ]; then
+        return 0
+    fi
+    steamemu_ipctool_paused=0
+
+    if [ ! -f "$steamemu_ipctool_plist" ]; then
+        log_bootstrap "steamemu_launchctl_restore_skipped_missing_plist plist=$steamemu_ipctool_plist"
+        return 0
+    fi
+
+    if launchctl asuser "$steamemu_ipctool_uid" launchctl load -S Background "$steamemu_ipctool_plist" >/dev/null 2>&1; then
+        log_bootstrap "steamemu_launchctl_restore_ok plist=$steamemu_ipctool_plist"
+        return 0
+    fi
+    if launchctl load -S Background "$steamemu_ipctool_plist" >/dev/null 2>&1; then
+        log_bootstrap "steamemu_launchctl_restore_ok plist=$steamemu_ipctool_plist"
+        return 0
+    fi
+
+    log_bootstrap "steamemu_launchctl_restore_failed plist=$steamemu_ipctool_plist"
+}}
+
+kill_steamemu_ipcserver_for_dir() {{
+    ipcserver_path="$1/ipcserver"
+    if [ ! -x "$ipcserver_path" ]; then
+        return 0
+    fi
+
+    if command -v lsof >/dev/null 2>&1; then
+        lsof -t "$ipcserver_path" 2>/dev/null | while read -r existing_ipc_pid; do
+            if [ -n "$existing_ipc_pid" ]; then
+                kill "$existing_ipc_pid" >/dev/null 2>&1 && log_bootstrap "steamemu_local_ipcserver_killed pid=$existing_ipc_pid path=$ipcserver_path"
+            fi
+        done
+    fi
+
+    pgrep -f "$ipcserver_path" 2>/dev/null | while read -r existing_ipc_pid; do
+        if [ -n "$existing_ipc_pid" ]; then
+            kill "$existing_ipc_pid" >/dev/null 2>&1 && log_bootstrap "steamemu_local_ipcserver_killed pid=$existing_ipc_pid path=$ipcserver_path"
+        fi
+    done
+}}
+
+prepare_steamemu_runtime_files() {{
+    runtime_root="$1"
+    steamemu_dir="$2"
+    steamclient_file="$steamemu_dir/steamclient.dylib"
+    root_steamclient_link="$runtime_root/steamclient.dylib"
+    steamclient_ready=0
+    stale_root_steamclient_removed=0
+
+    if [ -f "$steamclient_file" ]; then
+        steamclient_ready=1
+    fi
+
+    # Older r2modmac scripts created a root symlink into Contents/MacOS. Do not
+    # create or copy Steam libraries; remove only that exact managed symlink.
+    if [ -L "$root_steamclient_link" ]; then
+        root_steamclient_target=$(readlink "$root_steamclient_link" 2>/dev/null || true)
+        if [ "$root_steamclient_target" = "../MacOS/steamclient.dylib" ] || [ "$root_steamclient_target" = "$steamclient_file" ]; then
+            if rm -f "$root_steamclient_link" >/dev/null 2>&1; then
+                stale_root_steamclient_removed=1
+            fi
+        fi
+    fi
+
+    appid_file="$steamemu_dir/steam_appid.txt"
+    appid_ready=0
+    if [ -f "$appid_file" ]; then
+        appid_ready=1
+    fi
+
+    log_bootstrap "steamemu_runtime_files runtime_root=$runtime_root steam_dir=$steamemu_dir bundled_steamclient=$steamclient_ready bundled_appid=$appid_ready stale_root_steamclient_removed=$stale_root_steamclient_removed"
+}}
+
 app_path="${{executable_path%/Contents/MacOS*}}"
 app_path_lower=$(printf "%s" "$app_path" | tr '[:upper:]' '[:lower:]')
 if echo "$app_path_lower" | grep -Eq '/steam\.app(/|$)|/steam\.appbundle/steam(/|$)'; then
     log_bootstrap "codesign_remove_signature_skipped_steam app_path=$app_path"
+elif [ "$runtime_disabled" = true ]; then
+    log_bootstrap "codesign_remove_signature_skipped_runtime_disabled app_path=$app_path"
 elif command -v codesign >/dev/null 2>&1 && [ -d "$app_path" ] && codesign -d "$app_path" >/dev/null 2>&1; then
     log_bootstrap "codesign_remove_signature_attempt app_path=$app_path"
     if codesign --remove-signature "$app_path" >/dev/null 2>&1; then
@@ -3205,23 +3521,182 @@ fi
 
 log_bootstrap "selected_runtime_arch=$arch doorstop_dylib=$doorstop_dylib"
 
-if [ ! -f "$doorstop_dylib" ]; then
-    log_bootstrap "doorstop_dylib_missing"
-    echo "Cannot find Doorstop library: $doorstop_dylib"
-    exit 1
+# r2modmac: keep vanilla launch arch independent from Doorstop arch decisions.
+# On Apple Silicon, prefer native arm64 for vanilla when the game binary supports it.
+vanilla_exec_arch="$arch"
+if [ "$native_macos_arch" = "arm64" ] && echo "$executable_type" | grep -q "arm64"; then
+    vanilla_exec_arch="arm64"
 fi
+log_bootstrap "selected_vanilla_exec_arch=$vanilla_exec_arch"
 
 if [ "$runtime_disabled" = true ]; then
     if [ "$steam_launch_args_ready" = true ]; then
         log_bootstrap "steam_launch_exec_vanilla argv=$*"
         exec "$@"
     fi
+
+    if [ "$launch_entry_uses_wrapper" = "1" ]; then
+        steamemu_macos_dir=$(dirname "$launch_entry_path")
+    else
+        steamemu_macos_dir="$BASEDIR/MacOS"
+    fi
+    steamemu_appid_file="$steamemu_macos_dir/steam_appid.txt"
+
+    # r2modmac: for bundled Steam-emu wrappers (GOG-style), avoid routing vanilla
+    # through the `load` script because it may depend on unsupported xattr flags.
+    # Prepare Steam env/ipc here and launch the real executable directly.
+    if [ "$launch_entry_uses_wrapper" = "1" ] && [ -x "$steamemu_macos_dir/ipcserver" ] && [ -f "$steamemu_appid_file" ]; then
+        steamemu_app_id=$(tr -d '[:space:]' < "$steamemu_appid_file" 2>/dev/null)
+        if [ -n "$steamemu_app_id" ]; then
+            export SteamAppId="$steamemu_app_id"
+            export SteamGameId="$steamemu_app_id"
+        fi
+        export STEAM_PATH="$steamemu_macos_dir"
+        export SteamPath="$steamemu_macos_dir"
+
+        steamemu_config_dir="$steamemu_macos_dir/../Config"
+        if [ ! -d "$steamemu_config_dir" ]; then
+            steamemu_config_dir="$steamemu_macos_dir"
+        fi
+        export STEAMEMU_SETTINGS_DIR="$steamemu_config_dir"
+
+        if [ -n "${{DYLD_LIBRARY_PATH:-}}" ]; then
+            export DYLD_LIBRARY_PATH="$steamemu_macos_dir:${{DYLD_LIBRARY_PATH}}"
+        else
+            export DYLD_LIBRARY_PATH="$steamemu_macos_dir"
+        fi
+        prepare_steamemu_runtime_files "$BASEDIR" "$steamemu_macos_dir"
+        log_bootstrap "vanilla_steamemu_runtime_prepare app_id=$steamemu_app_id steam_path=$steamemu_macos_dir settings_dir=${{STEAMEMU_SETTINGS_DIR:-}}"
+
+        log_bootstrap "steamemu_launchctl_untouched using_local_ipcserver=1"
+        pause_real_steam_for_steamemu
+        pause_steam_ipctool_for_steamemu
+
+        steamemu_previous_dir=$(pwd)
+        if cd "$steamemu_macos_dir" 2>/dev/null; then
+            kill_steamemu_ipcserver_for_dir "$steamemu_macos_dir"
+            sleep 0.2
+            if [ -x "$steamemu_macos_dir/reset" ]; then
+                env -u LD_PRELOAD -u DYLD_INSERT_LIBRARIES "$steamemu_macos_dir/reset" >> "$reset_log" 2>&1 || log_bootstrap "steamemu_reset_failed status=$?"
+                sleep 0.1
+            fi
+            env -u LD_PRELOAD -u DYLD_INSERT_LIBRARIES "$steamemu_macos_dir/ipcserver" >> "$ipc_log" 2>&1 &
+            steamemu_ipc_pid=$!
+            cd "$steamemu_previous_dir" >/dev/null 2>&1 || true
+        else
+            log_bootstrap "steamemu_runtime_dir_unreachable dir=$steamemu_macos_dir"
+        fi
+
+        _ipc_ready=0
+        for _i in 1 2 3 4 5 6 7 8 9 10; do
+            sleep 0.3
+            if kill -0 "$steamemu_ipc_pid" 2>/dev/null; then
+                _ipc_ready=1
+                break
+            fi
+        done
+        if [ "$_ipc_ready" = "0" ]; then
+            ipc_exit_status=0
+            if [ -n "$steamemu_ipc_pid" ]; then
+                wait "$steamemu_ipc_pid" >/dev/null 2>&1 || ipc_exit_status=$?
+            fi
+            log_bootstrap "steamemu_ipcserver_failed_to_start ipcpid=$steamemu_ipc_pid exit_status=$ipc_exit_status"
+            steamemu_ipc_pid=""
+        fi
+
+        _game_app_bundle=$(dirname "$(dirname "$executable_path")")
+        if [ -d "$_game_app_bundle" ]; then
+            if ! /usr/bin/xattr -cr "$_game_app_bundle" >/dev/null 2>&1; then
+                /usr/bin/xattr -c "$_game_app_bundle" >/dev/null 2>&1 || true
+            fi
+        fi
+
+        log_bootstrap "exec_vanilla_steamemu_direct target=$executable_path cwd=$steamemu_macos_dir arch=$vanilla_exec_arch ipc_ready=$_ipc_ready app_id=$steamemu_app_id settings_dir=${{STEAMEMU_SETTINGS_DIR:-}}"
+        cd "$steamemu_macos_dir" || exit 1
+        if [ "$vanilla_exec_arch" = "arm64" ] && command -v /usr/bin/arch >/dev/null 2>&1; then
+            /usr/bin/arch -arm64 "${{executable_path}}" >> "$exec_log" 2>&1 &
+            vanilla_arm_pid=$!
+            sleep 4
+            if kill -0 "$vanilla_arm_pid" 2>/dev/null; then
+                wait "$vanilla_arm_pid" >/dev/null 2>&1
+                exec_status=$?
+            else
+                wait "$vanilla_arm_pid" >/dev/null 2>&1
+                vanilla_arm_status=$?
+                vanilla_exec_name=$(basename "${{executable_path}}")
+                vanilla_exec_dir=$(dirname "${{executable_path}}")
+                vanilla_alive=0
+                if pgrep -x "$vanilla_exec_name" >/dev/null 2>&1 \
+                    || pgrep -f "${{executable_path}}" >/dev/null 2>&1 \
+                    || pgrep -f "$vanilla_exec_dir" >/dev/null 2>&1; then
+                    vanilla_alive=1
+                fi
+
+                # Some Unity/Steam-emu launch paths can detach/re-parent quickly.
+                # If a live game process is already present, keep ARM and do not force x64 fallback.
+                if [ "$vanilla_alive" = "1" ]; then
+                    vanilla_runtime_pid=$(pgrep -n -x "$vanilla_exec_name" 2>/dev/null || true)
+                    if [ -z "$vanilla_runtime_pid" ]; then
+                        vanilla_runtime_pid=$(pgrep -n -f "${{executable_path}}" 2>/dev/null || true)
+                    fi
+                    vanilla_runtime_flags=""
+                    vanilla_runtime_translated=0
+                    if [ -n "$vanilla_runtime_pid" ]; then
+                        vanilla_runtime_flags=$(ps -o flags= -p "$vanilla_runtime_pid" 2>/dev/null | tr -d '[:space:]')
+                        if printf '%s' "$vanilla_runtime_flags" | grep -Eq '^[0-9A-Fa-f]+$'; then
+                            if [ $((16#$vanilla_runtime_flags & 0x20000)) -ne 0 ]; then
+                                vanilla_runtime_translated=1
+                            fi
+                        fi
+                    fi
+                    log_bootstrap "vanilla_runtime_pid=$vanilla_runtime_pid flags=$vanilla_runtime_flags translated=$vanilla_runtime_translated"
+                    log_bootstrap "exec_vanilla_arm64_detached_running status=$vanilla_arm_status keep_arm64=true"
+                    printf '[%s] exec_vanilla_arm64_detached_running status=%s keep_arm64=true\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$vanilla_arm_status" >> "$exec_log"
+                    exec_status=0
+                elif [ "$vanilla_arm_status" = "126" ] || [ "$vanilla_arm_status" = "127" ] || [ "$vanilla_arm_status" = "132" ]; then
+                    # Fallback to Intel for hard exec errors (missing exec / bad arch / illegal instruction).
+                    log_bootstrap "exec_vanilla_arm64_exec_error status=$vanilla_arm_status fallback_to_x64=true"
+                    printf '[%s] exec_vanilla_arm64_exec_error status=%s fallback_to_x64=true\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$vanilla_arm_status" >> "$exec_log"
+                    /usr/bin/arch -x86_64 "${{executable_path}}" >> "$exec_log" 2>&1
+                    exec_status=$?
+                elif [ "$vanilla_arm_status" = "137" ] || [ "$vanilla_arm_status" = "143" ]; then
+                    # Observed on some GOG Steam-emu wrappers: native ARM launch is killed quickly.
+                    # Keep compatibility by falling back to x86_64 for vanilla.
+                    log_bootstrap "exec_vanilla_arm64_killed status=$vanilla_arm_status fallback_to_x64=true"
+                    printf '[%s] exec_vanilla_arm64_killed status=%s fallback_to_x64=true\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$vanilla_arm_status" >> "$exec_log"
+                    /usr/bin/arch -x86_64 "${{executable_path}}" >> "$exec_log" 2>&1
+                    exec_status=$?
+                else
+                    # Keep native-ARM decision and avoid forcing Rosetta for transient early exits.
+                    log_bootstrap "exec_vanilla_arm64_early_exit status=$vanilla_arm_status keep_arm64=true fallback_to_x64=false"
+                    printf '[%s] exec_vanilla_arm64_early_exit status=%s keep_arm64=true fallback_to_x64=false\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$vanilla_arm_status" >> "$exec_log"
+                    exec_status=$vanilla_arm_status
+                fi
+            fi
+        elif [ "$vanilla_exec_arch" = "x64" ] && command -v /usr/bin/arch >/dev/null 2>&1; then
+            /usr/bin/arch -x86_64 "${{executable_path}}" >> "$exec_log" 2>&1
+            exec_status=$?
+        else
+            "${{executable_path}}" >> "$exec_log" 2>&1
+            exec_status=$?
+        fi
+        log_bootstrap "exec_vanilla_steamemu_direct_done status=$exec_status"
+        printf '[%s] exec_vanilla_steamemu_direct_done status=%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$exec_status" >> "$exec_log"
+        exit "$exec_status"
+    fi
+
     if [ "$launch_entry_uses_wrapper" = "1" ]; then
         log_bootstrap "exec_vanilla_wrapper=$launch_entry_path"
         exec /bin/bash "${{launch_entry_path}}"
     fi
     log_bootstrap "exec_vanilla=$executable_path"
     exec "${{executable_path}}"
+fi
+
+if [ ! -f "$doorstop_dylib" ]; then
+    log_bootstrap "doorstop_dylib_missing"
+    echo "Cannot find Doorstop library: $doorstop_dylib"
+    exit 1
 fi
 
 if [ "$root_loader_mode" = true ]; then
@@ -3275,6 +3750,7 @@ if [ "$launch_entry_uses_wrapper" = "1" ]; then
 else
     steamemu_macos_dir="$BASEDIR/MacOS"
 fi
+modded_working_dir="$BASEDIR"
 steamemu_appid_file="$steamemu_macos_dir/steam_appid.txt"
 if [ -x "$steamemu_macos_dir/ipcserver" ] && [ -f "$steamemu_appid_file" ]; then
     steamemu_app_id=$(tr -d '[:space:]' < "$steamemu_appid_file" 2>/dev/null)
@@ -3283,25 +3759,89 @@ if [ -x "$steamemu_macos_dir/ipcserver" ] && [ -f "$steamemu_appid_file" ]; then
         export SteamGameId="$steamemu_app_id"
     fi
 
-    steamemu_config_dir="$BASEDIR/../Config"
-    if [ -d "$steamemu_config_dir" ]; then
-        export STEAMEMU_SETTINGS_DIR="$steamemu_config_dir"
+    # r2modmac: export STEAM_PATH / SteamPath so the bundled ipcserver can self-locate
+    # steamclient.dylib without needing a real Steam installation (GOG + Steam-emu bundles).
+    export STEAM_PATH="$steamemu_macos_dir"
+    export SteamPath="$steamemu_macos_dir"
+
+    steamemu_config_dir="$steamemu_macos_dir/../Config"
+    if [ ! -d "$steamemu_config_dir" ]; then
+        steamemu_config_dir="$steamemu_macos_dir"
     fi
+    export STEAMEMU_SETTINGS_DIR="$steamemu_config_dir"
 
     if [ -n "${{DYLD_LIBRARY_PATH:-}}" ]; then
         export DYLD_LIBRARY_PATH="$steamemu_macos_dir:${{DYLD_LIBRARY_PATH}}"
     else
         export DYLD_LIBRARY_PATH="$steamemu_macos_dir"
     fi
+    prepare_steamemu_runtime_files "$BASEDIR" "$steamemu_macos_dir"
 
-    launchctl remove com.valvesoftware.steam.ipctool >/dev/null 2>&1 || true
-    pkill ipcserver >/dev/null 2>&1 || true
-    if [ -x "$steamemu_macos_dir/reset" ]; then
-        "$steamemu_macos_dir/reset" >/dev/null 2>&1 || true
+    log_bootstrap "steamemu_launchctl_untouched using_local_ipcserver=1"
+    pause_real_steam_for_steamemu
+    pause_steam_ipctool_for_steamemu
+
+    steamemu_previous_dir=$(pwd)
+    if cd "$steamemu_macos_dir" 2>/dev/null; then
+        kill_steamemu_ipcserver_for_dir "$steamemu_macos_dir"
+        sleep 0.2
+        if [ -x "$steamemu_macos_dir/reset" ]; then
+            env -u LD_PRELOAD -u DYLD_INSERT_LIBRARIES "$steamemu_macos_dir/reset" >> "$reset_log" 2>&1 || log_bootstrap "steamemu_reset_failed status=$?"
+            sleep 0.1
+        fi
+        env -u LD_PRELOAD -u DYLD_INSERT_LIBRARIES "$steamemu_macos_dir/ipcserver" >> "$ipc_log" 2>&1 &
+        steamemu_ipc_pid=$!
+        cd "$steamemu_previous_dir" >/dev/null 2>&1 || true
+    else
+        log_bootstrap "steamemu_runtime_dir_unreachable dir=$steamemu_macos_dir"
     fi
-    "$steamemu_macos_dir/ipcserver" >/dev/null 2>&1 &
-    steamemu_ipc_pid=$!
-    log_bootstrap "steamemu_runtime_prepared app_id=$steamemu_app_id ipcpid=$steamemu_ipc_pid settings_dir=${{STEAMEMU_SETTINGS_DIR:-}}"
+
+    # r2modmac: wait for ipcserver to register its IPC socket before launching.
+    # Without this delay SteamAPI_Init() fails because the socket is not ready yet.
+    _ipc_ready=0
+    for _i in 1 2 3 4 5 6 7 8 9 10; do
+        sleep 0.3
+        if kill -0 "$steamemu_ipc_pid" 2>/dev/null; then
+            _ipc_ready=1
+            break
+        fi
+    done
+    if [ "$_ipc_ready" = "0" ]; then
+        ipc_exit_status=0
+        if [ -n "$steamemu_ipc_pid" ]; then
+            wait "$steamemu_ipc_pid" >/dev/null 2>&1 || ipc_exit_status=$?
+        fi
+        log_bootstrap "steamemu_ipcserver_failed_to_start ipcpid=$steamemu_ipc_pid exit_status=$ipc_exit_status"
+        steamemu_ipc_pid=""
+    fi
+
+    # Remove quarantine from the inner game bundle (mirrors what the load script does via xattr -cr).
+    _game_app_bundle=$(dirname "$(dirname "$executable_path")")
+    if [ -d "$_game_app_bundle" ]; then
+        if ! /usr/bin/xattr -cr "$_game_app_bundle" >/dev/null 2>&1; then
+            /usr/bin/xattr -c "$_game_app_bundle" >/dev/null 2>&1 || true
+        fi
+    fi
+
+    log_bootstrap "steamemu_runtime_prepared app_id=$steamemu_app_id ipcpid=$steamemu_ipc_pid ipc_ready=$_ipc_ready steam_path=$steamemu_macos_dir settings_dir=${{STEAMEMU_SETTINGS_DIR:-}}"
+fi
+
+# r2modmac: resolve the actual modded launch target AFTER steamemu_macos_dir is defined.
+# For GOG/Steam-emu wrappers (load + ipcserver + steamclient.dylib), bypass the wrapper
+# script: inject Doorstop directly into the real executable so our ipcserver (started
+# above) stays alive with the correct env instead of being killed by the load script.
+modded_target_path="$executable_path"
+modded_target_is_wrapper=false
+if [ "$launch_entry_uses_wrapper" = "1" ]; then
+    if [ -x "$steamemu_macos_dir/ipcserver" ] && [ -f "$steamemu_macos_dir/steam_appid.txt" ]; then
+        modded_working_dir="$steamemu_macos_dir"
+        log_bootstrap "gog_steamemu_wrapper_bypass target=$executable_path cwd=$modded_working_dir ipcserver=$steamemu_macos_dir/ipcserver"
+        modded_target_path="$executable_path"
+        modded_target_is_wrapper=false
+    else
+        modded_target_path="$launch_entry_path"
+        modded_target_is_wrapper=true
+    fi
 fi
 
 maybe_retry_x64_after_arm64_failure() {{
@@ -3433,82 +3973,152 @@ if [ "$steam_launch_args_ready" = true ]; then
 fi
 
 if [ "$arch" = "arm64" ] && [ "$wrapper_arch" = "arm64" ] && [ "$wrapper_translated" = "0" ]; then
-    log_bootstrap "exec_modded_arm64_direct=$executable_path"
-    "${{executable_path}}" >> "$exec_log" 2>&1
+    log_bootstrap "exec_modded_arm64_direct target=$modded_target_path wrapper=$modded_target_is_wrapper"
+    if [ "$modded_target_is_wrapper" = true ]; then
+        /bin/bash "${{modded_target_path}}" >> "$exec_log" 2>&1
+    else
+        cd "$modded_working_dir" || exit 1
+        "${{modded_target_path}}" >> "$exec_log" 2>&1
+    fi
     exec_status=$?
     log_bootstrap "exec_modded_arm64_direct_failed status=$exec_status"
     printf '[%s] exec_modded_arm64_direct_failed status=%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$exec_status" >> "$exec_log"
-    set -- "${{executable_path}}"
-    maybe_retry_x64_after_arm64_failure "exec_modded_arm64_direct" "$exec_status" "${{executable_path}}"
+    if [ "$modded_target_is_wrapper" = true ]; then
+        maybe_retry_x64_after_arm64_failure "exec_modded_arm64_direct" "$exec_status" /bin/bash "${{modded_target_path}}"
+    else
+        maybe_retry_x64_after_arm64_failure "exec_modded_arm64_direct" "$exec_status" "${{modded_target_path}}"
+    fi
     exit "$exec_status"
 fi
 
 if [ "$arch" = "arm64" ] && command -v /usr/bin/arch >/dev/null 2>&1; then
-    log_bootstrap "exec_modded_arm64_env=$executable_path"
-    /usr/bin/arch -arm64 \
-        -e DOORSTOP_ENABLE="${{DOORSTOP_ENABLE}}" \
-        -e DOORSTOP_ENABLED="${{DOORSTOP_ENABLED}}" \
-        -e DOORSTOP_INVOKE_DLL_PATH="${{DOORSTOP_INVOKE_DLL_PATH}}" \
-        -e DOORSTOP_TARGET_ASSEMBLY="${{DOORSTOP_TARGET_ASSEMBLY}}" \
-        -e DOORSTOP_BOOT_CONFIG_OVERRIDE="${{DOORSTOP_BOOT_CONFIG_OVERRIDE}}" \
-        -e DOORSTOP_IGNORE_DISABLED_ENV="${{DOORSTOP_IGNORE_DISABLED_ENV}}" \
-        -e DOORSTOP_MONO_DLL_SEARCH_PATH_OVERRIDE="${{DOORSTOP_MONO_DLL_SEARCH_PATH_OVERRIDE}}" \
-        -e DOORSTOP_MONO_DEBUG_ENABLED="${{DOORSTOP_MONO_DEBUG_ENABLED}}" \
-        -e DOORSTOP_MONO_DEBUG_ADDRESS="${{DOORSTOP_MONO_DEBUG_ADDRESS}}" \
-        -e DOORSTOP_MONO_DEBUG_SUSPEND="${{DOORSTOP_MONO_DEBUG_SUSPEND}}" \
-        -e DOORSTOP_CORLIB_OVERRIDE_PATH="${{DOORSTOP_CORLIB_OVERRIDE_PATH}}" \
-        -e DOORSTOP_REDIRECT_OUTPUT_LOG="${{DOORSTOP_REDIRECT_OUTPUT_LOG}}" \
-        -e SteamAppId="${{SteamAppId:-}}" \
-        -e SteamGameId="${{SteamGameId:-}}" \
-        -e STEAMEMU_SETTINGS_DIR="${{STEAMEMU_SETTINGS_DIR:-}}" \
-        -e LD_LIBRARY_PATH="${{LD_LIBRARY_PATH:-}}" \
-        -e LD_PRELOAD="${{LD_PRELOAD:-}}" \
-        -e DYLD_LIBRARY_PATH="${{DYLD_LIBRARY_PATH:-}}" \
-        -e DYLD_INSERT_LIBRARIES="${{DYLD_INSERT_LIBRARIES:-}}" \
-        -e DYLD_PRINT_LIBRARIES="${{DYLD_PRINT_LIBRARIES:-}}" \
-        -e DYLD_PRINT_TO_FILE="${{DYLD_PRINT_TO_FILE:-}}" \
-        "${{executable_path}}" >> "$exec_log" 2>&1
+    log_bootstrap "exec_modded_arm64_env target=$modded_target_path wrapper=$modded_target_is_wrapper"
+    if [ "$modded_target_is_wrapper" = true ]; then
+        /usr/bin/arch -arm64 \
+            -e DOORSTOP_ENABLE="${{DOORSTOP_ENABLE}}" \
+            -e DOORSTOP_ENABLED="${{DOORSTOP_ENABLED}}" \
+            -e DOORSTOP_INVOKE_DLL_PATH="${{DOORSTOP_INVOKE_DLL_PATH}}" \
+            -e DOORSTOP_TARGET_ASSEMBLY="${{DOORSTOP_TARGET_ASSEMBLY}}" \
+            -e DOORSTOP_BOOT_CONFIG_OVERRIDE="${{DOORSTOP_BOOT_CONFIG_OVERRIDE}}" \
+            -e DOORSTOP_IGNORE_DISABLED_ENV="${{DOORSTOP_IGNORE_DISABLED_ENV}}" \
+            -e DOORSTOP_MONO_DLL_SEARCH_PATH_OVERRIDE="${{DOORSTOP_MONO_DLL_SEARCH_PATH_OVERRIDE}}" \
+            -e DOORSTOP_MONO_DEBUG_ENABLED="${{DOORSTOP_MONO_DEBUG_ENABLED}}" \
+            -e DOORSTOP_MONO_DEBUG_ADDRESS="${{DOORSTOP_MONO_DEBUG_ADDRESS}}" \
+            -e DOORSTOP_MONO_DEBUG_SUSPEND="${{DOORSTOP_MONO_DEBUG_SUSPEND}}" \
+            -e DOORSTOP_CORLIB_OVERRIDE_PATH="${{DOORSTOP_CORLIB_OVERRIDE_PATH}}" \
+            -e DOORSTOP_REDIRECT_OUTPUT_LOG="${{DOORSTOP_REDIRECT_OUTPUT_LOG}}" \
+            -e SteamAppId="${{SteamAppId:-}}" \
+            -e SteamGameId="${{SteamGameId:-}}" \
+            -e STEAMEMU_SETTINGS_DIR="${{STEAMEMU_SETTINGS_DIR:-}}" \
+            -e LD_LIBRARY_PATH="${{LD_LIBRARY_PATH:-}}" \
+            -e LD_PRELOAD="${{LD_PRELOAD:-}}" \
+            -e DYLD_LIBRARY_PATH="${{DYLD_LIBRARY_PATH:-}}" \
+            -e DYLD_INSERT_LIBRARIES="${{DYLD_INSERT_LIBRARIES:-}}" \
+            -e DYLD_PRINT_LIBRARIES="${{DYLD_PRINT_LIBRARIES:-}}" \
+            -e DYLD_PRINT_TO_FILE="${{DYLD_PRINT_TO_FILE:-}}" \
+            /bin/bash "${{modded_target_path}}" >> "$exec_log" 2>&1
+    else
+        cd "$modded_working_dir" || exit 1
+        /usr/bin/arch -arm64 \
+            -e DOORSTOP_ENABLE="${{DOORSTOP_ENABLE}}" \
+            -e DOORSTOP_ENABLED="${{DOORSTOP_ENABLED}}" \
+            -e DOORSTOP_INVOKE_DLL_PATH="${{DOORSTOP_INVOKE_DLL_PATH}}" \
+            -e DOORSTOP_TARGET_ASSEMBLY="${{DOORSTOP_TARGET_ASSEMBLY}}" \
+            -e DOORSTOP_BOOT_CONFIG_OVERRIDE="${{DOORSTOP_BOOT_CONFIG_OVERRIDE}}" \
+            -e DOORSTOP_IGNORE_DISABLED_ENV="${{DOORSTOP_IGNORE_DISABLED_ENV}}" \
+            -e DOORSTOP_MONO_DLL_SEARCH_PATH_OVERRIDE="${{DOORSTOP_MONO_DLL_SEARCH_PATH_OVERRIDE}}" \
+            -e DOORSTOP_MONO_DEBUG_ENABLED="${{DOORSTOP_MONO_DEBUG_ENABLED}}" \
+            -e DOORSTOP_MONO_DEBUG_ADDRESS="${{DOORSTOP_MONO_DEBUG_ADDRESS}}" \
+            -e DOORSTOP_MONO_DEBUG_SUSPEND="${{DOORSTOP_MONO_DEBUG_SUSPEND}}" \
+            -e DOORSTOP_CORLIB_OVERRIDE_PATH="${{DOORSTOP_CORLIB_OVERRIDE_PATH}}" \
+            -e DOORSTOP_REDIRECT_OUTPUT_LOG="${{DOORSTOP_REDIRECT_OUTPUT_LOG}}" \
+            -e SteamAppId="${{SteamAppId:-}}" \
+            -e SteamGameId="${{SteamGameId:-}}" \
+            -e STEAMEMU_SETTINGS_DIR="${{STEAMEMU_SETTINGS_DIR:-}}" \
+            -e LD_LIBRARY_PATH="${{LD_LIBRARY_PATH:-}}" \
+            -e LD_PRELOAD="${{LD_PRELOAD:-}}" \
+            -e DYLD_LIBRARY_PATH="${{DYLD_LIBRARY_PATH:-}}" \
+            -e DYLD_INSERT_LIBRARIES="${{DYLD_INSERT_LIBRARIES:-}}" \
+            -e DYLD_PRINT_LIBRARIES="${{DYLD_PRINT_LIBRARIES:-}}" \
+            -e DYLD_PRINT_TO_FILE="${{DYLD_PRINT_TO_FILE:-}}" \
+            "${{modded_target_path}}" >> "$exec_log" 2>&1
+    fi
     exec_status=$?
     log_bootstrap "exec_modded_arm64_env_failed status=$exec_status"
     printf '[%s] exec_modded_arm64_env_failed status=%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$exec_status" >> "$exec_log"
-    set -- "${{executable_path}}"
-    maybe_retry_x64_after_arm64_failure "exec_modded_arm64_env" "$exec_status" "${{executable_path}}"
+    if [ "$modded_target_is_wrapper" = true ]; then
+        maybe_retry_x64_after_arm64_failure "exec_modded_arm64_env" "$exec_status" /bin/bash "${{modded_target_path}}"
+    else
+        maybe_retry_x64_after_arm64_failure "exec_modded_arm64_env" "$exec_status" "${{modded_target_path}}"
+    fi
     exit "$exec_status"
 fi
 
 if [ "$arch" = "x64" ] && command -v /usr/bin/arch >/dev/null 2>&1; then
-    log_bootstrap "exec_modded_arch_env=$executable_path"
-    /usr/bin/arch -x86_64 \
-        -e DOORSTOP_ENABLE="${{DOORSTOP_ENABLE}}" \
-        -e DOORSTOP_ENABLED="${{DOORSTOP_ENABLED}}" \
-        -e DOORSTOP_INVOKE_DLL_PATH="${{DOORSTOP_INVOKE_DLL_PATH}}" \
-        -e DOORSTOP_TARGET_ASSEMBLY="${{DOORSTOP_TARGET_ASSEMBLY}}" \
-        -e DOORSTOP_BOOT_CONFIG_OVERRIDE="${{DOORSTOP_BOOT_CONFIG_OVERRIDE}}" \
-        -e DOORSTOP_IGNORE_DISABLED_ENV="${{DOORSTOP_IGNORE_DISABLED_ENV}}" \
-        -e DOORSTOP_MONO_DLL_SEARCH_PATH_OVERRIDE="${{DOORSTOP_MONO_DLL_SEARCH_PATH_OVERRIDE}}" \
-        -e DOORSTOP_MONO_DEBUG_ENABLED="${{DOORSTOP_MONO_DEBUG_ENABLED}}" \
-        -e DOORSTOP_MONO_DEBUG_ADDRESS="${{DOORSTOP_MONO_DEBUG_ADDRESS}}" \
-        -e DOORSTOP_MONO_DEBUG_SUSPEND="${{DOORSTOP_MONO_DEBUG_SUSPEND}}" \
-        -e DOORSTOP_CORLIB_OVERRIDE_PATH="${{DOORSTOP_CORLIB_OVERRIDE_PATH}}" \
-        -e DOORSTOP_REDIRECT_OUTPUT_LOG="${{DOORSTOP_REDIRECT_OUTPUT_LOG}}" \
-        -e SteamAppId="${{SteamAppId:-}}" \
-        -e SteamGameId="${{SteamGameId:-}}" \
-        -e STEAMEMU_SETTINGS_DIR="${{STEAMEMU_SETTINGS_DIR:-}}" \
-        -e LD_LIBRARY_PATH="${{LD_LIBRARY_PATH:-}}" \
-        -e LD_PRELOAD="${{LD_PRELOAD:-}}" \
-        -e DYLD_LIBRARY_PATH="${{DYLD_LIBRARY_PATH:-}}" \
-        -e DYLD_INSERT_LIBRARIES="${{DYLD_INSERT_LIBRARIES:-}}" \
-        -e DYLD_PRINT_LIBRARIES="${{DYLD_PRINT_LIBRARIES:-}}" \
-        -e DYLD_PRINT_TO_FILE="${{DYLD_PRINT_TO_FILE:-}}" \
-        "${{executable_path}}" >> "$exec_log" 2>&1
+    log_bootstrap "exec_modded_arch_env target=$modded_target_path wrapper=$modded_target_is_wrapper"
+    if [ "$modded_target_is_wrapper" = true ]; then
+        /usr/bin/arch -x86_64 \
+            -e DOORSTOP_ENABLE="${{DOORSTOP_ENABLE}}" \
+            -e DOORSTOP_ENABLED="${{DOORSTOP_ENABLED}}" \
+            -e DOORSTOP_INVOKE_DLL_PATH="${{DOORSTOP_INVOKE_DLL_PATH}}" \
+            -e DOORSTOP_TARGET_ASSEMBLY="${{DOORSTOP_TARGET_ASSEMBLY}}" \
+            -e DOORSTOP_BOOT_CONFIG_OVERRIDE="${{DOORSTOP_BOOT_CONFIG_OVERRIDE}}" \
+            -e DOORSTOP_IGNORE_DISABLED_ENV="${{DOORSTOP_IGNORE_DISABLED_ENV}}" \
+            -e DOORSTOP_MONO_DLL_SEARCH_PATH_OVERRIDE="${{DOORSTOP_MONO_DLL_SEARCH_PATH_OVERRIDE}}" \
+            -e DOORSTOP_MONO_DEBUG_ENABLED="${{DOORSTOP_MONO_DEBUG_ENABLED}}" \
+            -e DOORSTOP_MONO_DEBUG_ADDRESS="${{DOORSTOP_MONO_DEBUG_ADDRESS}}" \
+            -e DOORSTOP_MONO_DEBUG_SUSPEND="${{DOORSTOP_MONO_DEBUG_SUSPEND}}" \
+            -e DOORSTOP_CORLIB_OVERRIDE_PATH="${{DOORSTOP_CORLIB_OVERRIDE_PATH}}" \
+            -e DOORSTOP_REDIRECT_OUTPUT_LOG="${{DOORSTOP_REDIRECT_OUTPUT_LOG}}" \
+            -e SteamAppId="${{SteamAppId:-}}" \
+            -e SteamGameId="${{SteamGameId:-}}" \
+            -e STEAMEMU_SETTINGS_DIR="${{STEAMEMU_SETTINGS_DIR:-}}" \
+            -e LD_LIBRARY_PATH="${{LD_LIBRARY_PATH:-}}" \
+            -e LD_PRELOAD="${{LD_PRELOAD:-}}" \
+            -e DYLD_LIBRARY_PATH="${{DYLD_LIBRARY_PATH:-}}" \
+            -e DYLD_INSERT_LIBRARIES="${{DYLD_INSERT_LIBRARIES:-}}" \
+            -e DYLD_PRINT_LIBRARIES="${{DYLD_PRINT_LIBRARIES:-}}" \
+            -e DYLD_PRINT_TO_FILE="${{DYLD_PRINT_TO_FILE:-}}" \
+            /bin/bash "${{modded_target_path}}" >> "$exec_log" 2>&1
+    else
+        cd "$modded_working_dir" || exit 1
+        /usr/bin/arch -x86_64 \
+            -e DOORSTOP_ENABLE="${{DOORSTOP_ENABLE}}" \
+            -e DOORSTOP_ENABLED="${{DOORSTOP_ENABLED}}" \
+            -e DOORSTOP_INVOKE_DLL_PATH="${{DOORSTOP_INVOKE_DLL_PATH}}" \
+            -e DOORSTOP_TARGET_ASSEMBLY="${{DOORSTOP_TARGET_ASSEMBLY}}" \
+            -e DOORSTOP_BOOT_CONFIG_OVERRIDE="${{DOORSTOP_BOOT_CONFIG_OVERRIDE}}" \
+            -e DOORSTOP_IGNORE_DISABLED_ENV="${{DOORSTOP_IGNORE_DISABLED_ENV}}" \
+            -e DOORSTOP_MONO_DLL_SEARCH_PATH_OVERRIDE="${{DOORSTOP_MONO_DLL_SEARCH_PATH_OVERRIDE}}" \
+            -e DOORSTOP_MONO_DEBUG_ENABLED="${{DOORSTOP_MONO_DEBUG_ENABLED}}" \
+            -e DOORSTOP_MONO_DEBUG_ADDRESS="${{DOORSTOP_MONO_DEBUG_ADDRESS}}" \
+            -e DOORSTOP_MONO_DEBUG_SUSPEND="${{DOORSTOP_MONO_DEBUG_SUSPEND}}" \
+            -e DOORSTOP_CORLIB_OVERRIDE_PATH="${{DOORSTOP_CORLIB_OVERRIDE_PATH}}" \
+            -e DOORSTOP_REDIRECT_OUTPUT_LOG="${{DOORSTOP_REDIRECT_OUTPUT_LOG}}" \
+            -e SteamAppId="${{SteamAppId:-}}" \
+            -e SteamGameId="${{SteamGameId:-}}" \
+            -e STEAMEMU_SETTINGS_DIR="${{STEAMEMU_SETTINGS_DIR:-}}" \
+            -e LD_LIBRARY_PATH="${{LD_LIBRARY_PATH:-}}" \
+            -e LD_PRELOAD="${{LD_PRELOAD:-}}" \
+            -e DYLD_LIBRARY_PATH="${{DYLD_LIBRARY_PATH:-}}" \
+            -e DYLD_INSERT_LIBRARIES="${{DYLD_INSERT_LIBRARIES:-}}" \
+            -e DYLD_PRINT_LIBRARIES="${{DYLD_PRINT_LIBRARIES:-}}" \
+            -e DYLD_PRINT_TO_FILE="${{DYLD_PRINT_TO_FILE:-}}" \
+            "${{modded_target_path}}" >> "$exec_log" 2>&1
+    fi
     exec_status=$?
     log_bootstrap "exec_modded_arch_env_failed status=$exec_status"
     printf '[%s] exec_modded_arch_env_failed status=%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$exec_status" >> "$exec_log"
     exit "$exec_status"
 fi
 
-log_bootstrap "exec_modded=$executable_path"
-"${{executable_path}}" >> "$exec_log" 2>&1
+log_bootstrap "exec_modded target=$modded_target_path wrapper=$modded_target_is_wrapper"
+if [ "$modded_target_is_wrapper" = true ]; then
+    /bin/bash "${{modded_target_path}}" >> "$exec_log" 2>&1
+else
+    cd "$modded_working_dir" || exit 1
+    "${{modded_target_path}}" >> "$exec_log" 2>&1
+fi
 exec_status=$?
 log_bootstrap "exec_modded_failed status=$exec_status"
 printf '[%s] exec_modded_failed status=%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$exec_status" >> "$exec_log"
@@ -3544,17 +4154,18 @@ exit "$exec_status"
     script = script.replace("\r\n", "\n");
 
     // CRITICAL: detect if the script has a working runtime_disabled early-exit BEFORE
-    // DYLD_INSERT_LIBRARIES. Original BepInEx scripts set the runtime_disabled variable but
-    // never skip loading Doorstop when it's disabled. This causes a DYLD crash because
-    // doorstop_libs is renamed to doorstop_libs_DISABLED in vanilla mode and the dylib
-    // path no longer resolves. Always regenerate if the early-exit is absent or misplaced.
+    // Doorstop validation and DYLD env injection. Original BepInEx scripts set the
+    // runtime_disabled variable but never skip loading Doorstop when it's disabled.
+    // This causes startup failures in vanilla mode when the payload is renamed
+    // to *_DISABLED. Always regenerate if the early-exit is absent or misplaced.
     let has_early_exit = script.contains("if [ \"$runtime_disabled\" = true ]");
-    let early_exit_before_dyld = if has_early_exit {
+    let (early_exit_before_doorstop_validation, early_exit_before_dyld) = if has_early_exit {
         let exit_pos = script.find("if [ \"$runtime_disabled\" = true ]").unwrap_or(usize::MAX);
+        let doorstop_check_pos = script.find("doorstop_dylib_missing").unwrap_or(usize::MAX);
         let dyld_pos = script.find("DYLD_INSERT_LIBRARIES=").unwrap_or(usize::MAX);
-        exit_pos < dyld_pos
+        (exit_pos < doorstop_check_pos, exit_pos < dyld_pos)
     } else {
-        false
+        (false, false)
     };
 
     let has_root_doorstop_fallback =
@@ -3566,7 +4177,8 @@ exit "$exec_status"
         "write_debug_logs={}",
         if write_debug_logs_to_game { 1 } else { 0 }
     ));
-    let removes_codesign_signature = script.contains("codesign_remove_signature_attempt");
+    let removes_codesign_signature = script.contains("codesign_remove_signature_attempt")
+        && script.contains("codesign_remove_signature_skipped_runtime_disabled");
     let logs_loader_environment = script.contains("wrapper_arch=") && script.contains("loader_env LD_LIBRARY_PATH=");
     let has_root_loader_mode_env = script.contains("root_loader_mode=false")
         && script.contains("DOORSTOP_IGNORE_DISABLED_ENV=0")
@@ -3574,8 +4186,8 @@ exit "$exec_status"
         && script.contains("-e DOORSTOP_MONO_DLL_SEARCH_PATH_OVERRIDE=")
         && script.contains("root_loader_mode=$root_loader_mode")
         && script.contains("export DYLD_INSERT_LIBRARIES=\"libdoorstop.dylib");
-    let has_arch_env_exec = script.contains("exec_modded_arch_env=")
-        && script.contains("exec_modded_arm64_env=")
+    let has_arch_env_exec = script.contains("exec_modded_arch_env target=")
+        && script.contains("exec_modded_arm64_env target=")
         && script.contains("native_macos_arch=")
         && script.contains("/usr/bin/arch -arm64")
         && script.contains("-e DYLD_INSERT_LIBRARIES=");
@@ -3586,10 +4198,18 @@ exit "$exec_status"
         && script.contains("steam_launch_exec_modded_arch_env_failed status=$exec_status");
     let has_native_arm64_direct_exec = script.contains("steam_launch_exec_modded_arm64_direct argv=$*")
         && script.contains("steam_launch_exec_modded_arm64_direct_failed status=$exec_status")
-        && script.contains("exec_modded_arm64_direct=$executable_path")
+        && script.contains("exec_modded_arm64_direct target=$modded_target_path wrapper=$modded_target_is_wrapper")
         && script.contains("exec_modded_arm64_direct_failed status=$exec_status")
         && script.contains("[ \"$wrapper_arch\" = \"arm64\" ]")
         && script.contains("[ \"$wrapper_translated\" = \"0\" ]");
+    let has_wrapper_modded_exec_support = script.contains("modded_target_path=")
+        && script.contains("modded_target_is_wrapper=false")
+        && script.contains("modded_working_dir=\"$BASEDIR\"")
+        && script.contains("if [ \"$modded_target_is_wrapper\" = true ]; then")
+        && script.contains("/bin/bash \"${modded_target_path}\"")
+        && script.contains("cd \"$modded_working_dir\" || exit 1")
+        // GOG/Steam-emu bypass: modded target must be the real executable, not the wrapper script
+        && script.contains("gog_steamemu_wrapper_bypass");
     let has_arm64_x64_fallback_retry = script.contains("maybe_retry_x64_after_arm64_failure()")
         && script.contains("can_retry_x64=true")
         && script.contains("retrying_x64_fallback status=")
@@ -3610,7 +4230,85 @@ exit "$exec_status"
             && script.contains("export SteamAppId=")
             && script.contains("export SteamGameId=")
             && script.contains("steamemu_macos_dir=\"$BASEDIR/MacOS\"")
-            && script.contains("-e SteamAppId=");
+            && script.contains("STEAMEMU_SETTINGS_DIR=\"$steamemu_config_dir\"")
+            && script.contains("-e SteamAppId=")
+            // GOG + Steam-emu: ipcserver needs STEAM_PATH to self-locate steamclient.dylib
+            && script.contains("export STEAM_PATH=\"$steamemu_macos_dir\"")
+            && script.contains("export SteamPath=\"$steamemu_macos_dir\"")
+            && script.contains("steamemu_runtime_dir_unreachable dir=$steamemu_macos_dir")
+            && script.contains("steamemu_previous_dir=$(pwd)")
+            && script.contains("if cd \"$steamemu_macos_dir\" 2>/dev/null; then")
+            && script.contains(
+                "prepare_steamemu_runtime_files \"$BASEDIR\" \"$steamemu_macos_dir\"",
+            )
+            && script.contains(
+                "steamemu_runtime_files runtime_root=$runtime_root steam_dir=$steamemu_dir bundled_steamclient=$steamclient_ready bundled_appid=$appid_ready stale_root_steamclient_removed=$stale_root_steamclient_removed",
+            )
+            && script.contains("kill_steamemu_ipcserver_for_dir \"$steamemu_macos_dir\"")
+            && script.contains("pause_real_steam_for_steamemu")
+            && script.contains("env -u LD_PRELOAD -u DYLD_INSERT_LIBRARIES \"$steamemu_macos_dir/ipcserver\"")
+            // Use local ipcserver, but pause global Steam ipctool while wrapper is running.
+            && script.contains("steamemu_launchctl_untouched using_local_ipcserver=1")
+            && script.contains("pause_steam_ipctool_for_steamemu")
+            && script.contains("steamemu_launchctl_removed label=$steamemu_ipctool_label uid=$steamemu_ipctool_uid")
+            && script.contains("steamemu_launchctl_not_present label=$steamemu_ipctool_label uid=$steamemu_ipctool_uid")
+            // ipcserver readiness poll before game launch
+            && script.contains("steamemu_ipcserver_failed_to_start")
+            && script.contains("ipc_ready=$_ipc_ready")
+            && script.contains("exit_status=$ipc_exit_status");
+    let has_vanilla_exec_arch_branching =
+        (script.contains("if [ \"$vanilla_exec_arch\" = \"arm64\" ]")
+            && script.contains("elif [ \"$vanilla_exec_arch\" = \"x64\" ]"))
+            || (script.contains("if [ \"$vanilla_exec_arch\" = \"x64\" ]")
+                && script.contains("elif [ \"$vanilla_exec_arch\" = \"arm64\" ]"));
+    let has_vanilla_steamemu_direct_launch =
+        script.contains("exec_vanilla_steamemu_direct")
+            && script.contains("vanilla_steamemu_runtime_prepare")
+            && script.contains("if [ \"$launch_entry_uses_wrapper\" = \"1\" ] && [ -x \"$steamemu_macos_dir/ipcserver\" ]")
+            && script.contains("env -u LD_PRELOAD -u DYLD_INSERT_LIBRARIES \"$steamemu_macos_dir/reset\"")
+            && script.contains("exec_vanilla_steamemu_direct_done status=$exec_status")
+            && script.contains("selected_vanilla_exec_arch=$vanilla_exec_arch")
+            && has_vanilla_exec_arch_branching
+            && script.contains("/usr/bin/arch -x86_64 \"${executable_path}\"")
+            && script.contains("/usr/bin/arch -arm64 \"${executable_path}\"")
+            && script.contains("vanilla_exec_name=$(basename \"${executable_path}\")")
+            && script.contains("vanilla_exec_dir=$(dirname \"${executable_path}\")")
+            && script.contains("vanilla_alive=0")
+            && script.contains("vanilla_runtime_pid=$vanilla_runtime_pid flags=$vanilla_runtime_flags translated=$vanilla_runtime_translated")
+            && script.contains(
+                "exec_vanilla_arm64_detached_running status=$vanilla_arm_status keep_arm64=true",
+            )
+            && script.contains(
+                "exec_vanilla_arm64_exec_error status=$vanilla_arm_status fallback_to_x64=true",
+            )
+            && script.contains(
+                "exec_vanilla_arm64_killed status=$vanilla_arm_status fallback_to_x64=true",
+            )
+            && script.contains(
+                "exec_vanilla_arm64_early_exit status=$vanilla_arm_status keep_arm64=true fallback_to_x64=false",
+            );
+    let has_steamemu_runtime_cleanup =
+        script.contains("cleanup_steamemu_runtime()")
+            && script.contains("kill_steamemu_ipcserver_for_dir()")
+            && script.contains("pause_real_steam_for_steamemu()")
+            && script.contains("pause_steam_ipctool_for_steamemu()")
+            && script.contains("steamemu_ipctool_paused=0")
+            && script.contains("steamemu_ipctool_label=\"com.valvesoftware.steam.ipctool\"")
+            && script.contains("steamemu_ipctool_uid=$(id -u 2>/dev/null || printf \"\")")
+            && script.contains("steamemu_ipctool_plist=\"$HOME/Library/Application Support/Steam/com.valvesoftware.steam.ipctool.plist\"")
+            && script.contains("restore_real_steam_after_steamemu()")
+            && script.contains("restore_steam_ipctool_after_steamemu()")
+            && script.contains("is_real_steam_running()")
+            && script.contains("trap cleanup_steamemu_runtime EXIT INT TERM")
+            && script.contains("steamemu_runtime_cleanup ipcpid=$steamemu_ipc_pid")
+            && script.contains("steamemu_real_steam_pause_requested")
+            && script.contains("steamemu_real_steam_restore_requested")
+            && script.contains("steamemu_real_steam_pause_failed still_running=1")
+            && script.contains("steamemu_launchctl_restore_ok plist=$steamemu_ipctool_plist")
+            && script.contains("steamemu_launchctl_restore_failed plist=$steamemu_ipctool_plist")
+            && script.contains("steamemu_launchctl_restore_skipped_missing_plist plist=$steamemu_ipctool_plist")
+            && script.contains("lsof -t \"$ipcserver_path\"")
+            && script.contains("pgrep -f \"$ipcserver_path\"");
     let preserves_steam_dyld_hooks =
         script.contains("r2modmac: preserve Steam-provided DYLD hooks")
             && script.contains("DYLD_INSERT_LIBRARIES=\"${doorstop_dylib}:${DYLD_INSERT_LIBRARIES}\"");
@@ -3625,6 +4323,7 @@ exit "$exec_status"
     let steam_launch_order_ok = has_steam_arg_helper && doorstop_export_pos < steam_launch_pos;
     let needs_regeneration =
         !has_macos_doorstop_support(&script)
+            || !early_exit_before_doorstop_validation
             || !early_exit_before_dyld
             || !has_root_doorstop_fallback
             || !steam_launch_order_ok
@@ -3636,18 +4335,22 @@ exit "$exec_status"
             || !has_dyld_loader_logging
             || !has_exec_failure_logging
             || !has_native_arm64_direct_exec
+            || !has_wrapper_modded_exec_support
             || !has_arm64_x64_fallback_retry
             || !has_modern_doorstop_env_aliases
             || !has_launch_entry_support
             || !has_steamemu_runtime_prep
+            || !has_vanilla_steamemu_direct_launch
+            || !has_steamemu_runtime_cleanup
             || !preserves_steam_dyld_hooks
             || !steam_launch_exec_deferred
             || !has_expected_debug_log_setting
             || has_legacy_bepinex_bootstrap_log;
     if needs_regeneration {
         eprintln!(
-            "[configure_macos_bepinex_script] Regenerating script (has_doorstop={} early_exit_ok={} root_fallback_ok={} steam_launch_order_ok={} root_bootstrap_log_ok={} removes_codesign_signature={} logs_loader_environment={} has_arch_env_exec={} has_dyld_loader_logging={} has_exec_failure_logging={} modern_doorstop_env_aliases={} launch_entry_support={} steamemu_runtime_prep={} preserves_steam_dyld_hooks={} steam_launch_exec_deferred={} legacy_bepinex_bootstrap_log={}).",
+            "[configure_macos_bepinex_script] Regenerating script (has_doorstop={} early_exit_before_doorstop_ok={} early_exit_before_dyld_ok={} root_fallback_ok={} steam_launch_order_ok={} root_bootstrap_log_ok={} removes_codesign_signature={} logs_loader_environment={} has_arch_env_exec={} has_dyld_loader_logging={} has_exec_failure_logging={} wrapper_modded_exec_support={} modern_doorstop_env_aliases={} launch_entry_support={} steamemu_runtime_prep={} vanilla_steamemu_direct_launch={} steamemu_runtime_cleanup={} preserves_steam_dyld_hooks={} steam_launch_exec_deferred={} legacy_bepinex_bootstrap_log={}).",
             has_macos_doorstop_support(&script),
+            early_exit_before_doorstop_validation,
             early_exit_before_dyld,
             has_root_doorstop_fallback,
             steam_launch_order_ok,
@@ -3657,9 +4360,12 @@ exit "$exec_status"
             has_arch_env_exec,
             has_dyld_loader_logging,
             has_exec_failure_logging,
+            has_wrapper_modded_exec_support,
             has_modern_doorstop_env_aliases,
             has_launch_entry_support,
             has_steamemu_runtime_prep,
+            has_vanilla_steamemu_direct_launch,
+            has_steamemu_runtime_cleanup,
             preserves_steam_dyld_hooks,
             steam_launch_exec_deferred,
             has_legacy_bepinex_bootstrap_log
@@ -3799,6 +4505,44 @@ fn is_apple_silicon_host() -> bool {
     };
 
     output.status.success() && String::from_utf8_lossy(&output.stdout).trim() == "1"
+}
+
+fn is_macos_bundle_signature_valid(bundle_path: &std::path::Path) -> bool {
+    std::process::Command::new("codesign")
+        .args(["-v", "--strict", &bundle_path.to_string_lossy()])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+fn ad_hoc_sign_macos_bundle(bundle_path: &std::path::Path) -> bool {
+    std::process::Command::new("codesign")
+        .args(["--force", "--deep", "-s", "-", &bundle_path.to_string_lossy()])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+fn clear_macos_bundle_quarantine(bundle_path: &std::path::Path) {
+    let recursive_ok = std::process::Command::new("xattr")
+        .args(["-dr", "com.apple.quarantine", &bundle_path.to_string_lossy()])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false);
+
+    if !recursive_ok {
+        let _ = std::process::Command::new("xattr")
+            .args(["-c", &bundle_path.to_string_lossy()])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+    }
 }
 
 fn should_use_native_macos_bepinex_launcher(game_path: &std::path::Path) -> bool {
@@ -5061,8 +5805,14 @@ pub async fn launch_game_vanilla(
                 app_bundle.display()
             );
         } else {
+            // Skip re-sign for bundles that ship their own Steam emulation layer
+            // (e.g. GOG macOS releases with load + ipcserver + steamclient.dylib).
+            // Applying codesign --force --deep on these wrappers corrupts the load
+            // script layout and breaks subsequent modded launches.
+            let is_bundled_steam_emu = find_macos_wrapper_launcher_path(&game_path).is_some();
+
             // Check if the app has NO valid signature (unsigned after mod removal)
-            let needs_resign = std::process::Command::new("codesign")
+            let needs_resign = !is_bundled_steam_emu && std::process::Command::new("codesign")
                 .args(["-v", "--strict", &app_bundle.to_string_lossy()])
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
@@ -5079,14 +5829,30 @@ pub async fn launch_game_vanilla(
                     .stdout(std::process::Stdio::null())
                     .stderr(std::process::Stdio::null())
                     .status();
+            } else if is_bundled_steam_emu {
+                eprintln!(
+                    "[launch_game_vanilla] Skipping re-sign for bundled Steam-emu wrapper (GOG-style): {}",
+                    app_bundle.display()
+                );
             }
 
-            // De-quarantine
-            let _ = std::process::Command::new("xattr")
+            // De-quarantine (always safe, even on Steam-emu wrappers)
+            let dequarantine_recursive = std::process::Command::new("xattr")
                 .args(["-dr", "com.apple.quarantine", &app_bundle.to_string_lossy()])
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
                 .status();
+            let recursive_ok = dequarantine_recursive
+                .as_ref()
+                .map(|s| s.success())
+                .unwrap_or(false);
+            if !recursive_ok {
+                let _ = std::process::Command::new("xattr")
+                    .args(["-c", &app_bundle.to_string_lossy()])
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .status();
+            }
         }
     }
 
@@ -5110,6 +5876,42 @@ pub async fn launch_game_vanilla(
         }
 
         return launch_via_steam_for_game_path(&app, &game_path);
+    }
+
+    // For manual macOS wrapper apps (for example GOG bundles that use an outer
+    // `load` launcher), route vanilla launches through run_bepinex.sh too. The
+    // script's `runtime_disabled=true` branch skips Doorstop and keeps startup
+    // behavior aligned with modded launches while preserving consistent logging
+    // and path handling.
+    if find_macos_wrapper_launcher_path(&game_path).is_some() {
+        if let Some(inner_executable_path) = executable_path.as_ref() {
+            if let Some(inner_app_bundle) = find_enclosing_app_bundle(inner_executable_path) {
+                if !is_macos_bundle_signature_valid(&inner_app_bundle) {
+                    eprintln!(
+                        "[launch_game_vanilla] Inner game app has invalid/no signature — re-signing with ad-hoc: {}",
+                        inner_app_bundle.display()
+                    );
+                    if !ad_hoc_sign_macos_bundle(&inner_app_bundle) {
+                        eprintln!(
+                            "[launch_game_vanilla] Failed to ad-hoc sign inner game app bundle: {}",
+                            inner_app_bundle.display()
+                        );
+                    }
+                }
+
+                clear_macos_bundle_quarantine(&inner_app_bundle);
+            }
+        }
+
+        sync_macos_runtime_disabled_state(&runtime_game_path, true)?;
+        if launch_macos_bepinex_wrapper(
+            &app,
+            &runtime_game_path,
+            executable_path.as_ref(),
+            "launch_game_vanilla",
+        )? {
+            return Ok(());
+        }
     }
 
     let app_bundle = find_macos_launch_bundle(&game_path);
@@ -5250,27 +6052,31 @@ pub async fn stop_game(
         find_macos_executable_path(&game_path)
             .ok_or_else(|| "Could not determine the game executable.".to_string())?
     };
-    let exec_pattern = build_process_match_pattern(&executable_path);
+    let exec_patterns = build_macos_process_kill_patterns(&executable_path);
 
-    if !is_process_running_for_pattern(&exec_pattern) {
+    if !is_process_running_for_executable(&executable_path) {
         return Ok(());
     }
 
-    let _ = std::process::Command::new("/usr/bin/pkill")
-        .args(["-TERM", "-f", &exec_pattern])
-        .status()
-        .map_err(|e| format!("Failed to stop the game: {}", e))?;
+    for pattern in &exec_patterns {
+        let _ = std::process::Command::new("/usr/bin/pkill")
+            .args(["-TERM", "-f", pattern])
+            .status()
+            .map_err(|e| format!("Failed to stop the game: {}", e))?;
+    }
 
-    if wait_for_process_exit_pattern(&exec_pattern, 5_000) {
+    if wait_for_process_exit_patterns(&exec_patterns, 5_000) {
         return Ok(());
     }
 
-    let _ = std::process::Command::new("/usr/bin/pkill")
-        .args(["-KILL", "-f", &exec_pattern])
-        .status()
-        .map_err(|e| format!("Failed to force stop the game: {}", e))?;
+    for pattern in &exec_patterns {
+        let _ = std::process::Command::new("/usr/bin/pkill")
+            .args(["-KILL", "-f", pattern])
+            .status()
+            .map_err(|e| format!("Failed to force stop the game: {}", e))?;
+    }
 
-    if !wait_for_process_exit_pattern(&exec_pattern, 3_000) {
+    if !wait_for_process_exit_patterns(&exec_patterns, 3_000) {
         return Err("Game did not stop in time.".to_string());
     }
 
