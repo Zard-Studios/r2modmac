@@ -1209,9 +1209,11 @@ fn is_process_running_for_pattern(pattern: &str) -> bool {
 	}
 
 	#[cfg(windows)] {
+		use std::os::windows::process::CommandExt;
 		let gamefile_name = pattern.replace("\\", "");
 
 		std::process::Command::new("tasklist")
+		.creation_flags(0x08000000)
 		.args(["/FI", &format!("IMAGENAME eq {}", gamefile_name), "/NH", "/FO", "CSV"])
 		.output()
 		.map(|out| {
