@@ -45,7 +45,10 @@ fn run_volume_watcher(app: AppHandle) -> Result<(), String> {
     if watched_roots.is_empty() {
         eprintln!("[volume_watcher] no mount roots available to watch");
     } else {
-        eprintln!("[volume_watcher] watching {} mount root(s)", watched_roots.len());
+        eprintln!(
+            "[volume_watcher] watching {} mount root(s)",
+            watched_roots.len()
+        );
     }
 
     loop {
@@ -125,14 +128,26 @@ fn collect_watch_roots() -> HashSet<WatchRoot> {
 
     #[cfg(target_os = "macos")]
     {
-        push_root(&mut roots, PathBuf::from("/Volumes"), RecursiveMode::NonRecursive);
+        push_root(
+            &mut roots,
+            PathBuf::from("/Volumes"),
+            RecursiveMode::NonRecursive,
+        );
     }
 
     #[cfg(target_os = "linux")]
     {
-        push_root(&mut roots, PathBuf::from("/media"), RecursiveMode::Recursive);
+        push_root(
+            &mut roots,
+            PathBuf::from("/media"),
+            RecursiveMode::Recursive,
+        );
         push_root(&mut roots, PathBuf::from("/mnt"), RecursiveMode::Recursive);
-        push_root(&mut roots, PathBuf::from("/run/media"), RecursiveMode::Recursive);
+        push_root(
+            &mut roots,
+            PathBuf::from("/run/media"),
+            RecursiveMode::Recursive,
+        );
     }
 
     #[cfg(target_os = "windows")]

@@ -13,15 +13,15 @@ pub fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::
     if !dst.exists() {
         fs::create_dir_all(dst)?;
     }
-    
+
     let mut files_copied = 0;
     let mut dirs_created = 0;
-    
+
     for entry in fs::read_dir(src)? {
         let entry = entry?;
         let file_type = entry.file_type()?;
         let dest_path = dst.join(entry.file_name());
-        
+
         if file_type.is_dir() {
             if !dest_path.exists() {
                 fs::create_dir_all(&dest_path)?;
@@ -31,7 +31,9 @@ pub fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::
         } else {
             // Check if file exists and has same size to skip copy
             let should_copy = if dest_path.exists() {
-                if let (Ok(src_meta), Ok(dst_meta)) = (fs::metadata(entry.path()), fs::metadata(&dest_path)) {
+                if let (Ok(src_meta), Ok(dst_meta)) =
+                    (fs::metadata(entry.path()), fs::metadata(&dest_path))
+                {
                     // Start with size check - simple and fast
                     if src_meta.len() != dst_meta.len() {
                         true
@@ -59,17 +61,19 @@ pub fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::
             }
         }
     }
-    
+
     if files_copied > 0 || dirs_created > 0 {
-        eprintln!("[copy_dir_recursive] {:?} -> {:?}: {} files, {} dirs", 
-            src.file_name().unwrap_or_default(), 
-            dst.file_name().unwrap_or_default(), 
-            files_copied, dirs_created);
+        eprintln!(
+            "[copy_dir_recursive] {:?} -> {:?}: {} files, {} dirs",
+            src.file_name().unwrap_or_default(),
+            dst.file_name().unwrap_or_default(),
+            files_copied,
+            dirs_created
+        );
     }
-    
+
     Ok(())
 }
-
 
 /// Calculate directory size recursively
 pub fn calculate_dir_size(path: &std::path::Path) -> std::io::Result<u64> {
@@ -246,14 +250,22 @@ pub fn repair_backslash_named_entries(root: &std::path::Path) -> Result<(), Stri
             continue;
         }
 
-        let relative = source
-            .strip_prefix(root)
-            .map_err(|e| format!("Failed to normalize malformed entry {}: {}", source.display(), e))?;
+        let relative = source.strip_prefix(root).map_err(|e| {
+            format!(
+                "Failed to normalize malformed entry {}: {}",
+                source.display(),
+                e
+            )
+        })?;
 
         let mut normalized_relative = std::path::PathBuf::new();
         for component in relative.components() {
             if let std::path::Component::Normal(value) = component {
-                for part in value.to_string_lossy().split('\\').filter(|part| !part.is_empty()) {
+                for part in value
+                    .to_string_lossy()
+                    .split('\\')
+                    .filter(|part| !part.is_empty())
+                {
                     normalized_relative.push(part);
                 }
             }
@@ -265,21 +277,45 @@ pub fn repair_backslash_named_entries(root: &std::path::Path) -> Result<(), Stri
 
         let target = root.join(&normalized_relative);
         if let Some(parent) = target.parent() {
-            fs::create_dir_all(parent)
-                .map_err(|e| format!("Failed to create repaired path {}: {}", parent.display(), e))?;
+            fs::create_dir_all(parent).map_err(|e| {
+                format!("Failed to create repaired path {}: {}", parent.display(), e)
+            })?;
         }
 
         if source.is_dir() {
             if target.exists() {
-                copy_dir_recursive(&source, &target)
-                    .map_err(|e| format!("Failed to merge repaired directory {} -> {}: {}", source.display(), target.display(), e))?;
-                fs::remove_dir_all(&source)
-                    .map_err(|e| format!("Failed to remove malformed directory {}: {}", source.display(), e))?;
+                copy_dir_recursive(&source, &target).map_err(|e| {
+                    format!(
+                        "Failed to merge repaired directory {} -> {}: {}",
+                        source.display(),
+                        target.display(),
+                        e
+                    )
+                })?;
+                fs::remove_dir_all(&source).map_err(|e| {
+                    format!(
+                        "Failed to remove malformed directory {}: {}",
+                        source.display(),
+                        e
+                    )
+                })?;
             } else if let Err(rename_err) = fs::rename(&source, &target) {
-                copy_dir_recursive(&source, &target)
-                    .map_err(|e| format!("Failed to repair directory {} -> {} after rename error {}: {}", source.display(), target.display(), rename_err, e))?;
-                fs::remove_dir_all(&source)
-                    .map_err(|e| format!("Failed to remove malformed directory {}: {}", source.display(), e))?;
+                copy_dir_recursive(&source, &target).map_err(|e| {
+                    format!(
+                        "Failed to repair directory {} -> {} after rename error {}: {}",
+                        source.display(),
+                        target.display(),
+                        rename_err,
+                        e
+                    )
+                })?;
+                fs::remove_dir_all(&source).map_err(|e| {
+                    format!(
+                        "Failed to remove malformed directory {}: {}",
+                        source.display(),
+                        e
+                    )
+                })?;
             }
         } else {
             if target.exists() || target.is_symlink() {
@@ -291,17 +327,28 @@ pub fn repair_backslash_named_entries(root: &std::path::Path) -> Result<(), Stri
             }
 
             if let Err(rename_err) = fs::rename(&source, &target) {
-                fs::copy(&source, &target)
-                    .map_err(|e| format!("Failed to repair file {} -> {} after rename error {}: {}", source.display(), target.display(), rename_err, e))?;
-                fs::remove_file(&source)
-                    .map_err(|e| format!("Failed to remove malformed file {}: {}", source.display(), e))?;
+                fs::copy(&source, &target).map_err(|e| {
+                    format!(
+                        "Failed to repair file {} -> {} after rename error {}: {}",
+                        source.display(),
+                        target.display(),
+                        rename_err,
+                        e
+                    )
+                })?;
+                fs::remove_file(&source).map_err(|e| {
+                    format!(
+                        "Failed to remove malformed file {}: {}",
+                        source.display(),
+                        e
+                    )
+                })?;
             }
         }
     }
 
     Ok(())
 }
-
 
 #[command]
 pub fn check_directory_exists(path: String) -> bool {

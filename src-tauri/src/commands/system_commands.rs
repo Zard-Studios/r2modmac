@@ -1,11 +1,11 @@
-use std::fs;
-use std::collections::HashMap;
-use futures_util::stream::{self, StreamExt};
-use tauri::{command, AppHandle, Emitter, Manager, State};
 use crate::models::shared::*;
+use futures_util::stream::{self, StreamExt};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::fs;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
+use tauri::{command, AppHandle, Emitter, Manager, State};
 
 #[command]
 pub async fn fetch_communities() -> Result<Vec<serde_json::Value>, String> {
@@ -13,22 +13,32 @@ pub async fn fetch_communities() -> Result<Vec<serde_json::Value>, String> {
     let mut all_results = Vec::new();
 
     while let Some(current_url) = url {
-        let resp = reqwest::get(&current_url).await.map_err(|e| e.to_string())?;
+        let resp = reqwest::get(&current_url)
+            .await
+            .map_err(|e| e.to_string())?;
         let json: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
 
         if let Some(results) = json.get("results").and_then(|v| v.as_array()) {
-            eprintln!("[fetch_communities] Fetched {} communities from {}", results.len(), current_url);
+            eprintln!(
+                "[fetch_communities] Fetched {} communities from {}",
+                results.len(),
+                current_url
+            );
             all_results.extend(results.clone());
         }
 
         // API uses pagination.next_link instead of "next"
-        url = json.get("pagination")
+        url = json
+            .get("pagination")
             .and_then(|p| p.get("next_link"))
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
     }
 
-    eprintln!("[fetch_communities] Total communities fetched: {}", all_results.len());
+    eprintln!(
+        "[fetch_communities] Total communities fetched: {}",
+        all_results.len()
+    );
     Ok(all_results)
 }
 
@@ -53,12 +63,15 @@ pub async fn fetch_community_images() -> Result<std::collections::HashMap<String
 
     // Regex for img tags (fallback)
     // Matches: <img ... src="https://gcdn.thunderstore.io/live/community/risk-of-rain-2/..." ...>
-    let re_img = regex::Regex::new(r#"src="(https://gcdn\.thunderstore\.io/live/community/([^/]+)/[^"]+)""#)
-        .map_err(|e| e.to_string())?;
+    let re_img =
+        regex::Regex::new(r#"src="(https://gcdn\.thunderstore\.io/live/community/([^/]+)/[^"]+)""#)
+            .map_err(|e| e.to_string())?;
 
     for cap in re_img.captures_iter(&html) {
         if let (Some(url), Some(id)) = (cap.get(1), cap.get(2)) {
-             images.entry(id.as_str().to_string()).or_insert(url.as_str().to_string());
+            images
+                .entry(id.as_str().to_string())
+                .or_insert(url.as_str().to_string());
         }
     }
 
@@ -133,10 +146,7 @@ fn similarity_score(query: &str, candidate: &str) -> f32 {
         return 0.0;
     }
 
-    let overlap = q_tokens
-        .iter()
-        .filter(|t| c_tokens.contains(t))
-        .count() as f32;
+    let overlap = q_tokens.iter().filter(|t| c_tokens.contains(t)).count() as f32;
     overlap / (q_tokens.len().max(c_tokens.len()) as f32)
 }
 
@@ -172,7 +182,10 @@ async fn fetch_steam_platforms(client: &reqwest::Client, app_id: u32) -> Option<
     })
 }
 
-async fn resolve_from_steam(client: &reqwest::Client, input: &PlatformLookupInput) -> Option<PlatformInfo> {
+async fn resolve_from_steam(
+    client: &reqwest::Client,
+    input: &PlatformLookupInput,
+) -> Option<PlatformInfo> {
     let mut best: Option<(SteamSearchItem, f32)> = None;
     let mut search_terms = vec![input.name.clone(), input.identifier.replace('-', " ")];
     // Composite community names like "Titanfall 2: Northstar" should also try base game title.
@@ -275,7 +288,10 @@ async fn resolve_from_steam(client: &reqwest::Client, input: &PlatformLookupInpu
     Some(info)
 }
 
-async fn resolve_from_wikipedia(client: &reqwest::Client, input: &PlatformLookupInput) -> Option<PlatformInfo> {
+async fn resolve_from_wikipedia(
+    client: &reqwest::Client,
+    input: &PlatformLookupInput,
+) -> Option<PlatformInfo> {
     let query = format!("{} {}", input.name, input.identifier.replace('-', " "));
     for lang in ["en", "it"] {
         let search_url = format!(
@@ -409,7 +425,10 @@ async fn resolve_from_wikipedia(client: &reqwest::Client, input: &PlatformLookup
     None
 }
 
-async fn resolve_from_wikidata(client: &reqwest::Client, input: &PlatformLookupInput) -> Option<PlatformInfo> {
+async fn resolve_from_wikidata(
+    client: &reqwest::Client,
+    input: &PlatformLookupInput,
+) -> Option<PlatformInfo> {
     let mut best_qid: Option<(String, f32, bool)> = None;
     for term in [input.name.as_str(), input.identifier.as_str()] {
         let search_url = format!(
@@ -441,11 +460,19 @@ async fn resolve_from_wikidata(client: &reqwest::Client, input: &PlatformLookupI
                 Some(v) => v.to_string(),
                 None => continue,
             };
-            let label = item.get("label").and_then(|v| v.as_str()).unwrap_or_default();
-            let description = item.get("description").and_then(|v| v.as_str()).unwrap_or_default();
+            let label = item
+                .get("label")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
+            let description = item
+                .get("description")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
             let description_lc = description.to_lowercase();
-            let is_video_game = description_lc.contains("video game") || description_lc.contains("videogame");
-            let mut score = similarity_score(&input.name, label).max(similarity_score(&input.identifier, label));
+            let is_video_game =
+                description_lc.contains("video game") || description_lc.contains("videogame");
+            let mut score = similarity_score(&input.name, label)
+                .max(similarity_score(&input.identifier, label));
             if is_video_game {
                 score += 0.12;
             }
@@ -531,7 +558,11 @@ async fn resolve_from_wikidata(client: &reqwest::Client, input: &PlatformLookupI
         if lbl.contains("windows") {
             windows = true;
         }
-        if lbl.contains("macos") || lbl.contains("mac os") || lbl.contains("os x") || lbl.contains("macintosh") {
+        if lbl.contains("macos")
+            || lbl.contains("mac os")
+            || lbl.contains("os x")
+            || lbl.contains("macintosh")
+        {
             mac = true;
         }
         if lbl.contains("linux") {
@@ -617,7 +648,10 @@ fn heuristic_platform(input: &PlatformLookupInput) -> PlatformInfo {
     }
 }
 
-fn merge_platform_candidates(input: &PlatformLookupInput, candidates: Vec<PlatformInfo>) -> PlatformInfo {
+fn merge_platform_candidates(
+    input: &PlatformLookupInput,
+    candidates: Vec<PlatformInfo>,
+) -> PlatformInfo {
     if candidates.is_empty() {
         return heuristic_platform(input);
     }
@@ -626,7 +660,11 @@ fn merge_platform_candidates(input: &PlatformLookupInput, candidates: Vec<Platfo
     let steam_candidate = candidates
         .iter()
         .filter(|c| is_steam_source(&c.source))
-        .max_by(|a, b| a.confidence.partial_cmp(&b.confidence).unwrap_or(std::cmp::Ordering::Equal))
+        .max_by(|a, b| {
+            a.confidence
+                .partial_cmp(&b.confidence)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
         .cloned();
 
     // Strong Steam match is authoritative for platform flags.
@@ -645,7 +683,11 @@ fn merge_platform_candidates(input: &PlatformLookupInput, candidates: Vec<Platfo
     if let Some(authoritative_steam) = candidates
         .iter()
         .filter(|c| is_steam_source(&c.source))
-        .max_by(|a, b| a.confidence.partial_cmp(&b.confidence).unwrap_or(std::cmp::Ordering::Equal))
+        .max_by(|a, b| {
+            a.confidence
+                .partial_cmp(&b.confidence)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
         .cloned()
     {
         if authoritative_steam.confidence >= 0.9 {
@@ -654,7 +696,11 @@ fn merge_platform_candidates(input: &PlatformLookupInput, candidates: Vec<Platfo
     }
 
     let mut ordered = candidates;
-    ordered.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap_or(std::cmp::Ordering::Equal));
+    ordered.sort_by(|a, b| {
+        b.confidence
+            .partial_cmp(&a.confidence)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     let best_confidence = ordered.first().map(|c| c.confidence).unwrap_or(0.0);
 
     let mut considered: Vec<PlatformInfo> = Vec::new();
@@ -735,39 +781,40 @@ pub async fn resolve_community_platforms(
         unresolved.push(game);
     }
 
-    let resolved_pairs: Vec<(String, PlatformInfo)> = stream::iter(unresolved.into_iter().map(|game| {
-        let client = client.clone();
-        async move {
-            let key = game.identifier.to_lowercase();
-            let steam = resolve_from_steam(&client, &game).await;
-            if let Some(steam_info) = steam.clone() {
-                if steam_info.confidence >= 0.9 {
-                    return (key, steam_info);
+    let resolved_pairs: Vec<(String, PlatformInfo)> =
+        stream::iter(unresolved.into_iter().map(|game| {
+            let client = client.clone();
+            async move {
+                let key = game.identifier.to_lowercase();
+                let steam = resolve_from_steam(&client, &game).await;
+                if let Some(steam_info) = steam.clone() {
+                    if steam_info.confidence >= 0.9 {
+                        return (key, steam_info);
+                    }
                 }
-            }
 
-            let (wikidata, wiki) = tokio::join!(
-                resolve_from_wikidata(&client, &game),
-                resolve_from_wikipedia(&client, &game)
-            );
-            let mut candidates: Vec<PlatformInfo> = Vec::new();
-            if let Some(s) = steam {
-                candidates.push(s);
-            }
-            if let Some(wd) = wikidata {
-                candidates.push(wd);
-            }
-            if let Some(w) = wiki {
-                candidates.push(w);
-            }
+                let (wikidata, wiki) = tokio::join!(
+                    resolve_from_wikidata(&client, &game),
+                    resolve_from_wikipedia(&client, &game)
+                );
+                let mut candidates: Vec<PlatformInfo> = Vec::new();
+                if let Some(s) = steam {
+                    candidates.push(s);
+                }
+                if let Some(wd) = wikidata {
+                    candidates.push(wd);
+                }
+                if let Some(w) = wiki {
+                    candidates.push(w);
+                }
 
-            let resolved = merge_platform_candidates(&game, candidates);
-            (key, resolved)
-        }
-    }))
-    .buffer_unordered(10)
-    .collect()
-    .await;
+                let resolved = merge_platform_candidates(&game, candidates);
+                (key, resolved)
+            }
+        }))
+        .buffer_unordered(10)
+        .collect()
+        .await;
 
     {
         let mut cache = state.platform_cache.write().await;
@@ -787,13 +834,20 @@ pub async fn resolve_community_platforms(
 }
 
 #[command]
-pub async fn confirm_dialog(app: AppHandle, title: String, message: String) -> Result<bool, String> {
+pub async fn confirm_dialog(
+    app: AppHandle,
+    title: String,
+    message: String,
+) -> Result<bool, String> {
     use tauri_plugin_dialog::DialogExt;
     use tauri_plugin_dialog::MessageDialogButtons;
 
-    let window = app.get_webview_window("main").ok_or("Main window not found")?;
+    let window = app
+        .get_webview_window("main")
+        .ok_or("Main window not found")?;
 
-    let ans = app.dialog()
+    let ans = app
+        .dialog()
         .message(message)
         .title(title)
         .buttons(MessageDialogButtons::OkCancel)
@@ -808,7 +862,9 @@ pub async fn alert_dialog(app: AppHandle, title: String, message: String) -> Res
     use tauri_plugin_dialog::DialogExt;
     use tauri_plugin_dialog::MessageDialogButtons;
 
-    let window = app.get_webview_window("main").ok_or("Main window not found")?;
+    let window = app
+        .get_webview_window("main")
+        .ok_or("Main window not found")?;
 
     app.dialog()
         .message(message)
@@ -828,7 +884,10 @@ pub async fn select_folder(app: AppHandle) -> Result<Option<String>, String> {
 }
 
 #[command]
-pub async fn select_file(app: AppHandle, filters: Option<Vec<FileFilter>>) -> Result<Option<String>, String> {
+pub async fn select_file(
+    app: AppHandle,
+    filters: Option<Vec<FileFilter>>,
+) -> Result<Option<String>, String> {
     use tauri_plugin_dialog::DialogExt;
     let mut builder = app.dialog().file();
 
@@ -859,13 +918,17 @@ pub async fn read_image(path: String) -> Result<Option<String>, String> {
     let base64_str = base64::engine::general_purpose::STANDARD.encode(&bytes);
 
     // Determine mime type based on extension
-    let extension = path_buf.extension().and_then(|e| e.to_str()).unwrap_or("png").to_lowercase();
+    let extension = path_buf
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("png")
+        .to_lowercase();
     let mime = match extension.as_str() {
         "jpg" | "jpeg" => "image/jpeg",
         "png" => "image/png",
         "webp" => "image/webp",
         "gif" => "image/gif",
-        _ => "application/octet-stream"
+        _ => "application/octet-stream",
     };
 
     Ok(Some(format!("data:{};base64,{}", mime, base64_str)))
@@ -908,7 +971,10 @@ pub async fn check_update(current_version: String) -> Result<UpdateInfo, String>
         return Err(format!("GitHub API error: {}", resp.status()));
     }
 
-    let release: GithubRelease = resp.json().await.map_err(|e| format!("Parse error: {}", e))?;
+    let release: GithubRelease = resp
+        .json()
+        .await
+        .map_err(|e| format!("Parse error: {}", e))?;
 
     // Simple version comparison (naive string compare for now, ideally use semver)
     // Assume tag_name is "vX.X.X" and current_version is "X.X.X"
@@ -929,7 +995,9 @@ pub async fn check_update(current_version: String) -> Result<UpdateInfo, String>
     };
 
     // Find matching DMG/archive: prioritize exact arch match, fallback to universal
-    let asset = release.assets.iter()
+    let asset = release
+        .assets
+        .iter()
         .find(|a| {
             let name = a.name.to_lowercase();
             (name.ends_with(".dmg") || name.ends_with(".tar.gz") || name.ends_with(".zip"))
@@ -944,7 +1012,10 @@ pub async fn check_update(current_version: String) -> Result<UpdateInfo, String>
             })
         });
 
-    eprintln!("[check_update] Selected asset: {:?}", asset.map(|a| &a.name));
+    eprintln!(
+        "[check_update] Selected asset: {:?}",
+        asset.map(|a| &a.name)
+    );
 
     Ok(UpdateInfo {
         available: is_newer,
@@ -959,7 +1030,11 @@ pub async fn install_update(app: AppHandle, download_url: String) -> Result<(), 
     use std::process::Command;
 
     // 1. Download
-    let temp_dir = app.path().temp_dir().map_err(|e| e.to_string())?.join("r2modmac_update");
+    let temp_dir = app
+        .path()
+        .temp_dir()
+        .map_err(|e| e.to_string())?
+        .join("r2modmac_update");
     if temp_dir.exists() {
         fs::remove_dir_all(&temp_dir).map_err(|e| e.to_string())?;
     }
@@ -971,10 +1046,12 @@ pub async fn install_update(app: AppHandle, download_url: String) -> Result<(), 
     eprintln!("[install_update] Downloading to {:?}", file_path);
 
     // Stream download to calculate progress
-    use std::io::Write;
     use futures_util::StreamExt;
+    use std::io::Write;
 
-    let response = reqwest::get(&download_url).await.map_err(|e| e.to_string())?;
+    let response = reqwest::get(&download_url)
+        .await
+        .map_err(|e| e.to_string())?;
     let total_size = response.content_length().unwrap_or(0);
 
     let mut file = fs::File::create(&file_path).map_err(|e| e.to_string())?;
@@ -1004,34 +1081,46 @@ pub async fn install_update(app: AppHandle, download_url: String) -> Result<(), 
     let exe_string = current_exe.to_string_lossy();
     if exe_string.contains("/target/debug/") || exe_string.contains("/target/release/") {
         eprintln!("Dev/Build environment detected. Skipping destructive update.");
-        return Err("Cannot auto-update in development environment. Build a release bundle to test.".to_string());
+        return Err(
+            "Cannot auto-update in development environment. Build a release bundle to test."
+                .to_string(),
+        );
     }
 
     // Determine extraction/mount commands based on file type
-    let (extract_command, app_source) = if filename.ends_with(".tar.gz") {
-        (
-            format!("tar -xzf '{}' -C '{}'", file_path.to_string_lossy(), temp_dir.to_string_lossy()),
-            format!("{}/r2modmac.app", temp_dir.to_string_lossy())
-        )
-    } else if filename.ends_with(".zip") {
-        (
-            format!("unzip -o '{}' -d '{}'", file_path.to_string_lossy(), temp_dir.to_string_lossy()),
-            format!("{}/r2modmac.app", temp_dir.to_string_lossy())
-        )
-    } else if filename.ends_with(".dmg") {
-        // DMG: mount readonly to private folder, copy app, unmount
-        // "Extracting with style": hdiutil attach ...
-        let mount_point = format!("{}/dmg_mount", temp_dir.to_string_lossy());
-        (
-            format!(
+    let (extract_command, app_source) =
+        if filename.ends_with(".tar.gz") {
+            (
+                format!(
+                    "tar -xzf '{}' -C '{}'",
+                    file_path.to_string_lossy(),
+                    temp_dir.to_string_lossy()
+                ),
+                format!("{}/r2modmac.app", temp_dir.to_string_lossy()),
+            )
+        } else if filename.ends_with(".zip") {
+            (
+                format!(
+                    "unzip -o '{}' -d '{}'",
+                    file_path.to_string_lossy(),
+                    temp_dir.to_string_lossy()
+                ),
+                format!("{}/r2modmac.app", temp_dir.to_string_lossy()),
+            )
+        } else if filename.ends_with(".dmg") {
+            // DMG: mount readonly to private folder, copy app, unmount
+            // "Extracting with style": hdiutil attach ...
+            let mount_point = format!("{}/dmg_mount", temp_dir.to_string_lossy());
+            (
+                format!(
                 "mkdir -p '{}' && hdiutil attach '{}' -mountpoint '{}' -nobrowse -quiet -readonly",
                 mount_point, file_path.to_string_lossy(), mount_point
             ),
-            format!("{}/r2modmac.app", mount_point)
-        )
-    } else {
-        return Err("Unknown update format".to_string());
-    };
+                format!("{}/r2modmac.app", mount_point),
+            )
+        } else {
+            return Err("Unknown update format".to_string());
+        };
 
     let is_dmg = filename.ends_with(".dmg");
     let mount_point = format!("{}/dmg_mount", temp_dir.to_string_lossy());
@@ -1040,7 +1129,9 @@ pub async fn install_update(app: AppHandle, download_url: String) -> Result<(), 
     // Bundle path usually ends in .app.
     // Guard ensured we are likely safe, but let's defaulting to /Applications just in case.
     let current_app_path = current_exe
-        .parent().and_then(|p| p.parent()).and_then(|p| p.parent())
+        .parent()
+        .and_then(|p| p.parent())
+        .and_then(|p| p.parent())
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or("/Applications/r2modmac.app".to_string());
 
@@ -1053,7 +1144,7 @@ pub async fn install_update(app: AppHandle, download_url: String) -> Result<(), 
 
     // The script waits for PID, mounts/extracts, deletes OLD app, moves NEW app, launches NEW app, cleans up.
     let script = format!(
-r#"#!/bin/bash
+        r#"#!/bin/bash
 PID={}
 APP_PATH="{}"
 UPDATE_DIR="{}"
@@ -1092,8 +1183,10 @@ rm -rf "$UPDATE_DIR"
     );
 
     fs::write(&script_path, script).map_err(|e| e.to_string())?;
-    #[cfg(unix)] {
-        fs::set_permissions(&script_path, fs::Permissions::from_mode(0o755)).map_err(|e| e.to_string())?;
+    #[cfg(unix)]
+    {
+        fs::set_permissions(&script_path, fs::Permissions::from_mode(0o755))
+            .map_err(|e| e.to_string())?;
     }
     // 3. Launch Script detached
     eprintln!("[install_update] Launching update script...");
@@ -1116,8 +1209,12 @@ pub fn compare_versions(v1: &str, v2: &str) -> bool {
     for i in 0..std::cmp::max(v1_parts.len(), v2_parts.len()) {
         let p1 = v1_parts.get(i).unwrap_or(&0);
         let p2 = v2_parts.get(i).unwrap_or(&0);
-        if p1 > p2 { return true; }
-        if p1 < p2 { return false; }
+        if p1 > p2 {
+            return true;
+        }
+        if p1 < p2 {
+            return false;
+        }
     }
     false
 }

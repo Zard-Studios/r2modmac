@@ -126,12 +126,24 @@ fn manifest_scope_dir(app: &AppHandle, profile_id: &str, scope: &str) -> Result<
         .join(scope))
 }
 
-fn manifest_file_path(app: &AppHandle, profile_id: &str, scope: &str, mod_full_name: &str) -> Result<PathBuf, String> {
-    Ok(manifest_scope_dir(app, profile_id, scope)?.join(format!("{}.json", manifest_slug(mod_full_name))))
+fn manifest_file_path(
+    app: &AppHandle,
+    profile_id: &str,
+    scope: &str,
+    mod_full_name: &str,
+) -> Result<PathBuf, String> {
+    Ok(manifest_scope_dir(app, profile_id, scope)?
+        .join(format!("{}.json", manifest_slug(mod_full_name))))
 }
 
-fn backup_dir_path(app: &AppHandle, profile_id: &str, scope: &str, mod_full_name: &str) -> Result<PathBuf, String> {
-    Ok(manifest_scope_dir(app, profile_id, scope)?.join(format!("{}_backup", manifest_slug(mod_full_name))))
+fn backup_dir_path(
+    app: &AppHandle,
+    profile_id: &str,
+    scope: &str,
+    mod_full_name: &str,
+) -> Result<PathBuf, String> {
+    Ok(manifest_scope_dir(app, profile_id, scope)?
+        .join(format!("{}_backup", manifest_slug(mod_full_name))))
 }
 
 fn normalize_relative_string(path: &Path) -> Option<String> {
@@ -299,7 +311,10 @@ pub fn load_owned_mod_manifests(
             Ok(manifest) => manifest,
             Err(_) => continue,
         };
-        let stem = path.file_stem().and_then(|value| value.to_str()).unwrap_or_default();
+        let stem = path
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default();
         manifests.push(StoredModOwnershipManifest {
             backup_dir: manifests_dir.join(format!("{}_backup", stem)),
             manifest_path: path,
@@ -391,7 +406,9 @@ fn best_effort_remove_generated_entries(
         for entry in entries.filter_map(|entry| entry.ok()) {
             let path = entry.path();
             let name = entry.file_name().to_string_lossy().to_string();
-            if !entry_matches_terms(&name, &removed_terms) || entry_matches_terms(&name, &kept_terms) {
+            if !entry_matches_terms(&name, &removed_terms)
+                || entry_matches_terms(&name, &kept_terms)
+            {
                 continue;
             }
 
@@ -454,7 +471,11 @@ pub fn cleanup_owned_mod_manifests(
 
             if target_path.exists() || target_path.is_symlink() {
                 remove_path_if_present(&target_path).map_err(|e| {
-                    format!("Failed to remove managed mod file {}: {}", target_path.display(), e)
+                    format!(
+                        "Failed to remove managed mod file {}: {}",
+                        target_path.display(),
+                        e
+                    )
                 })?;
             }
             prune_empty_parent_dirs(&target_path, target_root);
@@ -489,7 +510,8 @@ pub fn cleanup_owned_mod_manifests(
         }
     }
 
-    let _ = best_effort_remove_generated_entries(target_root, manifests_to_remove, manifests_to_keep)?;
+    let _ =
+        best_effort_remove_generated_entries(target_root, manifests_to_remove, manifests_to_keep)?;
 
     let mut removed_count = 0usize;
     for entry in manifests_to_remove {

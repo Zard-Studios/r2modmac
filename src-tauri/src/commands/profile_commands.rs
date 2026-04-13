@@ -1,8 +1,10 @@
+use crate::commands::game_commands::{ensure_macos_steam_launch_options, get_game_path};
+use crate::models::shared::{
+    get_balatro_mods_dir, is_balatro_game_path, is_balatro_identifier, AppState,
+};
+use crate::utils::file_ops::*;
 use std::fs;
 use tauri::{command, AppHandle, Manager, State};
-use crate::utils::file_ops::*;
-use crate::commands::game_commands::{ensure_macos_steam_launch_options, get_game_path};
-use crate::models::shared::{AppState, get_balatro_mods_dir, is_balatro_game_path, is_balatro_identifier};
 
 fn is_bepinex_shell_script(name: &str) -> bool {
     let lower = name.to_lowercase();
@@ -16,17 +18,21 @@ pub fn get_profiles(app: AppHandle) -> Result<Vec<serde_json::Value>, String> {
         return Ok(vec![]);
     }
     let data = fs::read_to_string(profile_path).map_err(|e| e.to_string())?;
-    let profiles: Vec<serde_json::Value> = serde_json::from_str(&data).map_err(|e| e.to_string())?;
+    let profiles: Vec<serde_json::Value> =
+        serde_json::from_str(&data).map_err(|e| e.to_string())?;
     Ok(profiles)
 }
 
 #[command]
-pub async fn save_profiles(app: AppHandle, profiles: Vec<serde_json::Value>) -> Result<bool, String> {
+pub async fn save_profiles(
+    app: AppHandle,
+    profiles: Vec<serde_json::Value>,
+) -> Result<bool, String> {
     let profile_path = app.path().app_data_dir().unwrap().join("profiles.json");
-    
+
     // Serialize first (fast operation)
     let data = serde_json::to_string_pretty(&profiles).map_err(|e| e.to_string())?;
-    
+
     // Write to disk in blocking thread pool to avoid blocking async runtime
     tokio::task::spawn_blocking(move || {
         // Ensure dir exists
@@ -38,23 +44,34 @@ pub async fn save_profiles(app: AppHandle, profiles: Vec<serde_json::Value>) -> 
     .await
     .map_err(|e| format!("Task join error: {}", e))?
     .map_err(|e| e.to_string())?;
-    
+
     Ok(true)
 }
 
 #[command]
-pub async fn delete_profile_folder(app: AppHandle, profile_id: String, game_identifier: Option<String>, platform: Option<String>) -> Result<bool, String> {
-    let profile_dir = app.path().app_data_dir().unwrap().join("profiles").join(&profile_id);
-    
+pub async fn delete_profile_folder(
+    app: AppHandle,
+    profile_id: String,
+    game_identifier: Option<String>,
+    platform: Option<String>,
+) -> Result<bool, String> {
+    let profile_dir = app
+        .path()
+        .app_data_dir()
+        .unwrap()
+        .join("profiles")
+        .join(&profile_id);
+
     // If game_identifier is provided, clean up ALL BepInEx-related files from the game folder
     if let Some(game_id) = game_identifier {
         let is_mac_profile = platform.as_deref() == Some("mac");
         let is_balatro_game = is_balatro_identifier(&game_id);
-        if let Ok(Some(game_path_str)) = get_game_path(app.clone(), game_id, platform.clone()).await {
+        if let Ok(Some(game_path_str)) = get_game_path(app.clone(), game_id, platform.clone()).await
+        {
             let game_path = std::path::Path::new(&game_path_str);
             let mut removed_runtime_artifact = false;
             let is_balatro = is_mac_profile && (is_balatro_game || is_balatro_game_path(game_path));
-            
+
             // Remove BepInEx folder
             let bepinex_path = game_path.join("BepInEx");
             if bepinex_path.exists() {
@@ -62,7 +79,7 @@ pub async fn delete_profile_folder(app: AppHandle, profile_id: String, game_iden
                 let _ = fs::remove_dir_all(&bepinex_path);
                 removed_runtime_artifact = true;
             }
-            
+
             // Remove winhttp.dll
             let winhttp_path = game_path.join("winhttp.dll");
             if winhttp_path.exists() {
@@ -70,7 +87,7 @@ pub async fn delete_profile_folder(app: AppHandle, profile_id: String, game_iden
                 let _ = fs::remove_file(&winhttp_path);
                 removed_runtime_artifact = true;
             }
-            
+
             // Remove doorstop_config.ini
             let doorstop_path = game_path.join("doorstop_config.ini");
             if doorstop_path.exists() {
@@ -118,7 +135,9 @@ pub async fn delete_profile_folder(app: AppHandle, profile_id: String, game_iden
                     for entry in entries.filter_map(|e| e.ok()) {
                         let path = entry.path();
                         let name = entry.file_name().to_string_lossy().to_string();
-                        if path.is_file() && (is_bepinex_shell_script(&name) || name.ends_with("_DISABLED")) {
+                        if path.is_file()
+                            && (is_bepinex_shell_script(&name) || name.ends_with("_DISABLED"))
+                        {
                             eprintln!("[delete_profile] Removing {} from game", name);
                             let _ = fs::remove_file(&path);
                             removed_runtime_artifact = true;
@@ -150,23 +169,26 @@ pub async fn delete_profile_folder(app: AppHandle, profile_id: String, game_iden
                             .parent()
                             .map(|p| p.join("Mods_DISABLED"))
                             .unwrap_or_else(|| mods_dir.join("Mods_DISABLED"));
-                        for dir_path in [
-                            mods_dir.clone(),
-                            disabled_dir,
-                        ] {
+                        for dir_path in [mods_dir.clone(), disabled_dir] {
                             if dir_path.exists() {
-                                eprintln!("[delete_profile] Removing Balatro mods dir {:?}", dir_path);
+                                eprintln!(
+                                    "[delete_profile] Removing Balatro mods dir {:?}",
+                                    dir_path
+                                );
                                 let _ = fs::remove_dir_all(&dir_path);
                             }
                         }
                     }
                 }
             }
-            
-            eprintln!("[delete_profile] Cleaned up game folder: {}", game_path.display());
+
+            eprintln!(
+                "[delete_profile] Cleaned up game folder: {}",
+                game_path.display()
+            );
         }
     }
-    
+
     // Delete the profile folder
     if profile_dir.exists() {
         fs::remove_dir_all(profile_dir).map_err(|e| e.to_string())?;
@@ -178,15 +200,23 @@ pub async fn delete_profile_folder(app: AppHandle, profile_id: String, game_iden
 
 #[command]
 pub async fn open_profile_folder(app: AppHandle, profile_id: String) -> Result<(), String> {
-    let profile_dir = app.path().app_data_dir().unwrap().join("profiles").join(&profile_id);
-    eprintln!("[open_profile_folder] Attempting to open: {:?}", profile_dir);
-    
+    let profile_dir = app
+        .path()
+        .app_data_dir()
+        .unwrap()
+        .join("profiles")
+        .join(&profile_id);
+    eprintln!(
+        "[open_profile_folder] Attempting to open: {:?}",
+        profile_dir
+    );
+
     // Create the folder if it doesn't exist
     if !profile_dir.exists() {
         eprintln!("[open_profile_folder] Folder doesn't exist, creating it...");
         fs::create_dir_all(&profile_dir).map_err(|e| e.to_string())?;
     }
-    
+
     eprintln!("[open_profile_folder] Opening folder in Finder...");
     open::that(&profile_dir).map_err(|e| {
         eprintln!("[open_profile_folder] Failed to open: {}", e);
@@ -197,14 +227,20 @@ pub async fn open_profile_folder(app: AppHandle, profile_id: String) -> Result<(
 }
 
 #[command]
-pub async fn clear_profile_cache(app: AppHandle, state: State<'_, AppState>) -> Result<serde_json::Value, String> {
-    let profiles_dir = app.path().app_data_dir().map_err(|e| e.to_string())?
+pub async fn clear_profile_cache(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let profiles_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
         .join("profiles");
-    
+
     let mut cleared = 0;
     let mut size_freed: u64 = 0;
     let mut chunk_files_removed = 0;
-    
+
     if profiles_dir.exists() {
         if let Ok(entries) = fs::read_dir(&profiles_dir) {
             for entry in entries.filter_map(|e| e.ok()) {
@@ -242,14 +278,12 @@ pub async fn clear_profile_cache(app: AppHandle, state: State<'_, AppState>) -> 
         let mut platform_cache = state.platform_cache.write().await;
         platform_cache.clear();
     }
-    
+
     eprintln!(
         "[clear_profile_cache] Cleared {} profile caches, removed {} chunk files, freed {} bytes",
-        cleared,
-        chunk_files_removed,
-        size_freed
+        cleared, chunk_files_removed, size_freed
     );
-    
+
     Ok(serde_json::json!({
         "cleared": cleared,
         "chunks_cleared": chunk_files_removed,
@@ -258,18 +292,22 @@ pub async fn clear_profile_cache(app: AppHandle, state: State<'_, AppState>) -> 
 }
 
 #[command]
-pub async fn toggle_profile_vanilla_mode(app: AppHandle, profile_id: String) -> Result<bool, String> {
+pub async fn toggle_profile_vanilla_mode(
+    app: AppHandle,
+    profile_id: String,
+) -> Result<bool, String> {
     let profile_path = app.path().app_data_dir().unwrap().join("profiles.json");
     if !profile_path.exists() {
         return Err("No profiles found".to_string());
     }
-    
+
     let data = fs::read_to_string(&profile_path).map_err(|e| e.to_string())?;
-    let mut profiles: Vec<serde_json::Value> = serde_json::from_str(&data).map_err(|e| e.to_string())?;
-    
+    let mut profiles: Vec<serde_json::Value> =
+        serde_json::from_str(&data).map_err(|e| e.to_string())?;
+
     let mut new_state = false;
     let mut found = false;
-    
+
     for p in &mut profiles {
         if p["id"].as_str() == Some(&profile_id) {
             let current = p["is_vanilla"].as_bool().unwrap_or(false);
@@ -279,7 +317,7 @@ pub async fn toggle_profile_vanilla_mode(app: AppHandle, profile_id: String) -> 
             break;
         }
     }
-    
+
     if found {
         save_profiles(app, profiles).await?;
         Ok(new_state)

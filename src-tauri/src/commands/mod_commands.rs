@@ -1,14 +1,12 @@
-use std::fs;
-use futures_util::StreamExt;
-use tauri::{command, AppHandle, Emitter, Manager};
+use crate::commands::game_commands::get_game_path;
 use crate::models::shared::*;
 use crate::utils::file_ops::*;
 use crate::utils::mod_manifest::{
-    backup_existing_mod_files,
-    save_owned_mod_manifest,
-    GAME_MANIFEST_SCOPE,
+    backup_existing_mod_files, save_owned_mod_manifest, GAME_MANIFEST_SCOPE,
 };
-use crate::commands::game_commands::get_game_path;
+use futures_util::StreamExt;
+use std::fs;
+use tauri::{command, AppHandle, Emitter, Manager};
 
 fn is_bepinex_shell_script(name: &str) -> bool {
     let lower = name.to_lowercase();
@@ -72,7 +70,10 @@ fn extract_ini_value(content: &str, keys: &[&str]) -> Option<String> {
         }
 
         let (key, value) = trimmed.split_once('=')?;
-        if keys.iter().any(|needle| key.trim().eq_ignore_ascii_case(needle)) {
+        if keys
+            .iter()
+            .any(|needle| key.trim().eq_ignore_ascii_case(needle))
+        {
             Some(value.trim().to_string())
         } else {
             None
@@ -80,17 +81,17 @@ fn extract_ini_value(content: &str, keys: &[&str]) -> Option<String> {
     })
 }
 
-pub(crate) fn normalize_macos_doorstop_config_file(
-    path: &std::path::Path,
-) -> Result<(), String> {
+pub(crate) fn normalize_macos_doorstop_config_file(path: &std::path::Path) -> Result<(), String> {
     if !path.exists() {
         return Ok(());
     }
 
     let content = fs::read_to_string(path).map_err(|e| e.to_string())?;
-    let dll_search_path_override =
-        extract_ini_value(&content, &["dllSearchPathOverride", "dll_search_path_override"])
-            .unwrap_or_default();
+    let dll_search_path_override = extract_ini_value(
+        &content,
+        &["dllSearchPathOverride", "dll_search_path_override"],
+    )
+    .unwrap_or_default();
     let ignore_disable_switch = normalize_ini_bool(
         extract_ini_value(&content, &["ignoreDisableSwitch", "ignore_disable_switch"]),
         false,
@@ -395,7 +396,10 @@ fn extract_lovely_zip_to_game_root<R: std::io::Read + std::io::Seek>(
     for i in 0..archive.len() {
         let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
         let file_name = normalize_zip_entry_path(file.name())
-            .and_then(|path| path.file_name().map(|name| name.to_string_lossy().to_string()))
+            .and_then(|path| {
+                path.file_name()
+                    .map(|name| name.to_string_lossy().to_string())
+            })
             .or_else(|| {
                 std::path::Path::new(file.name())
                     .file_name()
@@ -495,7 +499,9 @@ async fn download_official_lovely_runtime(version: &str) -> Result<Vec<u8>, Stri
             assets.iter().find_map(|asset| {
                 let name = asset["name"].as_str()?;
                 if name.eq_ignore_ascii_case(desired_asset) {
-                    asset["browser_download_url"].as_str().map(|s| s.to_string())
+                    asset["browser_download_url"]
+                        .as_str()
+                        .map(|s| s.to_string())
                 } else {
                     None
                 }
@@ -553,7 +559,10 @@ fn official_bepinex_version_candidates(thunderstore_version: &str) -> Vec<String
             if major == 5 && (minor, patch_major, patch_minor) < (4, 23, 5) {
                 candidates.push("5.4.23.5".to_string());
             }
-            candidates.push(format!("{}.{}.{}.{}", major, minor, patch_major, patch_minor));
+            candidates.push(format!(
+                "{}.{}.{}.{}",
+                major, minor, patch_major, patch_minor
+            ));
             candidates.push(format!("{}.{}.{}", major, minor, patch_major));
             candidates.push(format!("{}.{}.{}.0", major, minor, patch_major));
         }
@@ -655,7 +664,9 @@ async fn download_bepinex_release_asset(
     Ok(Some(bytes.to_vec()))
 }
 
-async fn download_official_macos_bepinex_pack(thunderstore_version: &str) -> Result<Vec<u8>, String> {
+async fn download_official_macos_bepinex_pack(
+    thunderstore_version: &str,
+) -> Result<Vec<u8>, String> {
     let version_candidates = official_bepinex_version_candidates(thunderstore_version);
     let client = reqwest::Client::builder()
         .user_agent("r2modmac/0.6.0")
@@ -744,10 +755,12 @@ async fn download_official_macos_bepinex6_pack(
     thunderstore_version: &str,
     runtime_kind: &str,
 ) -> Result<Vec<u8>, String> {
-    let build_number = thunderstore_version
-        .split('.')
-        .nth(2)
-        .ok_or_else(|| format!("Could not parse BepInEx 6 build number from {}", thunderstore_version))?;
+    let build_number = thunderstore_version.split('.').nth(2).ok_or_else(|| {
+        format!(
+            "Could not parse BepInEx 6 build number from {}",
+            thunderstore_version
+        )
+    })?;
     let client = reqwest::Client::builder()
         .user_agent("r2modmac/0.6.0")
         .build()
@@ -768,10 +781,7 @@ async fn download_official_macos_bepinex6_pack(
     let candidates: &[&str] = if runtime_kind == "il2cpp" {
         &["bepinex-unity.il2cpp-macos-x64", "bepinex_unityil2cpp_x64"]
     } else {
-        &[
-            "bepinex-unity.mono-macos-x64",
-            "bepinex_unitymono_unix",
-        ]
+        &["bepinex-unity.mono-macos-x64", "bepinex_unitymono_unix"]
     };
 
     let href_re = regex::Regex::new(r#"href="([^"]+\.zip)""#)
@@ -831,8 +841,9 @@ async fn download_official_macos_bepinex6_pack(
                 .map_err(|e| format!("Failed to read official BepInEx 6 runtime: {}", e))?;
 
             let cursor = std::io::Cursor::new(bytes.as_ref());
-            let mut archive = zip::ZipArchive::new(cursor)
-                .map_err(|e| format!("Downloaded official BepInEx 6 runtime is not a zip: {}", e))?;
+            let mut archive = zip::ZipArchive::new(cursor).map_err(|e| {
+                format!("Downloaded official BepInEx 6 runtime is not a zip: {}", e)
+            })?;
             let (is_bepinex_pack, _) = detect_bepinex_structure(&mut archive);
             let (has_macos_loader, _) = detect_bepinex_pack_platform(&mut archive);
 
@@ -886,7 +897,9 @@ pub(crate) fn extract_bepinex_pack_to_root<R: std::io::Read + std::io::Seek>(
             continue;
         }
 
-        let Some(normalized_relative_path) = normalize_bepinex_pack_entry(relative_path, target_is_macos) else {
+        let Some(normalized_relative_path) =
+            normalize_bepinex_pack_entry(relative_path, target_is_macos)
+        else {
             continue;
         };
         let outpath = target_root.join(remap_disabled_macos_runtime_path(
@@ -920,9 +933,14 @@ pub(crate) fn extract_bepinex_pack_to_root<R: std::io::Read + std::io::Seek>(
     Ok(())
 }
 
-fn normalize_macos_bepinex_runtime_overlay_entry(relative_path: &str) -> Option<std::path::PathBuf> {
+fn normalize_macos_bepinex_runtime_overlay_entry(
+    relative_path: &str,
+) -> Option<std::path::PathBuf> {
     let normalized = normalize_bepinex_pack_entry(relative_path, true)?;
-    let lower = normalized.to_string_lossy().replace('\\', "/").to_lowercase();
+    let lower = normalized
+        .to_string_lossy()
+        .replace('\\', "/")
+        .to_lowercase();
 
     if lower == "run_bepinex.sh"
         || lower == "libdoorstop.dylib"
@@ -977,7 +995,9 @@ fn extract_macos_bepinex_runtime_overlay_to_root<R: std::io::Read + std::io::See
             continue;
         }
 
-        if normalized_relative_path == std::path::PathBuf::from("doorstop_config.ini") && outpath.exists() {
+        if normalized_relative_path == std::path::PathBuf::from("doorstop_config.ini")
+            && outpath.exists()
+        {
             normalize_macos_doorstop_config_file(&outpath)?;
             continue;
         }
@@ -1089,7 +1109,10 @@ fn collect_macos_bepinex_runtime_overlay_files<R: std::io::Read + std::io::Seek>
     Ok(files)
 }
 
-fn normalize_bepinex_pack_entry(relative_path: &str, target_is_macos: bool) -> Option<std::path::PathBuf> {
+fn normalize_bepinex_pack_entry(
+    relative_path: &str,
+    target_is_macos: bool,
+) -> Option<std::path::PathBuf> {
     let trimmed = relative_path.trim_start_matches("./").trim_matches('/');
     if trimmed.is_empty() {
         return None;
@@ -1112,7 +1135,10 @@ fn normalize_bepinex_pack_entry(relative_path: &str, target_is_macos: bool) -> O
         return None;
     }
 
-    if matches!(lower_trimmed.as_str(), "doorstop_config.ini" | "libdoorstop.dylib" | "winhttp.dll") {
+    if matches!(
+        lower_trimmed.as_str(),
+        "doorstop_config.ini" | "libdoorstop.dylib" | "winhttp.dll"
+    ) {
         return Some(std::path::PathBuf::from(file_name));
     }
 
@@ -1181,7 +1207,11 @@ fn folder_matches_mod(folder_name: &str, mod_query: &str, mod_key: &str) -> bool
     extract_mod_key(folder_name) == mod_key
 }
 
-fn find_mod_entry_recursive(base: &std::path::Path, mod_name: &str, depth: usize) -> Option<std::path::PathBuf> {
+fn find_mod_entry_recursive(
+    base: &std::path::Path,
+    mod_name: &str,
+    depth: usize,
+) -> Option<std::path::PathBuf> {
     if depth == 0 || !base.exists() {
         return None;
     }
@@ -1251,9 +1281,9 @@ fn find_mod_folder_in(base: &std::path::Path, mod_name: &str) -> Option<String> 
 fn is_macos_game_dir(path: &std::path::Path) -> bool {
     fs::read_dir(path)
         .map(|entries| {
-            entries.filter_map(|e| e.ok()).any(|entry| {
-                entry.file_name().to_string_lossy().ends_with(".app")
-            })
+            entries
+                .filter_map(|e| e.ok())
+                .any(|entry| entry.file_name().to_string_lossy().ends_with(".app"))
         })
         .unwrap_or(false)
 }
@@ -1335,7 +1365,14 @@ fn detect_bepinex_pack_platform<R: std::io::Read + std::io::Seek>(
 }
 
 #[command]
-pub async fn install_mod(app: AppHandle, profile_id: String, download_url: String, mod_name: String, game_path: String, use_profile_cache: Option<bool>) -> Result<serde_json::Value, String> {
+pub async fn install_mod(
+    app: AppHandle,
+    profile_id: String,
+    download_url: String,
+    mod_name: String,
+    game_path: String,
+    use_profile_cache: Option<bool>,
+) -> Result<serde_json::Value, String> {
     // Install DIRECTLY to game folder
     let game_dir = std::path::Path::new(&game_path);
     let target_is_macos = is_macos_game_dir(game_dir);
@@ -1343,7 +1380,10 @@ pub async fn install_mod(app: AppHandle, profile_id: String, download_url: Strin
     let install_into_disabled_runtime =
         target_is_macos && !target_is_balatro && profile_is_vanilla(&app, &profile_id);
 
-    eprintln!("[install_mod] Installing {} directly to game: {:?}", mod_name, game_dir);
+    eprintln!(
+        "[install_mod] Installing {} directly to game: {:?}",
+        mod_name, game_dir
+    );
 
     // Download with live progress events (bytes + speed)
     let client = reqwest::Client::new();
@@ -1409,7 +1449,7 @@ pub async fn install_mod(app: AppHandle, profile_id: String, download_url: Strin
             "done": true
         }),
     );
-    
+
     let mut runtime_bytes = bytes;
 
     if target_is_balatro {
@@ -1418,7 +1458,8 @@ pub async fn install_mod(app: AppHandle, profile_id: String, download_url: Strin
                 .ok_or_else(|| format!("Could not parse Lovely version from {}", mod_name))?;
             let cursor = std::io::Cursor::new(&runtime_bytes);
             let mut archive_for_detect = zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
-            let (has_macos_runtime, _has_windows_runtime) = detect_lovely_runtime_in_zip(&mut archive_for_detect);
+            let (has_macos_runtime, _has_windows_runtime) =
+                detect_lovely_runtime_in_zip(&mut archive_for_detect);
 
             if has_macos_runtime {
                 let cursor = std::io::Cursor::new(&runtime_bytes);
@@ -1432,8 +1473,12 @@ pub async fn install_mod(app: AppHandle, profile_id: String, download_url: Strin
             dequarantine_recursive(game_dir);
 
             if use_profile_cache.unwrap_or(false) {
-                let profile_dir = app.path().app_data_dir().map_err(|e| e.to_string())?
-                    .join("profiles").join(&profile_id);
+                let profile_dir = app
+                    .path()
+                    .app_data_dir()
+                    .map_err(|e| e.to_string())?
+                    .join("profiles")
+                    .join(&profile_id);
                 let cache_dir = profile_dir.join("BalatroRoot");
                 fs::create_dir_all(&cache_dir).map_err(|e| e.to_string())?;
 
@@ -1453,8 +1498,9 @@ pub async fn install_mod(app: AppHandle, profile_id: String, download_url: Strin
             return Ok(serde_json::json!({ "success": true }));
         }
 
-        let mods_root = get_balatro_mods_dir()
-            .ok_or_else(|| "Could not resolve ~/Library/Application Support/Balatro/Mods".to_string())?;
+        let mods_root = get_balatro_mods_dir().ok_or_else(|| {
+            "Could not resolve ~/Library/Application Support/Balatro/Mods".to_string()
+        })?;
         fs::create_dir_all(&mods_root).map_err(|e| e.to_string())?;
 
         let target_folder = balatro_target_folder_name(&mod_name);
@@ -1464,9 +1510,16 @@ pub async fn install_mod(app: AppHandle, profile_id: String, download_url: Strin
         extract_zip_directory_to_target(&mut archive, &mod_dir)?;
 
         if use_profile_cache.unwrap_or(false) {
-            let profile_dir = app.path().app_data_dir().map_err(|e| e.to_string())?
-                .join("profiles").join(&profile_id);
-            let profile_mod_dir = profile_dir.join("Balatro").join("Mods").join(&target_folder);
+            let profile_dir = app
+                .path()
+                .app_data_dir()
+                .map_err(|e| e.to_string())?
+                .join("profiles")
+                .join(&profile_id);
+            let profile_mod_dir = profile_dir
+                .join("Balatro")
+                .join("Mods")
+                .join(&target_folder);
             let cursor = std::io::Cursor::new(&runtime_bytes);
             let mut cache_archive = zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
             extract_zip_directory_to_target(&mut cache_archive, &profile_mod_dir)?;
@@ -1479,7 +1532,8 @@ pub async fn install_mod(app: AppHandle, profile_id: String, download_url: Strin
     let cursor = std::io::Cursor::new(&runtime_bytes);
     let mut archive_for_detect = zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
     let (mut is_bepinex_pack, _) = detect_bepinex_structure(&mut archive_for_detect);
-    let (mut has_macos_loader, mut has_windows_loader) = detect_bepinex_pack_platform(&mut archive_for_detect);
+    let (mut has_macos_loader, mut has_windows_loader) =
+        detect_bepinex_pack_platform(&mut archive_for_detect);
     let mut macos_runtime_overlay_bytes: Option<Vec<u8>> = None;
 
     if is_bepinex_pack && target_is_macos {
@@ -1495,8 +1549,7 @@ pub async fn install_mod(app: AppHandle, profile_id: String, download_url: Strin
 
             let cursor = std::io::Cursor::new(&fallback_runtime_bytes);
             let mut fallback_archive = zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
-            let (fallback_is_bepinex_pack, _) =
-                detect_bepinex_structure(&mut fallback_archive);
+            let (fallback_is_bepinex_pack, _) = detect_bepinex_structure(&mut fallback_archive);
             let (fallback_has_macos_loader, fallback_has_windows_loader) =
                 detect_bepinex_pack_platform(&mut fallback_archive);
 
@@ -1532,16 +1585,16 @@ pub async fn install_mod(app: AppHandle, profile_id: String, download_url: Strin
         if let Some(overlay_bytes) = macos_runtime_overlay_bytes.as_ref() {
             let cursor = std::io::Cursor::new(overlay_bytes);
             let mut overlay_archive = zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
-            files.extend(collect_macos_bepinex_runtime_overlay_files(&mut overlay_archive)?);
+            files.extend(collect_macos_bepinex_runtime_overlay_files(
+                &mut overlay_archive,
+            )?);
         }
 
         files.sort();
         files.dedup();
         files
             .into_iter()
-            .map(|file| {
-                remap_disabled_macos_runtime_path(&file, install_into_disabled_runtime)
-            })
+            .map(|file| remap_disabled_macos_runtime_path(&file, install_into_disabled_runtime))
             .collect::<Vec<_>>()
     };
     let backed_up_files = if managed_files.is_empty() {
@@ -1613,9 +1666,16 @@ pub async fn install_mod(app: AppHandle, profile_id: String, download_url: Strin
 
     // LEGACY MODE: Also save to profile cache folder
     if use_profile_cache.unwrap_or(false) {
-        let profile_dir = app.path().app_data_dir().map_err(|e| e.to_string())?
-            .join("profiles").join(&profile_id);
-        eprintln!("[install_mod] LEGACY: Also caching to profile: {:?}", profile_dir);
+        let profile_dir = app
+            .path()
+            .app_data_dir()
+            .map_err(|e| e.to_string())?
+            .join("profiles")
+            .join(&profile_id);
+        eprintln!(
+            "[install_mod] LEGACY: Also caching to profile: {:?}",
+            profile_dir
+        );
 
         let cursor = std::io::Cursor::new(&runtime_bytes);
         let mut archive = zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
@@ -1626,7 +1686,8 @@ pub async fn install_mod(app: AppHandle, profile_id: String, download_url: Strin
 
             if let Some(overlay_bytes) = macos_runtime_overlay_bytes.as_ref() {
                 let cursor = std::io::Cursor::new(overlay_bytes);
-                let mut overlay_archive = zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
+                let mut overlay_archive =
+                    zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
                 extract_macos_bepinex_runtime_overlay_to_root(
                     &mut overlay_archive,
                     &profile_dir,
@@ -1634,7 +1695,10 @@ pub async fn install_mod(app: AppHandle, profile_id: String, download_url: Strin
                 )?;
             }
         } else {
-            eprintln!("[install_mod] Updating profile cache root for {:?}", profile_dir);
+            eprintln!(
+                "[install_mod] Updating profile cache root for {:?}",
+                profile_dir
+            );
             extract_regular_mod_to_root(&mut archive, &profile_dir, &mod_name, false)?;
             if target_is_macos {
                 migrate_root_plugins_into_bepinex(&profile_dir)?;
@@ -1646,25 +1710,37 @@ pub async fn install_mod(app: AppHandle, profile_id: String, download_url: Strin
         }
     }
 
-    eprintln!("[install_mod] Successfully installed {} to game folder", mod_name);
+    eprintln!(
+        "[install_mod] Successfully installed {} to game folder",
+        mod_name
+    );
     Ok(serde_json::json!({ "success": true }))
 }
 
 #[command]
-pub async fn remove_mod(app: AppHandle, profile_id: String, mod_name: String) -> Result<bool, String> {
-    let profile_dir = app.path().app_data_dir().unwrap().join("profiles").join(&profile_id);
+pub async fn remove_mod(
+    app: AppHandle,
+    profile_id: String,
+    mod_name: String,
+) -> Result<bool, String> {
+    let profile_dir = app
+        .path()
+        .app_data_dir()
+        .unwrap()
+        .join("profiles")
+        .join(&profile_id);
     let plugins_dir = profile_dir.join("BepInEx").join("plugins");
-    
+
     // mod_name is usually "Namespace-Name-Version" or "Namespace-Name"
     // We need to find the folder.
     // Logic similar to open_mod_folder
-    
+
     if plugins_dir.exists() {
         for entry in walkdir::WalkDir::new(&plugins_dir)
             .min_depth(1)
             .max_depth(2)
             .into_iter()
-            .filter_map(|e| e.ok()) 
+            .filter_map(|e| e.ok())
         {
             if entry.file_type().is_dir() {
                 if let Some(name) = entry.file_name().to_str() {
@@ -1672,15 +1748,15 @@ pub async fn remove_mod(app: AppHandle, profile_id: String, mod_name: String) ->
                     // Better: check if folder name STARTS with mod_name (Namespace-Name)
                     // But mod_name passed from frontend is usually "Namespace-Name-Version"
                     // We should probably pass the "clean name" or handle it.
-                    
+
                     // Let's try to match loosely for now, or require exact match if possible.
                     // Frontend passes `mod.uuid4` to store, but `removeMod` in store has `modId`.
                     // Wait, store `removeMod` takes `modId` (uuid4).
                     // But to delete file, I need the name.
                     // The store has the profile, so it knows the name.
-                    
+
                     // I will update the store to pass the name.
-                    
+
                     if name.to_lowercase().contains(&mod_name.to_lowercase()) {
                         fs::remove_dir_all(entry.path()).map_err(|e| e.to_string())?;
                         return Ok(true);
@@ -1718,7 +1794,8 @@ pub async fn open_mod_folder(
             .all(|path| path.exists());
 
             if lovely_files_present {
-                open::that(game_root).map_err(|e| format!("Failed to open Balatro root folder: {}", e))?;
+                open::that(game_root)
+                    .map_err(|e| format!("Failed to open Balatro root folder: {}", e))?;
                 return Ok(());
             }
 
@@ -1731,7 +1808,10 @@ pub async fn open_mod_folder(
             mods_root.join(entry_name)
         } else if let Some(found_path) = find_mod_entry_recursive(&mods_root, &mod_name, 3) {
             if found_path.is_file() {
-                found_path.parent().map(|p| p.to_path_buf()).unwrap_or(found_path)
+                found_path
+                    .parent()
+                    .map(|p| p.to_path_buf())
+                    .unwrap_or(found_path)
             } else {
                 found_path
             }
@@ -1754,7 +1834,8 @@ pub async fn open_mod_folder(
             && !is_balatro_game_path(game_root);
         let bepinex_root = game_root.join(runtime_bepinex_dir_name(use_disabled_runtime));
         if bepinex_root.exists() {
-            open::that(&bepinex_root).map_err(|e| format!("Failed to open BepInEx folder: {}", e))?;
+            open::that(&bepinex_root)
+                .map_err(|e| format!("Failed to open BepInEx folder: {}", e))?;
             return Ok(());
         }
 
@@ -1813,7 +1894,10 @@ pub async fn open_mod_folder(
     // Recursive fallback for packages that place files in non-standard nested paths.
     if let Some(found_path) = find_mod_entry_recursive(&bepinex_root, &mod_name, 4) {
         let target = if found_path.is_file() {
-            found_path.parent().map(|p| p.to_path_buf()).unwrap_or(found_path)
+            found_path
+                .parent()
+                .map(|p| p.to_path_buf())
+                .unwrap_or(found_path)
         } else {
             found_path
         };
@@ -1825,7 +1909,8 @@ pub async fn open_mod_folder(
     if mod_name.to_lowercase().contains("monomod") {
         let patchers_dir = bepinex_root.join("patchers");
         if patchers_dir.exists() {
-            open::that(&patchers_dir).map_err(|e| format!("Failed to open patchers folder: {}", e))?;
+            open::that(&patchers_dir)
+                .map_err(|e| format!("Failed to open patchers folder: {}", e))?;
             return Ok(());
         }
     }
@@ -1834,15 +1919,30 @@ pub async fn open_mod_folder(
 }
 
 #[command]
-pub async fn toggle_mod(app: AppHandle, profile_id: String, mod_name: String, enabled: bool, game_identifier: Option<String>, platform: Option<String>) -> Result<(), String> {
-    eprintln!("[toggle_mod] Toggle mod: {} enabled: {} in profile: {}", mod_name, enabled, profile_id);
-    
+pub async fn toggle_mod(
+    app: AppHandle,
+    profile_id: String,
+    mod_name: String,
+    enabled: bool,
+    game_identifier: Option<String>,
+    platform: Option<String>,
+) -> Result<(), String> {
+    eprintln!(
+        "[toggle_mod] Toggle mod: {} enabled: {} in profile: {}",
+        mod_name, enabled, profile_id
+    );
+
     let use_disabled_runtime = profile_is_vanilla(&app, &profile_id)
-        && platform.as_deref().map(|value| value.eq_ignore_ascii_case("mac")).unwrap_or(false);
+        && platform
+            .as_deref()
+            .map(|value| value.eq_ignore_ascii_case("mac"))
+            .unwrap_or(false);
 
     // Get game path for sync (optional - toggle still works without it)
     let game_plugins = if let Some(ref game_id) = game_identifier {
-        if let Ok(Some(game_path_str)) = get_game_path(app.clone(), game_id.clone(), platform.clone()).await {
+        if let Ok(Some(game_path_str)) =
+            get_game_path(app.clone(), game_id.clone(), platform.clone()).await
+        {
             Some(runtime_plugins_dir(
                 std::path::Path::new(&game_path_str),
                 use_disabled_runtime,
@@ -1853,61 +1953,82 @@ pub async fn toggle_mod(app: AppHandle, profile_id: String, mod_name: String, en
     } else {
         None
     };
-    
+
     // Get profile cache path (may or may not exist depending on legacy mode)
-    let profile_dir = app.path().app_data_dir().map_err(|e| e.to_string())?
-        .join("profiles").join(&profile_id);
+    let profile_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("profiles")
+        .join(&profile_id);
     let profile_plugins_dir = profile_dir.join("BepInEx").join("plugins");
-    
+
     // Find mod in profile cache OR game folder
     // Try profile cache first
     let mut found_folder_name = find_mod_folder_in(&profile_plugins_dir, &mod_name);
-    
+
     // If not found in profile cache, try game folder
     if found_folder_name.is_none() {
         if let Some(ref game_plugins_path) = game_plugins {
             found_folder_name = find_mod_folder_in(game_plugins_path, &mod_name);
         }
     }
-    
+
     // If we have a game folder, sync the mod state
     if let Some(ref game_plugins_path) = game_plugins {
         if let Some(ref folder_name) = found_folder_name {
             let game_mod_path = game_plugins_path.join(folder_name);
             let profile_mod_path = profile_plugins_dir.join(folder_name);
-            
+
             if enabled {
                 // Need to add mod to game - copy from profile cache if available
                 if profile_mod_path.exists() && !game_mod_path.exists() {
-                    eprintln!("[toggle_mod] Enabling mod - copying from cache to game: {}", folder_name);
+                    eprintln!(
+                        "[toggle_mod] Enabling mod - copying from cache to game: {}",
+                        folder_name
+                    );
                     copy_dir_recursive(&profile_mod_path, &game_mod_path)
                         .map_err(|e| format!("Failed to sync mod to game: {}", e))?;
                 }
             } else {
                 // Remove mod from game folder (keep in cache)
                 if game_mod_path.exists() || game_mod_path.is_symlink() {
-                    eprintln!("[toggle_mod] Disabling mod - removing from game: {}", folder_name);
+                    eprintln!(
+                        "[toggle_mod] Disabling mod - removing from game: {}",
+                        folder_name
+                    );
                     if game_mod_path.is_symlink() || game_mod_path.is_file() {
-                        fs::remove_file(&game_mod_path)
-                            .map_err(|e| format!("Failed to remove mod symlink/file from game: {}", e))?;
+                        fs::remove_file(&game_mod_path).map_err(|e| {
+                            format!("Failed to remove mod symlink/file from game: {}", e)
+                        })?;
                     } else {
-                        fs::remove_dir_all(&game_mod_path)
-                            .map_err(|e| format!("Failed to remove mod directory from game: {}", e))?;
+                        fs::remove_dir_all(&game_mod_path).map_err(|e| {
+                            format!("Failed to remove mod directory from game: {}", e)
+                        })?;
                     }
                 }
             }
         }
     }
-    
+
     // Always succeed - the enabled state is tracked in profiles.json, not file system
     eprintln!("[toggle_mod] Toggle complete for mod: {}", mod_name);
     Ok(())
 }
 
 #[command]
-pub async fn copy_mod_from_cache(app: AppHandle, profile_id: String, mod_name: String, game_path: String) -> Result<serde_json::Value, String> {
-    let profile_dir = app.path().app_data_dir().map_err(|e| e.to_string())?
-        .join("profiles").join(&profile_id);
+pub async fn copy_mod_from_cache(
+    app: AppHandle,
+    profile_id: String,
+    mod_name: String,
+    game_path: String,
+) -> Result<serde_json::Value, String> {
+    let profile_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("profiles")
+        .join(&profile_id);
     let game_dir = std::path::Path::new(&game_path);
     let mod_name_lower = mod_name.to_lowercase();
     let use_disabled_runtime = profile_is_vanilla(&app, &profile_id)
@@ -1933,8 +2054,9 @@ pub async fn copy_mod_from_cache(app: AppHandle, profile_id: String, mod_name: S
             }
         } else {
             let profile_mods_dir = profile_dir.join("Balatro").join("Mods");
-            let game_mods_dir = get_balatro_mods_dir()
-                .ok_or_else(|| "Could not resolve ~/Library/Application Support/Balatro/Mods".to_string())?;
+            let game_mods_dir = get_balatro_mods_dir().ok_or_else(|| {
+                "Could not resolve ~/Library/Application Support/Balatro/Mods".to_string()
+            })?;
             fs::create_dir_all(&game_mods_dir).map_err(|e| e.to_string())?;
 
             let target_folder = balatro_target_folder_name(&mod_name);
@@ -1949,7 +2071,10 @@ pub async fn copy_mod_from_cache(app: AppHandle, profile_id: String, mod_name: S
             }
         }
 
-        eprintln!("[copy_mod_from_cache] Balatro mod {} not found in profile cache", mod_name);
+        eprintln!(
+            "[copy_mod_from_cache] Balatro mod {} not found in profile cache",
+            mod_name
+        );
         return Ok(serde_json::json!({ "success": false, "copied": false }));
     }
 
@@ -1961,7 +2086,14 @@ pub async fn copy_mod_from_cache(app: AppHandle, profile_id: String, mod_name: S
         if profile_has_runtime {
             let root_dirs = [
                 ("BepInEx", runtime_bepinex_dir_name(use_disabled_runtime)),
-                ("doorstop_libs", if use_disabled_runtime { "doorstop_libs_DISABLED" } else { "doorstop_libs" }),
+                (
+                    "doorstop_libs",
+                    if use_disabled_runtime {
+                        "doorstop_libs_DISABLED"
+                    } else {
+                        "doorstop_libs"
+                    },
+                ),
             ];
             for (source_name, dest_name) in root_dirs {
                 let src = profile_dir.join(source_name);
@@ -1975,8 +2107,22 @@ pub async fn copy_mod_from_cache(app: AppHandle, profile_id: String, mod_name: S
             }
 
             let root_files = [
-                ("doorstop_config.ini", if use_disabled_runtime { "doorstop_config.ini_DISABLED" } else { "doorstop_config.ini" }),
-                ("libdoorstop.dylib", if use_disabled_runtime { "libdoorstop.dylib_DISABLED" } else { "libdoorstop.dylib" }),
+                (
+                    "doorstop_config.ini",
+                    if use_disabled_runtime {
+                        "doorstop_config.ini_DISABLED"
+                    } else {
+                        "doorstop_config.ini"
+                    },
+                ),
+                (
+                    "libdoorstop.dylib",
+                    if use_disabled_runtime {
+                        "libdoorstop.dylib_DISABLED"
+                    } else {
+                        "libdoorstop.dylib"
+                    },
+                ),
                 ("run_bepinex.sh", "run_bepinex.sh"),
             ];
             for (source_name, dest_name) in root_files {
@@ -2003,16 +2149,12 @@ pub async fn copy_mod_from_cache(app: AppHandle, profile_id: String, mod_name: S
         let version_number = extract_version_number_from_full_name(&mod_name)
             .ok_or_else(|| format!("Could not parse BepInEx version from {}", mod_name))?;
         let runtime_kind = detect_unity_runtime_kind(game_dir);
-        let runtime_bytes = download_official_macos_bepinex_runtime(&version_number, runtime_kind).await?;
+        let runtime_bytes =
+            download_official_macos_bepinex_runtime(&version_number, runtime_kind).await?;
 
         let cursor = std::io::Cursor::new(&runtime_bytes);
         let mut game_archive = zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
-        extract_bepinex_pack_to_root(
-            &mut game_archive,
-            game_dir,
-            true,
-            use_disabled_runtime,
-        )?;
+        extract_bepinex_pack_to_root(&mut game_archive, game_dir, true, use_disabled_runtime)?;
 
         let cursor = std::io::Cursor::new(&runtime_bytes);
         let mut profile_archive = zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
@@ -2027,18 +2169,22 @@ pub async fn copy_mod_from_cache(app: AppHandle, profile_id: String, mod_name: S
 
     let profile_plugins_dir = profile_dir.join("BepInEx").join("plugins");
     let game_plugins_dir = runtime_plugins_dir(game_dir, use_disabled_runtime);
-    
+
     if let Ok(entries) = fs::read_dir(&profile_plugins_dir) {
         for entry in entries.filter_map(|e| e.ok()) {
             let folder_name = entry.file_name().to_string_lossy().to_string();
-            
-            if folder_name.to_lowercase().contains(&mod_name_lower) || 
-               mod_name_lower.contains(&folder_name.to_lowercase()) {
+
+            if folder_name.to_lowercase().contains(&mod_name_lower)
+                || mod_name_lower.contains(&folder_name.to_lowercase())
+            {
                 let src_path = entry.path();
                 let dst_path = game_plugins_dir.join(&folder_name);
-                
+
                 if src_path.is_dir() {
-                    eprintln!("[copy_mod_from_cache] Copying {} from cache to game", folder_name);
+                    eprintln!(
+                        "[copy_mod_from_cache] Copying {} from cache to game",
+                        folder_name
+                    );
                     fs::create_dir_all(&game_plugins_dir).map_err(|e| e.to_string())?;
                     if dst_path.exists() {
                         let _ = fs::remove_dir_all(&dst_path);
@@ -2052,34 +2198,47 @@ pub async fn copy_mod_from_cache(app: AppHandle, profile_id: String, mod_name: S
             }
         }
     }
-    
+
     // Not found in cache
-    eprintln!("[copy_mod_from_cache] Mod {} not found in profile cache", mod_name);
+    eprintln!(
+        "[copy_mod_from_cache] Mod {} not found in profile cache",
+        mod_name
+    );
     Ok(serde_json::json!({ "success": false, "copied": false }))
 }
 
 #[command]
-pub async fn fetch_packages(app: AppHandle, state: tauri::State<'_, AppState>, game_id: String) -> Result<usize, String> {
-    use std::time::SystemTime;
+pub async fn fetch_packages(
+    app: AppHandle,
+    state: tauri::State<'_, AppState>,
+    game_id: String,
+) -> Result<usize, String> {
     use std::time::Duration;
+    use std::time::SystemTime;
 
     let start_time = SystemTime::now();
-    
+
     // 0. Check if we already have packages in memory (instant return)
     {
         let packages_lock = state.packages.read().await;
         if let Some(packages) = packages_lock.get(&game_id) {
             if !packages.is_empty() {
-                eprintln!("[fetch_packages] Serving {} packages from memory (instant)", packages.len());
+                eprintln!(
+                    "[fetch_packages] Serving {} packages from memory (instant)",
+                    packages.len()
+                );
                 return Ok(packages.len());
             }
         }
     }
-    
+
     // 1. Fetch the index (list of chunk URLs)
-    let index_url = format!("https://thunderstore.io/c/{}/api/v1/package-listing-index/", game_id);
+    let index_url = format!(
+        "https://thunderstore.io/c/{}/api/v1/package-listing-index/",
+        game_id
+    );
     eprintln!("[fetch_packages] Fetching index from: {}", index_url);
-    
+
     let client = reqwest::Client::builder()
         .user_agent("r2modmac/0.6.0")
         .connect_timeout(Duration::from_secs(8))
@@ -2135,7 +2294,10 @@ pub async fn fetch_packages(app: AppHandle, state: tauri::State<'_, AppState>, g
         .await
         .map_err(|e| format!("Failed to fetch index: {}", e))?;
     if !resp.status().is_success() {
-        return Err(format!("Index request failed with status {}", resp.status()));
+        return Err(format!(
+            "Index request failed with status {}",
+            resp.status()
+        ));
     }
 
     let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
@@ -2149,7 +2311,10 @@ pub async fn fetch_packages(app: AppHandle, state: tauri::State<'_, AppState>, g
 
     // 2. Load chunks directly from the network and keep them in memory only.
     // This avoids creating large per-game cache files on disk.
-    async fn load_chunk(client: &reqwest::Client, url: &str) -> Result<Vec<serde_json::Value>, String> {
+    async fn load_chunk(
+        client: &reqwest::Client,
+        url: &str,
+    ) -> Result<Vec<serde_json::Value>, String> {
         let mut last_error: Option<String> = None;
         for attempt in 1..=3 {
             let resp = match client.get(url).send().await {
@@ -2162,7 +2327,11 @@ pub async fn fetch_packages(app: AppHandle, state: tauri::State<'_, AppState>, g
             };
 
             if !resp.status().is_success() {
-                last_error = Some(format!("Attempt {} failed with status {}", attempt, resp.status()));
+                last_error = Some(format!(
+                    "Attempt {} failed with status {}",
+                    attempt,
+                    resp.status()
+                ));
                 tokio::time::sleep(Duration::from_millis(250 * attempt as u64)).await;
                 continue;
             }
@@ -2182,7 +2351,10 @@ pub async fn fetch_packages(app: AppHandle, state: tauri::State<'_, AppState>, g
                 match std::io::Read::read_to_string(&mut gz, &mut out) {
                     Ok(_) => out,
                     Err(e) => {
-                        last_error = Some(format!("Attempt {} failed decompressing gzip: {}", attempt, e));
+                        last_error = Some(format!(
+                            "Attempt {} failed decompressing gzip: {}",
+                            attempt, e
+                        ));
                         tokio::time::sleep(Duration::from_millis(250 * attempt as u64)).await;
                         continue;
                     }
@@ -2191,7 +2363,8 @@ pub async fn fetch_packages(app: AppHandle, state: tauri::State<'_, AppState>, g
                 match String::from_utf8(bytes.to_vec()) {
                     Ok(out) => out,
                     Err(e) => {
-                        last_error = Some(format!("Attempt {} invalid utf-8 chunk: {}", attempt, e));
+                        last_error =
+                            Some(format!("Attempt {} invalid utf-8 chunk: {}", attempt, e));
                         tokio::time::sleep(Duration::from_millis(250 * attempt as u64)).await;
                         continue;
                     }
@@ -2201,12 +2374,15 @@ pub async fn fetch_packages(app: AppHandle, state: tauri::State<'_, AppState>, g
             let mut packages: Vec<serde_json::Value> = match serde_json::from_str(&json_str) {
                 Ok(packages) => packages,
                 Err(e) => {
-                    last_error = Some(format!("Attempt {} failed parsing JSON chunk: {}", attempt, e));
+                    last_error = Some(format!(
+                        "Attempt {} failed parsing JSON chunk: {}",
+                        attempt, e
+                    ));
                     tokio::time::sleep(Duration::from_millis(250 * attempt as u64)).await;
                     continue;
                 }
             };
-        
+
             // Filter out Manager packages (e.g. r2modman, Thunderstore Mod Manager) if they appear
             packages.retain(|pkg| {
                 let full_name = pkg["full_name"].as_str().unwrap_or("");
@@ -2230,8 +2406,11 @@ pub async fn fetch_packages(app: AppHandle, state: tauri::State<'_, AppState>, g
         match load_chunk(&client, first_url).await {
             Ok(first_packages) => {
                 let count = first_packages.len();
-                eprintln!("[fetch_packages] First chunk loaded (index {}): {} packages", idx, count);
-                
+                eprintln!(
+                    "[fetch_packages] First chunk loaded (index {}): {} packages",
+                    idx, count
+                );
+
                 // Update state immediately so UI can show something
                 let mut packages_lock = state.packages.write().await;
                 packages_lock.insert(game_id.clone(), first_packages);
@@ -2239,27 +2418,38 @@ pub async fn fetch_packages(app: AppHandle, state: tauri::State<'_, AppState>, g
                 break;
             }
             Err(e) => {
-                eprintln!("[fetch_packages] Failed first chunk attempt idx {}: {}", idx, e);
+                eprintln!(
+                    "[fetch_packages] Failed first chunk attempt idx {}: {}",
+                    idx, e
+                );
             }
         }
     }
 
     if first_loaded_index.is_none() {
-        return Err("Failed to load initial package chunks (network timeout or CDN issue)".to_string());
+        return Err(
+            "Failed to load initial package chunks (network timeout or CDN issue)".to_string(),
+        );
     }
 
     // 4. Load remaining chunks in parallel (streaming to state)
     let remaining_urls: Vec<String> = chunk_urls
         .into_iter()
         .enumerate()
-        .filter_map(|(idx, url)| if Some(idx) == first_loaded_index { None } else { Some(url) })
+        .filter_map(|(idx, url)| {
+            if Some(idx) == first_loaded_index {
+                None
+            } else {
+                Some(url)
+            }
+        })
         .collect();
-    
+
     if !remaining_urls.is_empty() {
         let packages_arc = state.packages.clone();
         let game_id_clone = game_id.clone();
         let app_handle = app.clone();
-        
+
         // Spawn background task for remaining chunks
         tokio::spawn(async move {
             let parallelism = 10usize;
@@ -2282,27 +2472,36 @@ pub async fn fetch_packages(app: AppHandle, state: tauri::State<'_, AppState>, g
                     Err(e) => eprintln!("[fetch_packages] Chunk error: {}", e),
                 }
             }
-            
+
             // Get final count and emit event for frontend
             let final_count = {
                 let packages_lock = packages_arc.read().await;
-                packages_lock.get(&game_id_clone).map(|p| p.len()).unwrap_or(0)
+                packages_lock
+                    .get(&game_id_clone)
+                    .map(|p| p.len())
+                    .unwrap_or(0)
             };
-            
-            eprintln!("[fetch_packages] Background loading complete. Total: {} packages", final_count);
-            
+
+            eprintln!(
+                "[fetch_packages] Background loading complete. Total: {} packages",
+                final_count
+            );
+
             // Emit event so frontend knows more packages are available
-            let _ = app_handle.emit("packages-loaded", serde_json::json!({
-                "game_id": game_id_clone,
-                "total_count": final_count
-            }));
+            let _ = app_handle.emit(
+                "packages-loaded",
+                serde_json::json!({
+                    "game_id": game_id_clone,
+                    "total_count": final_count
+                }),
+            );
         });
     }
 
     // 5. Return immediately with first chunk count
     let packages_lock = state.packages.read().await;
     let count = packages_lock.get(&game_id).map(|p| p.len()).unwrap_or(0);
-    
+
     if let Ok(elapsed) = start_time.elapsed() {
         eprintln!("[fetch_packages] Initial load in {:.2?} ({} packages ready, {} chunks loading in background)", 
             elapsed, count, total_chunks - 1);
@@ -2314,13 +2513,13 @@ pub async fn fetch_packages(app: AppHandle, state: tauri::State<'_, AppState>, g
 #[command]
 pub async fn get_available_categories(
     state: tauri::State<'_, AppState>,
-    game_id: String
+    game_id: String,
 ) -> Result<Vec<String>, String> {
     let packages_lock = state.packages.read().await;
-    
+
     if let Some(packages) = packages_lock.get(&game_id) {
         let mut categories: std::collections::HashSet<String> = std::collections::HashSet::new();
-        
+
         for p in packages.iter() {
             if let Some(cats) = p.get("categories").and_then(|v| v.as_array()) {
                 for cat in cats {
@@ -2330,7 +2529,7 @@ pub async fn get_available_categories(
                 }
             }
         }
-        
+
         let mut result: Vec<String> = categories.into_iter().collect();
         result.sort();
         Ok(result)
@@ -2341,10 +2540,10 @@ pub async fn get_available_categories(
 
 #[command]
 pub async fn get_packages(
-    state: tauri::State<'_, AppState>, 
-    game_id: String, 
-    page: usize, 
-    page_size: usize, 
+    state: tauri::State<'_, AppState>,
+    game_id: String,
+    page: usize,
+    page_size: usize,
     search: String,
     sort: Option<String>,
     nsfw: Option<bool>,
@@ -2352,105 +2551,142 @@ pub async fn get_packages(
     sort_direction: Option<String>,
     categories: Option<Vec<String>>,
     mods: Option<bool>,
-    modpacks: Option<bool>
+    modpacks: Option<bool>,
 ) -> Result<Vec<serde_json::Value>, String> {
     let packages_lock = state.packages.read().await;
-    
+
     if let Some(packages) = packages_lock.get(&game_id) {
         // Initial filtering
-        let mut filtered: Vec<&serde_json::Value> = packages.iter().filter(|p| {
-            // 1. Search Filter
-            if !search.is_empty() {
-                let search_lower = search.to_lowercase();
-                let name = p["name"].as_str().unwrap_or("").to_lowercase();
-                let full_name = p["full_name"].as_str().unwrap_or("").to_lowercase();
-                if !name.contains(&search_lower) && !full_name.contains(&search_lower) {
-                    return false;
-                }
-            }
-
-            // 2. NSFW Filter
-            // If nsfw tag is FALSE (default): Hide NSFW content
-            // If nsfw tag is TRUE: Show ONLY NSFW content
-            let nsfw_tag_active = nsfw.unwrap_or(false);
-            let is_nsfw = p.get("has_nsfw_content").and_then(|v| v.as_bool()).unwrap_or(false);
-            if nsfw_tag_active {
-                // Show ONLY NSFW
-                if !is_nsfw { return false; }
-            } else {
-                // Hide NSFW
-                if is_nsfw { return false; }
-            }
-
-            // 3. Deprecated Filter
-            // If deprecated tag is FALSE (default): Hide Deprecated content
-            // If deprecated tag is TRUE: Show ONLY Deprecated content
-            let deprecated_tag_active = deprecated.unwrap_or(false);
-            let is_deprecated = p.get("is_deprecated").and_then(|v| v.as_bool()).unwrap_or(false);
-            if deprecated_tag_active {
-                // Show ONLY Deprecated
-                if !is_deprecated { return false; }
-            } else {
-                // Hide Deprecated
-                if is_deprecated { return false; }
-            }
-
-            // 4. Mods/Modpacks Filter
-            // Logic: Both OFF = show all, Both ON = show all, Only one ON = show only that type
-            let mods_active = mods.unwrap_or(false);
-            let modpacks_active = modpacks.unwrap_or(false);
-            
-            // Check if package is a modpack (has "Modpacks" in categories)
-            let pkg_categories: Vec<String> = p.get("categories")
-                .and_then(|v| v.as_array())
-                .map(|arr| arr.iter().filter_map(|c| c.as_str().map(|s| s.to_string())).collect())
-                .unwrap_or_default();
-            let is_modpack = pkg_categories.iter().any(|c| c.to_lowercase() == "modpacks");
-            
-            // Apply filter only if exactly one is active
-            if mods_active != modpacks_active {
-                if mods_active && is_modpack {
-                    return false; // Show only mods, this is a modpack - hide it
-                }
-                if modpacks_active && !is_modpack {
-                    return false; // Show only modpacks, this is a mod - hide it
-                }
-            }
-
-            // 5. Category/Tag Filter
-            // If categories is empty or None, show all
-            // If categories has values, package must match at least one:
-            // - Match in categories array
-            // - OR match in package name
-            // - OR match in package description
-            if let Some(ref filter_cats) = categories {
-                if !filter_cats.is_empty() {
-                    let pkg_categories: Vec<String> = p.get("categories")
-                        .and_then(|v| v.as_array())
-                        .map(|arr| arr.iter().filter_map(|c| c.as_str().map(|s| s.to_lowercase())).collect())
-                        .unwrap_or_default();
-                    
-                    let pkg_name = p.get("name").and_then(|v| v.as_str()).unwrap_or("").to_lowercase();
-                    let pkg_full_name = p.get("full_name").and_then(|v| v.as_str()).unwrap_or("").to_lowercase();
-                    
-                    // Check if any filter tag matches
-                    let has_match = filter_cats.iter().any(|fc| {
-                        let fc_lower = fc.to_lowercase();
-                        // Match in categories
-                        pkg_categories.iter().any(|c| c.contains(&fc_lower)) ||
-                        // Match in name
-                        pkg_name.contains(&fc_lower) ||
-                        pkg_full_name.contains(&fc_lower)
-                    });
-                    
-                    if !has_match {
+        let mut filtered: Vec<&serde_json::Value> = packages
+            .iter()
+            .filter(|p| {
+                // 1. Search Filter
+                if !search.is_empty() {
+                    let search_lower = search.to_lowercase();
+                    let name = p["name"].as_str().unwrap_or("").to_lowercase();
+                    let full_name = p["full_name"].as_str().unwrap_or("").to_lowercase();
+                    if !name.contains(&search_lower) && !full_name.contains(&search_lower) {
                         return false;
                     }
                 }
-            }
 
-            true
-        }).collect();
+                // 2. NSFW Filter
+                // If nsfw tag is FALSE (default): Hide NSFW content
+                // If nsfw tag is TRUE: Show ONLY NSFW content
+                let nsfw_tag_active = nsfw.unwrap_or(false);
+                let is_nsfw = p
+                    .get("has_nsfw_content")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                if nsfw_tag_active {
+                    // Show ONLY NSFW
+                    if !is_nsfw {
+                        return false;
+                    }
+                } else {
+                    // Hide NSFW
+                    if is_nsfw {
+                        return false;
+                    }
+                }
+
+                // 3. Deprecated Filter
+                // If deprecated tag is FALSE (default): Hide Deprecated content
+                // If deprecated tag is TRUE: Show ONLY Deprecated content
+                let deprecated_tag_active = deprecated.unwrap_or(false);
+                let is_deprecated = p
+                    .get("is_deprecated")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                if deprecated_tag_active {
+                    // Show ONLY Deprecated
+                    if !is_deprecated {
+                        return false;
+                    }
+                } else {
+                    // Hide Deprecated
+                    if is_deprecated {
+                        return false;
+                    }
+                }
+
+                // 4. Mods/Modpacks Filter
+                // Logic: Both OFF = show all, Both ON = show all, Only one ON = show only that type
+                let mods_active = mods.unwrap_or(false);
+                let modpacks_active = modpacks.unwrap_or(false);
+
+                // Check if package is a modpack (has "Modpacks" in categories)
+                let pkg_categories: Vec<String> = p
+                    .get("categories")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|c| c.as_str().map(|s| s.to_string()))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let is_modpack = pkg_categories
+                    .iter()
+                    .any(|c| c.to_lowercase() == "modpacks");
+
+                // Apply filter only if exactly one is active
+                if mods_active != modpacks_active {
+                    if mods_active && is_modpack {
+                        return false; // Show only mods, this is a modpack - hide it
+                    }
+                    if modpacks_active && !is_modpack {
+                        return false; // Show only modpacks, this is a mod - hide it
+                    }
+                }
+
+                // 5. Category/Tag Filter
+                // If categories is empty or None, show all
+                // If categories has values, package must match at least one:
+                // - Match in categories array
+                // - OR match in package name
+                // - OR match in package description
+                if let Some(ref filter_cats) = categories {
+                    if !filter_cats.is_empty() {
+                        let pkg_categories: Vec<String> = p
+                            .get("categories")
+                            .and_then(|v| v.as_array())
+                            .map(|arr| {
+                                arr.iter()
+                                    .filter_map(|c| c.as_str().map(|s| s.to_lowercase()))
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+
+                        let pkg_name = p
+                            .get("name")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_lowercase();
+                        let pkg_full_name = p
+                            .get("full_name")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_lowercase();
+
+                        // Check if any filter tag matches
+                        let has_match = filter_cats.iter().any(|fc| {
+                            let fc_lower = fc.to_lowercase();
+                            // Match in categories
+                            pkg_categories.iter().any(|c| c.contains(&fc_lower)) ||
+                        // Match in name
+                        pkg_name.contains(&fc_lower) ||
+                        pkg_full_name.contains(&fc_lower)
+                        });
+
+                        if !has_match {
+                            return false;
+                        }
+                    }
+                }
+
+                true
+            })
+            .collect();
 
         // Sorting
         if let Some(sort_by) = sort {
@@ -2461,32 +2697,56 @@ pub async fn get_packages(
                 "downloads" => filtered.sort_by(|a, b| {
                     let get_downloads = |p: &serde_json::Value| -> u64 {
                         p.get("versions")
-                         .and_then(|v| v.as_array())
-                         .and_then(|arr| arr.first()) 
-                         .and_then(|ver| ver.get("downloads"))
-                         .and_then(|d| d.as_u64())
-                         .unwrap_or(0)
+                            .and_then(|v| v.as_array())
+                            .and_then(|arr| arr.first())
+                            .and_then(|ver| ver.get("downloads"))
+                            .and_then(|d| d.as_u64())
+                            .unwrap_or(0)
                     };
                     let da = get_downloads(a);
                     let db = get_downloads(b);
-                    if is_asc { da.cmp(&db) } else { db.cmp(&da) }
+                    if is_asc {
+                        da.cmp(&db)
+                    } else {
+                        db.cmp(&da)
+                    }
                 }),
                 "rating" => filtered.sort_by(|a, b| {
                     let ra = a.get("rating_score").and_then(|v| v.as_i64()).unwrap_or(0);
                     let rb = b.get("rating_score").and_then(|v| v.as_i64()).unwrap_or(0);
-                    if is_asc { ra.cmp(&rb) } else { rb.cmp(&ra) }
+                    if is_asc {
+                        ra.cmp(&rb)
+                    } else {
+                        rb.cmp(&ra)
+                    }
                 }),
                 "updated" => filtered.sort_by(|a, b| {
                     let da = a.get("date_updated").and_then(|v| v.as_str()).unwrap_or("");
                     let db = b.get("date_updated").and_then(|v| v.as_str()).unwrap_or("");
-                    if is_asc { da.cmp(db) } else { db.cmp(da) }
+                    if is_asc {
+                        da.cmp(db)
+                    } else {
+                        db.cmp(da)
+                    }
                 }),
                 "alphabetical" => filtered.sort_by(|a, b| {
-                    let na = a.get("name").and_then(|v| v.as_str()).unwrap_or("").to_lowercase();
-                    let nb = b.get("name").and_then(|v| v.as_str()).unwrap_or("").to_lowercase();
+                    let na = a
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_lowercase();
+                    let nb = b
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_lowercase();
                     // Ascending: A-Z (na vs nb)
                     // Descending: Z-A (nb vs na)
-                    if is_asc { na.cmp(&nb) } else { nb.cmp(&na) }
+                    if is_asc {
+                        na.cmp(&nb)
+                    } else {
+                        nb.cmp(&na)
+                    }
                 }),
                 _ => {}
             }
@@ -2496,9 +2756,10 @@ pub async fn get_packages(
         if start >= filtered.len() {
             return Ok(vec![]);
         }
-        
+
         let end = std::cmp::min(start + page_size, filtered.len());
-        let slice: Vec<serde_json::Value> = filtered[start..end].iter().map(|&v| v.clone()).collect();
+        let slice: Vec<serde_json::Value> =
+            filtered[start..end].iter().map(|&v| v.clone()).collect();
         Ok(slice)
     } else {
         Ok(vec![])
@@ -2509,16 +2770,16 @@ pub async fn get_packages(
 pub async fn lookup_packages_by_names(
     state: tauri::State<'_, AppState>,
     game_id: String,
-    names: Vec<String>
+    names: Vec<String>,
 ) -> Result<serde_json::Value, String> {
     let packages_lock = state.packages.read().await;
-    
+
     if let Some(packages) = packages_lock.get(&game_id) {
         let mut found = Vec::new();
         let mut unknown = Vec::new();
-        
+
         let re = regex::Regex::new(r"^(.*)-(\d+\.\d+\.\d+)$").unwrap();
-        
+
         for name in names {
             // Strip version if present: "Author-Mod-1.0.0" -> "Author-Mod"
             let clean_name = if let Some(caps) = re.captures(&name) {
@@ -2526,16 +2787,17 @@ pub async fn lookup_packages_by_names(
             } else {
                 name.clone()
             };
-            
-            if let Some(pkg) = packages.iter().find(|p| {
-                p["full_name"].as_str().unwrap_or("") == clean_name
-            }) {
+
+            if let Some(pkg) = packages
+                .iter()
+                .find(|p| p["full_name"].as_str().unwrap_or("") == clean_name)
+            {
                 found.push(pkg.clone());
             } else {
                 unknown.push(name.clone());
             }
         }
-        
+
         Ok(serde_json::json!({
             "found": found,
             "unknown": unknown
@@ -2546,9 +2808,13 @@ pub async fn lookup_packages_by_names(
 }
 
 #[command]
-pub async fn fetch_package_by_name(state: tauri::State<'_, AppState>, name: String, game_id: Option<String>) -> Result<Option<serde_json::Value>, String> {
+pub async fn fetch_package_by_name(
+    state: tauri::State<'_, AppState>,
+    name: String,
+    game_id: Option<String>,
+) -> Result<Option<serde_json::Value>, String> {
     // name might be "Namespace-Name" or "Namespace-Name-Version"
-    
+
     // 1. Strip version if present (Regex: ^(.*)-(\d+\.\d+\.\d+)$)
     let re = regex::Regex::new(r"^(.*)-(\d+\.\d+\.\d+)$").unwrap();
     let clean_name = if let Some(caps) = re.captures(&name) {
@@ -2565,19 +2831,26 @@ pub async fn fetch_package_by_name(state: tauri::State<'_, AppState>, name: Stri
             // Cache structure: Array of package objects
             // We need to match full_name or name
             // The cache stores objects with "full_name": "Namespace-Name"
-            
+
             let target_name = clean_name.to_lowercase();
-            
-            if let Some(pkg) = packages.iter().find(|p| {
-                 p["full_name"].as_str().unwrap_or("").to_lowercase() == target_name
-            }) {
-                eprintln!("[fetch_package_by_name] Found {} in cache for game {}", clean_name, gid);
+
+            if let Some(pkg) = packages
+                .iter()
+                .find(|p| p["full_name"].as_str().unwrap_or("").to_lowercase() == target_name)
+            {
+                eprintln!(
+                    "[fetch_package_by_name] Found {} in cache for game {}",
+                    clean_name, gid
+                );
                 return Ok(Some(pkg.clone()));
             }
         }
     }
 
-    eprintln!("[fetch_package_by_name] Cache miss for {}. Fetching from API...", clean_name);
+    eprintln!(
+        "[fetch_package_by_name] Cache miss for {}. Fetching from API...",
+        clean_name
+    );
 
     // 3. Split Namespace and Name
     let parts: Vec<&str> = clean_name.splitn(2, '-').collect();
@@ -2587,18 +2860,21 @@ pub async fn fetch_package_by_name(state: tauri::State<'_, AppState>, name: Stri
     let namespace = parts[0];
     let package_name = parts[1];
 
-    let url = format!("https://thunderstore.io/api/v1/package/{}/{}/", namespace, package_name);
+    let url = format!(
+        "https://thunderstore.io/api/v1/package/{}/{}/",
+        namespace, package_name
+    );
     let client = reqwest::Client::builder()
         .user_agent("r2modmac/0.0.1")
         .build()
         .map_err(|e| e.to_string())?;
-    
+
     let response = client.get(&url).send().await.map_err(|e| e.to_string())?;
 
     if response.status() == 404 {
         return Ok(None);
     }
-    
+
     if !response.status().is_success() {
         return Err(format!("Failed to fetch package: {}", response.status()));
     }

@@ -1,5 +1,5 @@
-use tauri::{command, AppHandle};
 use crate::models::shared::*;
+use tauri::{command, AppHandle};
 
 #[command]
 pub async fn get_settings(app: AppHandle) -> Result<Settings, String> {

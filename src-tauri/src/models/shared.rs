@@ -121,7 +121,10 @@ pub fn save_settings_impl(app: &tauri::AppHandle, settings: &Settings) -> Result
 }
 
 pub fn normalize_for_matching(s: &str) -> String {
-    s.to_lowercase().chars().filter(|c| c.is_alphanumeric()).collect()
+    s.to_lowercase()
+        .chars()
+        .filter(|c| c.is_alphanumeric())
+        .collect()
 }
 
 pub fn is_balatro_identifier(game_identifier: &str) -> bool {
@@ -139,12 +142,7 @@ pub fn is_balatro_game_path(path: &std::path::Path) -> bool {
         return true;
     }
 
-    if path
-        .join("Contents")
-        .join("MacOS")
-        .join("love")
-        .exists()
-    {
+    if path.join("Contents").join("MacOS").join("love").exists() {
         return true;
     }
 
@@ -212,7 +210,10 @@ pub fn clean_mod_name(name: &str, version: &str) -> String {
 
 pub fn normalize_zip_entry_path(name: &str) -> Option<PathBuf> {
     let normalized = name.replace('\\', "/");
-    let trimmed = normalized.trim().trim_start_matches("./").trim_start_matches('/');
+    let trimmed = normalized
+        .trim()
+        .trim_start_matches("./")
+        .trim_start_matches('/');
 
     if trimmed.is_empty() {
         return None;
@@ -256,17 +257,19 @@ pub fn zip_entry_is_dir(name: &str) -> bool {
     name.replace('\\', "/").ends_with('/')
 }
 
-pub fn detect_bepinex_structure<R: std::io::Read + std::io::Seek>(archive: &mut zip::ZipArchive<R>) -> (bool, Option<String>) {
+pub fn detect_bepinex_structure<R: std::io::Read + std::io::Seek>(
+    archive: &mut zip::ZipArchive<R>,
+) -> (bool, Option<String>) {
     let mut found_bepinex_core = false;
     let mut found_root_level_dll = false;
     let mut root_prefix: Option<String> = None;
-    
+
     for i in 0..archive.len() {
         if let Ok(file) = archive.by_index_raw(i) {
             let Some(name) = normalize_zip_entry_name(file.name()) else {
                 continue;
             };
-            
+
             if name.contains("BepInEx/core/") || name.ends_with("BepInEx/core") {
                 found_bepinex_core = true;
                 if let Some(idx) = name.find("BepInEx/") {
@@ -276,7 +279,7 @@ pub fn detect_bepinex_structure<R: std::io::Read + std::io::Seek>(archive: &mut 
                     }
                 }
             }
-            
+
             if name.ends_with("winhttp.dll") || name.ends_with("doorstop_config.ini") {
                 found_root_level_dll = true;
                 if let Some(idx) = name.rfind('/') {
@@ -288,11 +291,11 @@ pub fn detect_bepinex_structure<R: std::io::Read + std::io::Seek>(archive: &mut 
             }
         }
     }
-    
+
     let is_bepinex = found_bepinex_core || found_root_level_dll;
     if is_bepinex && root_prefix.is_none() {
         root_prefix = Some(String::new());
     }
-    
+
     (is_bepinex, root_prefix)
 }
