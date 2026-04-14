@@ -91,12 +91,16 @@ pub(crate) fn launch_via_steam_for_game_path(
     );
 
     if let Some(executable_path) = executable_path.as_ref() {
-        if !wait_for_process_start(executable_path, MACOS_LAUNCH_OBSERVE_TIMEOUT_MS) {
-            eprintln!(
-                "[launch_via_steam_for_game_path] Steam accepted the launch request for app {}, but the game process was not observed in time. Continuing optimistically.",
-                app_id
-            );
-        }
+        let observed_executable_path = executable_path.clone();
+        let observed_app_id = app_id.clone();
+        std::thread::spawn(move || {
+            if !wait_for_process_start(&observed_executable_path, MACOS_LAUNCH_OBSERVE_TIMEOUT_MS) {
+                eprintln!(
+                    "[launch_via_steam_for_game_path] Steam accepted the launch request for app {}, but the game process was not observed in time. Continuing optimistically.",
+                    observed_app_id
+                );
+            }
+        });
     }
 
     eprintln!(
