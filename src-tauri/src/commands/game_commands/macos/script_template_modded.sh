@@ -1,22 +1,68 @@
 
+BEPINEX_LOG_PATH="$BASEDIR/BepInEx/LogOutput.log"
+BEPINEX_LOG_MTIME_BEFORE=0
+if [ -f "$BEPINEX_LOG_PATH" ]; then
+    BEPINEX_LOG_MTIME_BEFORE=$(stat -f %m "$BEPINEX_LOG_PATH" 2>/dev/null || printf 0)
+fi
+
 maybe_retry_x64_after_arm64_failure() {{
     failed_mode="$1"
     failed_status="$2"
     shift 2
-    bepinex_log="$BASEDIR/BepInEx/LogOutput.log"
-
-    if [ "$failed_status" = "0" ]; then
-        return 1
+    bepinex_log="$BEPINEX_LOG_PATH"
+    bepinex_log_mtime_before="${{BEPINEX_LOG_MTIME_BEFORE:-0}}"
+    bepinex_log_mtime_after="$bepinex_log_mtime_before"
+    if [ -f "$bepinex_log" ]; then
+        bepinex_log_mtime_after=$(stat -f %m "$bepinex_log" 2>/dev/null || printf "$bepinex_log_mtime_before")
+    fi
+    bepinex_started=false
+    if [ "$bepinex_log_mtime_after" -gt "$bepinex_log_mtime_before" ] 2>/dev/null; then
+        bepinex_started=true
     fi
 
     if [ "$arch" != "arm64" ] || [ "$can_retry_x64" != true ]; then
         return 1
     fi
 
-    if [ -s "$dyld_log" ] || [ -f "$bepinex_log" ]; then
+    # Arm64 launch succeeded in initializing BepInEx; keep current runtime arch.
+    if [ "$bepinex_started" = true ]; then
         return 1
     fi
 
+    # User interrupted or terminated launch manually; don't auto-retry.
+    if [ "$failed_status" = "130" ] || [ "$failed_status" = "143" ]; then
+        return 1
+    fi
+
+    # Give arm64 launches a short grace period: some games detach quickly while
+    # BepInEx/logging initializes. If the process is alive or logs start moving,
+    # keep arm64 and do not force x64 fallback.
+    retry_probe=0
+    while [ $retry_probe -lt 6 ]; do
+        if [ -f "$bepinex_log" ]; then
+            bepinex_log_mtime_after=$(stat -f %m "$bepinex_log" 2>/dev/null || printf "$bepinex_log_mtime_before")
+            if [ "$bepinex_log_mtime_after" -gt "$bepinex_log_mtime_before" ] 2>/dev/null; then
+                log_bootstrap "${{failed_mode}}_retry_skipped_bepinex_started status=${{failed_status}}"
+                return 1
+            fi
+        fi
+
+        if [ -n "${{executable_path:-}}" ]; then
+            retry_exec_name=$(basename "${{executable_path}}")
+            retry_exec_dir=$(dirname "${{executable_path}}")
+            if pgrep -f "${{executable_path}}" >/dev/null 2>&1 \
+                || pgrep -x "$retry_exec_name" >/dev/null 2>&1 \
+                || pgrep -f "$retry_exec_dir" >/dev/null 2>&1; then
+                log_bootstrap "${{failed_mode}}_retry_skipped_process_alive status=${{failed_status}}"
+                return 1
+            fi
+        fi
+
+        retry_probe=$((retry_probe+1))
+        sleep 0.5
+    done
+
+    # If arm64 exits without initializing BepInEx, retry once under x64.
     log_bootstrap "${{failed_mode}}_retrying_x64_fallback status=${{failed_status}}"
     printf '[%s] %s_retrying_x64_fallback status=%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$failed_mode" "$failed_status" >> "$exec_log"
     /usr/bin/arch -x86_64 \

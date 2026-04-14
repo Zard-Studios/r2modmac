@@ -103,36 +103,114 @@ steam_arg_helper() {{
 }}
 
 steam_launch_args_ready=false
+steam_launch_seen=false
+steam_launch_args_list=""
 for a in "$@"; do
+    steam_launch_args_list="${{steam_launch_args_list}}
+${{a}}"
     if [ "$a" = "SteamLaunch" ]; then
-        log_bootstrap "steam_launch_branch_entered"
+        steam_launch_seen=true
+    fi
+done
+
+if [ "$steam_launch_seen" = true ]; then
+    log_bootstrap "steam_launch_branch_entered"
+    # Upstream BepInEx behavior for Steam bootstrapper relaunch:
+    # preserve both old and new Steam layouts where `--` can be interleaved.
+    if [ "$2" = "SteamLaunch" ]; then
+        to_rotate=4
         rotated=0
-        max=$#
-        while [ $rotated -lt $max ]; do
-            if steam_arg_helper "$1"; then
-                to_rotate=$(($# - rotated))
-                set -- "$@" "$0"
-                while [ $((to_rotate-=1)) -ge 0 ]; do
-                    set -- "$@" "$1"
-                    shift
-                done
-                steam_launch_args_ready=true
-                log_bootstrap "steam_launch_args_ready argv=$*"
-                break
-            else
+        while [ $((to_rotate-=1)) -ge 0 ]; do
+            while [ "z$1" = "z--" ]; do
                 set -- "$@" "$1"
                 shift
                 rotated=$((rotated+1))
+            done
+            set -- "$@" "$1"
+            shift
+            rotated=$((rotated+1))
+        done
+        to_rotate=$(($# - rotated))
+        set -- "$@" "$0"
+        while [ $((to_rotate-=1)) -ge 0 ]; do
+            set -- "$@" "$1"
+            shift
+        done
+        steam_launch_args_ready=true
+        log_bootstrap "steam_launch_args_ready source=bootstrap_relay argv=$*"
+        # Keep Steam bootstrap chain intact (overlay + SteamAPI context), then
+        # continue in the relaunched script process.
+        exec "$@"
+    fi
+
+    if [ "$steam_launch_args_ready" != true ]; then
+        steam_launch_after_separator=false
+        steam_launch_exec_args=""
+        old_ifs=$IFS
+        IFS='
+'
+        for a in $steam_launch_args_list; do
+            if [ "$steam_launch_after_separator" = true ]; then
+                steam_launch_exec_args="${{steam_launch_exec_args}}
+${{a}}"
+            elif [ "$a" = "--" ]; then
+                steam_launch_after_separator=true
             fi
         done
-        if [ "$steam_launch_args_ready" != true ]; then
-            log_bootstrap "steam_launch_branch_failed_to_match_executable"
-            echo "Please set executable_name to a valid name in a text editor"
-            exit 1
+        IFS=$old_ifs
+
+        if [ -n "$steam_launch_exec_args" ]; then
+            set --
+            old_ifs=$IFS
+            IFS='
+'
+            for a in $steam_launch_exec_args; do
+                set -- "$@" "$a"
+            done
+            IFS=$old_ifs
+            steam_launch_args_ready=true
+            log_bootstrap "steam_launch_args_ready source=separator argv=$*"
         fi
-        break
     fi
-done
+
+    if [ "$steam_launch_args_ready" != true ]; then
+        steam_launch_collect=false
+        steam_launch_exec_args=""
+        old_ifs=$IFS
+        IFS='
+'
+        for a in $steam_launch_args_list; do
+            if [ "$steam_launch_collect" = true ]; then
+                steam_launch_exec_args="${{steam_launch_exec_args}}
+${{a}}"
+            elif steam_arg_helper "$a"; then
+                steam_launch_collect=true
+                steam_launch_exec_args="${{steam_launch_exec_args}}
+${{a}}"
+            fi
+        done
+        IFS=$old_ifs
+
+        if [ -n "$steam_launch_exec_args" ]; then
+            set --
+            old_ifs=$IFS
+            IFS='
+'
+            for a in $steam_launch_exec_args; do
+                set -- "$@" "$a"
+            done
+            IFS=$old_ifs
+            steam_launch_args_ready=true
+            log_bootstrap "steam_launch_args_ready source=executable_match argv=$*"
+        fi
+    fi
+
+    if [ "$steam_launch_args_ready" != true ]; then
+        log_bootstrap "steam_launch_branch_failed_to_match_executable"
+        echo "Please set executable_name to a valid name in a text editor"
+        exit 1
+    fi
+fi
 
 case "$executable_name" in
     *.app|/*.app)
@@ -360,12 +438,18 @@ if echo "$app_path_lower" | grep -Eq '/steam\.app(/|$)|/steam\.appbundle/steam(/
     log_bootstrap "codesign_remove_signature_skipped_steam app_path=$app_path"
 elif [ "$runtime_disabled" = true ]; then
     log_bootstrap "codesign_remove_signature_skipped_runtime_disabled app_path=$app_path"
-elif command -v codesign >/dev/null 2>&1 && [ -d "$app_path" ] && codesign -d "$app_path" >/dev/null 2>&1; then
-    log_bootstrap "codesign_adhoc_sign_attempt app_path=$app_path"
-    if codesign --force --deep --sign - "$app_path" >/dev/null 2>&1; then
-        log_bootstrap "codesign_adhoc_sign_ok"
+elif command -v codesign >/dev/null 2>&1 && [ -d "$app_path" ]; then
+    if codesign -v --strict "$app_path" >/dev/null 2>&1; then
+        log_bootstrap "codesign_adhoc_sign_skipped_valid app_path=$app_path"
+    elif codesign -d "$app_path" >/dev/null 2>&1; then
+        log_bootstrap "codesign_adhoc_sign_attempt app_path=$app_path"
+        if codesign --force --deep --sign - "$app_path" >/dev/null 2>&1; then
+            log_bootstrap "codesign_adhoc_sign_ok"
+        else
+            log_bootstrap "codesign_adhoc_sign_failed"
+        fi
     else
-        log_bootstrap "codesign_adhoc_sign_failed"
+        log_bootstrap "codesign_adhoc_sign_skipped_no_signature app_path=$app_path"
     fi
 fi
 

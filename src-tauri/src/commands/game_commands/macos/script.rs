@@ -61,6 +61,7 @@ pub(crate) fn configure_macos_bepinex_script(
         if write_debug_logs_to_game { 1 } else { 0 }
     ));
     let removes_codesign_signature = script.contains("codesign_adhoc_sign_attempt")
+        && script.contains("codesign_adhoc_sign_skipped_valid")
         && script.contains("codesign_remove_signature_skipped_runtime_disabled");
     let logs_loader_environment =
         script.contains("wrapper_arch=") && script.contains("loader_env LD_LIBRARY_PATH=");
@@ -100,6 +101,9 @@ pub(crate) fn configure_macos_bepinex_script(
         && script.contains("steamemu_dir=$steamemu_macos_dir");
     let has_arm64_x64_fallback_retry = script.contains("maybe_retry_x64_after_arm64_failure()")
         && script.contains("can_retry_x64=true")
+        && script.contains("BEPINEX_LOG_MTIME_BEFORE")
+        && script.contains("bepinex_started=true")
+        && script.contains("retry_skipped_process_alive status=")
         && script.contains("retrying_x64_fallback status=")
         && script.contains("x64_fallback_failed status=$retry_status");
     let has_modern_doorstop_env_aliases = script.contains("DOORSTOP_ENABLE=1")
@@ -204,7 +208,9 @@ pub(crate) fn configure_macos_bepinex_script(
     let preserves_steam_dyld_hooks = script
         .contains("r2modmac: preserve Steam-provided DYLD hooks")
         && script.contains("DYLD_INSERT_LIBRARIES=\"${doorstop_dylib}:${DYLD_INSERT_LIBRARIES}\"");
-    let steam_launch_exec_deferred = script.contains("steam_launch_args_ready=true")
+    let steam_launch_exec_deferred = script
+        .contains("steam_launch_args_ready source=bootstrap_relay")
+        && script.contains("steam_launch_args_ready source=separator")
         && script.contains("steam_launch_exec_modded argv=$*");
     let has_legacy_bepinex_bootstrap_log = script
         .contains("bootstrap_log=\"$BASEDIR/BepInEx/r2modmac_bootstrap.log\"")
