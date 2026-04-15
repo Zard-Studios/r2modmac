@@ -4,6 +4,7 @@ BEPINEX_LOG_MTIME_BEFORE=0
 if [ -f "$BEPINEX_LOG_PATH" ]; then
     BEPINEX_LOG_MTIME_BEFORE=$(stat -f %m "$BEPINEX_LOG_PATH" 2>/dev/null || printf 0)
 fi
+R2MODMAC_LAUNCH_EPOCH=$(date +%s 2>/dev/null || printf 0)
 
 maybe_retry_x64_after_arm64_failure() {{
     failed_mode="$1"
@@ -24,14 +25,50 @@ maybe_retry_x64_after_arm64_failure() {{
         return 1
     fi
 
+    arm64_preloader_crash=false
+    latest_preloader_log=""
+    retry_executable_dir=""
+    if [ -n "${{executable_path:-}}" ]; then
+        retry_executable_dir=$(dirname "${{executable_path}}")
+    fi
+    for preloader_candidate in "$BASEDIR"/preloader_*.log "$retry_executable_dir"/preloader_*.log "$modded_working_dir"/preloader_*.log; do
+        [ -f "$preloader_candidate" ] || continue
+        if [ -z "$latest_preloader_log" ] || [ "$preloader_candidate" -nt "$latest_preloader_log" ]; then
+            latest_preloader_log="$preloader_candidate"
+        fi
+    done
+    if [ -n "$latest_preloader_log" ] && [ -f "$latest_preloader_log" ]; then
+        latest_preloader_mtime=$(stat -f %m "$latest_preloader_log" 2>/dev/null || printf 0)
+        launch_epoch="${{R2MODMAC_LAUNCH_EPOCH:-0}}"
+        if [ "$launch_epoch" = "0" ] || [ "$latest_preloader_mtime" -ge "$launch_epoch" ] 2>/dev/null; then
+            if grep -Eq "HarmonyInteropFix\\.Apply|ConsoleSetOutFix\\.Apply|DetourHelper\\.GetIdentifiable|HarmonyException: (Patching exception|IL Compile Error)" "$latest_preloader_log"; then
+                arm64_preloader_crash=true
+                log_bootstrap "${{failed_mode}}_retry_preloader_crash_detected status=${{failed_status}} log=${{latest_preloader_log}}"
+                if [ -n "${{force_x64_state_file:-}}" ] && [ -n "${{force_x64_state_key:-}}" ]; then
+                    printf '%s\n' "$force_x64_state_key" > "$force_x64_state_file" 2>/dev/null || true
+                    log_bootstrap "${{failed_mode}}_retry_force_x64_state_written key=${{force_x64_state_key}}"
+                fi
+            fi
+        fi
+    fi
+
     # Arm64 launch succeeded in initializing BepInEx; keep current runtime arch.
-    if [ "$bepinex_started" = true ]; then
+    if [ "$bepinex_started" = true ] && [ "$arm64_preloader_crash" != true ]; then
         return 1
     fi
 
     # User interrupted or terminated launch manually; don't auto-retry.
     if [ "$failed_status" = "130" ] || [ "$failed_status" = "143" ]; then
         return 1
+    fi
+
+    # A clean exit is not a launch failure; avoid spawning a second x64 run.
+    # Some native macOS games can return 0 after handing off to child/runtime.
+    if [ "$failed_status" = "0" ] && [ "$arm64_preloader_crash" != true ]; then
+        log_bootstrap "${{failed_mode}}_retry_skipped_clean_exit status=${{failed_status}}"
+        return 1
+    elif [ "$failed_status" = "0" ] && [ "$arm64_preloader_crash" = true ]; then
+        log_bootstrap "${{failed_mode}}_retrying_x64_after_preloader_crash status=${{failed_status}}"
     fi
 
     # Give arm64 launches a short grace period: some games detach quickly while

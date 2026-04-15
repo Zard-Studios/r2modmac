@@ -1,5 +1,47 @@
 use super::*;
 
+const MIN_BEPINEX5_UNITY6_LOG_WRITER_FIX: (u32, u32, u32, u32) = (5, 4, 23, 5);
+
+fn parse_macos_bepinex5_runtime_version(
+    runtime_root: &std::path::Path,
+) -> Option<(u32, u32, u32, u32)> {
+    let bepinex_core = runtime_root
+        .join("BepInEx")
+        .join("core")
+        .join("BepInEx.dll");
+    let bytes = fs::read(bepinex_core).ok()?;
+    let text = String::from_utf8_lossy(&bytes);
+    let version_re = regex::Regex::new(r"\b5\.(\d+)\.(\d+)(?:\.(\d+))?\b").ok()?;
+
+    let mut best: Option<(u32, u32, u32, u32)> = None;
+    for captures in version_re.captures_iter(&text) {
+        let minor = captures.get(1)?.as_str().parse::<u32>().ok()?;
+        let patch_major = captures.get(2)?.as_str().parse::<u32>().ok()?;
+        let patch_minor = captures
+            .get(3)
+            .and_then(|value| value.as_str().parse::<u32>().ok())
+            .unwrap_or(0);
+        let candidate = (5, minor, patch_major, patch_minor);
+        if best.map(|current| candidate > current).unwrap_or(true) {
+            best = Some(candidate);
+        }
+    }
+
+    best
+}
+
+fn macos_bepinex_runtime_requires_unity6_log_writer_fix(runtime_root: &std::path::Path) -> bool {
+    if detect_unity_runtime_kind(runtime_root) != "mono" {
+        return false;
+    }
+
+    let Some(version) = parse_macos_bepinex5_runtime_version(runtime_root) else {
+        return false;
+    };
+
+    version.0 == 5 && version < MIN_BEPINEX5_UNITY6_LOG_WRITER_FIX
+}
+
 pub(crate) fn copy_macos_bepinex_runtime_root(
     source_root: &std::path::Path,
     game_path: &std::path::Path,
@@ -91,14 +133,26 @@ pub(crate) async fn ensure_macos_bepinex_runtime_present(
     game_path: &std::path::Path,
 ) -> Result<(), String> {
     let runtime_root = resolve_macos_runtime_root(game_path);
+    let runtime_has_complete = has_complete_macos_bepinex_runtime(&runtime_root);
+    let runtime_requires_fix =
+        runtime_has_complete && macos_bepinex_runtime_requires_unity6_log_writer_fix(&runtime_root);
 
-    if has_complete_macos_bepinex_runtime(&runtime_root) {
+    if runtime_has_complete && !runtime_requires_fix {
         normalize_macos_doorstop_config_file(&runtime_root.join("doorstop_config.ini"))?;
         configure_macos_doorstop_target_assembly(
             &runtime_root.join("doorstop_config.ini"),
             &runtime_root,
         )?;
         return Ok(());
+    } else if runtime_requires_fix {
+        eprintln!(
+            "[ensure_macos_bepinex_runtime_present] Existing macOS BepInEx runtime at {} is below {}.{}.{}.{}; attempting in-place refresh to include Unity 6 log-writer fix.",
+            runtime_root.display(),
+            MIN_BEPINEX5_UNITY6_LOG_WRITER_FIX.0,
+            MIN_BEPINEX5_UNITY6_LOG_WRITER_FIX.1,
+            MIN_BEPINEX5_UNITY6_LOG_WRITER_FIX.2,
+            MIN_BEPINEX5_UNITY6_LOG_WRITER_FIX.3
+        );
     }
 
     let profile_dir = app
@@ -107,14 +161,26 @@ pub(crate) async fn ensure_macos_bepinex_runtime_present(
         .map_err(|e| e.to_string())?
         .join("profiles")
         .join(profile_id);
+    let profile_has_complete = has_complete_macos_bepinex_runtime(&profile_dir);
+    let profile_requires_fix =
+        profile_has_complete && macos_bepinex_runtime_requires_unity6_log_writer_fix(&profile_dir);
 
-    if has_complete_macos_bepinex_runtime(&profile_dir) {
+    if profile_has_complete && !profile_requires_fix {
         normalize_macos_doorstop_config_file(&profile_dir.join("doorstop_config.ini"))?;
         copy_macos_bepinex_runtime_root(&profile_dir, &runtime_root)?;
         dequarantine_recursive(&runtime_root);
         if has_complete_macos_bepinex_runtime(&runtime_root) {
             return Ok(());
         }
+    } else if profile_requires_fix {
+        eprintln!(
+            "[ensure_macos_bepinex_runtime_present] Profile runtime at {} is below {}.{}.{}.{}; skipping direct copy and refreshing from official runtime source.",
+            profile_dir.display(),
+            MIN_BEPINEX5_UNITY6_LOG_WRITER_FIX.0,
+            MIN_BEPINEX5_UNITY6_LOG_WRITER_FIX.1,
+            MIN_BEPINEX5_UNITY6_LOG_WRITER_FIX.2,
+            MIN_BEPINEX5_UNITY6_LOG_WRITER_FIX.3
+        );
     }
 
     let profiles_path = app
@@ -139,15 +205,46 @@ pub(crate) async fn ensure_macos_bepinex_runtime_present(
         .find(|full_name| full_name.to_lowercase().contains("bepinexpack"))
         .map(|s| s.to_string());
 
-    let Some(bepinex_full_name) = bepinex_full_name else {
+    let version_number = if let Some(bepinex_full_name) = bepinex_full_name {
+        extract_version_number_from_full_name(&bepinex_full_name)
+            .ok_or_else(|| format!("Could not parse BepInEx version from {}", bepinex_full_name))?
+    } else if runtime_requires_fix {
+        eprintln!(
+            "[ensure_macos_bepinex_runtime_present] No explicit BepInExPack entry found in profile mods; forcing runtime refresh with minimum version {}.{}.{}.{}.",
+            MIN_BEPINEX5_UNITY6_LOG_WRITER_FIX.0,
+            MIN_BEPINEX5_UNITY6_LOG_WRITER_FIX.1,
+            MIN_BEPINEX5_UNITY6_LOG_WRITER_FIX.2,
+            MIN_BEPINEX5_UNITY6_LOG_WRITER_FIX.3
+        );
+        format!(
+            "{}.{}.{}.{}",
+            MIN_BEPINEX5_UNITY6_LOG_WRITER_FIX.0,
+            MIN_BEPINEX5_UNITY6_LOG_WRITER_FIX.1,
+            MIN_BEPINEX5_UNITY6_LOG_WRITER_FIX.2,
+            MIN_BEPINEX5_UNITY6_LOG_WRITER_FIX.3
+        )
+    } else {
         return Ok(());
     };
-
-    let version_number = extract_version_number_from_full_name(&bepinex_full_name)
-        .ok_or_else(|| format!("Could not parse BepInEx version from {}", bepinex_full_name))?;
     let runtime_kind = detect_unity_runtime_kind(&runtime_root);
-    let runtime_bytes =
-        download_official_macos_bepinex_runtime(&version_number, runtime_kind).await?;
+    let runtime_bytes = match download_official_macos_bepinex_runtime(&version_number, runtime_kind)
+        .await
+    {
+        Ok(bytes) => bytes,
+        Err(error) if runtime_has_complete => {
+            eprintln!(
+                    "[ensure_macos_bepinex_runtime_present] Runtime refresh failed ({}), but an existing runtime is present. Continuing with existing runtime.",
+                    error
+                );
+            normalize_macos_doorstop_config_file(&runtime_root.join("doorstop_config.ini"))?;
+            configure_macos_doorstop_target_assembly(
+                &runtime_root.join("doorstop_config.ini"),
+                &runtime_root,
+            )?;
+            return Ok(());
+        }
+        Err(error) => return Err(error),
+    };
 
     fs::create_dir_all(&profile_dir).map_err(|e| e.to_string())?;
 

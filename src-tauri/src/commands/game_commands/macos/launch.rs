@@ -59,6 +59,13 @@ pub(crate) async fn launch_game_with_mods_for_macos(
     }
 
     validate_macos_bepinex_support(&runtime_game_path)?;
+    sync_macos_runtime_disabled_state(&runtime_game_path, false).map_err(|error| {
+        format!(
+            "Failed to enable macOS runtime before modded launch ({}): {}",
+            runtime_game_path.display(),
+            error
+        )
+    })?;
 
     let dist = infer_distribution_from_game_path(app, game_path, false);
     if dist == "steam" && !use_direct_launch {
@@ -75,7 +82,7 @@ pub(crate) async fn launch_game_with_mods_for_macos(
 
         if let Ok(false) = macos_steam_launch_option_matches_desired(app, game_path) {
             eprintln!(
-                "[launch_game_with_mods] Steam launch option differs (likely arch mismatch) — forcing reconcile with Steam restart."
+                "[launch_game_with_mods] Steam launch option differs (arch/script mismatch) — reconciling managed option before Steam launch."
             );
             ensure_macos_steam_launch_options(app, game_path, true, true)?;
         }

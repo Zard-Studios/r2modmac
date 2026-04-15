@@ -63,6 +63,9 @@ pub(crate) fn configure_macos_bepinex_script(
     let removes_codesign_signature = script.contains("codesign_adhoc_sign_attempt")
         && script.contains("codesign_adhoc_sign_skipped_valid")
         && script.contains("codesign_remove_signature_skipped_runtime_disabled");
+    let has_codesign_cache_guard = script.contains(".r2modmac_codesign_state")
+        && script.contains("codesign_adhoc_sign_skipped_cached")
+        && script.contains("codesign_state_key");
     let logs_loader_environment =
         script.contains("wrapper_arch=") && script.contains("loader_env LD_LIBRARY_PATH=");
     let has_root_loader_mode_env = script.contains("root_loader_mode=false")
@@ -103,10 +106,23 @@ pub(crate) fn configure_macos_bepinex_script(
         && script.contains("can_retry_x64=true")
         && script.contains("BEPINEX_LOG_MTIME_BEFORE")
         && script.contains("bepinex_started=true")
+        && script.contains("retry_skipped_clean_exit status=")
         && script.contains("retry_skipped_process_alive status=")
         && script.contains("retrying_x64_fallback status=")
         && script.contains("x64_fallback_failed status=$retry_status");
-    let has_modern_doorstop_env_aliases = script.contains("DOORSTOP_ENABLE=1")
+    let has_preloader_crash_arch_recovery = script.contains("R2MODMAC_LAUNCH_EPOCH")
+        && script.contains("arm64_preloader_crash=false")
+        && script.contains("retry_preloader_crash_detected status=")
+        && script.contains("retrying_x64_after_preloader_crash status=")
+        && script.contains("recent_preloader_log=\"\"")
+        && script.contains("forcing_x64_due_recent_preloader_crash log=");
+    let has_persistent_x64_state = script.contains(".r2modmac_force_x64_state")
+        && script.contains("force_x64_persisted=false")
+        && script.contains("force_x64_state_present key=")
+        && script.contains("forcing_x64_due_persisted_state key=")
+        && script.contains("force_x64_state_written key=")
+        && script.contains("retry_force_x64_state_written key=");
+    let has_cross_generation_doorstop_bool_flags = script.contains("DOORSTOP_ENABLE=TRUE")
         && script.contains("DOORSTOP_ENABLED=1")
         && script.contains("DOORSTOP_TARGET_ASSEMBLY=")
         && script.contains("DOORSTOP_BOOT_CONFIG_OVERRIDE=")
@@ -229,6 +245,7 @@ pub(crate) fn configure_macos_bepinex_script(
         || !steam_launch_order_ok
         || !has_root_bootstrap_log
         || !removes_codesign_signature
+        || !has_codesign_cache_guard
         || !logs_loader_environment
         || !has_root_loader_mode_env
         || !has_arch_env_exec
@@ -237,7 +254,9 @@ pub(crate) fn configure_macos_bepinex_script(
         || !has_native_arm64_direct_exec
         || !has_wrapper_modded_exec_support
         || !has_arm64_x64_fallback_retry
-        || !has_modern_doorstop_env_aliases
+        || !has_preloader_crash_arch_recovery
+        || !has_persistent_x64_state
+        || !has_cross_generation_doorstop_bool_flags
         || !has_launch_entry_support
         || !has_steamemu_runtime_prep
         || !has_vanilla_steamemu_direct_launch
@@ -249,7 +268,7 @@ pub(crate) fn configure_macos_bepinex_script(
         || has_legacy_bepinex_bootstrap_log;
     if needs_regeneration {
         eprintln!(
-            "[configure_macos_bepinex_script] Regenerating script (has_doorstop={} early_exit_before_doorstop_ok={} early_exit_before_dyld_ok={} root_fallback_ok={} steam_launch_order_ok={} root_bootstrap_log_ok={} removes_codesign_signature={} logs_loader_environment={} has_arch_env_exec={} has_dyld_loader_logging={} has_exec_failure_logging={} wrapper_modded_exec_support={} modern_doorstop_env_aliases={} launch_entry_support={} steamemu_runtime_prep={} vanilla_steamemu_direct_launch={} steamemu_runtime_cleanup={} preserves_steam_dyld_hooks={} steam_launch_exec_deferred={} legacy_bepinex_bootstrap_log={}).",
+            "[configure_macos_bepinex_script] Regenerating script (has_doorstop={} early_exit_before_doorstop_ok={} early_exit_before_dyld_ok={} root_fallback_ok={} steam_launch_order_ok={} root_bootstrap_log_ok={} removes_codesign_signature={} has_codesign_cache_guard={} logs_loader_environment={} has_arch_env_exec={} has_dyld_loader_logging={} has_exec_failure_logging={} wrapper_modded_exec_support={} arm64_x64_fallback_retry={} preloader_crash_arch_recovery={} persistent_x64_state={} cross_generation_doorstop_bool_flags={} launch_entry_support={} steamemu_runtime_prep={} vanilla_steamemu_direct_launch={} steamemu_runtime_cleanup={} preserves_steam_dyld_hooks={} steam_launch_exec_deferred={} legacy_bepinex_bootstrap_log={}).",
             has_macos_doorstop_support(&script),
             early_exit_before_doorstop_validation,
             early_exit_before_dyld,
@@ -257,12 +276,16 @@ pub(crate) fn configure_macos_bepinex_script(
             steam_launch_order_ok,
             has_root_bootstrap_log,
             removes_codesign_signature,
+            has_codesign_cache_guard,
             logs_loader_environment,
             has_arch_env_exec,
             has_dyld_loader_logging,
             has_exec_failure_logging,
             has_wrapper_modded_exec_support,
-            has_modern_doorstop_env_aliases,
+            has_arm64_x64_fallback_retry,
+            has_preloader_crash_arch_recovery,
+            has_persistent_x64_state,
+            has_cross_generation_doorstop_bool_flags,
             has_launch_entry_support,
             has_steamemu_runtime_prep,
             has_vanilla_steamemu_direct_launch,

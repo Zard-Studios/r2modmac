@@ -88,6 +88,9 @@ pub(crate) fn macos_steam_launch_option_matches_desired(
         );
     }
 
+    let mut saw_managed_option_for_game = false;
+    let mut saw_managed_arch_mismatch = false;
+
     for localconfig_path in localconfig_paths {
         let Ok(localconfig) = fs::read_to_string(&localconfig_path) else {
             continue;
@@ -101,19 +104,47 @@ pub(crate) fn macos_steam_launch_option_matches_desired(
             return Ok(true);
         }
 
-        if is_managed_macos_launch_option_for_game(&current, game_path) {
-            // Script path matches but arch flags differ (e.g. -x86_64 vs -arm64).
-            // A wrong arch causes DYLD_ vars to be stripped across the i386→arm64
-            // boundary, resulting in SIGKILL 137. Return false so the caller
-            // forces a Steam launch-option update.
+        if managed_macos_launch_option_semantically_matches_desired(&current, &desired, game_path) {
             eprintln!(
-                "[macos_steam_launch_option_matches_desired] managed option arch MISMATCH for app_id={} — returning false to trigger update: current={:?} desired={:?}",
+                "[macos_steam_launch_option_matches_desired] semantically equivalent managed option for app_id={} localconfig={} current={:?} desired={:?}",
                 app_id,
+                localconfig_path.display(),
                 current,
                 desired
             );
-            return Ok(false);
+            return Ok(true);
         }
+
+        if is_managed_macos_launch_option_for_game(&current, game_path) {
+            saw_managed_option_for_game = true;
+            if extract_macos_launch_option_arch(&current)
+                != extract_macos_launch_option_arch(&desired)
+            {
+                saw_managed_arch_mismatch = true;
+            }
+        }
+    }
+
+    if saw_managed_option_for_game {
+        // Managed launch option exists for this game, but it does not match the
+        // current desired one (commonly after runtime arch/script changes).
+        // Let caller reconcile the option.
+        if saw_managed_arch_mismatch {
+            eprintln!(
+                "[macos_steam_launch_option_matches_desired] managed option arch mismatch for app_id={} game_path={} desired={:?}",
+                app_id,
+                game_path.display(),
+                desired
+            );
+        } else {
+            eprintln!(
+                "[macos_steam_launch_option_matches_desired] managed option mismatch for app_id={} game_path={} desired={:?}",
+                app_id,
+                game_path.display(),
+                desired
+            );
+        }
+        return Ok(false);
     }
 
     eprintln!(
@@ -234,6 +265,50 @@ pub(crate) fn extract_macos_launch_script_path(value: &str) -> Option<std::path:
             .get(1)
             .map(|path| std::path::PathBuf::from(path.as_str()))
     })
+}
+
+fn extract_macos_launch_option_arch(value: &str) -> Option<&'static str> {
+    if value.contains("/usr/bin/arch -arm64") {
+        return Some("arm64");
+    }
+    if value.contains("/usr/bin/arch -x86_64") {
+        return Some("x86_64");
+    }
+    None
+}
+
+fn normalize_launch_script_path_for_compare(path: &std::path::Path) -> std::path::PathBuf {
+    if path.is_absolute() {
+        canonicalize_or_original(path)
+    } else {
+        path.to_path_buf()
+    }
+}
+
+fn managed_macos_launch_option_semantically_matches_desired(
+    current: &str,
+    desired: &str,
+    game_path: &std::path::Path,
+) -> bool {
+    if !is_managed_macos_launch_option_for_game(current, game_path) {
+        return false;
+    }
+
+    let current_arch = extract_macos_launch_option_arch(current);
+    let desired_arch = extract_macos_launch_option_arch(desired);
+    if current_arch.is_some() && desired_arch.is_some() && current_arch != desired_arch {
+        return false;
+    }
+
+    let Some(current_script_path) = extract_macos_launch_script_path(current) else {
+        return false;
+    };
+    let Some(desired_script_path) = extract_macos_launch_script_path(desired) else {
+        return false;
+    };
+
+    normalize_launch_script_path_for_compare(&current_script_path)
+        == normalize_launch_script_path_for_compare(&desired_script_path)
 }
 
 pub(crate) fn is_managed_macos_launch_option_for_game(
@@ -357,6 +432,36 @@ pub(crate) fn ensure_macos_steam_launch_options(
         }
         Ok(())
     };
+    let mut write_localconfig_with_optional_steam_stop = |localconfig_path: &std::path::Path,
+                                                          updated_text: &str,
+                                                          action: &str|
+     -> Result<(), String> {
+        #[cfg(target_os = "macos")]
+        let steam_app_running = is_steam_app_running_on_macos();
+        #[cfg(not(target_os = "macos"))]
+        let steam_app_running = false;
+
+        if steam_app_running {
+            ensure_steam_stopped()?;
+            return fs::write(localconfig_path, updated_text)
+                .map_err(|e| format!("Failed to {} Steam launch options: {}", action, e));
+        }
+
+        match fs::write(localconfig_path, updated_text) {
+            Ok(()) => Ok(()),
+            Err(first_error) => {
+                eprintln!(
+                        "[ensure_macos_steam_launch_options] initial {} write failed with Steam.app not running (localconfig={}): {}. Retrying after clearing stale Steam helpers...",
+                        action,
+                        localconfig_path.display(),
+                        first_error
+                    );
+                ensure_steam_stopped()?;
+                fs::write(localconfig_path, updated_text)
+                    .map_err(|e| format!("Failed to {} Steam launch options: {}", action, e))
+            }
+        }
+    };
 
     for localconfig_path in localconfig_paths {
         let localconfig_started = std::time::Instant::now();
@@ -426,9 +531,11 @@ pub(crate) fn ensure_macos_steam_launch_options(
 
             if updated_text != localconfig {
                 let write_started = std::time::Instant::now();
-                ensure_steam_stopped()?;
-                fs::write(&localconfig_path, updated_text)
-                    .map_err(|e| format!("Failed to update Steam launch options: {}", e))?;
+                write_localconfig_with_optional_steam_stop(
+                    &localconfig_path,
+                    &updated_text,
+                    "update",
+                )?;
                 let persisted = fs::read_to_string(&localconfig_path)
                     .map_err(|e| format!("Failed to verify updated Steam launch options: {}", e))?;
                 if get_launch_options_for_app(&persisted, &app_id).as_deref()
@@ -459,9 +566,11 @@ pub(crate) fn ensure_macos_steam_launch_options(
                 update_launch_options_in_localconfig(&localconfig, &app_id, Some(&previous))?;
             if restored_text != localconfig {
                 let write_started = std::time::Instant::now();
-                ensure_steam_stopped()?;
-                fs::write(&localconfig_path, restored_text)
-                    .map_err(|e| format!("Failed to restore Steam launch options: {}", e))?;
+                write_localconfig_with_optional_steam_stop(
+                    &localconfig_path,
+                    &restored_text,
+                    "restore",
+                )?;
                 let persisted = fs::read_to_string(&localconfig_path).map_err(|e| {
                     format!("Failed to verify restored Steam launch options: {}", e)
                 })?;
@@ -488,9 +597,7 @@ pub(crate) fn ensure_macos_steam_launch_options(
             && updated_text != localconfig
         {
             let write_started = std::time::Instant::now();
-            ensure_steam_stopped()?;
-            fs::write(&localconfig_path, updated_text)
-                .map_err(|e| format!("Failed to clear Steam launch options: {}", e))?;
+            write_localconfig_with_optional_steam_stop(&localconfig_path, &updated_text, "clear")?;
             let persisted = fs::read_to_string(&localconfig_path)
                 .map_err(|e| format!("Failed to verify cleared Steam launch options: {}", e))?;
             if get_launch_options_for_app(&persisted, &app_id)
@@ -562,4 +669,50 @@ pub(crate) fn ensure_macos_steam_launch_options(
     );
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extract_macos_launch_option_arch_parses_known_flags() {
+        assert_eq!(
+            extract_macos_launch_option_arch(
+                "/usr/bin/arch -arm64 /bin/bash \"/tmp/run_bepinex.sh\" %command%"
+            ),
+            Some("arm64")
+        );
+        assert_eq!(
+            extract_macos_launch_option_arch(
+                "/usr/bin/arch -x86_64 /bin/bash \"/tmp/run_bepinex.sh\" %command%"
+            ),
+            Some("x86_64")
+        );
+        assert_eq!(
+            extract_macos_launch_option_arch("/bin/bash \"/tmp/run_bepinex.sh\" %command%"),
+            None
+        );
+    }
+
+    #[test]
+    fn semantic_match_accepts_same_script_and_arch() {
+        let game_path = std::path::Path::new("/tmp/SampleGame");
+        let current = "/usr/bin/arch -arm64 /bin/bash \"/tmp/SampleGame/run_bepinex.sh\" %command%";
+        let desired = "/usr/bin/arch -arm64 /bin/bash \"/tmp/SampleGame/run_bepinex.sh\" %command%";
+        assert!(managed_macos_launch_option_semantically_matches_desired(
+            current, desired, game_path
+        ));
+    }
+
+    #[test]
+    fn semantic_match_rejects_arch_mismatch() {
+        let game_path = std::path::Path::new("/tmp/SampleGame");
+        let current =
+            "/usr/bin/arch -x86_64 /bin/bash \"/tmp/SampleGame/run_bepinex.sh\" %command%";
+        let desired = "/usr/bin/arch -arm64 /bin/bash \"/tmp/SampleGame/run_bepinex.sh\" %command%";
+        assert!(!managed_macos_launch_option_semantically_matches_desired(
+            current, desired, game_path
+        ));
+    }
 }

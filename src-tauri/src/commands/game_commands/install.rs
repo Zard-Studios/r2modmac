@@ -589,7 +589,9 @@ pub async fn install_to_game(
                                 }
                             }
                         }
-                    } else if is_mac_profile && mac_runtime_present_before_sync {
+                    } else if is_mac_profile
+                        && has_complete_macos_bepinex_runtime(runtime_game_path)
+                    {
                         eprintln!(
                             "[install_to_game] Keeping existing macOS runtime payload: {}",
                             name
@@ -619,6 +621,16 @@ pub async fn install_to_game(
             sync_macos_runtime_disabled_state(runtime_game_path, false)?;
             ensure_macos_bepinex_runtime_present(&app, &profile_id, runtime_game_path).await?;
         }
+        let profile_script_is_macos = find_bepinex_script_in_dir(&profile_dir)
+            .and_then(|script_path| fs::read_to_string(script_path).ok())
+            .map(|script| has_macos_doorstop_support(&script))
+            .unwrap_or(false);
+        let profile_has_safe_macos_runtime_payload =
+            has_complete_macos_bepinex_runtime(&profile_dir) && profile_script_is_macos;
+        let keep_existing_macos_runtime_payload = !is_vanilla
+            && !is_balatro_profile
+            && (mac_runtime_present_before_sync
+                || has_complete_macos_bepinex_runtime(runtime_game_path));
 
         for root in [game_path, runtime_game_path] {
             let leaked_windows_loader = root.join("winhttp.dll");
@@ -641,9 +653,16 @@ pub async fn install_to_game(
                 continue;
             }
 
-            if mac_runtime_present_before_sync {
+            if keep_existing_macos_runtime_payload {
                 eprintln!(
                     "[install_to_game] Keeping existing macOS root payload: {}",
+                    item_name
+                );
+                continue;
+            }
+            if !profile_has_safe_macos_runtime_payload {
+                eprintln!(
+                    "[install_to_game] Skipping profile macOS root payload copy for {} because the cached profile runtime is incomplete or not macOS-compatible.",
                     item_name
                 );
                 continue;
@@ -665,10 +684,14 @@ pub async fn install_to_game(
 
         if let Some(source_script) = find_bepinex_script_in_dir(&profile_dir) {
             let dest_script = runtime_game_path.join(CANONICAL_MAC_BEPINEX_SCRIPT);
-            if mac_runtime_present_before_sync {
+            if keep_existing_macos_runtime_payload {
                 eprintln!(
                     "[install_to_game] Keeping existing macOS launcher script: {}",
                     CANONICAL_MAC_BEPINEX_SCRIPT
+                );
+            } else if !profile_has_safe_macos_runtime_payload {
+                eprintln!(
+                    "[install_to_game] Skipping profile launcher script copy because the cached profile runtime is incomplete or not macOS-compatible."
                 );
             } else {
                 if dest_script.exists() {

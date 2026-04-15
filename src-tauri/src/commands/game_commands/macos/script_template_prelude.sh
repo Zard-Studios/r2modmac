@@ -73,8 +73,10 @@ if command -v xattr >/dev/null 2>&1; then
   /usr/bin/xattr -d com.apple.quarantine "$BASEDIR/run_bepinex.sh" "$BASEDIR/doorstop_libs" "$BASEDIR/BepInEx" "$BASEDIR"/*.dylib 2>/dev/null || true
 fi
 
-# UnityDoorstop bool parsing is strict on some builds; use numeric flags.
-export DOORSTOP_ENABLE=1
+# Doorstop compatibility (old/new forks):
+# - legacy loaders read DOORSTOP_ENABLE and require "TRUE"
+# - newer loaders read DOORSTOP_ENABLED and require "1"/"0"
+export DOORSTOP_ENABLE=TRUE
 export DOORSTOP_ENABLED=1
 export DOORSTOP_INVOKE_DLL_PATH="$BASEDIR/BepInEx/core/BepInEx.Preloader.dll"
 export DOORSTOP_TARGET_ASSEMBLY="$DOORSTOP_INVOKE_DLL_PATH"
@@ -434,17 +436,36 @@ prepare_steamemu_runtime_files() {{
 
 app_path="${{executable_path%/Contents/MacOS*}}"
 app_path_lower=$(printf "%s" "$app_path" | tr '[:upper:]' '[:lower:]')
+codesign_state_file="$BASEDIR/.r2modmac_codesign_state"
+app_exec_mtime=$(stat -f %m "$executable_path" 2>/dev/null || stat -f %m "$app_path" 2>/dev/null || printf 0)
+codesign_state_key="$app_path|$app_exec_mtime"
+force_x64_state_file="$BASEDIR/.r2modmac_force_x64_state"
+force_x64_state_key="$codesign_state_key"
+force_x64_persisted=false
+if [ -f "$force_x64_state_file" ]; then
+    if grep -Fxq "$force_x64_state_key" "$force_x64_state_file" 2>/dev/null; then
+        force_x64_persisted=true
+        log_bootstrap "force_x64_state_present key=$force_x64_state_key"
+    else
+        rm -f "$force_x64_state_file" >/dev/null 2>&1 || true
+        log_bootstrap "force_x64_state_cleared_stale key=$force_x64_state_key"
+    fi
+fi
 if echo "$app_path_lower" | grep -Eq '/steam\.app(/|$)|/steam\.appbundle/steam(/|$)'; then
     log_bootstrap "codesign_remove_signature_skipped_steam app_path=$app_path"
 elif [ "$runtime_disabled" = true ]; then
     log_bootstrap "codesign_remove_signature_skipped_runtime_disabled app_path=$app_path"
 elif command -v codesign >/dev/null 2>&1 && [ -d "$app_path" ]; then
-    if codesign -v --strict "$app_path" >/dev/null 2>&1; then
+    if [ -f "$codesign_state_file" ] && grep -Fxq "$codesign_state_key" "$codesign_state_file" 2>/dev/null; then
+        log_bootstrap "codesign_adhoc_sign_skipped_cached state=$codesign_state_key"
+    elif codesign -v --strict "$app_path" >/dev/null 2>&1; then
         log_bootstrap "codesign_adhoc_sign_skipped_valid app_path=$app_path"
+        printf '%s\n' "$codesign_state_key" > "$codesign_state_file" 2>/dev/null || true
     elif codesign -d "$app_path" >/dev/null 2>&1; then
         log_bootstrap "codesign_adhoc_sign_attempt app_path=$app_path"
         if codesign --force --deep --sign - "$app_path" >/dev/null 2>&1; then
             log_bootstrap "codesign_adhoc_sign_ok"
+            printf '%s\n' "$codesign_state_key" > "$codesign_state_file" 2>/dev/null || true
         else
             log_bootstrap "codesign_adhoc_sign_failed"
         fi
@@ -472,7 +493,7 @@ fi
 root_loader_mode=false
 if [ -f "$root_doorstop_dylib" ] && [ ! -d "$BASEDIR/doorstop_libs" ]; then
     root_loader_mode=true
-    export DOORSTOP_ENABLE=1
+    export DOORSTOP_ENABLE=TRUE
     export DOORSTOP_ENABLED=1
     export DOORSTOP_TARGET_ASSEMBLY="$DOORSTOP_INVOKE_DLL_PATH"
     export DOORSTOP_CLR_RUNTIME_CORECLR_PATH=""
@@ -510,6 +531,35 @@ esac
 if [ "$launch_entry_uses_wrapper" = "1" ] && [ "$native_macos_arch" = "arm64" ]; then
     arch="x64"
     log_bootstrap "forcing_x64_for_wrapper_game launch_entry=$launch_entry_path"
+fi
+
+if [ "$arch" = "arm64" ] && [ "$can_retry_x64" = true ] && [ "$force_x64_persisted" = true ]; then
+    arch="x64"
+    log_bootstrap "forcing_x64_due_persisted_state key=$force_x64_state_key"
+fi
+
+if [ "$arch" = "arm64" ] && [ "$can_retry_x64" = true ]; then
+    recent_preloader_log=""
+    executable_dir=$(dirname "${{executable_path}}")
+    for preloader_candidate in "$BASEDIR"/preloader_*.log "$executable_dir"/preloader_*.log; do
+        [ -f "$preloader_candidate" ] || continue
+        if [ -z "$recent_preloader_log" ] || [ "$preloader_candidate" -nt "$recent_preloader_log" ]; then
+            recent_preloader_log="$preloader_candidate"
+        fi
+    done
+
+    if [ -n "$recent_preloader_log" ] && [ -f "$recent_preloader_log" ]; then
+        recent_preloader_mtime=$(stat -f %m "$recent_preloader_log" 2>/dev/null || printf 0)
+        now_epoch=$(date +%s 2>/dev/null || printf 0)
+        if [ "$recent_preloader_mtime" -gt 0 ] && [ "$now_epoch" -gt 0 ] && [ "$recent_preloader_mtime" -ge $((now_epoch - 180)) ] 2>/dev/null; then
+            if grep -Eq "HarmonyInteropFix\\.Apply|ConsoleSetOutFix\\.Apply|DetourHelper\\.GetIdentifiable|HarmonyException: (Patching exception|IL Compile Error)" "$recent_preloader_log"; then
+                arch="x64"
+                log_bootstrap "forcing_x64_due_recent_preloader_crash log=$recent_preloader_log"
+                printf '%s\n' "$force_x64_state_key" > "$force_x64_state_file" 2>/dev/null || true
+                log_bootstrap "force_x64_state_written key=$force_x64_state_key"
+            fi
+        fi
+    fi
 fi
 
 doorstop_libname="libdoorstop_${{arch}}.dylib"
