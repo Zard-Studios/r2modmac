@@ -8,6 +8,8 @@ use futures_util::StreamExt;
 use std::fs;
 use tauri::{command, AppHandle, Emitter, Manager};
 
+const APP_USER_AGENT: &str = concat!("r2modmac/", env!("CARGO_PKG_VERSION"));
+
 fn is_bepinex_shell_script(name: &str) -> bool {
     let lower = name.to_lowercase();
     lower.ends_with(".sh") && lower.contains("bepinex")
@@ -467,7 +469,7 @@ fn lovely_asset_name_for_current_arch() -> &'static str {
 
 async fn download_official_lovely_runtime(version: &str) -> Result<Vec<u8>, String> {
     let client = reqwest::Client::builder()
-        .user_agent("r2modmac/0.6.0")
+        .user_agent(APP_USER_AGENT)
         .build()
         .map_err(|e| format!("Failed to build Lovely client: {}", e))?;
     let desired_asset = lovely_asset_name_for_current_arch();
@@ -669,7 +671,7 @@ async fn download_official_macos_bepinex_pack(
 ) -> Result<Vec<u8>, String> {
     let version_candidates = official_bepinex_version_candidates(thunderstore_version);
     let client = reqwest::Client::builder()
-        .user_agent("r2modmac/0.6.0")
+        .user_agent(APP_USER_AGENT)
         .build()
         .map_err(|e| format!("Failed to build GitHub client: {}", e))?;
 
@@ -762,7 +764,7 @@ async fn download_official_macos_bepinex6_pack(
         )
     })?;
     let client = reqwest::Client::builder()
-        .user_agent("r2modmac/0.6.0")
+        .user_agent(APP_USER_AGENT)
         .build()
         .map_err(|e| format!("Failed to build GitHub client: {}", e))?;
 
@@ -2240,7 +2242,7 @@ pub async fn fetch_packages(
     eprintln!("[fetch_packages] Fetching index from: {}", index_url);
 
     let client = reqwest::Client::builder()
-        .user_agent("r2modmac/0.6.0")
+        .user_agent(APP_USER_AGENT)
         .connect_timeout(Duration::from_secs(8))
         .timeout(Duration::from_secs(25))
         .gzip(true)
@@ -2865,7 +2867,7 @@ pub async fn fetch_package_by_name(
         namespace, package_name
     );
     let client = reqwest::Client::builder()
-        .user_agent("r2modmac/0.0.1")
+        .user_agent(APP_USER_AGENT)
         .build()
         .map_err(|e| e.to_string())?;
 
