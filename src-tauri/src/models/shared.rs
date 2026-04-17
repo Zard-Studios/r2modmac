@@ -54,7 +54,7 @@ pub struct Settings {
     pub install_in_parallel: bool,
     #[serde(default)]
     pub confirm_before_apply_to_game: bool,
-    #[serde(default = "default_true")]
+    #[serde(default = "default_false")]
     pub write_debug_logs_to_game: bool,
     #[serde(default = "default_mod_view_mode")]
     pub default_mod_view_mode: String,
@@ -79,7 +79,7 @@ impl Settings {
             ask_version_before_install: true,
             install_in_parallel: true,
             confirm_before_apply_to_game: false,
-            write_debug_logs_to_game: true,
+            write_debug_logs_to_game: false,
             default_mod_view_mode: default_mod_view_mode(),
             hide_crossover_guide: false,
             hide_macos_guide: false,
@@ -94,6 +94,10 @@ fn default_mod_view_mode() -> String {
 
 fn default_true() -> bool {
     true
+}
+
+fn default_false() -> bool {
+    false
 }
 
 pub fn get_settings_path(app: &tauri::AppHandle) -> std::path::PathBuf {

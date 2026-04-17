@@ -245,7 +245,7 @@ function App() {
   const [askVersionBeforeInstall, setAskVersionBeforeInstall] = useState(true)
   const [installInParallel, setInstallInParallel] = useState(true)
   const [confirmBeforeApplyToGame, setConfirmBeforeApplyToGame] = useState(false)
-  const [writeDebugLogsToGame, setWriteDebugLogsToGame] = useState(true)
+  const [writeDebugLogsToGame, setWriteDebugLogsToGame] = useState(false)
   const [defaultModViewMode, setDefaultModViewMode] = useState<'grid' | 'list'>('grid')
   const [isBrowsingMode, setIsBrowsingMode] = useState(false)
   const isInitialLoadRunningRef = useRef(false)
@@ -354,7 +354,7 @@ function App() {
       setAskVersionBeforeInstall(s.ask_version_before_install ?? true);
       setInstallInParallel(s.install_in_parallel ?? true);
       setConfirmBeforeApplyToGame(!!s.confirm_before_apply_to_game);
-      setWriteDebugLogsToGame(s.write_debug_logs_to_game ?? true);
+      setWriteDebugLogsToGame(s.write_debug_logs_to_game ?? false);
       const storedViewMode = s.default_mod_view_mode === 'list' ? 'list' : 'grid';
       setDefaultModViewMode(storedViewMode);
       setViewMode(storedViewMode);

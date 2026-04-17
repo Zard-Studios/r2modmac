@@ -132,10 +132,37 @@ pub(crate) async fn ensure_macos_bepinex_runtime_present(
     profile_id: &str,
     game_path: &std::path::Path,
 ) -> Result<(), String> {
+    let profiles_path = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("profiles.json");
+    let profiles_data = fs::read_to_string(&profiles_path).map_err(|e| e.to_string())?;
+    let profiles: Vec<serde_json::Value> =
+        serde_json::from_str(&profiles_data).map_err(|e| e.to_string())?;
+    let profile = profiles
+        .iter()
+        .find(|p| p["id"].as_str() == Some(profile_id))
+        .ok_or_else(|| "Profile not found while restoring macOS BepInEx runtime".to_string())?;
+
+    // Keep explicit game/community BepInEx packs pinned. Older Intel-only games
+    // can require pack-specific runtime layouts that break if we auto-refresh to
+    // latest generic official runtime.
+    let bepinex_full_name = profile["mods"]
+        .as_array()
+        .unwrap_or(&vec![])
+        .iter()
+        .filter(|m| m["enabled"].as_bool().unwrap_or(true))
+        .filter_map(|m| m["fullName"].as_str())
+        .find(|full_name| full_name.to_lowercase().contains("bepinexpack"))
+        .map(|s| s.to_string());
+    let has_explicit_bepinex_pack = bepinex_full_name.is_some();
+
     let runtime_root = resolve_macos_runtime_root(game_path);
     let runtime_has_complete = has_complete_macos_bepinex_runtime(&runtime_root);
-    let runtime_requires_fix =
-        runtime_has_complete && macos_bepinex_runtime_requires_unity6_log_writer_fix(&runtime_root);
+    let runtime_requires_fix = runtime_has_complete
+        && !has_explicit_bepinex_pack
+        && macos_bepinex_runtime_requires_unity6_log_writer_fix(&runtime_root);
 
     if runtime_has_complete && !runtime_requires_fix {
         normalize_macos_doorstop_config_file(&runtime_root.join("doorstop_config.ini"))?;
@@ -162,8 +189,9 @@ pub(crate) async fn ensure_macos_bepinex_runtime_present(
         .join("profiles")
         .join(profile_id);
     let profile_has_complete = has_complete_macos_bepinex_runtime(&profile_dir);
-    let profile_requires_fix =
-        profile_has_complete && macos_bepinex_runtime_requires_unity6_log_writer_fix(&profile_dir);
+    let profile_requires_fix = profile_has_complete
+        && !has_explicit_bepinex_pack
+        && macos_bepinex_runtime_requires_unity6_log_writer_fix(&profile_dir);
 
     if profile_has_complete && !profile_requires_fix {
         normalize_macos_doorstop_config_file(&profile_dir.join("doorstop_config.ini"))?;
@@ -183,31 +211,15 @@ pub(crate) async fn ensure_macos_bepinex_runtime_present(
         );
     }
 
-    let profiles_path = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| e.to_string())?
-        .join("profiles.json");
-    let profiles_data = fs::read_to_string(&profiles_path).map_err(|e| e.to_string())?;
-    let profiles: Vec<serde_json::Value> =
-        serde_json::from_str(&profiles_data).map_err(|e| e.to_string())?;
-    let profile = profiles
-        .iter()
-        .find(|p| p["id"].as_str() == Some(profile_id))
-        .ok_or_else(|| "Profile not found while restoring macOS BepInEx runtime".to_string())?;
-
-    let bepinex_full_name = profile["mods"]
-        .as_array()
-        .unwrap_or(&vec![])
-        .iter()
-        .filter(|m| m["enabled"].as_bool().unwrap_or(true))
-        .filter_map(|m| m["fullName"].as_str())
-        .find(|full_name| full_name.to_lowercase().contains("bepinexpack"))
-        .map(|s| s.to_string());
-
     let version_number = if let Some(bepinex_full_name) = bepinex_full_name {
         extract_version_number_from_full_name(&bepinex_full_name)
-            .ok_or_else(|| format!("Could not parse BepInEx version from {}", bepinex_full_name))?
+            .unwrap_or_else(|| {
+                eprintln!(
+                    "[ensure_macos_bepinex_runtime_present] Could not parse BepInEx version from {}; leaving current runtime untouched.",
+                    bepinex_full_name
+                );
+                "".to_string()
+            })
     } else if runtime_requires_fix {
         eprintln!(
             "[ensure_macos_bepinex_runtime_present] No explicit BepInExPack entry found in profile mods; forcing runtime refresh with minimum version {}.{}.{}.{}.",
@@ -226,6 +238,9 @@ pub(crate) async fn ensure_macos_bepinex_runtime_present(
     } else {
         return Ok(());
     };
+    if version_number.is_empty() {
+        return Ok(());
+    }
     let runtime_kind = detect_unity_runtime_kind(&runtime_root);
     let runtime_bytes = match download_official_macos_bepinex_runtime(&version_number, runtime_kind)
         .await

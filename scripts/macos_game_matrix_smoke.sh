@@ -9,9 +9,10 @@ mkdir -p "$OUT_DIR"
 
 GAMES=("valheim" "silksong" "rounds" "muck")
 RUNTIME_FILES=("BepInEx" "doorstop_libs" "libdoorstop.dylib" "doorstop_config.ini")
+SETTINGS_PATH="${R2MODMAC_SETTINGS_PATH:-$HOME/Library/Application Support/com.r2modmac/settings.json}"
 
 RESULTS_TSV="$OUT_DIR/results.tsv"
-printf "game\tmode\tresult\treason\tprocess_started\tbootstrap_updated\tbepinex_updated\tcrash_signature\texec_path\tlauncher_log\n" > "$RESULTS_TSV"
+printf "game\tmode\tresult\treason\tprocess_started\tbootstrap_updated\tbepinex_updated\tplayerlog_updated\tchainloader_seen\tplugin_load_seen\tcrash_signature\texec_path\tlauncher_log\n" > "$RESULTS_TSV"
 
 now() {
     date "+%Y-%m-%d %H:%M:%S"
@@ -21,12 +22,107 @@ log() {
     printf "[%s] %s\n" "$(now)" "$*"
 }
 
+settings_game_path() {
+    local key="$1"
+    [ -f "$SETTINGS_PATH" ] || return 1
+    command -v jq >/dev/null 2>&1 || return 1
+    local value=""
+    value=$(jq -r --arg key "$key" '.game_paths[$key] // empty' "$SETTINGS_PATH" 2>/dev/null | head -n 1)
+    [ -n "$value" ] || return 1
+    printf "%s\n" "$value"
+}
+
+first_existing_dir() {
+    local candidate=""
+    for candidate in "$@"; do
+        [ -n "$candidate" ] || continue
+        if [ -d "$candidate" ]; then
+            printf "%s\n" "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
+find_game_dir_on_volumes() {
+    local game_dir="$1"
+    local candidate=""
+    for candidate in /Volumes/*/SteamLibrary/steamapps/common/"$game_dir" /Volumes/*/steamapps/common/"$game_dir"; do
+        [ -d "$candidate" ] || continue
+        printf "%s\n" "$candidate"
+        return 0
+    done
+    return 1
+}
+
 game_path_for() {
+    local game="$1"
+    local from_env=""
+    local from_settings=""
+    local from_volumes=""
+    local resolved=""
+
+    case "$game" in
+        valheim)
+            from_env="${R2MODMAC_MATRIX_VALHEIM_PATH:-}"
+            from_settings=$(settings_game_path "valheim::mac" || true)
+            from_volumes=$(find_game_dir_on_volumes "Valheim" || true)
+            resolved=$(first_existing_dir \
+                "$from_env" \
+                "$from_settings" \
+                "/Applications/Valheim_Steam.app/Contents/game" \
+                "/Applications/Valheim.app/Contents/game" \
+                "$HOME/Library/Application Support/Steam/steamapps/common/Valheim" \
+                "$from_volumes" \
+                || true)
+            ;;
+        silksong)
+            from_env="${R2MODMAC_MATRIX_SILKSONG_PATH:-}"
+            from_settings=$(settings_game_path "hollow-knight-silksong::mac" || true)
+            from_volumes=$(find_game_dir_on_volumes "Hollow Knight Silksong" || true)
+            resolved=$(first_existing_dir \
+                "$from_env" \
+                "$from_settings" \
+                "$HOME/Library/Application Support/Steam/steamapps/common/Hollow Knight Silksong" \
+                "$from_volumes" \
+                || true)
+            ;;
+        rounds)
+            from_env="${R2MODMAC_MATRIX_ROUNDS_PATH:-}"
+            from_settings=$(settings_game_path "rounds::mac" || true)
+            from_volumes=$(find_game_dir_on_volumes "ROUNDS" || true)
+            resolved=$(first_existing_dir \
+                "$from_env" \
+                "$from_settings" \
+                "$HOME/Library/Application Support/Steam/steamapps/common/ROUNDS" \
+                "$from_volumes" \
+                || true)
+            ;;
+        muck)
+            from_env="${R2MODMAC_MATRIX_MUCK_PATH:-}"
+            from_settings=$(settings_game_path "muck::mac" || true)
+            from_volumes=$(find_game_dir_on_volumes "Muck" || true)
+            resolved=$(first_existing_dir \
+                "$from_env" \
+                "$from_settings" \
+                "$HOME/Library/Application Support/Steam/steamapps/common/Muck" \
+                "$from_volumes" \
+                || true)
+            ;;
+        *)
+            resolved=""
+            ;;
+    esac
+
+    printf "%s\n" "$resolved"
+}
+
+player_log_for() {
     case "$1" in
-        valheim) printf "/Applications/Valheim_Steam.app/Contents/game" ;;
-        silksong) printf "/Volumes/Feduzi/SteamLibrary/steamapps/common/Hollow Knight Silksong" ;;
-        rounds) printf "/Users/federicofeduzi/Library/Application Support/Steam/steamapps/common/ROUNDS" ;;
-        muck) printf "/Users/federicofeduzi/Library/Application Support/Steam/steamapps/common/Muck" ;;
+        valheim) printf "$HOME/Library/Logs/IronGate/Valheim/Player.log" ;;
+        silksong) printf "$HOME/Library/Logs/Team Cherry/Hollow Knight Silksong/Player.log" ;;
+        rounds) printf "$HOME/Library/Logs/Landfall Games/ROUNDS/Player.log" ;;
+        muck) printf "$HOME/Library/Logs/Dani/Muck/Player.log" ;;
         *) printf "" ;;
     esac
 }
@@ -183,6 +279,37 @@ detect_crash_signature() {
     printf "%s\n" "$hit"
 }
 
+log_has_chainloader_complete() {
+    local log_file="$1"
+    [ -f "$log_file" ] || return 1
+    tail -n 900 "$log_file" | rg -q "Chainloader startup complete"
+}
+
+log_has_plugin_load_markers() {
+    local log_file="$1"
+    [ -f "$log_file" ] || return 1
+    tail -n 1200 "$log_file" | rg -q "(plugins? to load|Loading \\[)"
+}
+
+log_has_any_bepinex_markers() {
+    local log_file="$1"
+    [ -f "$log_file" ] || return 1
+    tail -n 1200 "$log_file" | rg -q "(\\[Message:\\s+BepInEx\\]|\\[Info\\s+:\\s+BepInEx\\]|Preloader started|Chainloader started|Chainloader startup complete)"
+}
+
+modded_chainloader_seen() {
+    local bepinex_log="$1"
+    local player_log="$2"
+    local playerlog_updated="$3"
+    if log_has_chainloader_complete "$bepinex_log"; then
+        return 0
+    fi
+    if [ "$playerlog_updated" = "1" ] && log_has_chainloader_complete "$player_log"; then
+        return 0
+    fi
+    return 1
+}
+
 run_case() {
     local game="$1"
     local mode="$2"
@@ -195,7 +322,7 @@ run_case() {
 
     if [ ! -f "$run_script" ]; then
         reason="missing_run_bepinex.sh"
-        printf "%s\t%s\t%s\t%s\t0\t0\t0\t0\t-\t%s\n" "$game" "$mode" "$result" "$reason" "$launcher_log" >> "$RESULTS_TSV"
+        printf "%s\t%s\t%s\t%s\t0\t0\t0\t0\t0\t0\t0\t-\t%s\n" "$game" "$mode" "$result" "$reason" "$launcher_log" >> "$RESULTS_TSV"
         return
     fi
 
@@ -208,10 +335,14 @@ run_case() {
 
     local bootstrap_log="$game_path/r2modmac_bootstrap.log"
     local bepinex_log="$game_path/BepInEx/LogOutput.log"
+    local player_log=""
+    player_log=$(player_log_for "$game")
     local before_bootstrap_mtime
     local before_bepinex_mtime
+    local before_player_mtime
     before_bootstrap_mtime=$(mtime_or_zero "$bootstrap_log")
     before_bepinex_mtime=$(mtime_or_zero "$bepinex_log")
+    before_player_mtime=$(mtime_or_zero "$player_log")
     local before_pids
     before_pids=$(collect_pids "$exec_path" "$exec_name")
 
@@ -245,9 +376,13 @@ run_case() {
     done
 
     if [ "$mode" = "modded" ]; then
+        local settle_player_updated="0"
         local settle=0
-        while [ "$settle" -lt 18 ]; do
-            if [ "$(mtime_or_zero "$bepinex_log")" -gt "$before_bepinex_mtime" ]; then
+        while [ "$settle" -lt 60 ]; do
+            if [ "$(mtime_or_zero "$player_log")" -gt "$before_player_mtime" ]; then
+                settle_player_updated="1"
+            fi
+            if modded_chainloader_seen "$bepinex_log" "$player_log" "$settle_player_updated"; then
                 break
             fi
             if [ "$(detect_crash_signature "$bootstrap_log" "$game_path")" = "1" ]; then
@@ -262,13 +397,39 @@ run_case() {
 
     local after_bootstrap_mtime
     local after_bepinex_mtime
+    local after_player_mtime
     after_bootstrap_mtime=$(mtime_or_zero "$bootstrap_log")
     after_bepinex_mtime=$(mtime_or_zero "$bepinex_log")
+    after_player_mtime=$(mtime_or_zero "$player_log")
 
     local bootstrap_updated="0"
     local bepinex_updated="0"
+    local playerlog_updated="0"
     [ "$after_bootstrap_mtime" -gt "$before_bootstrap_mtime" ] && bootstrap_updated="1"
     [ "$after_bepinex_mtime" -gt "$before_bepinex_mtime" ] && bepinex_updated="1"
+    [ "$after_player_mtime" -gt "$before_player_mtime" ] && playerlog_updated="1"
+
+    local chainloader_seen="0"
+    local plugin_load_seen="0"
+    local any_bepinex_markers="0"
+    if log_has_chainloader_complete "$bepinex_log"; then
+        chainloader_seen="1"
+    fi
+    if [ "$chainloader_seen" = "0" ] && [ "$playerlog_updated" = "1" ] && log_has_chainloader_complete "$player_log"; then
+        chainloader_seen="1"
+    fi
+    if log_has_plugin_load_markers "$bepinex_log"; then
+        plugin_load_seen="1"
+    fi
+    if [ "$plugin_load_seen" = "0" ] && [ "$playerlog_updated" = "1" ] && log_has_plugin_load_markers "$player_log"; then
+        plugin_load_seen="1"
+    fi
+    if log_has_any_bepinex_markers "$bepinex_log"; then
+        any_bepinex_markers="1"
+    fi
+    if [ "$any_bepinex_markers" = "0" ] && [ "$playerlog_updated" = "1" ] && log_has_any_bepinex_markers "$player_log"; then
+        any_bepinex_markers="1"
+    fi
 
     local crash_signature
     crash_signature=$(detect_crash_signature "$bootstrap_log" "$game_path")
@@ -277,12 +438,21 @@ run_case() {
         if [ "$crash_signature" = "1" ]; then
             result="FAIL"
             reason="crash_signature_detected"
-        elif [ "$bepinex_updated" = "1" ] && [ "$process_started" = "1" ]; then
+        elif [ "$chainloader_seen" = "1" ] && [ "$process_started" = "1" ]; then
             result="PASS"
-            reason="bepinex_loaded_and_process_started"
+            reason="chainloader_loaded_and_process_started"
+        elif [ "$chainloader_seen" = "1" ]; then
+            result="PASS"
+            reason="chainloader_loaded_process_detached"
+        elif [ "$plugin_load_seen" = "1" ]; then
+            result="PASS"
+            reason="plugin_load_detected_without_chainloader_marker"
+        elif [ "$any_bepinex_markers" = "1" ]; then
+            result="FAIL"
+            reason="bepinex_started_but_chainloader_incomplete"
         elif [ "$bepinex_updated" = "1" ]; then
-            result="PASS"
-            reason="bepinex_loaded_process_detached"
+            result="FAIL"
+            reason="bepinex_log_updated_without_chainloader"
         else
             result="FAIL"
             reason="no_bepinex_activity"
@@ -312,8 +482,8 @@ run_case() {
     new_pids=$(diff_pids "$before_pids" "$current_pids")
     kill_pid_list "$new_pids" "KILL"
 
-    printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" \
-        "$game" "$mode" "$result" "$reason" "$process_started" "$bootstrap_updated" "$bepinex_updated" "$crash_signature" "$exec_path" "$launcher_log" \
+    printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" \
+        "$game" "$mode" "$result" "$reason" "$process_started" "$bootstrap_updated" "$bepinex_updated" "$playerlog_updated" "$chainloader_seen" "$plugin_load_seen" "$crash_signature" "$exec_path" "$launcher_log" \
         >> "$RESULTS_TSV"
 }
 
@@ -325,8 +495,8 @@ main() {
         game_path=$(game_path_for "$game")
         if [ ! -d "$game_path" ]; then
             log "Skipping game=$game (path missing: $game_path)"
-            printf "%s\tmodded\tFAIL\tmissing_game_path\t0\t0\t0\t0\t-\t-\n" "$game" >> "$RESULTS_TSV"
-            printf "%s\tvanilla\tFAIL\tmissing_game_path\t0\t0\t0\t0\t-\t-\n" "$game" >> "$RESULTS_TSV"
+            printf "%s\tmodded\tFAIL\tmissing_game_path\t0\t0\t0\t0\t0\t0\t0\t-\t-\n" "$game" >> "$RESULTS_TSV"
+            printf "%s\tvanilla\tFAIL\tmissing_game_path\t0\t0\t0\t0\t0\t0\t0\t-\t-\n" "$game" >> "$RESULTS_TSV"
             continue
         fi
 
