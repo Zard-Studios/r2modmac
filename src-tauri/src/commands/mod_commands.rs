@@ -9,6 +9,16 @@ use std::fs;
 use tauri::{command, AppHandle, Emitter, Manager};
 
 const APP_USER_AGENT: &str = concat!("r2modmac/", env!("CARGO_PKG_VERSION"));
+const NEWTONSOFT_JSON_VERSION: &str = "12.0.3";
+const NEWTONSOFT_JSON_NETSTANDARD20_ENTRY: &str = "lib/netstandard2.0/Newtonsoft.Json.dll";
+const ROR2_CROSSOVER_NEWTONSOFT_TARGET: &str = "BepInEx/core/Newtonsoft.Json.dll";
+
+#[derive(Clone)]
+struct RuntimeCompatAsset {
+    relative_path: std::path::PathBuf,
+    bytes: Vec<u8>,
+    label: &'static str,
+}
 
 fn is_bepinex_shell_script(name: &str) -> bool {
     let lower = name.to_lowercase();
@@ -326,6 +336,140 @@ fn runtime_plugins_dir(
     game_dir
         .join(runtime_bepinex_dir_name(use_disabled_runtime))
         .join("plugins")
+}
+
+fn is_probably_risk_of_rain_2_game_dir(game_dir: &std::path::Path) -> bool {
+    let folder_name = game_dir
+        .file_name()
+        .map(|name| normalize_alnum(&name.to_string_lossy()))
+        .unwrap_or_default();
+
+    if folder_name == "riskofrain2" || folder_name == "ror2" {
+        return true;
+    }
+
+    game_dir.join("Risk of Rain 2.exe").exists()
+        || game_dir.join("RoR2.exe").exists()
+        || game_dir.join("Risk of Rain 2_Data").is_dir()
+}
+
+fn should_install_ror2_crossover_newtonsoft_compat(
+    game_dir: &std::path::Path,
+    target_is_macos: bool,
+) -> bool {
+    cfg!(target_os = "macos") && !target_is_macos && is_probably_risk_of_rain_2_game_dir(game_dir)
+}
+
+fn extract_newtonsoft_json_dll_from_nupkg(nupkg_bytes: &[u8]) -> Result<Vec<u8>, String> {
+    let cursor = std::io::Cursor::new(nupkg_bytes);
+    let mut archive = zip::ZipArchive::new(cursor).map_err(|e| {
+        format!(
+            "Downloaded Newtonsoft.Json package is not a valid nupkg: {}",
+            e
+        )
+    })?;
+    let mut dll = archive
+        .by_name(NEWTONSOFT_JSON_NETSTANDARD20_ENTRY)
+        .map_err(|_| {
+            format!(
+                "Newtonsoft.Json {} package did not contain {}",
+                NEWTONSOFT_JSON_VERSION, NEWTONSOFT_JSON_NETSTANDARD20_ENTRY
+            )
+        })?;
+    let mut bytes = Vec::new();
+    std::io::copy(&mut dll, &mut bytes)
+        .map_err(|e| format!("Failed to extract Newtonsoft.Json.dll: {}", e))?;
+    Ok(bytes)
+}
+
+fn newtonsoft_json_nuget_url() -> String {
+    format!(
+        "https://api.nuget.org/v3-flatcontainer/newtonsoft.json/{0}/newtonsoft.json.{0}.nupkg",
+        NEWTONSOFT_JSON_VERSION
+    )
+}
+
+async fn download_newtonsoft_json_dll() -> Result<Vec<u8>, String> {
+    let client = reqwest::Client::builder()
+        .user_agent(APP_USER_AGENT)
+        .build()
+        .map_err(|e| format!("Failed to build NuGet client: {}", e))?;
+    let url = newtonsoft_json_nuget_url();
+    let bytes = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to download Newtonsoft.Json: {}", e))?
+        .error_for_status()
+        .map_err(|e| format!("Newtonsoft.Json download request failed: {}", e))?
+        .bytes()
+        .await
+        .map_err(|e| format!("Failed to read Newtonsoft.Json package: {}", e))?;
+
+    extract_newtonsoft_json_dll_from_nupkg(bytes.as_ref())
+}
+
+async fn prepare_ror2_crossover_newtonsoft_compat(
+    game_dir: &std::path::Path,
+    mod_name: &str,
+    target_is_macos: bool,
+) -> Result<Vec<RuntimeCompatAsset>, String> {
+    if !should_install_ror2_crossover_newtonsoft_compat(game_dir, target_is_macos) {
+        return Ok(Vec::new());
+    }
+
+    let relative_path = std::path::PathBuf::from(ROR2_CROSSOVER_NEWTONSOFT_TARGET);
+    if game_dir.join(&relative_path).exists() {
+        return Ok(Vec::new());
+    }
+
+    eprintln!(
+        "[install_mod] Risk of Rain 2 compatibility: installing Newtonsoft.Json {} for CrossOver/Wine runtime",
+        NEWTONSOFT_JSON_VERSION
+    );
+
+    let compat_required = extract_mod_key(mod_name) == "levteam-macoshealthbarsfix";
+    let bytes = match download_newtonsoft_json_dll().await {
+        Ok(bytes) => bytes,
+        Err(error) if compat_required => return Err(error),
+        Err(error) => {
+            eprintln!(
+                "[install_mod] Risk of Rain 2 compatibility: could not install Newtonsoft.Json helper: {}",
+                error
+            );
+            return Ok(Vec::new());
+        }
+    };
+    Ok(vec![RuntimeCompatAsset {
+        relative_path,
+        bytes,
+        label: "Newtonsoft.Json",
+    }])
+}
+
+fn write_runtime_compat_assets(
+    target_root: &std::path::Path,
+    assets: &[RuntimeCompatAsset],
+    use_disabled_runtime: bool,
+) -> Result<(), String> {
+    for asset in assets {
+        let relative_path =
+            remap_disabled_macos_runtime_path(&asset.relative_path, use_disabled_runtime);
+        let outpath = target_root.join(relative_path);
+        if let Some(parent) = outpath.parent() {
+            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        fs::write(&outpath, &asset.bytes).map_err(|e| {
+            format!(
+                "Failed to write {} compatibility asset to {}: {}",
+                asset.label,
+                outpath.display(),
+                e
+            )
+        })?;
+    }
+
+    Ok(())
 }
 
 fn extract_regular_mod_to_root<R: std::io::Read + std::io::Seek>(
@@ -1537,6 +1681,8 @@ pub async fn install_mod(
     let (mut has_macos_loader, mut has_windows_loader) =
         detect_bepinex_pack_platform(&mut archive_for_detect);
     let mut macos_runtime_overlay_bytes: Option<Vec<u8>> = None;
+    let runtime_compat_assets =
+        prepare_ror2_crossover_newtonsoft_compat(game_dir, &mod_name, target_is_macos).await?;
 
     if is_bepinex_pack && target_is_macos {
         let version_number = extract_version_number_from_full_name(&mod_name);
@@ -1591,6 +1737,11 @@ pub async fn install_mod(
                 &mut overlay_archive,
             )?);
         }
+        files.extend(
+            runtime_compat_assets
+                .iter()
+                .map(|asset| asset.relative_path.clone()),
+        );
 
         files.sort();
         files.dedup();
@@ -1654,6 +1805,14 @@ pub async fn install_mod(
         }
     }
 
+    if !runtime_compat_assets.is_empty() {
+        write_runtime_compat_assets(
+            game_dir,
+            &runtime_compat_assets,
+            install_into_disabled_runtime,
+        )?;
+    }
+
     if !managed_files.is_empty() {
         save_owned_mod_manifest(
             &app,
@@ -1705,6 +1864,10 @@ pub async fn install_mod(
             if target_is_macos {
                 migrate_root_plugins_into_bepinex(&profile_dir)?;
             }
+        }
+
+        if !runtime_compat_assets.is_empty() {
+            write_runtime_compat_assets(&profile_dir, &runtime_compat_assets, false)?;
         }
 
         if target_is_macos {
@@ -2883,4 +3046,77 @@ pub async fn fetch_package_by_name(
 
     let json: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
     Ok(Some(json))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Cursor, Write};
+
+    fn temp_dir(label: &str) -> std::path::PathBuf {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("r2modmac-{}-{}", label, unique));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn make_test_nupkg(dll_bytes: &[u8]) -> Vec<u8> {
+        let cursor = Cursor::new(Vec::new());
+        let mut archive = zip::ZipWriter::new(cursor);
+        let options = zip::write::FileOptions::default();
+        archive
+            .start_file(NEWTONSOFT_JSON_NETSTANDARD20_ENTRY, options)
+            .unwrap();
+        archive.write_all(dll_bytes).unwrap();
+        archive.finish().unwrap().into_inner()
+    }
+
+    #[test]
+    fn risk_of_rain_2_detection_accepts_folder_name() {
+        let path = std::path::Path::new("/tmp/steamapps/common/Risk of Rain 2");
+        assert!(is_probably_risk_of_rain_2_game_dir(path));
+    }
+
+    #[test]
+    fn risk_of_rain_2_detection_accepts_game_files() {
+        let dir = temp_dir("ror2-detection");
+        fs::write(dir.join("Risk of Rain 2.exe"), b"fake").unwrap();
+        assert!(is_probably_risk_of_rain_2_game_dir(&dir));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn extracts_newtonsoft_dll_from_netstandard20_nupkg_entry() {
+        let nupkg = make_test_nupkg(b"newtonsoft dll");
+        let dll = extract_newtonsoft_json_dll_from_nupkg(&nupkg).unwrap();
+        assert_eq!(dll, b"newtonsoft dll");
+    }
+
+    #[test]
+    fn newtonsoft_download_url_interpolates_version() {
+        let url = newtonsoft_json_nuget_url();
+        assert_eq!(
+            url,
+            "https://api.nuget.org/v3-flatcontainer/newtonsoft.json/12.0.3/newtonsoft.json.12.0.3.nupkg"
+        );
+        assert!(!url.contains("{0}"));
+    }
+
+    #[test]
+    fn writes_runtime_compat_asset_to_bepinex_core() {
+        let dir = temp_dir("compat-asset");
+        let asset = RuntimeCompatAsset {
+            relative_path: std::path::PathBuf::from(ROR2_CROSSOVER_NEWTONSOFT_TARGET),
+            bytes: b"newtonsoft dll".to_vec(),
+            label: "Newtonsoft.Json",
+        };
+
+        write_runtime_compat_assets(&dir, &[asset], false).unwrap();
+        let written = fs::read(dir.join(ROR2_CROSSOVER_NEWTONSOFT_TARGET)).unwrap();
+        assert_eq!(written, b"newtonsoft dll");
+        let _ = fs::remove_dir_all(dir);
+    }
 }
