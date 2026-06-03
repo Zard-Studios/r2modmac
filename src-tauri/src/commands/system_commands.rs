@@ -48,30 +48,102 @@ pub async fn fetch_community_images() -> Result<std::collections::HashMap<String
     let resp = reqwest::get(url).await.map_err(|e| e.to_string())?;
     let html = resp.text().await.map_err(|e| e.to_string())?;
 
-    let mut images = std::collections::HashMap::new();
+    extract_community_images_from_html(&html)
+}
 
-    // Regex for preload links
-    // Matches: <link rel="preload" href="https://gcdn.thunderstore.io/live/community/risk-of-rain-2/..." as="image">
-    let re_preload = regex::Regex::new(r#"<link rel="preload" href="(https://gcdn\.thunderstore\.io/live/community/([^/]+)/[^"]+)" as="image">"#)
-        .map_err(|e| e.to_string())?;
+fn normalize_community_image_url(url: &str) -> String {
+    url.replace("&amp;", "&").replace("\\/", "/")
+}
 
-    for cap in re_preload.captures_iter(&html) {
-        if let (Some(url), Some(id)) = (cap.get(1), cap.get(2)) {
-            images.insert(id.as_str().to_string(), url.as_str().to_string());
-        }
+fn is_community_cdn_image(url: &str) -> bool {
+    let lower = url.to_ascii_lowercase();
+    lower.starts_with("https://gcdn.thunderstore.io/live/community/")
+        || lower.starts_with("https://gcdn.thunderstore.io/assets/")
+}
+
+fn looks_like_community_cover(url: &str) -> bool {
+    let lower = url.to_ascii_lowercase();
+    let has_cover_hint = lower.contains("360x480")
+        || lower.contains("cover")
+        || lower.contains("-cov")
+        || lower.contains("_cov");
+    let obvious_non_cover = lower.contains("-bg-")
+        || lower.contains("_bg")
+        || lower.contains("-icon-")
+        || lower.contains("_icon")
+        || lower.contains("icon-192")
+        || lower.contains("logo");
+
+    is_community_cdn_image(url) && has_cover_hint && !obvious_non_cover
+}
+
+fn insert_community_image(
+    images: &mut HashMap<String, String>,
+    community_id: &str,
+    image_url: &str,
+    require_cover_hint: bool,
+) {
+    let community_id = community_id.trim().trim_matches('/').to_ascii_lowercase();
+    if community_id.is_empty() {
+        return;
     }
 
-    // Regex for img tags (fallback)
-    // Matches: <img ... src="https://gcdn.thunderstore.io/live/community/risk-of-rain-2/..." ...>
-    let re_img =
-        regex::Regex::new(r#"src="(https://gcdn\.thunderstore\.io/live/community/([^/]+)/[^"]+)""#)
-            .map_err(|e| e.to_string())?;
+    let image_url = normalize_community_image_url(image_url);
+    if !is_community_cdn_image(&image_url) {
+        return;
+    }
+    if require_cover_hint && !looks_like_community_cover(&image_url) {
+        return;
+    }
 
-    for cap in re_img.captures_iter(&html) {
-        if let (Some(url), Some(id)) = (cap.get(1), cap.get(2)) {
-            images
-                .entry(id.as_str().to_string())
-                .or_insert(url.as_str().to_string());
+    images.entry(community_id).or_insert(image_url);
+}
+
+fn extract_community_images_from_html(html: &str) -> Result<HashMap<String, String>, String> {
+    let mut images = HashMap::new();
+
+    // Thunderstore renders community cards with either /live/community/... or /assets/...
+    // CDN paths. Prefer the image inside the community link because the path filename
+    // can drift independently from the community identifier.
+    let re_community_link = regex::Regex::new(r#"<a[^>]+href=["']/c/([^/"']+)/["'][^>]*>"#)
+        .map_err(|e| e.to_string())?;
+    let re_img_src = regex::Regex::new(r#"src=["'](https://gcdn\.thunderstore\.io/[^"']+)["']"#)
+        .map_err(|e| e.to_string())?;
+
+    for cap in re_community_link.captures_iter(html) {
+        let (Some(link), Some(community_id)) = (cap.get(0), cap.get(1)) else {
+            continue;
+        };
+        let rest = &html[link.end()..];
+        let Some(anchor_end) = rest.find("</a>") else {
+            continue;
+        };
+        let anchor_body = &rest[..anchor_end];
+        let Some(img_cap) = re_img_src.captures(anchor_body) else {
+            continue;
+        };
+        let Some(image_url) = img_cap.get(1) else {
+            continue;
+        };
+
+        insert_community_image(
+            &mut images,
+            community_id.as_str(),
+            image_url.as_str(),
+            false,
+        );
+    }
+
+    // Fallback for preload tags and serialized React Router payloads. This derives
+    // the community id from the CDN path, so only cover-like filenames are accepted.
+    let re_direct_cover = regex::Regex::new(
+        r#"(https://gcdn\.thunderstore\.io/(?:live/community|assets)/([^/"'\\\s<>]+)/[^"'\\\s<>]+)"#,
+    )
+    .map_err(|e| e.to_string())?;
+
+    for cap in re_direct_cover.captures_iter(html) {
+        if let (Some(image_url), Some(community_id)) = (cap.get(1), cap.get(2)) {
+            insert_community_image(&mut images, community_id.as_str(), image_url.as_str(), true);
         }
     }
 
@@ -1217,4 +1289,76 @@ pub fn compare_versions(v1: &str, v2: &str) -> bool {
         }
     }
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extracts_assets_cover_from_community_card() {
+        let html = r#"
+            <div class="card-community">
+                <a tabindex="-1" title="Book of Travels" class="link" href="/c/book-of-travels/" data-discover="true">
+                    <div class="image image--variant--primary card-community__image image--is3by4">
+                        <div class="image__content image__content--variant--primary image--fullwidth">
+                            <img class="image__src" loading="lazy" alt="" width="360" height="480" src="https://gcdn.thunderstore.io/assets/book-of-travels/book-of-travels-cover-360x480.webp"/>
+                        </div>
+                    </div>
+                </a>
+            </div>
+        "#;
+
+        let images = extract_community_images_from_html(html).unwrap();
+
+        assert_eq!(
+            images.get("book-of-travels").map(String::as_str),
+            Some("https://gcdn.thunderstore.io/assets/book-of-travels/book-of-travels-cover-360x480.webp")
+        );
+    }
+
+    #[test]
+    fn extracts_assets_cover_urls_from_serialized_payload() {
+        let html = r#"
+            "https://gcdn.thunderstore.io/assets/paralives/paralives-cover-360x480.webp",
+            "https://gcdn.thunderstore.io/assets/everything-is-crab/everything-is-crab-cover-360x480.webp",
+            "https://gcdn.thunderstore.io/assets/crashout-crew/crashout-crew-cover-360x480.webp",
+            "https://gcdn.thunderstore.io/assets/book-of-travels/book-of-travels-cover-360x480.webp"
+        "#;
+
+        let images = extract_community_images_from_html(html).unwrap();
+
+        assert_eq!(
+            images.get("paralives").map(String::as_str),
+            Some("https://gcdn.thunderstore.io/assets/paralives/paralives-cover-360x480.webp")
+        );
+        assert_eq!(
+            images.get("everything-is-crab").map(String::as_str),
+            Some("https://gcdn.thunderstore.io/assets/everything-is-crab/everything-is-crab-cover-360x480.webp")
+        );
+        assert_eq!(
+            images.get("crashout-crew").map(String::as_str),
+            Some("https://gcdn.thunderstore.io/assets/crashout-crew/crashout-crew-cover-360x480.webp")
+        );
+        assert_eq!(
+            images.get("book-of-travels").map(String::as_str),
+            Some("https://gcdn.thunderstore.io/assets/book-of-travels/book-of-travels-cover-360x480.webp")
+        );
+    }
+
+    #[test]
+    fn fallback_ignores_obvious_hero_and_icon_urls() {
+        let html = r#"
+            "https://gcdn.thunderstore.io/live/community/sample/sample-bg-1920x620.webp",
+            "https://gcdn.thunderstore.io/live/community/sample/sample-icon-192x192.webp",
+            "https://gcdn.thunderstore.io/live/community/sample/sample-cover-360x480.webp"
+        "#;
+
+        let images = extract_community_images_from_html(html).unwrap();
+
+        assert_eq!(
+            images.get("sample").map(String::as_str),
+            Some("https://gcdn.thunderstore.io/live/community/sample/sample-cover-360x480.webp")
+        );
+    }
 }
