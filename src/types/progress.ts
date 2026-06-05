@@ -9,6 +9,7 @@ export interface ProgressState {
   downloadedBytes?: number;
   totalBytes?: number;
   activeDownloads?: number;
+  isCancelable?: boolean;
 }
 
 export interface ModDownloadProgressEvent {

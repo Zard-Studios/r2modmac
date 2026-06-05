@@ -5,6 +5,47 @@ import { Button } from '../ui';
 
 const MAX_PARALLEL_TOGGLES = 10;
 
+const localModToPackage = (mod: InstalledMod): Package => {
+    const owner = mod.author || 'Local';
+    const name = mod.displayName || mod.fullName.split('-')[1] || mod.fullName;
+    const version = mod.versionNumber || '1.0.0';
+    const fullName = `${owner}-${name}`;
+    const versionFullName = `${fullName}-${version}`;
+    const now = new Date().toISOString();
+
+    return {
+        name,
+        full_name: fullName,
+        owner,
+        package_url: '',
+        date_created: now,
+        date_updated: now,
+        uuid4: mod.uuid4,
+        rating_score: 0,
+        is_pinned: false,
+        is_deprecated: false,
+        has_nsfw_content: false,
+        categories: ['Custom'],
+        versions: [{
+            name,
+            full_name: versionFullName,
+            description: mod.description || 'Custom local mod',
+            icon: mod.iconUrl || '',
+            version_number: version,
+            dependencies: [],
+            download_url: '',
+            downloads: 0,
+            date_created: now,
+            website_url: '',
+            is_active: true,
+            uuid4: mod.uuid4,
+            file_size: mod.fileSize || 0,
+            localReadme: mod.readme,
+            isLocal: true,
+        }]
+    };
+};
+
 interface ProfileSidebarProps {
     activeProfile: Profile | undefined;
     currentCommunity: Community | null;
@@ -29,6 +70,7 @@ interface ProfileSidebarProps {
     isCheckingGamePath?: boolean;
     onResolvePackage: (mod: InstalledMod) => Promise<Package | null>;
     onExportProfile: () => void;
+    onImportCustomMod?: () => void;
     onOpenSettings: () => void;
     onUpdateProfile: (profileId: string, updates: Partial<Profile>) => void;
     onToggleVanilla: (profileId: string, newVanillaState: boolean) => Promise<void> | void;
@@ -58,6 +100,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
     isCheckingGamePath = false,
     onResolvePackage,
     onExportProfile,
+    onImportCustomMod,
     onOpenSettings,
     onUpdateProfile,
     onToggleVanilla,
@@ -108,7 +151,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
     };
 
     const displayedMods = activeProfile?.mods.filter(mod =>
-        mod.fullName.toLowerCase().includes(searchQuery.toLowerCase())
+        `${mod.fullName} ${mod.displayName || ''} ${mod.author || ''}`.toLowerCase().includes(searchQuery.toLowerCase())
     ) || [];
     const visibleModIds = useMemo(() => new Set(displayedMods.map((m) => m.uuid4)), [displayedMods]);
     const effectiveSelectedModIds = useMemo(
@@ -186,6 +229,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
 
     const updatesInView = useMemo(() => {
         return displayedMods.reduce((count, mod) => {
+            if (mod.source === 'local') return count;
             const modNameWithoutVersion = mod.fullName.replace(/-\d+\.\d+\.\d+$/, '');
             const latestVersion = latestVersionByPackage.get(modNameWithoutVersion);
             const hasUpdate = !!(latestVersion && latestVersion !== mod.versionNumber);
@@ -201,6 +245,11 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
     }, [activeProfile, legacyInstallMode]);
 
     const resolveAndOpenModDetails = async (mod: InstalledMod, pkg?: Package) => {
+        if (mod.source === 'local') {
+            onViewModDetails(localModToPackage(mod));
+            return;
+        }
+
         if (pkg) {
             onViewModDetails(pkg);
             return;
@@ -418,23 +467,36 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
 
             {/* Local Mod Search */}
             <div className="px-4 pt-4 pb-2">
-                <div className="relative group">
-                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                        <svg className={`w-4 h-4 transition-colors duration-200 ${searchQuery ? 'text-blue-500' : 'text-gray-500 group-focus-within:text-blue-500'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                        </svg>
+                <div className="flex gap-2">
+                    <div className="relative group flex-1 min-w-0">
+                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                            <svg className={`w-4 h-4 transition-colors duration-200 ${searchQuery ? 'text-blue-500' : 'text-gray-500 group-focus-within:text-blue-500'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                            </svg>
+                        </div>
+                        <input
+                            type="text"
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            placeholder="search profile mods..."
+                            spellCheck={false}
+                            autoCorrect="off"
+                            autoCapitalize="none"
+                            autoComplete="off"
+                            className="w-full pl-9 pr-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
+                        />
                     </div>
-                    <input
-                        type="text"
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        placeholder="search profile mods..."
-                        spellCheck={false}
-                        autoCorrect="off"
-                        autoCapitalize="none"
-                        autoComplete="off"
-                        className="w-full pl-9 pr-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
-                    />
+                    <button
+                        type="button"
+                        onClick={() => onImportCustomMod?.()}
+                        className="w-[38px] h-[38px] flex-shrink-0 rounded-lg bg-gray-800 border border-gray-700 text-gray-400 hover:text-white hover:border-blue-500 hover:bg-gray-800 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors flex items-center justify-center"
+                        title="Import Custom Mod"
+                        aria-label="Import Custom Mod"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v14m7-7H5" />
+                        </svg>
+                    </button>
                 </div>
             </div>
 
@@ -472,10 +534,11 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
 
                 {displayedMods.map(mod => {
                     const modNameWithoutVersion = mod.fullName.replace(/-\d+\.\d+\.\d+$/, '');
-                    const pkg = packages.find(p => p.full_name === modNameWithoutVersion);
+                    const pkg = mod.source === 'local' ? undefined : packages.find(p => p.full_name === modNameWithoutVersion);
                     const latestVersion = pkg?.versions[0].version_number;
                     const hasUpdate = latestVersion && latestVersion !== mod.versionNumber;
                     const isSelected = selectedModIdSet.has(mod.uuid4);
+                    const displayName = mod.displayName || mod.fullName.split('-')[1] || mod.fullName;
 
                     return (
                         <div
@@ -491,7 +554,9 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                                 {mod.iconUrl ? (
                                     <img src={mod.iconUrl} alt="" className="w-full h-full object-cover" />
                                 ) : (
-                                    <div className="w-full h-full flex items-center justify-center text-gray-600 text-xs">?</div>
+                                    <div className="w-full h-full flex items-center justify-center text-gray-500 text-xs font-bold">
+                                        {mod.source === 'local' ? 'C' : '?'}
+                                    </div>
                                 )}
                                 {!mod.enabled && (
                                     <div className="absolute inset-0 flex items-center justify-center bg-black/50">
@@ -503,8 +568,13 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                             <div className="min-w-0 flex-1">
                                 <div className="flex items-center gap-2">
                                     <div className={`text-sm font-medium truncate transition-colors ${mod.enabled ? 'text-gray-200 group-hover:text-white' : 'text-gray-500 line-through'}`}>
-                                        {mod.fullName.split('-')[1] || mod.fullName}
+                                        {displayName}
                                     </div>
+                                    {mod.source === 'local' && (
+                                        <span className="text-[10px] px-1.5 py-0.5 rounded-full border border-blue-500/25 bg-blue-500/10 text-blue-300">
+                                            Custom
+                                        </span>
+                                    )}
                                 </div>
                                 <div className="text-xs text-gray-500 flex items-center gap-2">
                                     <span>v{mod.versionNumber}</span>

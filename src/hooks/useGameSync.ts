@@ -43,6 +43,54 @@ export function useGameSync({
         return latestProfiles;
     };
 
+    const refreshLocalModsBeforeSync = async (profile: any) => {
+        const localMods = profile.mods.filter((mod: any) => mod.source === 'local' && mod.localId);
+        if (localMods.length === 0) return profile;
+
+        let latestProfile = profile;
+        let changed = false;
+        for (const mod of localMods) {
+            try {
+                const result = await window.ipcRenderer.refreshLocalModMetadata(
+                    profile.id,
+                    mod.localId,
+                    mod.sourcePath,
+                    mod.enabled
+                );
+                if (!result?.mod) continue;
+
+                const refreshedMod = {
+                    ...mod,
+                    ...result.mod,
+                    uuid4: mod.uuid4,
+                    enabled: mod.enabled,
+                    synced_enabled: mod.synced_enabled,
+                    pending_sync: !!mod.pending_sync || !!result.changed,
+                };
+                latestProfile = {
+                    ...latestProfile,
+                    mods: latestProfile.mods.map((candidate: any) =>
+                        candidate.uuid4 === mod.uuid4 ? refreshedMod : candidate
+                    ),
+                    needs_sync: !!latestProfile.needs_sync || !!result.changed,
+                };
+                changed = changed || !!result.changed;
+            } catch (err) {
+                console.error(`Failed to refresh custom mod ${mod.fullName}`, err);
+            }
+        }
+
+        if (changed) {
+            updateProfile(profile.id, {
+                mods: latestProfile.mods,
+                needs_sync: latestProfile.needs_sync,
+            });
+            await persistProfilesNow();
+        }
+
+        return useProfileStore.getState().profiles.find((p) => p.id === profile.id) || latestProfile;
+    };
+
     const handleSyncToGame = async (
         isVanillaOverride?: boolean,
         syncOptions?: SyncToGameOptions
@@ -95,10 +143,11 @@ export function useGameSync({
                 setProgressState(prev => ({ ...prev, isOpen: false }));
             }
 
+            const refreshedProfile = await refreshLocalModsBeforeSync(activeProfile);
             await persistProfilesNow();
 
             // ── Profile sync ──────────────────────────────────────────────────────
-            const syncResult = await window.ipcRenderer.syncProfileToGame(activeProfile.id, community, legacyInstallMode);
+            const syncResult = await window.ipcRenderer.syncProfileToGame(refreshedProfile.id, community, legacyInstallMode);
 
             const skippedVersionMismatch: string[] = [];
             const failedInstalls: string[] = [];
@@ -192,12 +241,13 @@ export function useGameSync({
                     let status = 'Installed';
                     let trackedFullName: string | null = null;
                     try {
-                    const modInProfile = activeProfile.mods.find(m => {
-                        if (!m.enabled) return false;
-                        const parts = m.fullName.split('-');
-                        const key = parts.length >= 2 ? `${parts[0]}-${parts[1]}` : m.fullName;
-                        return key.toLowerCase() === modKey.toLowerCase();
-                    });
+                        const profileForLookup = useProfileStore.getState().profiles.find((p) => p.id === activeProfile.id) || refreshedProfile;
+                        const modInProfile = profileForLookup.mods.find((m: any) => {
+                            if (!m.enabled) return false;
+                            const parts = m.fullName.split('-');
+                            const key = parts.length >= 2 ? `${parts[0]}-${parts[1]}` : m.fullName;
+                            return key.toLowerCase() === modKey.toLowerCase();
+                        });
 
                     if (modInProfile) {
                         if (legacyInstallMode) {
@@ -207,6 +257,28 @@ export function useGameSync({
                                 status = 'Copied from cache';
                                 return;
                             }
+                        }
+
+                        if (modInProfile.source === 'local') {
+                            if (!modInProfile.localId) {
+                                skippedVersionMismatch.push(`${modKey} (missing local payload id)`);
+                                status = 'Skipped (local payload missing)';
+                                return;
+                            }
+                            trackedFullName = modInProfile.fullName;
+                            const installResult = await window.ipcRenderer.installLocalMod(
+                                activeProfile.id,
+                                modInProfile.localId,
+                                modInProfile.fullName,
+                                gamePath,
+                                legacyInstallMode
+                            );
+                            if (!installResult.success) {
+                                throw new Error(installResult.error || 'Local mod install failed');
+                            }
+                            actuallyInstalled++;
+                            status = 'Installed local mod';
+                            return;
                         }
 
                         const pkg = await window.ipcRenderer.fetchPackageByName(modInProfile.fullName, community);

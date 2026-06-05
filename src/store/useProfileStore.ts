@@ -24,10 +24,36 @@ const getModKey = (fullName: string): string => {
     return fullName.toLowerCase();
 };
 
+const normalizeLocalKeyPart = (value?: string | null): string => (
+    value
+        ?.trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '')
+        || ''
+);
+
+const getLocalModDisplayKey = (mod: InstalledMod): string => {
+    const parts = mod.fullName.split('-');
+    const fallbackName = parts.length >= 2 ? parts[1] : mod.fullName;
+    const author = normalizeLocalKeyPart(mod.author || (parts.length >= 2 ? parts[0] : 'local')) || 'local';
+    const name = normalizeLocalKeyPart(mod.displayName || fallbackName);
+    if (name) return `${author}:${name}`;
+    if (mod.sha256) return `sha:${mod.sha256.toLowerCase()}`;
+    return normalizeLocalKeyPart(mod.fullName) || mod.uuid4;
+};
+
+const getInstalledModKey = (mod: InstalledMod): string => {
+    if (mod.source === 'local') {
+        return `local:${getLocalModDisplayKey(mod)}`;
+    }
+    return getModKey(mod.fullName);
+};
+
 const dedupeModsByKey = (mods: InstalledMod[]): InstalledMod[] => {
     const byKey = new Map<string, InstalledMod>();
     for (const mod of mods) {
-        byKey.set(getModKey(mod.fullName), mod);
+        byKey.set(getInstalledModKey(mod), mod);
     }
     return Array.from(byKey.values());
 };
@@ -47,6 +73,7 @@ const normalizeProfile = (profile: Profile): Profile => {
 
     return {
         ...profile,
+        mods: dedupeModsByKey(profile.mods || []),
         platform,
         distribution,
         launchMode,
@@ -147,6 +174,7 @@ export const useProfileStore = create<ProfileState>((set) => ({
     },
 
     addMod: (profileId, mod) => {
+        const obsoleteLocalPayloads: string[] = [];
         set((state) => {
             const profileIndex = state.profiles.findIndex(p => p.id === profileId);
             if (profileIndex === -1) return state;
@@ -160,29 +188,38 @@ export const useProfileStore = create<ProfileState>((set) => ({
                 synced_enabled: mod.synced_enabled ?? (mod.pending_sync ? undefined : mod.enabled),
             };
 
-            const incomingKey = getModKey(normalizedMod.fullName);
-            const existingIndex = profile.mods.findIndex((m) =>
-                m.uuid4 === normalizedMod.uuid4 || getModKey(m.fullName) === incomingKey
+            const incomingKey = getInstalledModKey(normalizedMod);
+            const matchingMods = profile.mods.filter((m) =>
+                m.uuid4 === normalizedMod.uuid4 || getInstalledModKey(m) === incomingKey
             );
+            const existing = matchingMods[matchingMods.length - 1];
 
-            if (existingIndex >= 0) {
-                const existing = profile.mods[existingIndex];
-                const merged: InstalledMod = {
-                    ...existing,
-                    ...normalizedMod,
-                };
-                profile.mods = profile.mods.map((m, idx) => (idx === existingIndex ? merged : m));
-            } else {
-                profile.mods = [...profile.mods, normalizedMod];
+            if (normalizedMod.source === 'local') {
+                obsoleteLocalPayloads.push(
+                    ...matchingMods
+                        .map((m) => m.localId)
+                        .filter((localId): localId is string => !!localId && localId !== normalizedMod.localId)
+                );
             }
 
-            profile.mods = dedupeModsByKey(profile.mods);
+            const merged: InstalledMod = existing ? { ...existing, ...normalizedMod } : normalizedMod;
+            profile.mods = [
+                ...profile.mods.filter((m) =>
+                    m.uuid4 !== normalizedMod.uuid4 && getInstalledModKey(m) !== incomingKey
+                ),
+                merged,
+            ];
             profile.needs_sync = !!profile.needs_sync || profile.mods.some(m => m.pending_sync);
             updatedProfiles[profileIndex] = profile;
             debouncedSaveProfiles(updatedProfiles);
 
             return { profiles: updatedProfiles };
         });
+        for (const localId of obsoleteLocalPayloads) {
+            void window.ipcRenderer.deleteLocalModPayload(profileId, localId).catch((err) => {
+                console.error("Failed to delete replaced custom mod payload:", err);
+            });
+        }
     },
 
     removeMod: async (profileId, modId) => {
@@ -198,6 +235,9 @@ export const useProfileStore = create<ProfileState>((set) => ({
             try {
                 const modName = mod.fullName.split('-').slice(0, 2).join('-');
                 await window.ipcRenderer.removeMod(profileId, modName);
+                if (mod.source === 'local' && mod.localId) {
+                    await window.ipcRenderer.deleteLocalModPayload(profileId, mod.localId);
+                }
             } catch (e) {
                 console.error("Failed to remove mod files:", e);
                 // Continue to update state anyway

@@ -1,6 +1,15 @@
 export type ProfilePlatform = 'windows' | 'mac';
 export type ProfileDistribution = 'steam' | 'manual';
 export type ProfileLaunchMode = 'auto' | 'steam' | 'direct';
+export type InstalledModSource = 'thunderstore' | 'local';
+
+export interface CustomModSecurityReport {
+    riskLevel: 'low' | 'medium' | 'high';
+    warnings: string[];
+    executableFiles: string[];
+    totalFiles: number;
+    totalUncompressedBytes: number;
+}
 
 export interface InstalledMod {
     uuid4: string;
@@ -8,6 +17,20 @@ export interface InstalledMod {
     versionNumber: string;
     iconUrl?: string;
     enabled: boolean;
+    source?: InstalledModSource;
+    localId?: string;
+    displayName?: string;
+    author?: string;
+    description?: string;
+    readme?: string;
+    fileName?: string;
+    fileSize?: number;
+    sha256?: string;
+    manifestSha256?: string;
+    contentFingerprint?: string;
+    sourcePath?: string;
+    platforms?: Array<'windows' | 'mac' | 'linux'>;
+    securityReport?: CustomModSecurityReport;
     pending_sync?: boolean;
     synced_enabled?: boolean;
 }

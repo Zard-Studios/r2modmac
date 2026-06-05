@@ -1,4 +1,4 @@
-import type { Profile } from './profile';
+import type { InstalledMod, Profile } from './profile';
 import type { Community, Package, CommunityPlatformInfo } from './thunderstore';
 
 export interface AppSettings {
@@ -23,6 +23,27 @@ export interface IElectronAPI {
     selectFolder: () => Promise<string | null>;
     selectFile: (filters?: { name: string; extensions: string[] }[]) => Promise<string | null>;
     installMod: (profileId: string, downloadUrl: string, modName: string, gamePath: string, useProfileCache?: boolean) => Promise<{ success: boolean; error?: string }>;
+    inspectCustomMod: (path: string) => Promise<any>;
+    cancelCustomModImport: () => Promise<boolean>;
+    importCustomMod: (
+        profileId: string,
+        path: string,
+        options: { name?: string; author?: string; version?: string; platforms?: string[] }
+    ) => Promise<{ mod: InstalledMod; inspection: any }>;
+    refreshLocalModMetadata: (
+        profileId: string,
+        localId: string,
+        sourcePath?: string,
+        enabled?: boolean
+    ) => Promise<{ changed: boolean; mod: InstalledMod; inspection: any }>;
+    importEmbeddedCustomMod: (
+        profileId: string,
+        archivePath: string,
+        payloadPath: string,
+        options: { name?: string; author?: string; version?: string; enabled?: boolean; platforms?: string[]; expectedSha256?: string }
+    ) => Promise<{ mod: InstalledMod; inspection: any }>;
+    installLocalMod: (profileId: string, localId: string, modName: string, gamePath: string, useProfileCache?: boolean) => Promise<{ success: boolean; error?: string }>;
+    deleteLocalModPayload: (profileId: string, localId: string) => Promise<boolean>;
     checkDirectoryExists: (dirPath: string) => Promise<boolean>;
     fetchCommunities: () => Promise<Community[]>;
     fetchCommunityImages: () => Promise<Record<string, string>>;

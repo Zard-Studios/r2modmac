@@ -18,6 +18,42 @@ export const tauriAPI: IElectronAPI = {
             return { success: false, error: String(e) };
         }
     },
+    inspectCustomMod: async (path) => invoke('inspect_custom_mod', { path }),
+    cancelCustomModImport: async () => invoke('cancel_custom_mod_import'),
+    importCustomMod: async (profileId, path, options) => invoke('import_custom_mod', {
+        profileId,
+        path,
+        name: options.name,
+        author: options.author,
+        version: options.version,
+        platforms: options.platforms,
+    }),
+    refreshLocalModMetadata: async (profileId, localId, sourcePath, enabled) => invoke('refresh_local_mod_metadata', {
+        profileId,
+        localId,
+        sourcePath,
+        enabled,
+    }),
+    importEmbeddedCustomMod: async (profileId, archivePath, payloadPath, options) => invoke('import_embedded_custom_mod', {
+        profileId,
+        archivePath,
+        payloadPath,
+        name: options.name,
+        author: options.author,
+        version: options.version,
+        enabled: options.enabled,
+        platforms: options.platforms,
+        expectedSha256: options.expectedSha256,
+    }),
+    installLocalMod: async (profileId, localId, modName, gamePath, useProfileCache) => {
+        try {
+            await invoke('install_local_mod', { profileId, localId, modName, gamePath, useProfileCache: useProfileCache ?? false });
+            return { success: true };
+        } catch (e) {
+            return { success: false, error: String(e) };
+        }
+    },
+    deleteLocalModPayload: async (profileId, localId) => invoke<boolean>('delete_local_mod_payload', { profileId, localId }),
     checkDirectoryExists: async (path) => invoke<boolean>('check_directory_exists', { path }),
     fetchCommunities: () => invoke<Community[]>('fetch_communities'),
     fetchCommunityImages: () => invoke<Record<string, string>>('fetch_community_images'),

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { Button } from './components/ui'
 import { Layout } from './components/Layout'
 import type { FilterOptions } from './components/FilterPopover'
@@ -13,6 +13,7 @@ import { useAppStore } from './store/useAppStore';
 import type { CommunityPlatformInfo, Package, PackageVersion } from './types/thunderstore';
 import { getVersion } from '@tauri-apps/api/app';
 import { listen } from '@tauri-apps/api/event';
+import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { flushSync } from 'react-dom';
 import { AppModals } from './components/screens/AppModals';
 import type { AppSettings, UpdateInfo } from './types/electron';
@@ -209,6 +210,8 @@ function App() {
     progress: 0,
     currentTask: ''
   })
+  const [isCancellingCustomModImport, setIsCancellingCustomModImport] = useState(false)
+  const [isCustomModDragActive, setIsCustomModDragActive] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [isLaunchingProfile, setIsLaunchingProfile] = useState(false)
   const [isStoppingProfile, setIsStoppingProfile] = useState(false)
@@ -217,6 +220,7 @@ function App() {
   const applyInFlightRef = useRef(false)
   const profileActionLockRef = useRef(false)
   const steamRestartingRef = useRef(false)
+  const customModImportCancelledRef = useRef(false)
   const launchGraceUntilRef = useRef(0)
   const [isApplyingToGame, setIsApplyingToGame] = useState(false)
   const [showExportModal, setShowExportModal] = useState(false)
@@ -260,6 +264,7 @@ function App() {
     selectProfile,
     deleteProfile,
     updateProfile,
+    addMod,
     removeMod,
     toggleMod
   } = useProfileStore()
@@ -271,7 +276,6 @@ function App() {
   const [activeProfileGamePath, setActiveProfileGamePath] = useState<string | null>(null)
   const [isCheckingActiveProfileGamePath, setIsCheckingActiveProfileGamePath] = useState(false)
   const [storageVolumeEventCount, setStorageVolumeEventCount] = useState(0)
-
   useEffect(() => {
     if (!activeProfile) {
       setIsGameRunning(false)
@@ -795,6 +799,141 @@ function App() {
     await handleInstallMod(pkg, targetProfileId, selectedVersion);
   };
 
+  const handleCancelProgress = async () => {
+    if (!progressState.isOpen || !progressState.isCancelable || isCancellingCustomModImport) return;
+
+    customModImportCancelledRef.current = true;
+    setIsCancellingCustomModImport(true);
+    setProgressState(prev => ({
+      ...prev,
+      currentTask: 'Cancelling custom mod import...'
+    }));
+
+    try {
+      await window.ipcRenderer.cancelCustomModImport();
+    } catch (error) {
+      console.error('Failed to cancel custom mod import', error);
+    }
+  };
+
+  const importCustomModPaths = useCallback(async (paths: string[]) => {
+    if (!activeProfile) {
+      await window.ipcRenderer.alert('Profile Required', 'Create or select a profile before importing a custom mod.');
+      return;
+    }
+
+    const importPaths = paths.map(path => path.trim()).filter(Boolean);
+    if (importPaths.length === 0) return;
+
+    try {
+      customModImportCancelledRef.current = false;
+      setIsCancellingCustomModImport(false);
+      let importedCount = 0;
+      const importedNames: string[] = [];
+
+      setProgressState({
+        isOpen: true,
+        title: 'Importing Custom Mod',
+        progress: 10,
+        currentTask: importPaths.length > 1
+          ? `Scanning 1/${importPaths.length}...`
+          : 'Scanning selected folder...',
+        isCancelable: true
+      });
+
+      for (let index = 0; index < importPaths.length; index++) {
+        const path = importPaths[index];
+        setProgressState(prev => ({
+          ...prev,
+          progress: Math.max(10, Math.round((index / Math.max(importPaths.length, 1)) * 90)),
+          currentTask: importPaths.length > 1
+            ? `Staging custom mod ${index + 1}/${importPaths.length}...`
+            : 'Staging custom mod...'
+        }));
+
+        const result = await window.ipcRenderer.importCustomMod(activeProfile.id, path, {});
+        if (customModImportCancelledRef.current) {
+          if (result.mod.localId) {
+            await window.ipcRenderer.deleteLocalModPayload(activeProfile.id, result.mod.localId);
+          }
+          customModImportCancelledRef.current = false;
+          setIsCancellingCustomModImport(false);
+          setProgressState(prev => ({ ...prev, isOpen: false, isCancelable: false }));
+          return;
+        }
+        addMod(activeProfile.id, result.mod);
+        importedCount++;
+        importedNames.push(result.mod.displayName || result.mod.fullName);
+      }
+
+      setProgressState(prev => ({ ...prev, isOpen: false, isCancelable: false }));
+      setIsCancellingCustomModImport(false);
+      await window.ipcRenderer.alert(
+        importedCount === 1 ? 'Custom Mod Imported' : 'Custom Mods Imported',
+        importedCount === 1
+          ? `${importedNames[0]} was added to the profile.\n\nIt is staged in r2modmac storage and will be installed when you apply the profile to the game.`
+          : `${importedCount} custom mods were added to the profile.\n\nThey are staged in r2modmac storage and will be installed when you apply the profile to the game.`
+      );
+    } catch (error: any) {
+      const message = String(error?.message || error || 'Failed to import the selected custom mod folder.');
+      const wasCancelled = customModImportCancelledRef.current || message.toLowerCase().includes('cancelled');
+      customModImportCancelledRef.current = false;
+      setIsCancellingCustomModImport(false);
+      setProgressState(prev => ({ ...prev, isOpen: false, isCancelable: false }));
+      if (wasCancelled) return;
+
+      await window.ipcRenderer.alert(
+        'Import Failed',
+        message
+      );
+    }
+  }, [activeProfile, addMod]);
+
+  const handleImportCustomModRequest = async () => {
+    const path = await window.ipcRenderer.selectFolder();
+    if (!path) return;
+    await importCustomModPaths([path]);
+  };
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let disposed = false;
+
+    getCurrentWebview().onDragDropEvent((event) => {
+      const payload = event.payload;
+      if (payload.type === 'enter') {
+        setIsCustomModDragActive(payload.paths.length > 0);
+        return;
+      }
+      if (payload.type === 'over') {
+        setIsCustomModDragActive(true);
+        return;
+      }
+      if (payload.type === 'leave') {
+        setIsCustomModDragActive(false);
+        return;
+      }
+      if (payload.type === 'drop') {
+        setIsCustomModDragActive(false);
+        if (progressState.isOpen || isCancellingCustomModImport) return;
+        void importCustomModPaths(payload.paths);
+      }
+    }).then((cleanup) => {
+      if (disposed) {
+        cleanup();
+      } else {
+        unlisten = cleanup;
+      }
+    }).catch((error) => {
+      console.error('Failed to listen for custom mod drag and drop', error);
+    });
+
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [importCustomModPaths, progressState.isOpen, isCancellingCustomModImport]);
+
   const handleInstallToGameRequest = async (
     isVanillaOverride?: boolean,
     options?: {
@@ -1261,12 +1400,13 @@ function App() {
 
           const confirmed = await window.ipcRenderer.confirm(
             'Uninstall Mod',
-            `Uninstall ${mod.fullName}?`
+            `Uninstall ${mod.displayName || mod.fullName}?`
           );
           if (!confirmed) return;
           await removeMod(activeProfile.id, mod.uuid4);
         }}
         onResolvePackage={async (mod) => {
+          if (mod.source === 'local') return null;
           // Extract mod name from fullName (format: "Author-ModName-Version")
           // We need "Author-ModName" (or just "ModName" depending on API) 
           // fetchPackageByName expects "Author-ModName" or exact match with full_name
@@ -1289,6 +1429,7 @@ function App() {
         hasConfiguredGamePath={!!activeProfileGamePath}
         isCheckingGamePath={isCheckingActiveProfileGamePath}
         onExportProfile={() => setShowExportModal(true)}
+        onImportCustomMod={handleImportCustomModRequest}
         onOpenSettings={() => setShowSettings(true)}
         onUpdateProfile={updateProfile}
         onToggleVanilla={handleToggleProfileVanilla}
@@ -1389,6 +1530,21 @@ function App() {
         {content}
       </div>
 
+      {isCustomModDragActive && (
+        <div className="fixed inset-0 z-[55] bg-black/55 backdrop-blur-sm flex items-center justify-center pointer-events-none p-6">
+          <div className="w-full max-w-md rounded-xl border-2 border-dashed border-blue-400/70 bg-gray-900/90 px-6 py-8 text-center shadow-2xl">
+            <div className="mx-auto mb-4 h-12 w-12 rounded-xl bg-blue-500/15 border border-blue-400/30 flex items-center justify-center text-blue-300">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 11v6m3-3H9" />
+              </svg>
+            </div>
+            <div className="text-lg font-bold text-white">Drop Custom Mod</div>
+            <div className="mt-1 text-sm text-gray-400">Folder, .zip, or .r2z</div>
+          </div>
+        </div>
+      )}
+
       {/* Modals */}
       <AppModals
         selectedMod={selectedMod}
@@ -1402,6 +1558,8 @@ function App() {
         isBrowsingMode={isBrowsingMode}
         progressState={progressState}
         setProgressState={setProgressState}
+        onCancelProgress={handleCancelProgress}
+        isCancellingProgress={isCancellingCustomModImport}
         uninstallModalState={uninstallModalState}
         setUninstallModalState={setUninstallModalState}
         executeUninstall={executeUninstall}

@@ -4,9 +4,10 @@ interface ExportModalProps {
     onClose: () => void;
     onExportFile: () => void;
     onExportCode: () => void;
+    hasLocalMods?: boolean;
 }
 
-export function ExportModal({ isOpen, onClose, onExportFile, onExportCode }: ExportModalProps) {
+export function ExportModal({ isOpen, onClose, onExportFile, onExportCode, hasLocalMods = false }: ExportModalProps) {
     if (!isOpen) return null;
 
     return (
@@ -24,10 +25,15 @@ export function ExportModal({ isOpen, onClose, onExportFile, onExportCode }: Exp
                 <div className="space-y-4">
                     <button
                         onClick={() => {
+                            if (hasLocalMods) return;
                             onExportCode();
                             onClose();
                         }}
-                        className="w-full bg-gray-800 border-2 border-dashed border-gray-600 rounded-xl p-6 flex flex-col items-center justify-center text-center hover:border-blue-500 hover:bg-gray-700/50 transition-all group"
+                        disabled={hasLocalMods}
+                        className={`w-full bg-gray-800 border-2 border-dashed rounded-xl p-6 flex flex-col items-center justify-center text-center transition-all group ${hasLocalMods
+                            ? 'border-gray-700 opacity-60 cursor-not-allowed'
+                            : 'border-gray-600 hover:border-blue-500 hover:bg-gray-700/50'
+                            }`}
                     >
                         <div className="w-12 h-12 bg-gray-700 rounded-full flex items-center justify-center mb-3 group-hover:bg-blue-500/20 transition-colors">
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 group-hover:text-blue-400 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -35,7 +41,9 @@ export function ExportModal({ isOpen, onClose, onExportFile, onExportCode }: Exp
                             </svg>
                         </div>
                         <h3 className="text-lg font-bold text-white mb-1">Share Code</h3>
-                        <p className="text-sm text-gray-400">Generate a code to share with friends</p>
+                        <p className="text-sm text-gray-400">
+                            {hasLocalMods ? 'Unavailable for profiles with custom mods' : 'Generate a code to share with friends'}
+                        </p>
                     </button>
 
                     <div className="relative">
@@ -60,7 +68,9 @@ export function ExportModal({ isOpen, onClose, onExportFile, onExportCode }: Exp
                             </svg>
                         </div>
                         <h3 className="text-lg font-bold text-white mb-1">Export as File</h3>
-                        <p className="text-sm text-gray-400">Save as .r2z file</p>
+                        <p className="text-sm text-gray-400">
+                            {hasLocalMods ? 'Save a complete .r2z with custom mod files' : 'Save as .r2z file'}
+                        </p>
                     </button>
                 </div>
             </div>

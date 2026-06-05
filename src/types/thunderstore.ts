@@ -20,6 +20,8 @@ export interface PackageVersion {
     is_active: boolean;
     uuid4: string;
     file_size: number;
+    localReadme?: string;
+    isLocal?: boolean;
 }
 
 export interface Package {

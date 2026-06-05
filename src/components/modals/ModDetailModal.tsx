@@ -51,6 +51,8 @@ export function ModDetailModal({
         [pkg, selectedVersionNumber]
     );
     const mod = selectedVersion;
+    const isLocalMod = !!mod.isLocal;
+    const localReadme = mod.localReadme?.trim() || '';
     const installedVersionNumber = useMemo(
         () => installedMods.find(m => m.fullName.startsWith(pkg.full_name))?.versionNumber || null,
         [installedMods, pkg.full_name]
@@ -69,13 +71,15 @@ export function ModDetailModal({
             setChangelogContent(null);
             setDependencies([]);
             setActiveTab('description');
-            fetchContent('readme');
+            if (!isLocalMod) {
+                fetchContent('readme');
 
-            if (mod.dependencies?.length > 0 && gameId) {
-                fetchDependencies();
+                if (mod.dependencies?.length > 0 && gameId) {
+                    fetchDependencies();
+                }
             }
         }
-    }, [isOpen, mod.full_name, gameId]);
+    }, [isOpen, mod.full_name, gameId, isLocalMod]);
 
     const fetchDependencies = async () => {
         try {
@@ -114,10 +118,10 @@ export function ModDetailModal({
     };
 
     useEffect(() => {
-        if (activeTab === 'changelog' && !changelogContent) {
+        if (!isLocalMod && activeTab === 'changelog' && !changelogContent) {
             fetchContent('changelog');
         }
-    }, [activeTab]);
+    }, [activeTab, isLocalMod]);
 
     if (!isOpen) return null;
 
@@ -136,6 +140,7 @@ export function ModDetailModal({
     // Calculate total size including dependencies
     const totalBytes = mod.file_size + dependencies.reduce((sum, dep) => sum + (dep.versions[0]?.file_size || 0), 0);
     const sizeDisplay = dependencies.length > 0 ? formatBytes(totalBytes) : formatBytes(mod.file_size);
+    const detailTabs: Tab[] = isLocalMod ? ['description'] : ['description', 'changelog', 'dependencies'];
 
     return (
         <>
@@ -175,7 +180,9 @@ export function ModDetailModal({
                             <div className="flex justify-between items-start">
                                 <div>
                                     <h2 className="text-2xl font-bold text-white leading-tight">{mod.name}</h2>
-                                    <p className="text-sm text-gray-400 mt-0.5">by {mod.full_name.split('-')[0]}</p>
+                                    <p className="text-sm text-gray-400 mt-0.5">
+                                        {isLocalMod ? 'Custom local mod' : `by ${mod.full_name.split('-')[0]}`}
+                                    </p>
                                 </div>
                                 <div className="text-right flex flex-col items-end">
                                     <span className="text-[10px] uppercase text-gray-500 font-bold tracking-wider">Updated</span>
@@ -201,18 +208,22 @@ export function ModDetailModal({
                             {/* Stats row - aligned at bottom */}
                             <div className="flex items-center gap-4 text-xs text-gray-500 mt-auto">
                                 <span className="bg-gray-700 px-2.5 py-1 rounded-md text-gray-300 font-medium">v{mod.version_number}</span>
-                                <span className="flex items-center gap-1.5" title={`${mod.downloads.toLocaleString()} downloads`}>
-                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                                    </svg>
-                                    {mod.downloads.toLocaleString()}
-                                </span>
-                                <LikeStat
-                                    count={pkg.rating_score}
-                                    className="gap-1.5 text-rose-400"
-                                    iconClassName="w-4 h-4"
-                                    title={`${pkg.rating_score.toLocaleString()} likes`}
-                                />
+                                {!isLocalMod && (
+                                    <>
+                                        <span className="flex items-center gap-1.5" title={`${mod.downloads.toLocaleString()} downloads`}>
+                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                            </svg>
+                                            {mod.downloads.toLocaleString()}
+                                        </span>
+                                        <LikeStat
+                                            count={pkg.rating_score}
+                                            className="gap-1.5 text-rose-400"
+                                            iconClassName="w-4 h-4"
+                                            title={`${pkg.rating_score.toLocaleString()} likes`}
+                                        />
+                                    </>
+                                )}
                                 <span className="flex items-center gap-1.5" title={dependencies.length > 0 ? `Package: ${formatBytes(mod.file_size)} + ${dependencies.length} dependencies` : undefined}>
                                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
@@ -269,7 +280,7 @@ export function ModDetailModal({
 
                     {/* Tabs */}
                     <div className="flex border-b border-gray-700 bg-gray-900/30 px-6 gap-6">
-                        {(['description', 'changelog', 'dependencies'] as const).map(tab => (
+                        {detailTabs.map(tab => (
                             <button
                                 key={tab}
                                 onClick={() => setActiveTab(tab)}
@@ -311,7 +322,11 @@ export function ModDetailModal({
                     `}</style>
                         {activeTab === 'description' && (
                             <div>
-                                {loadingContent && !readmeContent ? (
+                                {isLocalMod && localReadme ? (
+                                    <div className="prose prose-invert prose-sm max-w-none whitespace-pre-wrap break-words overflow-hidden">
+                                        {localReadme}
+                                    </div>
+                                ) : loadingContent && !readmeContent ? (
                                     <div className="animate-pulse space-y-3">
                                         <div className="h-4 bg-gray-700 rounded w-3/4"></div>
                                         <div className="h-4 bg-gray-700 rounded w-1/2"></div>

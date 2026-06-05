@@ -22,6 +22,8 @@ export interface AppModalsProps {
     isBrowsingMode: boolean;
     progressState: any;
     setProgressState: (state: any) => void;
+    onCancelProgress?: () => void | Promise<void>;
+    isCancellingProgress?: boolean;
     uninstallModalState: any;
     setUninstallModalState: (state: any) => void;
     executeUninstall: (deps: string[]) => void;
@@ -53,7 +55,7 @@ export function AppModals({
     activeProfileId, profiles, selectedCommunity,
     handleInstallMod, handleUpdateMod, handleUninstallWithDependencies,
     isBrowsingMode,
-    progressState, setProgressState,
+    progressState, setProgressState, onCancelProgress, isCancellingProgress,
     uninstallModalState, setUninstallModalState, executeUninstall,
     showSettings, setShowSettings,
     showExportModal, setShowExportModal, handleExportCode, handleExportFile,
@@ -65,6 +67,8 @@ export function AppModals({
 }: AppModalsProps) {
 
     const activeProfile = activeProfileId ? profiles.find(p => p.id === activeProfileId) || null : null;
+    const selectedVersion = selectedMod?.versions[0];
+    const selectedIsLocal = !!selectedVersion?.isLocal;
 
     return (
         <>
@@ -93,11 +97,13 @@ export function AppModals({
                     }}
                     isInstalled={
                         activeProfileId
-                            ? profiles.find(p => p.id === activeProfileId)?.mods.some((m: any) => m.fullName.startsWith(selectedMod.full_name)) ?? false
+                            ? selectedIsLocal
+                                ? profiles.find(p => p.id === activeProfileId)?.mods.some((m: any) => m.uuid4 === selectedMod.uuid4) ?? false
+                                : profiles.find(p => p.id === activeProfileId)?.mods.some((m: any) => m.fullName.startsWith(selectedMod.full_name)) ?? false
                             : false
                     }
                     hasUpdate={
-                        activeProfileId
+                        activeProfileId && !selectedIsLocal
                             ? (() => {
                                 const profile = profiles.find(p => p.id === activeProfileId);
                                 const installed = profile?.mods.find((m: any) => m.fullName.startsWith(selectedMod.full_name));
@@ -106,7 +112,7 @@ export function AppModals({
                             })()
                             : false
                     }
-                    isBrowsing={isBrowsingMode}
+                    isBrowsing={isBrowsingMode || selectedIsLocal}
                     legacyInstallMode={legacyInstallMode}
                 />
             )}
@@ -120,6 +126,8 @@ export function AppModals({
                 totalBytes={progressState.totalBytes}
                 downloadSpeedBps={progressState.downloadSpeedBps}
                 activeDownloads={progressState.activeDownloads}
+                onCancel={progressState.isCancelable ? onCancelProgress : undefined}
+                isCancelling={isCancellingProgress}
             />
 
             <UninstallModal
@@ -148,6 +156,7 @@ export function AppModals({
                     onClose={() => setShowExportModal(false)}
                     onExportCode={handleExportCode}
                     onExportFile={handleExportFile}
+                    hasLocalMods={!!activeProfile?.mods?.some((mod: any) => mod.source === 'local')}
                 />
             )}
 

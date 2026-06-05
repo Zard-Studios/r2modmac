@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import type { ProgressState } from '../../types/progress';
 
 interface ProgressModalProps {
@@ -9,6 +10,8 @@ interface ProgressModalProps {
     downloadedBytes?: ProgressState['downloadedBytes'];
     totalBytes?: ProgressState['totalBytes'];
     activeDownloads?: ProgressState['activeDownloads'];
+    onCancel?: () => void | Promise<void>;
+    isCancelling?: boolean;
 }
 
 const formatBytes = (bytes?: number) => {
@@ -37,7 +40,23 @@ export function ProgressModal({
     downloadedBytes,
     totalBytes,
     activeDownloads,
+    onCancel,
+    isCancelling = false,
 }: ProgressModalProps) {
+    useEffect(() => {
+        if (!isOpen || !onCancel || isCancelling) return;
+
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                onCancel();
+            }
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [isOpen, onCancel, isCancelling]);
+
     if (!isOpen) return null;
     const hasDownloadStats = typeof downloadedBytes === 'number' || typeof totalBytes === 'number' || typeof downloadSpeedBps === 'number';
     const transferLabel = typeof totalBytes === 'number' && totalBytes > 0
@@ -47,10 +66,26 @@ export function ProgressModal({
     return (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
             <div className="bg-gray-800 rounded-xl p-6 max-w-md w-full border border-gray-700 shadow-2xl">
-                <h3 className="text-xl font-bold text-white mb-4">{title}</h3>
+                <div className="flex items-start justify-between gap-4 mb-4">
+                    <h3 className="text-xl font-bold text-white">{title}</h3>
+                    {onCancel && (
+                        <button
+                            type="button"
+                            onClick={onCancel}
+                            disabled={isCancelling}
+                            className="h-8 w-8 rounded-lg flex items-center justify-center text-gray-400 hover:text-white hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                            aria-label="Cancel operation"
+                            title="Cancel"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                        </button>
+                    )}
+                </div>
 
                 <div className="mb-2 flex justify-between text-sm text-gray-400">
-                    <span>{currentTask}</span>
+                    <span>{isCancelling ? 'Cancelling...' : currentTask}</span>
                     <span>{Math.round(progress)}%</span>
                 </div>
 
