@@ -1,38 +1,27 @@
 use crate::models::shared::*;
 use base64::Engine;
 use std::fs;
+use std::io::{Seek, Write};
 use tauri::{command, AppHandle, Manager};
 
-#[command]
-pub async fn export_profile(
-    app: AppHandle,
-    profile_id: String,
-) -> Result<serde_json::Value, String> {
-    // 1. Read profiles.json
-    let profiles_path = app.path().app_data_dir().unwrap().join("profiles.json");
-    if !profiles_path.exists() {
-        return Err("No profiles found".to_string());
-    }
-    let profiles_data = fs::read_to_string(&profiles_path).map_err(|e| e.to_string())?;
-    let profiles: Vec<serde_json::Value> =
-        serde_json::from_str(&profiles_data).map_err(|e| e.to_string())?;
-
-    let profile = profiles
-        .iter()
-        .find(|p| p["id"] == profile_id)
-        .ok_or("Profile not found")?;
-
-    // 2. Create export data
-    let mods = profile["mods"]
+fn profile_has_local_mods(profile: &serde_json::Value) -> bool {
+    profile["mods"]
         .as_array()
-        .unwrap_or(&vec![])
-        .iter()
+        .map(|mods| mods.iter().any(|m| m["source"].as_str() == Some("local")))
+        .unwrap_or(false)
+}
+
+fn build_export_mods(profile: &serde_json::Value) -> Vec<serde_json::Value> {
+    let Some(mods) = profile["mods"].as_array() else {
+        return Vec::new();
+    };
+
+    mods.iter()
         .map(|m| {
             let full_name = m["fullName"].as_str().unwrap_or("");
             let version_number = m["versionNumber"].as_str().unwrap_or("0.0.0");
             let enabled = m["enabled"].as_bool().unwrap_or(true);
 
-            // Clean name logic (strip version suffix)
             let clean_name = if full_name.ends_with(&format!("-{}", version_number)) {
                 &full_name[0..full_name.len() - version_number.len() - 1]
             } else {
@@ -44,7 +33,7 @@ pub async fn export_profile(
             let minor = version_parts.get(1).unwrap_or(&"0").parse().unwrap_or(0);
             let patch = version_parts.get(2).unwrap_or(&"0").parse().unwrap_or(0);
 
-            serde_json::json!({
+            let mut value = serde_json::json!({
                 "name": clean_name,
                 "version": {
                     "major": major,
@@ -52,10 +41,81 @@ pub async fn export_profile(
                     "patch": patch
                 },
                 "enabled": enabled
-            })
-        })
-        .collect::<Vec<_>>();
+            });
 
+            if m["source"].as_str() == Some("local") {
+                if let Some(local_id) = m["localId"].as_str() {
+                    value["source"] = serde_json::json!("local");
+                    value["localId"] = serde_json::json!(local_id);
+                    value["payload"] =
+                        serde_json::json!(format!("r2modmac/local_mods/{}/payload.zip", local_id));
+                    value["displayName"] = m["displayName"].clone();
+                    value["author"] = m["author"].clone();
+                    value["description"] = m["description"].clone();
+                    value["readme"] = m["readme"].clone();
+                    value["iconUrl"] = m["iconUrl"].clone();
+                    value["fileName"] = m["fileName"].clone();
+                    value["fileSize"] = m["fileSize"].clone();
+                    value["sha256"] = m["sha256"].clone();
+                    value["manifestSha256"] = m["manifestSha256"].clone();
+                    value["contentFingerprint"] = m["contentFingerprint"].clone();
+                    value["platforms"] = m["platforms"].clone();
+                    value["securityReport"] = m["securityReport"].clone();
+                }
+            }
+
+            value
+        })
+        .collect::<Vec<_>>()
+}
+
+fn write_embedded_local_payloads<W: Write + std::io::Seek>(
+    app: &AppHandle,
+    profile_id: &str,
+    profile: &serde_json::Value,
+    zip: &mut zip::ZipWriter<W>,
+    options: zip::write::FileOptions,
+) -> Result<(), String> {
+    let profile_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("profiles")
+        .join(profile_id);
+
+    let Some(mods) = profile["mods"].as_array() else {
+        return Ok(());
+    };
+
+    for m in mods {
+        if m["source"].as_str() != Some("local") {
+            continue;
+        }
+        let local_id = m["localId"]
+            .as_str()
+            .ok_or("Local mod is missing localId")?;
+        let payload_path = profile_dir
+            .join("local_mods")
+            .join(local_id)
+            .join("payload.zip");
+        if !payload_path.exists() {
+            return Err(format!(
+                "Local mod payload is missing for {}",
+                m["fullName"].as_str().unwrap_or(local_id)
+            ));
+        }
+        let archive_path = format!("r2modmac/local_mods/{}/payload.zip", local_id);
+        zip.start_file(archive_path, options)
+            .map_err(|e| e.to_string())?;
+        let mut payload_file = fs::File::open(payload_path).map_err(|e| e.to_string())?;
+        std::io::copy(&mut payload_file, zip).map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
+}
+
+fn build_export_data(profile: &serde_json::Value) -> serde_json::Value {
+    let mods = build_export_mods(profile);
     let mut export_data = serde_json::json!({
         "profileName": profile["name"],
         "mods": mods
@@ -65,26 +125,73 @@ pub async fn export_profile(
         export_data["platform"] = plat.clone();
     }
 
-    // 3. Convert to YAML
-    let yaml_content = serde_yaml::to_string(&export_data).map_err(|e| e.to_string())?;
+    export_data
+}
 
-    // 4. Create Zip
+fn write_profile_zip<W: Write + Seek>(
+    app: &AppHandle,
+    profile_id: &str,
+    profile: &serde_json::Value,
+    writer: W,
+    include_local_payloads: bool,
+) -> Result<W, String> {
+    let export_data = build_export_data(profile);
+    let yaml_content = serde_yaml::to_string(&export_data).map_err(|e| e.to_string())?;
+    let mut zip = zip::ZipWriter::new(writer);
+    let options =
+        zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Stored);
+
+    zip.start_file("export.r2x", options)
+        .map_err(|e| e.to_string())?;
+    zip.write_all(yaml_content.as_bytes())
+        .map_err(|e| e.to_string())?;
+
+    if include_local_payloads {
+        write_embedded_local_payloads(app, profile_id, profile, &mut zip, options)?;
+    }
+
+    zip.finish().map_err(|e| e.to_string())
+}
+
+fn build_profile_zip_bytes(
+    app: &AppHandle,
+    profile_id: &str,
+    profile: &serde_json::Value,
+    include_local_payloads: bool,
+) -> Result<Vec<u8>, String> {
+    let cursor = std::io::Cursor::new(Vec::new());
+    let cursor = write_profile_zip(app, profile_id, profile, cursor, include_local_payloads)?;
+    Ok(cursor.into_inner())
+}
+
+fn find_profile(app: &AppHandle, profile_id: &str) -> Result<serde_json::Value, String> {
+    let profiles_path = app.path().app_data_dir().unwrap().join("profiles.json");
+    if !profiles_path.exists() {
+        return Err("No profiles found".to_string());
+    }
+    let profiles_data = fs::read_to_string(&profiles_path).map_err(|e| e.to_string())?;
+    let profiles: Vec<serde_json::Value> =
+        serde_json::from_str(&profiles_data).map_err(|e| e.to_string())?;
+
+    profiles
+        .into_iter()
+        .find(|p| p["id"] == profile_id)
+        .ok_or("Profile not found".to_string())
+}
+
+#[command]
+pub async fn export_profile(
+    app: AppHandle,
+    profile_id: String,
+) -> Result<serde_json::Value, String> {
+    let profile = find_profile(&app, &profile_id)?;
+
     let temp_dir = std::env::temp_dir().join(format!("r2modmac-export-{}", profile_id));
     fs::create_dir_all(&temp_dir).map_err(|e| e.to_string())?;
     let zip_path = temp_dir.join("profile.r2z");
     let file = fs::File::create(&zip_path).map_err(|e| e.to_string())?;
-    let mut zip = zip::ZipWriter::new(file);
+    write_profile_zip(&app, &profile_id, &profile, file, true)?;
 
-    let options =
-        zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Stored);
-    zip.start_file("export.r2x", options)
-        .map_err(|e| e.to_string())?;
-    use std::io::Write;
-    zip.write_all(yaml_content.as_bytes())
-        .map_err(|e| e.to_string())?;
-    zip.finish().map_err(|e| e.to_string())?;
-
-    // 5. Save Dialog
     use tauri_plugin_dialog::DialogExt;
     let save_path = app
         .dialog()
@@ -107,82 +214,13 @@ pub async fn export_profile(
 
 #[command]
 pub async fn share_profile(app: AppHandle, profile_id: String) -> Result<String, String> {
-    // 1. Read profiles.json
-    let profiles_path = app.path().app_data_dir().unwrap().join("profiles.json");
-    if !profiles_path.exists() {
-        return Err("No profiles found".to_string());
-    }
-    let profiles_data = fs::read_to_string(&profiles_path).map_err(|e| e.to_string())?;
-    let profiles: Vec<serde_json::Value> =
-        serde_json::from_str(&profiles_data).map_err(|e| e.to_string())?;
+    let profile = find_profile(&app, &profile_id)?;
 
-    let profile = profiles
-        .iter()
-        .find(|p| p["id"] == profile_id)
-        .ok_or("Profile not found")?;
-
-    // 2. Create export data (Same logic as export_profile)
-    let mods = profile["mods"]
-        .as_array()
-        .unwrap_or(&vec![])
-        .iter()
-        .map(|m| {
-            let full_name = m["fullName"].as_str().unwrap_or("");
-            let version_number = m["versionNumber"].as_str().unwrap_or("0.0.0");
-            let enabled = m["enabled"].as_bool().unwrap_or(true);
-
-            // Clean name logic (strip version suffix)
-            let clean_name = if full_name.ends_with(&format!("-{}", version_number)) {
-                &full_name[0..full_name.len() - version_number.len() - 1]
-            } else {
-                full_name
-            };
-
-            let version_parts: Vec<&str> = version_number.split('.').collect();
-            let major = version_parts.get(0).unwrap_or(&"0").parse().unwrap_or(0);
-            let minor = version_parts.get(1).unwrap_or(&"0").parse().unwrap_or(0);
-            let patch = version_parts.get(2).unwrap_or(&"0").parse().unwrap_or(0);
-
-            serde_json::json!({
-                "name": clean_name,
-                "version": {
-                    "major": major,
-                    "minor": minor,
-                    "patch": patch
-                },
-                "enabled": enabled
-            })
-        })
-        .collect::<Vec<_>>();
-
-    let mut export_data = serde_json::json!({
-        "profileName": profile["name"],
-        "mods": mods
-    });
-
-    if let Some(plat) = profile.get("platform") {
-        export_data["platform"] = plat.clone();
+    if profile_has_local_mods(&profile) {
+        return Err("This profile contains custom local mods. Thunderstore share codes cannot carry local files; use Export as File instead.".to_string());
     }
 
-    // 3. Convert to YAML
-    let yaml_content = serde_yaml::to_string(&export_data).map_err(|e| e.to_string())?;
-
-    // 4. Create Zip in Memory
-    let mut zip_buffer = Vec::new();
-    {
-        let cursor = std::io::Cursor::new(&mut zip_buffer);
-        let mut zip = zip::ZipWriter::new(cursor);
-        let options =
-            zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Stored);
-
-        zip.start_file("export.r2x", options)
-            .map_err(|e| e.to_string())?;
-        use std::io::Write;
-        zip.write_all(yaml_content.as_bytes())
-            .map_err(|e| e.to_string())?;
-
-        zip.finish().map_err(|e| e.to_string())?;
-    }
+    let zip_buffer = build_profile_zip_bytes(&app, &profile_id, &profile, false)?;
 
     // 5. Base64 Encode and Prepend Header
     let base64_data = base64::engine::general_purpose::STANDARD.encode(&zip_buffer);
@@ -213,7 +251,7 @@ pub async fn share_profile(app: AppHandle, profile_id: String) -> Result<String,
 
 #[command]
 pub async fn import_profile(_app: AppHandle, code: String) -> Result<serde_json::Value, String> {
-    eprintln!("[import_profile] Starting import with code: {}", code);
+    eprintln!("[import_profile] Starting import with provided code");
     let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::limited(10))
         .build()
@@ -375,7 +413,8 @@ pub async fn import_profile_from_file(
     })?;
 
     eprintln!("[import_profile_from_file] Zip archive created, processing...");
-    let result = process_zip_archive(archive)?;
+    let mut result = process_zip_archive(archive)?;
+    result["archivePath"] = serde_json::json!(path);
     eprintln!("[import_profile_from_file] Result: {:?}", result);
     Ok(result)
 }
@@ -472,17 +511,38 @@ fn process_zip_archive(
 
             let clean_name = clean_mod_name(name, &version_str);
             let enabled = m["enabled"].as_bool().unwrap_or(true);
+            let source = m["source"].as_str().unwrap_or("thunderstore");
 
             eprintln!(
                 "[process_zip_archive] Mod {}: {} -> {} (v{}), enabled: {}",
                 idx, name, clean_name, version_str, enabled
             );
 
-            serde_json::json!({
+            let mut value = serde_json::json!({
                 "name": clean_name,
                 "version": version_str,
                 "enabled": enabled
-            })
+            });
+
+            if source == "local" {
+                value["source"] = serde_json::json!("local");
+                value["localId"] = m["localId"].clone();
+                value["payload"] = m["payload"].clone();
+                value["displayName"] = m["displayName"].clone();
+                value["author"] = m["author"].clone();
+                value["description"] = m["description"].clone();
+                value["readme"] = m["readme"].clone();
+                value["iconUrl"] = m["iconUrl"].clone();
+                value["fileName"] = m["fileName"].clone();
+                value["fileSize"] = m["fileSize"].clone();
+                value["sha256"] = m["sha256"].clone();
+                value["manifestSha256"] = m["manifestSha256"].clone();
+                value["contentFingerprint"] = m["contentFingerprint"].clone();
+                value["platforms"] = m["platforms"].clone();
+                value["securityReport"] = m["securityReport"].clone();
+            }
+
+            value
         })
         .collect::<Vec<_>>();
 

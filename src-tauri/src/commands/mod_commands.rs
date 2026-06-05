@@ -4,20 +4,1134 @@ use crate::utils::file_ops::*;
 use crate::utils::mod_manifest::{
     backup_existing_mod_files, save_owned_mod_manifest, GAME_MANIFEST_SCOPE,
 };
+use base64::Engine;
 use futures_util::StreamExt;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
+use std::io::{Read, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{command, AppHandle, Emitter, Manager};
 
 const APP_USER_AGENT: &str = concat!("r2modmac/", env!("CARGO_PKG_VERSION"));
 const NEWTONSOFT_JSON_VERSION: &str = "12.0.3";
 const NEWTONSOFT_JSON_NETSTANDARD20_ENTRY: &str = "lib/netstandard2.0/Newtonsoft.Json.dll";
 const ROR2_CROSSOVER_NEWTONSOFT_TARGET: &str = "BepInEx/core/Newtonsoft.Json.dll";
+const CUSTOM_MOD_MAX_ARCHIVE_BYTES: u64 = 1024 * 1024 * 1024;
+const CUSTOM_MOD_MAX_UNCOMPRESSED_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+const CUSTOM_MOD_MAX_SINGLE_FILE_BYTES: u64 = 768 * 1024 * 1024;
+const CUSTOM_MOD_MAX_ENTRIES: usize = 4096;
+const CUSTOM_MOD_MAX_MANIFEST_BYTES: u64 = 256 * 1024;
+const CUSTOM_MOD_MAX_README_BYTES: u64 = 512 * 1024;
+const CUSTOM_MOD_MAX_ICON_BYTES: u64 = 2 * 1024 * 1024;
+const CUSTOM_MOD_MAX_PATH_CHARS: usize = 240;
+const CUSTOM_MOD_MAX_RATE_WINDOW: Duration = Duration::from_secs(60);
+const CUSTOM_MOD_MAX_RATE_EVENTS: usize = 12;
+const CUSTOM_MOD_CANCELLED_MESSAGE: &str = "Custom mod import cancelled.";
+
+static CUSTOM_MOD_RATE_LIMITER: OnceLock<Mutex<HashMap<String, VecDeque<SystemTime>>>> =
+    OnceLock::new();
+static CUSTOM_MOD_IMPORT_ACTIVE: AtomicBool = AtomicBool::new(false);
+static CUSTOM_MOD_IMPORT_CANCELLED: AtomicBool = AtomicBool::new(false);
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CustomModSecurityReport {
+    risk_level: String,
+    warnings: Vec<String>,
+    executable_files: Vec<String>,
+    total_files: usize,
+    total_uncompressed_bytes: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CustomModInspection {
+    file_name: String,
+    file_size: u64,
+    sha256: String,
+    manifest_sha256: Option<String>,
+    content_fingerprint: String,
+    suggested_name: String,
+    suggested_description: Option<String>,
+    suggested_author: String,
+    suggested_version: String,
+    readme: Option<String>,
+    icon_data_url: Option<String>,
+    platforms: Vec<String>,
+    security_report: CustomModSecurityReport,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StoredLocalModMetadata {
+    local_id: String,
+    full_name: String,
+    display_name: String,
+    author: String,
+    version_number: String,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    readme: Option<String>,
+    #[serde(default)]
+    icon_data_url: Option<String>,
+    file_name: String,
+    file_size: u64,
+    sha256: String,
+    #[serde(default)]
+    manifest_sha256: Option<String>,
+    #[serde(default)]
+    content_fingerprint: String,
+    #[serde(default)]
+    source_path: Option<String>,
+    platforms: Vec<String>,
+    imported_at: u128,
+    security_report: CustomModSecurityReport,
+}
 
 #[derive(Clone)]
 struct RuntimeCompatAsset {
     relative_path: std::path::PathBuf,
     bytes: Vec<u8>,
     label: &'static str,
+}
+
+fn guard_custom_mod_rate_limit(action: &str) -> Result<(), String> {
+    let now = SystemTime::now();
+    let limiter = CUSTOM_MOD_RATE_LIMITER.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut guard = limiter
+        .lock()
+        .map_err(|_| "Custom mod safety limiter is unavailable".to_string())?;
+    let events = guard
+        .entry(action.to_string())
+        .or_insert_with(VecDeque::new);
+    while let Some(front) = events.front().copied() {
+        if now.duration_since(front).unwrap_or_default() > CUSTOM_MOD_MAX_RATE_WINDOW {
+            events.pop_front();
+        } else {
+            break;
+        }
+    }
+    if events.len() >= CUSTOM_MOD_MAX_RATE_EVENTS {
+        return Err(
+            "Too many custom mod requests. Please wait a minute before trying again.".to_string(),
+        );
+    }
+    events.push_back(now);
+    Ok(())
+}
+
+struct CustomModImportGuard;
+
+impl Drop for CustomModImportGuard {
+    fn drop(&mut self) {
+        CUSTOM_MOD_IMPORT_ACTIVE.store(false, Ordering::SeqCst);
+        CUSTOM_MOD_IMPORT_CANCELLED.store(false, Ordering::SeqCst);
+    }
+}
+
+fn begin_custom_mod_import() -> CustomModImportGuard {
+    CUSTOM_MOD_IMPORT_ACTIVE.store(true, Ordering::SeqCst);
+    CUSTOM_MOD_IMPORT_CANCELLED.store(false, Ordering::SeqCst);
+    CustomModImportGuard
+}
+
+fn check_custom_mod_cancelled() -> Result<(), String> {
+    if CUSTOM_MOD_IMPORT_CANCELLED.load(Ordering::SeqCst) {
+        Err(CUSTOM_MOD_CANCELLED_MESSAGE.to_string())
+    } else {
+        Ok(())
+    }
+}
+
+fn sanitize_mod_slug(value: Option<String>, fallback: &str) -> String {
+    let source = value
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or(fallback);
+    let mut out = String::new();
+    let mut last_was_sep = false;
+    for ch in source.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch);
+            last_was_sep = false;
+        } else if matches!(ch, '_' | '-' | '.') || ch.is_whitespace() {
+            if !last_was_sep {
+                out.push('_');
+                last_was_sep = true;
+            }
+        }
+    }
+    let trimmed = out.trim_matches('_').to_string();
+    if trimmed.is_empty() {
+        fallback.to_string()
+    } else {
+        trimmed.chars().take(48).collect()
+    }
+}
+
+fn sanitize_version(value: Option<String>, fallback: &str) -> String {
+    let raw = value
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or(fallback);
+    let mut cleaned = raw
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '+'))
+        .collect::<String>();
+    if cleaned.is_empty() {
+        cleaned = "1.0.0".to_string();
+    }
+    if !cleaned.chars().any(|c| c == '.') {
+        cleaned.push_str(".0.0");
+    }
+    cleaned.chars().take(32).collect()
+}
+
+fn safe_platforms(platforms: Option<Vec<String>>) -> Vec<String> {
+    let mut values = platforms
+        .unwrap_or_else(|| {
+            vec![
+                "windows".to_string(),
+                "mac".to_string(),
+                "linux".to_string(),
+            ]
+        })
+        .into_iter()
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| matches!(value.as_str(), "windows" | "mac" | "linux"))
+        .collect::<Vec<_>>();
+    values.sort();
+    values.dedup();
+    if values.is_empty() {
+        values = vec![
+            "windows".to_string(),
+            "mac".to_string(),
+            "linux".to_string(),
+        ];
+    }
+    values
+}
+
+fn is_zip_symlink(file: &zip::read::ZipFile<'_>) -> bool {
+    file.unix_mode()
+        .map(|mode| (mode & 0o170000) == 0o120000)
+        .unwrap_or(false)
+}
+
+fn is_executable_like(path: &str) -> bool {
+    let lower = path.to_ascii_lowercase();
+    let Some(ext) = lower.rsplit('.').next() else {
+        return false;
+    };
+    matches!(
+        ext,
+        "exe"
+            | "dll"
+            | "dylib"
+            | "so"
+            | "sh"
+            | "bash"
+            | "zsh"
+            | "command"
+            | "bat"
+            | "cmd"
+            | "ps1"
+            | "vbs"
+            | "js"
+            | "jar"
+            | "py"
+            | "rb"
+            | "pl"
+            | "msi"
+            | "scr"
+    ) || lower.ends_with(".app/contents/macos")
+}
+
+fn hash_file(path: &std::path::Path) -> Result<String, String> {
+    let mut file = fs::File::open(path).map_err(|e| e.to_string())?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        check_custom_mod_cancelled()?;
+        let read = file.read(&mut buffer).map_err(|e| e.to_string())?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
+fn hash_bytes(bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    format!("{:x}", hasher.finalize())
+}
+
+fn read_zip_file_to_bytes(
+    file: &mut zip::read::ZipFile<'_>,
+    max_bytes: u64,
+) -> Result<Vec<u8>, String> {
+    if file.size() > max_bytes {
+        return Err(format!("File exceeds {} KB.", max_bytes / 1024));
+    }
+    let mut bytes = Vec::with_capacity(file.size().min(max_bytes) as usize);
+    file.take(max_bytes + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|e| e.to_string())?;
+    if bytes.len() as u64 > max_bytes {
+        return Err(format!("File exceeds {} KB.", max_bytes / 1024));
+    }
+    Ok(bytes)
+}
+
+fn read_zip_file_to_string(
+    file: &mut zip::read::ZipFile<'_>,
+    max_bytes: u64,
+) -> Result<String, String> {
+    let bytes = read_zip_file_to_bytes(file, max_bytes)?;
+    String::from_utf8(bytes).map_err(|_| "File is not valid UTF-8.".to_string())
+}
+
+fn zip_file_basename(path: &str) -> &str {
+    path.rsplit('/').next().unwrap_or(path)
+}
+
+fn readme_candidate_score(path: &str) -> Option<usize> {
+    let basename = zip_file_basename(path).to_ascii_lowercase();
+    let is_readme = basename == "readme"
+        || basename == "readme.md"
+        || basename == "readme.txt"
+        || basename == "readme.markdown"
+        || basename == "readme.rst"
+        || basename.starts_with("readme.");
+    if !is_readme {
+        return None;
+    }
+    let depth = path.matches('/').count();
+    Some(depth)
+}
+
+fn icon_mime_for_path(path: &str) -> Option<&'static str> {
+    let basename = zip_file_basename(path).to_ascii_lowercase();
+    match basename.as_str() {
+        "icon.png" => Some("image/png"),
+        "icon.jpg" | "icon.jpeg" => Some("image/jpeg"),
+        "icon.webp" => Some("image/webp"),
+        _ => None,
+    }
+}
+
+fn parse_custom_mod_manifest<R: std::io::Read + std::io::Seek>(
+    archive: &mut zip::ZipArchive<R>,
+) -> (Option<serde_json::Value>, Option<String>, Vec<String>) {
+    let mut warnings = Vec::new();
+    let mut manifest_index: Option<usize> = None;
+
+    for i in 0..archive.len() {
+        if check_custom_mod_cancelled().is_err() {
+            return (None, None, warnings);
+        }
+        let Ok(file) = archive.by_index(i) else {
+            continue;
+        };
+        let Some(name) = normalize_zip_entry_name(file.name()) else {
+            continue;
+        };
+        let lower = name.to_ascii_lowercase();
+        if lower == "manifest.json" || lower.ends_with("/manifest.json") {
+            manifest_index = Some(i);
+            break;
+        }
+    }
+
+    let Some(index) = manifest_index else {
+        warnings.push(
+            "No Thunderstore-style manifest.json was found; defaults will be used.".to_string(),
+        );
+        return (None, None, warnings);
+    };
+
+    let mut file = match archive.by_index(index) {
+        Ok(file) => file,
+        Err(_) => return (None, None, warnings),
+    };
+    if file.size() > CUSTOM_MOD_MAX_MANIFEST_BYTES {
+        warnings.push("manifest.json is too large and was ignored.".to_string());
+        return (None, None, warnings);
+    }
+    let content = match read_zip_file_to_string(&mut file, CUSTOM_MOD_MAX_MANIFEST_BYTES) {
+        Ok(content) => content,
+        Err(_) => {
+            warnings.push("manifest.json could not be read as UTF-8 and was ignored.".to_string());
+            return (None, None, warnings);
+        }
+    };
+    let manifest_sha256 = Some(hash_bytes(content.as_bytes()));
+    match serde_json::from_str::<serde_json::Value>(&content) {
+        Ok(value) => (Some(value), manifest_sha256, warnings),
+        Err(_) => {
+            warnings.push("manifest.json is invalid JSON and was ignored.".to_string());
+            (None, manifest_sha256, warnings)
+        }
+    }
+}
+
+fn inspect_custom_mod_archive<R: std::io::Read + std::io::Seek>(
+    mut archive: zip::ZipArchive<R>,
+    file_name: String,
+    file_size: u64,
+    sha256: String,
+) -> Result<CustomModInspection, String> {
+    if archive.len() == 0 {
+        return Err("The custom mod archive is empty.".to_string());
+    }
+    if archive.len() > CUSTOM_MOD_MAX_ENTRIES {
+        return Err(format!(
+            "The custom mod archive contains too many files ({} > {}).",
+            archive.len(),
+            CUSTOM_MOD_MAX_ENTRIES
+        ));
+    }
+
+    let (manifest, manifest_sha256, mut warnings) = parse_custom_mod_manifest(&mut archive);
+    let mut executable_files = Vec::new();
+    let mut normalized_paths = HashSet::new();
+    let mut total_files = 0usize;
+    let mut total_uncompressed = 0u64;
+    let mut has_payload_file = false;
+    let mut readme_content: Option<(usize, String)> = None;
+    let mut icon_data_url: Option<String> = None;
+    let mut fingerprint_parts = Vec::new();
+
+    for i in 0..archive.len() {
+        check_custom_mod_cancelled()?;
+        let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
+        let raw_name = file.name().to_string();
+        if is_zip_symlink(&file) {
+            return Err(format!("Blocked symlink entry in archive: {}", raw_name));
+        }
+
+        let normalized_path = normalize_zip_entry_name(&raw_name)
+            .ok_or_else(|| format!("Blocked unsafe archive path: {}", raw_name))?;
+        if normalized_path.chars().count() > CUSTOM_MOD_MAX_PATH_CHARS {
+            return Err(format!(
+                "Blocked overlong archive path: {}",
+                normalized_path
+            ));
+        }
+        let path_key = normalized_path.to_ascii_lowercase();
+        if !normalized_paths.insert(path_key) {
+            return Err(format!(
+                "Blocked duplicate archive path: {}",
+                normalized_path
+            ));
+        }
+
+        if zip_entry_is_dir(&raw_name) {
+            continue;
+        }
+
+        fingerprint_parts.push(format!(
+            "{}:{}:{}",
+            normalized_path,
+            file.size(),
+            file.crc32()
+        ));
+        total_files += 1;
+        has_payload_file = true;
+        total_uncompressed = total_uncompressed
+            .checked_add(file.size())
+            .ok_or_else(|| "Archive size accounting overflowed.".to_string())?;
+        if total_uncompressed > CUSTOM_MOD_MAX_UNCOMPRESSED_BYTES {
+            return Err(format!(
+                "Blocked archive: unpacked size exceeds {} MB.",
+                CUSTOM_MOD_MAX_UNCOMPRESSED_BYTES / 1024 / 1024
+            ));
+        }
+        if file.size() > CUSTOM_MOD_MAX_SINGLE_FILE_BYTES {
+            return Err(format!(
+                "Blocked file over {} MB: {}",
+                CUSTOM_MOD_MAX_SINGLE_FILE_BYTES / 1024 / 1024,
+                normalized_path
+            ));
+        }
+
+        let compressed = file.compressed_size();
+        if compressed == 0 && file.size() > 0 {
+            return Err(format!(
+                "Blocked suspicious zero-compressed-size entry: {}",
+                normalized_path
+            ));
+        }
+        if compressed > 0 && file.size() > 10 * 1024 * 1024 && file.size() / compressed.max(1) > 250
+        {
+            return Err(format!(
+                "Blocked suspicious compression ratio for {}.",
+                normalized_path
+            ));
+        }
+
+        if normalized_path.starts_with("__MACOSX/") {
+            warnings.push(
+                "Archive contains macOS metadata folders; they will be ignored by the installer."
+                    .to_string(),
+            );
+        }
+        if is_executable_like(&normalized_path) {
+            executable_files.push(normalized_path.clone());
+        }
+
+        if let Some(score) = readme_candidate_score(&normalized_path) {
+            let should_read = readme_content
+                .as_ref()
+                .map(|(current_score, _)| score < *current_score)
+                .unwrap_or(true);
+            if should_read {
+                match read_zip_file_to_string(&mut file, CUSTOM_MOD_MAX_README_BYTES) {
+                    Ok(content) => {
+                        readme_content = Some((score, content));
+                    }
+                    Err(_) => {
+                        warnings.push(format!("README could not be read: {}", normalized_path));
+                    }
+                }
+            }
+        } else if icon_data_url.is_none() {
+            if let Some(mime) = icon_mime_for_path(&normalized_path) {
+                match read_zip_file_to_bytes(&mut file, CUSTOM_MOD_MAX_ICON_BYTES) {
+                    Ok(bytes) => {
+                        let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+                        icon_data_url = Some(format!("data:{};base64,{}", mime, encoded));
+                    }
+                    Err(_) => {
+                        warnings.push(format!("Icon could not be read: {}", normalized_path));
+                    }
+                }
+            }
+        }
+    }
+
+    if !has_payload_file {
+        return Err("The custom mod archive does not contain any files.".to_string());
+    }
+
+    executable_files.sort();
+    executable_files.dedup();
+    warnings.sort();
+    warnings.dedup();
+
+    if !executable_files.is_empty() {
+        warnings.push(format!(
+            "Detected {} executable or loadable file(s). Custom mods can run code in-game.",
+            executable_files.len()
+        ));
+    }
+
+    let manifest_name = manifest
+        .as_ref()
+        .and_then(|value| value["name"].as_str())
+        .map(|value| value.to_string());
+    let manifest_version = manifest
+        .as_ref()
+        .and_then(|value| value["version_number"].as_str())
+        .map(|value| value.to_string());
+    let manifest_description = manifest
+        .as_ref()
+        .and_then(|value| value["description"].as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.chars().take(2000).collect::<String>());
+
+    let stem = std::path::Path::new(&file_name)
+        .file_stem()
+        .map(|value| value.to_string_lossy().to_string())
+        .unwrap_or_else(|| "CustomMod".to_string());
+    let suggested_name = sanitize_mod_slug(manifest_name, &stem);
+    let suggested_version = sanitize_version(manifest_version, "1.0.0");
+    fingerprint_parts.sort();
+    let content_fingerprint = hash_bytes(fingerprint_parts.join("\n").as_bytes());
+    let risk_level = if executable_files.iter().any(|name| {
+        let lower = name.to_ascii_lowercase();
+        lower.ends_with(".exe")
+            || lower.ends_with(".sh")
+            || lower.ends_with(".command")
+            || lower.ends_with(".bat")
+            || lower.ends_with(".cmd")
+            || lower.ends_with(".ps1")
+            || lower.ends_with(".vbs")
+            || lower.ends_with(".js")
+    }) {
+        "high"
+    } else if !executable_files.is_empty() || !warnings.is_empty() {
+        "medium"
+    } else {
+        "low"
+    }
+    .to_string();
+
+    Ok(CustomModInspection {
+        file_name,
+        file_size,
+        sha256,
+        manifest_sha256,
+        content_fingerprint,
+        suggested_name,
+        suggested_description: manifest_description,
+        suggested_author: "Local".to_string(),
+        suggested_version,
+        readme: readme_content.map(|(_, content)| content),
+        icon_data_url,
+        platforms: vec![
+            "windows".to_string(),
+            "mac".to_string(),
+            "linux".to_string(),
+        ],
+        security_report: CustomModSecurityReport {
+            risk_level,
+            warnings,
+            executable_files,
+            total_files,
+            total_uncompressed_bytes: total_uncompressed,
+        },
+    })
+}
+
+fn inspect_custom_mod_file_with_name(
+    path: &std::path::Path,
+    display_name: Option<String>,
+) -> Result<CustomModInspection, String> {
+    let metadata = fs::metadata(path).map_err(|e| e.to_string())?;
+    if !metadata.is_file() {
+        return Err("Please choose a .zip/.r2z file, not a folder.".to_string());
+    }
+    if metadata.len() > CUSTOM_MOD_MAX_ARCHIVE_BYTES {
+        return Err(format!(
+            "Custom mod archive is too large ({} MB max).",
+            CUSTOM_MOD_MAX_ARCHIVE_BYTES / 1024 / 1024
+        ));
+    }
+    let file_name = display_name.unwrap_or_else(|| {
+        path.file_name()
+            .map(|value| value.to_string_lossy().to_string())
+            .unwrap_or_else(|| "custom-mod.zip".to_string())
+    });
+    let sha256 = hash_file(path)?;
+    let file = fs::File::open(path).map_err(|e| e.to_string())?;
+    let archive = zip::ZipArchive::new(file).map_err(|e| format!("Invalid zip archive: {}", e))?;
+    inspect_custom_mod_archive(archive, file_name, metadata.len(), sha256)
+}
+
+fn inspect_custom_mod_file(path: &std::path::Path) -> Result<CustomModInspection, String> {
+    inspect_custom_mod_file_with_name(path, None)
+}
+
+fn zip_entry_name_from_relative_path(path: &std::path::Path) -> Result<String, String> {
+    let mut parts = Vec::new();
+    for component in path.components() {
+        let std::path::Component::Normal(value) = component else {
+            return Err("Blocked unsafe folder entry path.".to_string());
+        };
+        let part = value.to_string_lossy();
+        if part.is_empty() || part == "." || part == ".." {
+            return Err("Blocked unsafe folder entry path.".to_string());
+        }
+        parts.push(part.to_string());
+    }
+
+    if parts.is_empty() {
+        return Err("Blocked empty folder entry path.".to_string());
+    }
+
+    Ok(parts.join("/"))
+}
+
+fn package_custom_mod_folder_to_zip(
+    source_dir: &std::path::Path,
+    target_zip: &std::path::Path,
+) -> Result<(), String> {
+    check_custom_mod_cancelled()?;
+    let metadata = fs::metadata(source_dir).map_err(|e| e.to_string())?;
+    if !metadata.is_dir() {
+        return Err("Please choose a custom mod folder.".to_string());
+    }
+
+    if let Some(parent) = target_zip.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let file = fs::File::create(target_zip).map_err(|e| e.to_string())?;
+    let mut zip = zip::ZipWriter::new(file);
+    let options =
+        zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    let mut total_files = 0usize;
+    let mut total_bytes = 0u64;
+
+    for entry in walkdir::WalkDir::new(source_dir).follow_links(false) {
+        check_custom_mod_cancelled()?;
+        let entry = entry.map_err(|e| e.to_string())?;
+        let file_type = entry.file_type();
+        if file_type.is_symlink() {
+            return Err(format!(
+                "Blocked symlink inside custom mod folder: {}",
+                entry.path().display()
+            ));
+        }
+        if file_type.is_dir() {
+            continue;
+        }
+        if !file_type.is_file() {
+            continue;
+        }
+
+        let relative = entry
+            .path()
+            .strip_prefix(source_dir)
+            .map_err(|e| e.to_string())?;
+        let entry_name = zip_entry_name_from_relative_path(relative)?;
+        if entry_name.chars().count() > CUSTOM_MOD_MAX_PATH_CHARS {
+            return Err(format!(
+                "Blocked overlong folder entry path: {}",
+                entry_name
+            ));
+        }
+        if entry_name == ".DS_Store" || entry_name.ends_with("/.DS_Store") {
+            continue;
+        }
+
+        let file_metadata = entry.metadata().map_err(|e| e.to_string())?;
+        total_files += 1;
+        if total_files > CUSTOM_MOD_MAX_ENTRIES {
+            return Err(format!(
+                "The custom mod folder contains too many files ({} > {}).",
+                total_files, CUSTOM_MOD_MAX_ENTRIES
+            ));
+        }
+        if file_metadata.len() > CUSTOM_MOD_MAX_SINGLE_FILE_BYTES {
+            return Err(format!(
+                "Blocked file over {} MB: {}",
+                CUSTOM_MOD_MAX_SINGLE_FILE_BYTES / 1024 / 1024,
+                entry_name
+            ));
+        }
+        total_bytes = total_bytes
+            .checked_add(file_metadata.len())
+            .ok_or_else(|| "Folder size accounting overflowed.".to_string())?;
+        if total_bytes > CUSTOM_MOD_MAX_UNCOMPRESSED_BYTES {
+            return Err(format!(
+                "Blocked folder: unpacked size exceeds {} MB.",
+                CUSTOM_MOD_MAX_UNCOMPRESSED_BYTES / 1024 / 1024
+            ));
+        }
+
+        zip.start_file(entry_name, options)
+            .map_err(|e| e.to_string())?;
+        let mut input = fs::File::open(entry.path()).map_err(|e| e.to_string())?;
+        let mut buffer = [0u8; 64 * 1024];
+        loop {
+            check_custom_mod_cancelled()?;
+            let read = input.read(&mut buffer).map_err(|e| e.to_string())?;
+            if read == 0 {
+                break;
+            }
+            zip.write_all(&buffer[..read]).map_err(|e| e.to_string())?;
+        }
+    }
+
+    if total_files == 0 {
+        return Err("The selected custom mod folder does not contain any files.".to_string());
+    }
+
+    zip.finish().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn temp_custom_mod_zip_path(label: &str) -> std::path::PathBuf {
+    std::env::temp_dir().join(format!(
+        "r2modmac-custom-mod-{}-{}.zip",
+        now_millis(),
+        label
+    ))
+}
+
+fn inspect_custom_mod_path(path: &std::path::Path) -> Result<CustomModInspection, String> {
+    let metadata = fs::metadata(path).map_err(|e| e.to_string())?;
+    if metadata.is_file() {
+        return inspect_custom_mod_file(path);
+    }
+    if metadata.is_dir() {
+        let folder_name = path
+            .file_name()
+            .map(|value| value.to_string_lossy().to_string())
+            .unwrap_or_else(|| "custom-mod-folder".to_string());
+        let temp_path = temp_custom_mod_zip_path("inspect");
+        if let Err(err) = package_custom_mod_folder_to_zip(path, &temp_path) {
+            let _ = fs::remove_file(&temp_path);
+            return Err(err);
+        }
+        let result = inspect_custom_mod_file_with_name(&temp_path, Some(folder_name));
+        let _ = fs::remove_file(&temp_path);
+        return result;
+    }
+
+    Err("Please choose a custom mod folder or .zip/.r2z archive.".to_string())
+}
+
+fn local_mod_dir(
+    app: &AppHandle,
+    profile_id: &str,
+    local_id: &str,
+) -> Result<std::path::PathBuf, String> {
+    Ok(app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("profiles")
+        .join(profile_id)
+        .join("local_mods")
+        .join(local_id))
+}
+
+fn now_millis() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or(0)
+}
+
+fn make_local_mod_id(sha256: &str) -> String {
+    let prefix = sha256.chars().take(16).collect::<String>();
+    format!("local-{}-{}", now_millis(), prefix)
+}
+
+fn build_local_mod_response(
+    local_id: String,
+    inspection: CustomModInspection,
+    name: Option<String>,
+    author: Option<String>,
+    version: Option<String>,
+    enabled: bool,
+    platforms: Option<Vec<String>>,
+    source_path: Option<String>,
+    pending_sync: bool,
+) -> (StoredLocalModMetadata, serde_json::Value) {
+    let display_name = sanitize_mod_slug(name, &inspection.suggested_name);
+    let author = sanitize_mod_slug(author, &inspection.suggested_author);
+    let version_number = sanitize_version(version, &inspection.suggested_version);
+    let full_name = format!("{}-{}-{}", author, display_name, version_number);
+    let description = inspection.suggested_description.clone();
+    let platforms = safe_platforms(platforms);
+    let metadata = StoredLocalModMetadata {
+        local_id: local_id.clone(),
+        full_name: full_name.clone(),
+        display_name: display_name.clone(),
+        author: author.clone(),
+        version_number: version_number.clone(),
+        description: description.clone(),
+        readme: inspection.readme.clone(),
+        icon_data_url: inspection.icon_data_url.clone(),
+        file_name: inspection.file_name.clone(),
+        file_size: inspection.file_size,
+        sha256: inspection.sha256.clone(),
+        manifest_sha256: inspection.manifest_sha256.clone(),
+        content_fingerprint: inspection.content_fingerprint.clone(),
+        source_path: source_path.clone(),
+        platforms: platforms.clone(),
+        imported_at: now_millis(),
+        security_report: inspection.security_report.clone(),
+    };
+
+    let mod_value = serde_json::json!({
+        "uuid4": local_id,
+        "fullName": full_name,
+        "versionNumber": version_number,
+        "enabled": enabled,
+        "source": "local",
+        "localId": metadata.local_id,
+        "displayName": display_name,
+        "author": author,
+        "description": description,
+        "readme": metadata.readme,
+        "iconUrl": metadata.icon_data_url,
+        "fileName": metadata.file_name,
+        "fileSize": metadata.file_size,
+        "sha256": metadata.sha256,
+        "manifestSha256": metadata.manifest_sha256,
+        "contentFingerprint": metadata.content_fingerprint,
+        "sourcePath": metadata.source_path,
+        "platforms": platforms,
+        "securityReport": metadata.security_report,
+        "pending_sync": pending_sync
+    });
+
+    (metadata, mod_value)
+}
+
+fn write_local_mod_metadata(
+    dir: &std::path::Path,
+    metadata: &StoredLocalModMetadata,
+) -> Result<(), String> {
+    let content = serde_json::to_string_pretty(metadata).map_err(|e| e.to_string())?;
+    fs::write(dir.join("metadata.json"), content).map_err(|e| e.to_string())
+}
+
+fn read_local_mod_metadata(dir: &std::path::Path) -> Option<StoredLocalModMetadata> {
+    fs::read_to_string(dir.join("metadata.json"))
+        .ok()
+        .and_then(|content| serde_json::from_str::<StoredLocalModMetadata>(&content).ok())
+}
+
+fn prepare_custom_mod_source_payload(
+    source_path: &std::path::Path,
+    temp_label: &str,
+) -> Result<(std::path::PathBuf, bool, CustomModInspection), String> {
+    let source_metadata = fs::metadata(source_path).map_err(|e| e.to_string())?;
+    if source_metadata.is_dir() {
+        let temp_payload_path = temp_custom_mod_zip_path(temp_label);
+        if let Err(err) = package_custom_mod_folder_to_zip(source_path, &temp_payload_path) {
+            let _ = fs::remove_file(&temp_payload_path);
+            return Err(err);
+        }
+        let display_name = source_path
+            .file_name()
+            .map(|value| value.to_string_lossy().to_string());
+        let inspection =
+            match inspect_custom_mod_file_with_name(&temp_payload_path, display_name.clone()) {
+                Ok(inspection) => inspection,
+                Err(err) => {
+                    let _ = fs::remove_file(&temp_payload_path);
+                    return Err(err);
+                }
+            };
+        Ok((temp_payload_path, true, inspection))
+    } else if source_metadata.is_file() {
+        let inspection = inspect_custom_mod_file(source_path)?;
+        Ok((source_path.to_path_buf(), false, inspection))
+    } else {
+        Err("Please choose a custom mod folder or .zip/.r2z archive.".to_string())
+    }
+}
+
+fn copy_payload_with_hash_limit<R: Read>(
+    mut reader: R,
+    target_path: &std::path::Path,
+) -> Result<(u64, String), String> {
+    check_custom_mod_cancelled()?;
+    if let Some(parent) = target_path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let mut out = fs::File::create(target_path).map_err(|e| e.to_string())?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0u8; 64 * 1024];
+    let mut total = 0u64;
+    loop {
+        check_custom_mod_cancelled()?;
+        let read = reader.read(&mut buffer).map_err(|e| e.to_string())?;
+        if read == 0 {
+            break;
+        }
+        total = total
+            .checked_add(read as u64)
+            .ok_or_else(|| "Payload size accounting overflowed.".to_string())?;
+        if total > CUSTOM_MOD_MAX_ARCHIVE_BYTES {
+            return Err(format!(
+                "Custom mod payload is larger than {} MB.",
+                CUSTOM_MOD_MAX_ARCHIVE_BYTES / 1024 / 1024
+            ));
+        }
+        hasher.update(&buffer[..read]);
+        out.write_all(&buffer[..read]).map_err(|e| e.to_string())?;
+    }
+    Ok((total, format!("{:x}", hasher.finalize())))
+}
+
+fn copy_file_with_cancel(
+    source_path: &std::path::Path,
+    target_path: &std::path::Path,
+) -> Result<u64, String> {
+    check_custom_mod_cancelled()?;
+    if let Some(parent) = target_path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let mut input = fs::File::open(source_path).map_err(|e| e.to_string())?;
+    let mut output = fs::File::create(target_path).map_err(|e| e.to_string())?;
+    let mut buffer = [0u8; 64 * 1024];
+    let mut total = 0u64;
+    loop {
+        check_custom_mod_cancelled()?;
+        let read = input.read(&mut buffer).map_err(|e| e.to_string())?;
+        if read == 0 {
+            break;
+        }
+        total = total
+            .checked_add(read as u64)
+            .ok_or_else(|| "Payload size accounting overflowed.".to_string())?;
+        if total > CUSTOM_MOD_MAX_ARCHIVE_BYTES {
+            return Err(format!(
+                "Custom mod payload is larger than {} MB.",
+                CUSTOM_MOD_MAX_ARCHIVE_BYTES / 1024 / 1024
+            ));
+        }
+        output
+            .write_all(&buffer[..read])
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(total)
+}
+
+#[cfg(test)]
+mod custom_mod_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static FIXTURE_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    fn write_fixture_zip(entries: &[(&str, &[u8])]) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "r2modmac-custom-mod-test-{}-{}.zip",
+            now_millis(),
+            FIXTURE_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        let file = fs::File::create(&path).expect("create fixture zip");
+        let mut zip = zip::ZipWriter::new(file);
+        let options =
+            zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+
+        for (name, data) in entries {
+            zip.start_file(*name, options).expect("start fixture entry");
+            zip.write_all(data).expect("write fixture entry");
+        }
+        zip.finish().expect("finish fixture zip");
+        path
+    }
+
+    fn write_fixture_folder(entries: &[(&str, &[u8])]) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "r2modmac-custom-mod-folder-test-{}-{}",
+            now_millis(),
+            FIXTURE_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&dir).expect("create fixture folder");
+
+        for (name, data) in entries {
+            let path = dir.join(name);
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent).expect("create fixture parent");
+            }
+            fs::write(path, data).expect("write fixture file");
+        }
+
+        dir
+    }
+
+    #[test]
+    fn inspect_custom_mod_accepts_valid_archive() {
+        let manifest = br#"{"name":"SafeMod","version_number":"1.2.3","dependencies":[]}"#;
+        let path = write_fixture_zip(&[
+            ("manifest.json", manifest),
+            ("BepInEx/plugins/SafeMod/SafeMod.dll", b"dll bytes"),
+        ]);
+
+        let inspection = inspect_custom_mod_file(&path).expect("valid custom mod");
+        assert_eq!(inspection.suggested_name, "SafeMod");
+        assert_eq!(inspection.suggested_version, "1.2.3");
+        assert_eq!(inspection.security_report.total_files, 2);
+        assert_eq!(inspection.security_report.risk_level, "medium");
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn inspect_custom_mod_reads_readme_icon_and_description() {
+        let manifest = br#"{"name":"RichMod","version_number":"4.5.6","description":"Manifest description","dependencies":[]}"#;
+        let path = write_fixture_zip(&[
+            ("manifest.json", manifest),
+            ("README.weird", b"# Rich Mod\n\nCustom docs"),
+            ("icon.png", b"not-really-a-png-but-small"),
+            ("plugins/RichMod.dll", b"dll bytes"),
+        ]);
+
+        let inspection = inspect_custom_mod_file(&path).expect("rich custom mod");
+        assert_eq!(inspection.suggested_name, "RichMod");
+        assert_eq!(inspection.suggested_version, "4.5.6");
+        assert_eq!(
+            inspection.suggested_description.as_deref(),
+            Some("Manifest description")
+        );
+        assert_eq!(
+            inspection.readme.as_deref(),
+            Some("# Rich Mod\n\nCustom docs")
+        );
+        assert!(inspection
+            .icon_data_url
+            .as_deref()
+            .unwrap_or_default()
+            .starts_with("data:image/png;base64,"));
+        assert!(inspection.manifest_sha256.is_some());
+        assert!(!inspection.content_fingerprint.is_empty());
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn inspect_custom_mod_accepts_mod_folder() {
+        let manifest = br#"{"name":"FolderMod","version_number":"2.3.4","dependencies":[]}"#;
+        let path = write_fixture_folder(&[
+            ("manifest.json", manifest),
+            ("README.md", b"folder mod"),
+            ("plugins/FolderMod.dll", b"dll bytes"),
+        ]);
+
+        let inspection = inspect_custom_mod_path(&path).expect("valid custom mod folder");
+        assert_eq!(
+            inspection.file_name,
+            path.file_name().unwrap().to_string_lossy().to_string()
+        );
+        assert_eq!(inspection.suggested_name, "FolderMod");
+        assert_eq!(inspection.suggested_version, "2.3.4");
+        assert_eq!(inspection.security_report.total_files, 3);
+
+        let _ = fs::remove_dir_all(path);
+    }
+
+    #[test]
+    fn inspect_custom_mod_rejects_zip_slip_paths() {
+        let path = write_fixture_zip(&[
+            (
+                "manifest.json",
+                br#"{"name":"Bad","version_number":"1.0.0"}"#,
+            ),
+            ("../../outside.txt", b"bad"),
+        ]);
+
+        let err = inspect_custom_mod_file(&path).expect_err("zip slip should fail");
+        assert!(err.contains("unsafe archive path"));
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn inspect_custom_mod_rejects_case_insensitive_duplicates() {
+        let path = write_fixture_zip(&[
+            (
+                "manifest.json",
+                br#"{"name":"Dup","version_number":"1.0.0"}"#,
+            ),
+            ("plugins/Mod/File.dll", b"one"),
+            ("plugins/mod/file.dll", b"two"),
+        ]);
+
+        let err = inspect_custom_mod_file(&path).expect_err("duplicate paths should fail");
+        assert!(err.contains("duplicate archive path"));
+
+        let _ = fs::remove_file(path);
+    }
 }
 
 fn is_bepinex_shell_script(name: &str) -> bool {
@@ -683,6 +1797,313 @@ pub(crate) fn extract_version_number_from_full_name(full_name: &str) -> Option<S
         Some(tail.to_string())
     } else {
         None
+    }
+}
+
+#[command]
+pub async fn inspect_custom_mod(path: String) -> Result<serde_json::Value, String> {
+    guard_custom_mod_rate_limit("inspect_custom_mod")?;
+    let path = std::path::PathBuf::from(path);
+    let inspection = inspect_custom_mod_path(&path)?;
+    Ok(serde_json::to_value(inspection).map_err(|e| e.to_string())?)
+}
+
+#[command]
+pub async fn cancel_custom_mod_import() -> Result<bool, String> {
+    if !CUSTOM_MOD_IMPORT_ACTIVE.load(Ordering::SeqCst) {
+        CUSTOM_MOD_IMPORT_CANCELLED.store(false, Ordering::SeqCst);
+        return Ok(false);
+    }
+    CUSTOM_MOD_IMPORT_CANCELLED.store(true, Ordering::SeqCst);
+    Ok(true)
+}
+
+#[command]
+pub async fn import_custom_mod(
+    app: AppHandle,
+    profile_id: String,
+    path: String,
+    name: Option<String>,
+    author: Option<String>,
+    version: Option<String>,
+    platforms: Option<Vec<String>>,
+) -> Result<serde_json::Value, String> {
+    guard_custom_mod_rate_limit("import_custom_mod")?;
+    let _cancel_guard = begin_custom_mod_import();
+    let source_path = std::path::PathBuf::from(path);
+    let (source_payload_path, remove_source_payload, inspection) =
+        prepare_custom_mod_source_payload(&source_path, "folder-import")?;
+    if let Err(err) = check_custom_mod_cancelled() {
+        if remove_source_payload {
+            let _ = fs::remove_file(&source_payload_path);
+        }
+        return Err(err);
+    }
+    let local_id = make_local_mod_id(&inspection.sha256);
+    let dir = local_mod_dir(&app, &profile_id, &local_id)?;
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let payload_path = dir.join("payload.zip");
+    if let Err(err) = copy_file_with_cancel(&source_payload_path, &payload_path) {
+        let _ = fs::remove_dir_all(&dir);
+        if remove_source_payload {
+            let _ = fs::remove_file(&source_payload_path);
+        }
+        return Err(err);
+    }
+    if remove_source_payload {
+        let _ = fs::remove_file(&source_payload_path);
+    }
+    if let Err(err) = check_custom_mod_cancelled() {
+        let _ = fs::remove_dir_all(&dir);
+        return Err(err);
+    }
+    let copied_hash = match hash_file(&payload_path) {
+        Ok(hash) => hash,
+        Err(err) => {
+            let _ = fs::remove_dir_all(&dir);
+            return Err(err);
+        }
+    };
+    if copied_hash != inspection.sha256 {
+        let _ = fs::remove_dir_all(&dir);
+        return Err("Copied custom mod payload failed hash verification.".to_string());
+    }
+
+    let (metadata, mod_value) = build_local_mod_response(
+        local_id,
+        inspection.clone(),
+        name,
+        author,
+        version,
+        true,
+        platforms,
+        Some(source_path.to_string_lossy().to_string()),
+        true,
+    );
+    write_local_mod_metadata(&dir, &metadata)?;
+
+    Ok(serde_json::json!({
+        "mod": mod_value,
+        "inspection": inspection
+    }))
+}
+
+#[command]
+pub async fn refresh_local_mod_metadata(
+    app: AppHandle,
+    profile_id: String,
+    local_id: String,
+    source_path: Option<String>,
+    enabled: Option<bool>,
+) -> Result<serde_json::Value, String> {
+    let dir = local_mod_dir(&app, &profile_id, &local_id)?;
+    let payload_path = dir.join("payload.zip");
+    let previous = read_local_mod_metadata(&dir);
+    let resolved_source_path = source_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_string())
+        .or_else(|| {
+            previous
+                .as_ref()
+                .and_then(|metadata| metadata.source_path.clone())
+        });
+
+    let mut staged_from_source = false;
+    let inspection = if let Some(path) = resolved_source_path.as_deref() {
+        let source = std::path::PathBuf::from(path);
+        if source.exists() {
+            let (prepared_payload, remove_prepared_payload, inspection) =
+                prepare_custom_mod_source_payload(&source, "folder-refresh")?;
+            let source_changed = previous
+                .as_ref()
+                .map(|metadata| metadata.sha256 != inspection.sha256)
+                .unwrap_or(true);
+            if source_changed {
+                if let Err(err) = copy_file_with_cancel(&prepared_payload, &payload_path) {
+                    if remove_prepared_payload {
+                        let _ = fs::remove_file(prepared_payload);
+                    }
+                    return Err(err);
+                }
+                staged_from_source = true;
+            }
+            if remove_prepared_payload {
+                let _ = fs::remove_file(prepared_payload);
+            }
+            inspection
+        } else {
+            inspect_custom_mod_file(&payload_path)?
+        }
+    } else {
+        inspect_custom_mod_file(&payload_path)?
+    };
+
+    let existing_author = previous.as_ref().map(|metadata| metadata.author.clone());
+    let existing_platforms = previous.as_ref().map(|metadata| metadata.platforms.clone());
+    let (metadata, mut mod_value) = build_local_mod_response(
+        local_id,
+        inspection.clone(),
+        None,
+        existing_author,
+        None,
+        enabled.unwrap_or(true),
+        existing_platforms,
+        resolved_source_path,
+        false,
+    );
+
+    let changed = previous
+        .as_ref()
+        .map(|old| {
+            staged_from_source
+                || old.full_name != metadata.full_name
+                || old.version_number != metadata.version_number
+                || old.description != metadata.description
+                || old.readme != metadata.readme
+                || old.icon_data_url != metadata.icon_data_url
+                || old.sha256 != metadata.sha256
+                || old.manifest_sha256 != metadata.manifest_sha256
+                || old.content_fingerprint != metadata.content_fingerprint
+                || old.source_path != metadata.source_path
+        })
+        .unwrap_or(true);
+    mod_value["pending_sync"] = serde_json::json!(changed);
+    write_local_mod_metadata(&dir, &metadata)?;
+
+    Ok(serde_json::json!({
+        "changed": changed,
+        "mod": mod_value,
+        "inspection": inspection
+    }))
+}
+
+#[command]
+pub async fn import_embedded_custom_mod(
+    app: AppHandle,
+    profile_id: String,
+    archive_path: String,
+    payload_path: String,
+    name: Option<String>,
+    author: Option<String>,
+    version: Option<String>,
+    enabled: Option<bool>,
+    platforms: Option<Vec<String>>,
+    expected_sha256: Option<String>,
+) -> Result<serde_json::Value, String> {
+    guard_custom_mod_rate_limit("import_embedded_custom_mod")?;
+    let archive_file = fs::File::open(&archive_path).map_err(|e| e.to_string())?;
+    let mut archive = zip::ZipArchive::new(archive_file).map_err(|e| e.to_string())?;
+    let mut payload = archive
+        .by_name(&payload_path)
+        .map_err(|_| format!("Embedded local mod payload not found: {}", payload_path))?;
+    if payload.size() > CUSTOM_MOD_MAX_ARCHIVE_BYTES {
+        return Err(format!(
+            "Embedded custom mod payload exceeds {} MB.",
+            CUSTOM_MOD_MAX_ARCHIVE_BYTES / 1024 / 1024
+        ));
+    }
+
+    let payload_name = std::path::Path::new(&payload_path)
+        .file_name()
+        .map(|value| value.to_string_lossy().to_string())
+        .unwrap_or_else(|| "payload.zip".to_string());
+    let seed_hash = hash_bytes(format!("{}:{}", archive_path, payload_path).as_bytes());
+    let local_id = make_local_mod_id(&seed_hash);
+    let dir = local_mod_dir(&app, &profile_id, &local_id)?;
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let staged_payload_path = dir.join("payload.zip");
+    let (_copied_size, copied_hash) =
+        copy_payload_with_hash_limit(&mut payload, &staged_payload_path)?;
+    if let Some(expected) = expected_sha256
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        if !copied_hash.eq_ignore_ascii_case(expected) {
+            let _ = fs::remove_dir_all(&dir);
+            return Err(
+                "Embedded custom mod payload hash does not match export metadata.".to_string(),
+            );
+        }
+    }
+
+    let inspection = inspect_custom_mod_file(&staged_payload_path)?;
+    if inspection.sha256 != copied_hash {
+        let _ = fs::remove_dir_all(&dir);
+        return Err("Embedded custom mod payload failed post-copy verification.".to_string());
+    }
+    let mut inspection = inspection;
+    inspection.file_name = payload_name;
+
+    let (metadata, mod_value) = build_local_mod_response(
+        local_id,
+        inspection.clone(),
+        name,
+        author,
+        version,
+        enabled.unwrap_or(true),
+        platforms,
+        None,
+        false,
+    );
+    write_local_mod_metadata(&dir, &metadata)?;
+
+    Ok(serde_json::json!({
+        "mod": mod_value,
+        "inspection": inspection
+    }))
+}
+
+#[command]
+pub async fn install_local_mod(
+    app: AppHandle,
+    profile_id: String,
+    local_id: String,
+    mod_name: String,
+    game_path: String,
+    use_profile_cache: Option<bool>,
+) -> Result<serde_json::Value, String> {
+    guard_custom_mod_rate_limit("install_local_mod")?;
+    let dir = local_mod_dir(&app, &profile_id, &local_id)?;
+    let payload_path = dir.join("payload.zip");
+    let inspection = inspect_custom_mod_file(&payload_path)?;
+
+    if let Ok(content) = fs::read_to_string(dir.join("metadata.json")) {
+        if let Ok(metadata) = serde_json::from_str::<StoredLocalModMetadata>(&content) {
+            if metadata.sha256 != inspection.sha256 {
+                return Err(
+                    "Local custom mod payload hash no longer matches its metadata.".to_string(),
+                );
+            }
+        }
+    }
+
+    let bytes = fs::read(&payload_path).map_err(|e| e.to_string())?;
+    install_mod_bytes(
+        app,
+        profile_id,
+        mod_name,
+        game_path,
+        use_profile_cache,
+        bytes,
+    )
+    .await
+}
+
+#[command]
+pub async fn delete_local_mod_payload(
+    app: AppHandle,
+    profile_id: String,
+    local_id: String,
+) -> Result<bool, String> {
+    let dir = local_mod_dir(&app, &profile_id, &local_id)?;
+    if dir.exists() {
+        fs::remove_dir_all(dir).map_err(|e| e.to_string())?;
+        Ok(true)
+    } else {
+        Ok(false)
     }
 }
 
@@ -1519,19 +2940,6 @@ pub async fn install_mod(
     game_path: String,
     use_profile_cache: Option<bool>,
 ) -> Result<serde_json::Value, String> {
-    // Install DIRECTLY to game folder
-    let game_dir = std::path::Path::new(&game_path);
-    let target_is_macos = is_macos_game_dir(game_dir);
-    let target_is_balatro = target_is_macos && is_balatro_game_path(game_dir);
-    let install_into_disabled_runtime =
-        target_is_macos && !target_is_balatro && profile_is_vanilla(&app, &profile_id);
-
-    eprintln!(
-        "[install_mod] Installing {} directly to game: {:?}",
-        mod_name, game_dir
-    );
-
-    // Download with live progress events (bytes + speed)
     let client = reqwest::Client::new();
     let response = client
         .get(&download_url)
@@ -1594,6 +3002,37 @@ pub async fn install_mod(
             "progress_percent": 100,
             "done": true
         }),
+    );
+
+    install_mod_bytes(
+        app,
+        profile_id,
+        mod_name,
+        game_path,
+        use_profile_cache,
+        bytes,
+    )
+    .await
+}
+
+async fn install_mod_bytes(
+    app: AppHandle,
+    profile_id: String,
+    mod_name: String,
+    game_path: String,
+    use_profile_cache: Option<bool>,
+    bytes: Vec<u8>,
+) -> Result<serde_json::Value, String> {
+    // Install DIRECTLY to game folder
+    let game_dir = std::path::Path::new(&game_path);
+    let target_is_macos = is_macos_game_dir(game_dir);
+    let target_is_balatro = target_is_macos && is_balatro_game_path(game_dir);
+    let install_into_disabled_runtime =
+        target_is_macos && !target_is_balatro && profile_is_vanilla(&app, &profile_id);
+
+    eprintln!(
+        "[install_mod] Installing {} directly to game: {:?}",
+        mod_name, game_dir
     );
 
     let mut runtime_bytes = bytes;
