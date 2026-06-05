@@ -979,6 +979,45 @@ pub async fn select_file(
 }
 
 #[command]
+pub async fn select_import_path(app: AppHandle) -> Result<Option<String>, String> {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = &app;
+        let output = std::process::Command::new("/usr/bin/osascript")
+            .arg("-e")
+            .arg(
+                r#"POSIX path of (choose file or folder with prompt "Select a custom mod folder, .zip/.r2z mod archive, or r2modmac profile export")"#,
+            )
+            .output()
+            .map_err(|e| format!("Failed to open import picker: {}", e))?;
+
+        if output.status.success() {
+            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            return Ok((!path.is_empty()).then_some(path));
+        }
+
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if stderr.to_ascii_lowercase().contains("user canceled") {
+            return Ok(None);
+        }
+
+        return Err(stderr.trim().to_string());
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        select_file(
+            app,
+            Some(vec![FileFilter {
+                name: "Mod or Profile Archives".to_string(),
+                extensions: vec!["r2z".to_string(), "zip".to_string()],
+            }]),
+        )
+        .await
+    }
+}
+
+#[command]
 pub async fn read_image(path: String) -> Result<Option<String>, String> {
     use base64::Engine;
     let path_buf = std::path::PathBuf::from(&path);

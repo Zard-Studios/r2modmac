@@ -10,6 +10,7 @@ export const tauriAPI: IElectronAPI = {
     // Placeholder implementations for now
     selectFolder: async () => invoke<string | null>('select_folder'),
     selectFile: async (filters) => invoke<string | null>('select_file', { filters }),
+    selectImportPath: async () => invoke<string | null>('select_import_path'),
     installMod: async (profileId, downloadUrl, modName, gamePath, useProfileCache) => {
         try {
             await invoke('install_mod', { profileId, downloadUrl, modName, gamePath, useProfileCache: useProfileCache ?? false });

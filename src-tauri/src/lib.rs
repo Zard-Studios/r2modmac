@@ -190,6 +190,7 @@ pub fn run() {
             commands::system_commands::alert_dialog,
             commands::system_commands::select_folder,
             commands::system_commands::select_file,
+            commands::system_commands::select_import_path,
             commands::system_commands::read_image,
             commands::system_commands::check_update,
             commands::system_commands::install_update,

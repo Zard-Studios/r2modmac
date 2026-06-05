@@ -22,6 +22,7 @@ export interface IElectronAPI {
     saveProfiles: (profiles: Profile[]) => Promise<boolean>;
     selectFolder: () => Promise<string | null>;
     selectFile: (filters?: { name: string; extensions: string[] }[]) => Promise<string | null>;
+    selectImportPath: () => Promise<string | null>;
     installMod: (profileId: string, downloadUrl: string, modName: string, gamePath: string, useProfileCache?: boolean) => Promise<{ success: boolean; error?: string }>;
     inspectCustomMod: (path: string) => Promise<any>;
     cancelCustomModImport: () => Promise<boolean>;

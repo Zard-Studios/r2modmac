@@ -487,8 +487,9 @@ fn process_zip_archive(
         profile_name, platform_val
     );
 
-    let empty_vec = vec![];
-    let mods_array = parsed["mods"].as_array().unwrap_or(&empty_vec);
+    let mods_array = parsed["mods"]
+        .as_array()
+        .ok_or_else(|| "Invalid profile: missing mods array".to_string())?;
     eprintln!("[process_zip_archive] Found {} mods", mods_array.len());
 
     let mods = mods_array
@@ -558,4 +559,51 @@ fn process_zip_archive(
 
     eprintln!("[process_zip_archive] Final result: {:?}", result);
     Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    fn zip_archive_with_file(
+        name: &str,
+        content: &str,
+    ) -> zip::ZipArchive<std::io::Cursor<Vec<u8>>> {
+        let cursor = std::io::Cursor::new(Vec::new());
+        let mut writer = zip::ZipWriter::new(cursor);
+        let options = zip::write::FileOptions::default();
+        writer.start_file(name, options).unwrap();
+        writer.write_all(content.as_bytes()).unwrap();
+        let mut cursor = writer.finish().unwrap();
+        cursor.set_position(0);
+        zip::ZipArchive::new(cursor).unwrap()
+    }
+
+    #[test]
+    fn process_zip_archive_rejects_mod_manifest_without_profile_mods() {
+        let archive = zip_archive_with_file(
+            "manifest.json",
+            r#"{"name":"UltraOptimizer","version_number":"0.4.0","website_url":""}"#,
+        );
+
+        let err = process_zip_archive(archive).unwrap_err();
+
+        assert!(err.contains("missing mods array"));
+    }
+
+    #[test]
+    fn process_zip_archive_accepts_profile_manifest_with_mods() {
+        let archive = zip_archive_with_file(
+            "manifest.json",
+            r#"{"profileName":"test","mods":[{"name":"Author-Mod","version":"1.2.3","enabled":true}]}"#,
+        );
+
+        let result = process_zip_archive(archive).unwrap();
+
+        assert_eq!(result["type"], "profile");
+        assert_eq!(result["name"], "test");
+        assert_eq!(result["mods"][0]["name"], "Author-Mod");
+        assert_eq!(result["mods"][0]["version"], "1.2.3");
+    }
 }

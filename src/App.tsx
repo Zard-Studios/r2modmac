@@ -17,6 +17,7 @@ import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { flushSync } from 'react-dom';
 import { AppModals } from './components/screens/AppModals';
 import type { AppSettings, UpdateInfo } from './types/electron';
+import type { InstalledMod } from './types/profile';
 import { MAC_IMAGE_CACHE_KEY, MAC_PLATFORM_CACHE_KEY } from './constants/cacheKeys';
 import type { PreferencesSettings } from './components/modals/PreferencesModal';
 import type { ProgressState } from './types/progress';
@@ -64,6 +65,34 @@ interface StoredMacImageCache {
   missing_ids: string[];
   updated_at: number;
 }
+
+interface ImportedProfileMod {
+  name?: string;
+  version?: string;
+  enabled?: boolean;
+  source?: string;
+  payload?: string;
+  displayName?: string;
+  author?: string;
+  platforms?: string[];
+  sha256?: string;
+}
+
+interface ProfileArchiveMergeSummary {
+  handled: boolean;
+  cancelled?: boolean;
+  profileName?: string;
+  importedCount: number;
+  failedMods: string[];
+}
+
+const ARCHIVE_IMPORT_PATTERN = /\.(r2z|zip)$/i;
+
+const isArchiveImportPath = (path: string) => ARCHIVE_IMPORT_PATTERN.test(path.trim());
+
+const getProfileModName = (mod: ImportedProfileMod) => (
+  typeof mod.name === 'string' ? mod.name.trim() : ''
+);
 
 const emptyPlatformCache = (): StoredMacPlatformCache => ({
   version: 1,
@@ -816,6 +845,199 @@ function App() {
     }
   };
 
+  const mergeProfileArchiveIntoActiveProfile = useCallback(async (
+    archivePath: string,
+    result: any
+  ): Promise<ProfileArchiveMergeSummary> => {
+    const targetProfile = activeProfile;
+    const targetCommunity = selectedCommunity || targetProfile?.gameIdentifier || null;
+    const profileName = typeof result?.name === 'string' && result.name.trim()
+      ? result.name.trim()
+      : 'Imported Profile';
+    const importedMods: ImportedProfileMod[] = Array.isArray(result?.mods) ? result.mods : [];
+    const localMods = importedMods.filter((mod) => mod.source === 'local');
+    const thunderstoreMods = importedMods.filter((mod) => mod.source !== 'local' && getProfileModName(mod));
+
+    if (!targetProfile || !targetCommunity) {
+      return {
+        handled: true,
+        profileName,
+        importedCount: 0,
+        failedMods: ['No active profile selected'],
+      };
+    }
+
+    if (importedMods.length === 0) {
+      return {
+        handled: true,
+        profileName,
+        importedCount: 0,
+        failedMods: [],
+      };
+    }
+
+    setProgressState({
+      isOpen: true,
+      title: 'Importing Profile Mods',
+      progress: 8,
+      currentTask: `Reading ${profileName}...`,
+      isCancelable: true,
+    });
+
+    const modNames = Array.from(new Set(thunderstoreMods.map(getProfileModName).filter(Boolean)));
+    const lookup = modNames.length > 0
+      ? await window.ipcRenderer.lookupPackagesByNames(targetCommunity, modNames)
+      : { found: [], unknown: [] };
+
+    const foundPackages: Package[] = Array.isArray(lookup?.found) ? lookup.found : [];
+    const unknownMods: string[] = Array.isArray(lookup?.unknown) ? lookup.unknown : [];
+    const failedMods: string[] = unknownMods.map((name) => `${name} (not found on Thunderstore)`);
+
+    if (customModImportCancelledRef.current) {
+      return { handled: true, cancelled: true, profileName, importedCount: 0, failedMods };
+    }
+
+    if (unknownMods.length > 0) {
+      setProgressState(prev => ({ ...prev, isOpen: false, isCancelable: false }));
+      const proceed = await window.ipcRenderer.confirm(
+        'Some mods cannot be found',
+        `${unknownMods.length} mod(s) from "${profileName}" were not found on Thunderstore and will be skipped:\n\n${unknownMods.join('\n')}\n\nContinue importing the remaining mods into "${targetProfile.name}"?`
+      );
+      if (!proceed) {
+        return { handled: true, cancelled: true, profileName, importedCount: 0, failedMods };
+      }
+      setProgressState({
+        isOpen: true,
+        title: 'Importing Profile Mods',
+        progress: 10,
+        currentTask: `Importing ${profileName}...`,
+        isCancelable: true,
+      });
+    }
+
+    const resolvedThunderstoreMods = thunderstoreMods.filter((mod) => {
+      const modName = getProfileModName(mod);
+      return modName && !unknownMods.includes(modName);
+    });
+    const totalSteps = resolvedThunderstoreMods.length + localMods.length;
+    let completedSteps = 0;
+    let importedCount = 0;
+
+    const updateMergeProgress = (task: string) => {
+      const progress = totalSteps === 0
+        ? 100
+        : Math.round((completedSteps / totalSteps) * 90) + 10;
+      setProgressState(prev => ({
+        ...prev,
+        progress: Math.min(100, Math.max(10, progress)),
+        currentTask: task,
+      }));
+    };
+
+    for (const mod of resolvedThunderstoreMods) {
+      if (customModImportCancelledRef.current) {
+        return { handled: true, cancelled: true, profileName, importedCount, failedMods };
+      }
+
+      const modName = getProfileModName(mod);
+      updateMergeProgress(`Adding ${modName} (${completedSteps + 1}/${Math.max(totalSteps, 1)})...`);
+
+      try {
+        const pkg = foundPackages.find((p) => p.full_name === modName);
+        if (!pkg) {
+          throw new Error('Package not found after lookup');
+        }
+        const version = pkg.versions.find((v) => v.version_number === mod.version) || pkg.versions[0];
+        if (!version) {
+          throw new Error('Package has no available versions');
+        }
+
+        const installedMod: InstalledMod = {
+          uuid4: version.uuid4,
+          fullName: version.full_name,
+          versionNumber: version.version_number,
+          iconUrl: version.icon,
+          enabled: mod.enabled ?? true,
+          pending_sync: true,
+          synced_enabled: undefined,
+        };
+        addMod(targetProfile.id, installedMod);
+        importedCount++;
+      } catch (error) {
+        console.error(`Failed to add profile mod ${modName}`, error);
+        failedMods.push(modName);
+      } finally {
+        completedSteps++;
+        updateMergeProgress(`Processed ${completedSteps}/${Math.max(totalSteps, 1)}...`);
+      }
+    }
+
+    for (const mod of localMods) {
+      if (customModImportCancelledRef.current) {
+        return { handled: true, cancelled: true, profileName, importedCount, failedMods };
+      }
+
+      const modName = mod.displayName || getProfileModName(mod) || 'Custom mod';
+      updateMergeProgress(`Staging ${modName} (${completedSteps + 1}/${Math.max(totalSteps, 1)})...`);
+
+      try {
+        const payloadPath = mod.payload;
+        const embeddedArchivePath = result.archivePath || archivePath;
+        if (!payloadPath || !embeddedArchivePath) {
+          throw new Error('Embedded custom mod payload is missing from this profile export.');
+        }
+
+        const imported = await window.ipcRenderer.importEmbeddedCustomMod(
+          targetProfile.id,
+          embeddedArchivePath,
+          payloadPath,
+          {
+            name: mod.displayName || getProfileModName(mod).split('-').slice(1).join('-') || getProfileModName(mod),
+            author: mod.author || getProfileModName(mod).split('-')[0] || 'Local',
+            version: mod.version,
+            enabled: mod.enabled,
+            platforms: mod.platforms,
+            expectedSha256: mod.sha256,
+          }
+        );
+        addMod(targetProfile.id, {
+          ...imported.mod,
+          pending_sync: true,
+          synced_enabled: undefined,
+        });
+        importedCount++;
+      } catch (error) {
+        console.error(`Failed to stage embedded custom mod ${modName}`, error);
+        failedMods.push(modName);
+      } finally {
+        completedSteps++;
+        updateMergeProgress(`Processed ${completedSteps}/${Math.max(totalSteps, 1)}...`);
+      }
+    }
+
+    return {
+      handled: true,
+      profileName,
+      importedCount,
+      failedMods,
+    };
+  }, [activeProfile, selectedCommunity, addMod]);
+
+  const tryMergeProfileArchive = useCallback(async (
+    path: string
+  ): Promise<ProfileArchiveMergeSummary | null> => {
+    if (!isArchiveImportPath(path)) return null;
+
+    try {
+      const result = await window.ipcRenderer.importProfileFromFile(path);
+      if (result?.type !== 'profile' || !Array.isArray(result.mods)) return null;
+      return await mergeProfileArchiveIntoActiveProfile(path, result);
+    } catch (error) {
+      console.debug('Archive is not a profile export; falling back to custom mod import.', error);
+      return null;
+    }
+  }, [mergeProfileArchiveIntoActiveProfile]);
+
   const importCustomModPaths = useCallback(async (paths: string[]) => {
     if (!activeProfile) {
       await window.ipcRenderer.alert('Profile Required', 'Create or select a profile before importing a custom mod.');
@@ -828,16 +1050,20 @@ function App() {
     try {
       customModImportCancelledRef.current = false;
       setIsCancellingCustomModImport(false);
-      let importedCount = 0;
+      let customImportedCount = 0;
+      let profileImportedCount = 0;
+      let profileArchiveCount = 0;
       const importedNames: string[] = [];
+      const profileNames: string[] = [];
+      const failedMods: string[] = [];
 
       setProgressState({
         isOpen: true,
-        title: 'Importing Custom Mod',
+        title: 'Importing Content',
         progress: 10,
         currentTask: importPaths.length > 1
           ? `Scanning 1/${importPaths.length}...`
-          : 'Scanning selected folder...',
+          : 'Scanning selected content...',
         isCancelable: true
       });
 
@@ -851,6 +1077,21 @@ function App() {
             : 'Staging custom mod...'
         }));
 
+        const profileMerge = await tryMergeProfileArchive(path);
+        if (profileMerge?.handled) {
+          if (profileMerge.cancelled) {
+            customModImportCancelledRef.current = false;
+            setIsCancellingCustomModImport(false);
+            setProgressState(prev => ({ ...prev, isOpen: false, isCancelable: false }));
+            return;
+          }
+          profileArchiveCount++;
+          profileImportedCount += profileMerge.importedCount;
+          if (profileMerge.profileName) profileNames.push(profileMerge.profileName);
+          failedMods.push(...profileMerge.failedMods);
+          continue;
+        }
+
         const result = await window.ipcRenderer.importCustomMod(activeProfile.id, path, {});
         if (customModImportCancelledRef.current) {
           if (result.mod.localId) {
@@ -862,18 +1103,43 @@ function App() {
           return;
         }
         addMod(activeProfile.id, result.mod);
-        importedCount++;
+        customImportedCount++;
         importedNames.push(result.mod.displayName || result.mod.fullName);
       }
 
       setProgressState(prev => ({ ...prev, isOpen: false, isCancelable: false }));
       setIsCancellingCustomModImport(false);
-      await window.ipcRenderer.alert(
-        importedCount === 1 ? 'Custom Mod Imported' : 'Custom Mods Imported',
-        importedCount === 1
-          ? `${importedNames[0]} was added to the profile.\n\nIt is staged in r2modmac storage and will be installed when you apply the profile to the game.`
-          : `${importedCount} custom mods were added to the profile.\n\nThey are staged in r2modmac storage and will be installed when you apply the profile to the game.`
-      );
+      const totalImported = customImportedCount + profileImportedCount;
+      const title = profileArchiveCount > 0 && customImportedCount === 0
+        ? 'Profile Mods Imported'
+        : customImportedCount === 1 && profileImportedCount === 0
+          ? 'Custom Mod Imported'
+          : 'Import Complete';
+      let message = '';
+
+      if (profileArchiveCount > 0) {
+        const uniqueProfileNames = Array.from(new Set(profileNames));
+        message += `${profileImportedCount} mod(s) from ${uniqueProfileNames.length === 1 ? `"${uniqueProfileNames[0]}"` : `${uniqueProfileNames.length} profile files`} were added or updated in "${activeProfile.name}".`;
+      }
+
+      if (customImportedCount > 0) {
+        if (message) message += '\n\n';
+        message += customImportedCount === 1
+          ? `${importedNames[0]} was added to the profile.`
+          : `${customImportedCount} custom mods were added to the profile.`;
+      }
+
+      if (totalImported > 0) {
+        message += '\n\nThese changes are staged in r2modmac and will be installed when you apply the profile to the game.';
+      } else if (!message) {
+        message = 'No mods were imported.';
+      }
+
+      if (failedMods.length > 0) {
+        message += `\n\nNot imported:\n${failedMods.join('\n')}`;
+      }
+
+      await window.ipcRenderer.alert(title, message);
     } catch (error: any) {
       const message = String(error?.message || error || 'Failed to import the selected custom mod folder.');
       const wasCancelled = customModImportCancelledRef.current || message.toLowerCase().includes('cancelled');
@@ -887,10 +1153,16 @@ function App() {
         message
       );
     }
-  }, [activeProfile, addMod]);
+  }, [activeProfile, addMod, tryMergeProfileArchive]);
 
   const handleImportCustomModRequest = async () => {
-    const path = await window.ipcRenderer.selectFolder();
+    let path: string | null = null;
+    try {
+      path = await window.ipcRenderer.selectImportPath();
+    } catch (error) {
+      console.warn('Unified import picker failed; falling back to folder picker.', error);
+      path = await window.ipcRenderer.selectFolder();
+    }
     if (!path) return;
     await importCustomModPaths([path]);
   };
