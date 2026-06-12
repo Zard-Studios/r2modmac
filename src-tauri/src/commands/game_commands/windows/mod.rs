@@ -23,6 +23,35 @@ pub(crate) fn launch_windows_direct_game(game_path: &std::path::Path) -> Result<
         let prefix_root =
             find_wine_prefix_root(&executable_path).or_else(|| find_wine_prefix_root(game_path));
 
+        #[cfg(target_os = "macos")]
+        if let Some(prefix_root_path) = prefix_root.as_deref() {
+            if let Some(bundle_path) =
+                find_macos_wineskin_launcher_binary(Some(prefix_root_path), &executable_path)
+            {
+                match launch_macos_wineskin_program(
+                    &bundle_path,
+                    prefix_root_path,
+                    &executable_path,
+                    &[],
+                    Some(executable_dir),
+                    "launch_windows_direct_game",
+                ) {
+                    Ok(()) => {
+                        if !wait_for_process_start_patterns(&process_patterns, 20_000) {
+                            return Err("Game did not start in time.".to_string());
+                        }
+                        return Ok(());
+                    }
+                    Err(error) => {
+                        eprintln!(
+                            "[launch_windows_direct_game] Sikarugir/Wineskin launch failed ({}); falling back to direct Wine.",
+                            error
+                        );
+                    }
+                }
+            }
+        }
+
         if let Some(runner_path) =
             find_host_compat_runner_binary(prefix_root.as_deref(), &executable_path)
         {
@@ -115,6 +144,40 @@ pub(crate) fn launch_windows_steam_game(
         let prefix_root = find_wine_prefix_root(&steam_executable)
             .or_else(|| find_wine_prefix_root(&executable_path))
             .or_else(|| find_wine_prefix_root(game_path));
+
+        #[cfg(target_os = "macos")]
+        if let Some(prefix_root_path) = prefix_root.as_deref() {
+            if let Some(bundle_path) =
+                find_macos_wineskin_launcher_binary(Some(prefix_root_path), &steam_executable)
+            {
+                let args = vec!["-applaunch".to_string(), app_id.clone()];
+                match launch_macos_wineskin_program(
+                    &bundle_path,
+                    prefix_root_path,
+                    &steam_executable,
+                    &args,
+                    Some(&steam_root),
+                    "launch_windows_steam_game",
+                ) {
+                    Ok(()) => {
+                        if !wait_for_process_start_patterns(&process_patterns, 60_000) {
+                            eprintln!(
+                                "[launch_windows_steam_game] Sikarugir accepted the launch request for app {}, but the game process was not observed in time. Continuing optimistically.",
+                                app_id
+                            );
+                        }
+                        return Ok(());
+                    }
+                    Err(error) => {
+                        eprintln!(
+                            "[launch_windows_steam_game] Sikarugir/Wineskin launch failed ({}); falling back to direct Wine.",
+                            error
+                        );
+                    }
+                }
+            }
+        }
+
         let runner_path = find_host_compat_runner_binary(prefix_root.as_deref(), &steam_executable)
 			.ok_or_else(|| {
 				"No compatible runner was found for this Steam installation. Set the game path inside a supported compatibility-tool prefix and try again."
