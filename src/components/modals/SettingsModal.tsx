@@ -2,6 +2,8 @@ import { useState, useEffect, useRef } from 'react';
 import { Button } from '../ui';
 import type { Profile, ProfilePlatform } from '../../types/profile';
 import { ConfigEditorTab } from './ConfigEditorTab';
+import { PathCensor, CensoredInput } from '../ui/PathCensor';
+
 
 type SettingsTab = 'settings' | 'config-editor';
 
@@ -26,6 +28,7 @@ export function SettingsModal({ isOpen, onClose, selectedGame, activeProfile }: 
     const configEditorRef = useRef<HTMLDivElement>(null);
     const [tabHeight, setTabHeight] = useState<number | null>(null);
     const [enableHeightTransition, setEnableHeightTransition] = useState(false);
+
 
     const activeProfilePlatform: ProfilePlatform = activeProfile?.platform === 'mac' ? 'mac' : 'windows';
     const defaultMacSteamPath = '~/Library/Application Support/Steam';
@@ -78,6 +81,30 @@ export function SettingsModal({ isOpen, onClose, selectedGame, activeProfile }: 
         };
         init();
     }, [isOpen, selectedGame, activeProfilePlatform]);
+
+    // Modal Entrance/Exit Animation State
+    const [prevIsOpen, setPrevIsOpen] = useState(isOpen);
+    const [shouldRender, setShouldRender] = useState(isOpen);
+    const [isVisible, setIsVisible] = useState(false);
+
+    if (isOpen !== prevIsOpen) {
+        setPrevIsOpen(isOpen);
+        if (isOpen) {
+            setShouldRender(true);
+        } else {
+            setIsVisible(false);
+        }
+    }
+
+    useEffect(() => {
+        if (isOpen) {
+            const timer = setTimeout(() => setIsVisible(true), 10);
+            return () => clearTimeout(timer);
+        } else {
+            const timer = setTimeout(() => setShouldRender(false), 300);
+            return () => clearTimeout(timer);
+        }
+    }, [isOpen]);
 
     // Handle tab initialization and height transition enablement on open/close
     useEffect(() => {
@@ -198,36 +225,22 @@ export function SettingsModal({ isOpen, onClose, selectedGame, activeProfile }: 
     const switchTab = (next: SettingsTab) => {
         if (next === activeTab || isAnimating) return;
 
-        // Measure height of the next tab's inner content synchronously to start the transition instantly!
-        let nextHeight = 0;
-        if (next === 'settings' && settingsRef.current) {
-            const inner = settingsRef.current.firstElementChild as HTMLElement;
-            nextHeight = inner ? inner.offsetHeight : settingsRef.current.offsetHeight;
-        } else if (next === 'config-editor' && configEditorRef.current) {
-            const inner = configEditorRef.current.firstElementChild as HTMLElement;
-            nextHeight = inner ? inner.offsetHeight : configEditorRef.current.offsetHeight;
-        }
-
-        if (nextHeight > 0) {
-            setTabHeight(nextHeight);
-        }
-
         setActiveTab(next);
         setIsAnimating(true);
         setTimeout(() => setIsAnimating(false), 300);
     };
 
-    if (!isOpen) return null;
+    if (!shouldRender) return null;
 
     const shouldShowSteamDirectory = activeProfilePlatform === 'windows' || gameSource !== 'manual';
     const hasConfigEditor = !!activeProfile;
     const modalWidth = activeTab === 'config-editor' ? 'max-w-4xl w-full' : 'max-w-md w-full';
 
     return (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+        <div className={`fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 transition-opacity duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] ${isVisible ? 'opacity-100' : 'opacity-0'}`}>
             <div
-                className={`bg-gray-900 border border-gray-700 rounded-xl shadow-2xl ${modalWidth}`}
-                style={{ transition: 'max-width 0.3s cubic-bezier(0.4,0,0.2,1), width 0.3s cubic-bezier(0.4,0,0.2,1)' }}
+                className={`bg-gray-900 border border-gray-700 rounded-xl shadow-2xl ${modalWidth} transform transition-all duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] ${isVisible ? 'scale-100 translate-y-0' : 'scale-95 translate-y-4'}`}
+                style={{ transitionProperty: 'max-width, width, transform, opacity' }}
             >
                 {/* ── Header with Tabs ──────────────────────────────────────── */}
                 <div
@@ -306,11 +319,10 @@ export function SettingsModal({ isOpen, onClose, selectedGame, activeProfile }: 
                                         Steam Directory
                                     </label>
                                     <div className="flex gap-2">
-                                        <input
-                                            type="text"
+                                        <CensoredInput
                                             value={steamPath}
-                                            onChange={(e) => setSteamPath(e.target.value)}
-                                            className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
+                                            onChange={setSteamPath}
+                                            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
                                             placeholder={activeProfilePlatform === 'mac'
                                                 ? defaultMacSteamPath
                                                 : "(BottleName)/drive_c/Program Files (x86)/Steam"}
@@ -369,7 +381,7 @@ export function SettingsModal({ isOpen, onClose, selectedGame, activeProfile }: 
                                                 <svg className="h-3.5 w-3.5 text-green-500 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
                                                     <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
                                                 </svg>
-                                                <span className="text-gray-400 break-all">{gamePath}</span>
+                                                <PathCensor path={gamePath} className="text-gray-400 break-all" />
                                             </div>
                                         </div>
                                     ) : gameSource !== 'manual' ? (

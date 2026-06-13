@@ -189,6 +189,7 @@ pub fn run() {
             commands::system_commands::confirm_dialog,
             commands::system_commands::alert_dialog,
             commands::system_commands::select_folder,
+            commands::system_commands::get_username,
             commands::system_commands::select_file,
             commands::system_commands::select_import_path,
             commands::system_commands::read_image,

@@ -298,7 +298,7 @@ function App() {
     toggleMod
   } = useProfileStore()
   // App State Store
-  const { communities, communityImages, communityPlatforms, setCommunities, setCommunityImages, setCommunityPlatforms } = useAppStore();
+  const { communities, communityImages, communityPlatforms, streamMode, setCommunities, setCommunityImages, setCommunityPlatforms, setStreamMode, setUsername } = useAppStore();
 
   const [selectedCommunity, setSelectedCommunity] = useState<string | null>(null)
   const activeProfile = profiles.find((profile) => profile.id === activeProfileId) ?? null
@@ -392,6 +392,13 @@ function App() {
       setDefaultModViewMode(storedViewMode);
       setViewMode(storedViewMode);
       setHideCrossOverGuide(!!s.hide_crossover_guide);
+      setStreamMode(!!s.stream_mode);
+    });
+
+    window.ipcRenderer.getUsername().then((u: string) => {
+      setUsername(u);
+    }).catch((err) => {
+      console.error('Failed to get username', err);
     });
 
     // Listen for preferences menu event
@@ -1322,6 +1329,7 @@ function App() {
     setWriteDebugLogsToGame(newSettings.write_debug_logs_to_game);
     setDefaultModViewMode(newSettings.default_mod_view_mode);
     setViewMode(newSettings.default_mod_view_mode);
+    setStreamMode(newSettings.stream_mode);
 
     const currentSettings = await window.ipcRenderer.getSettings();
     await window.ipcRenderer.saveSettings({
@@ -1332,6 +1340,7 @@ function App() {
       confirm_before_apply_to_game: newSettings.confirm_before_apply_to_game,
       write_debug_logs_to_game: newSettings.write_debug_logs_to_game,
       default_mod_view_mode: newSettings.default_mod_view_mode,
+      stream_mode: newSettings.stream_mode,
     });
   };
 
@@ -1662,7 +1671,7 @@ function App() {
           if (!activeProfile) return;
           const community = selectedCommunity || activeProfile.gameIdentifier;
           if (community) {
-            let searchName = mod.fullName.replace(/-\d+\.\d+\.\d+$/, '');
+            const searchName = mod.fullName.replace(/-\d+\.\d+\.\d+$/, '');
             const pkg = await window.ipcRenderer.fetchPackageByName(searchName, community);
             if (pkg) {
               await handleUninstallWithDependencies(pkg, activeProfile.id);
@@ -1857,6 +1866,7 @@ function App() {
           confirm_before_apply_to_game: confirmBeforeApplyToGame,
           write_debug_logs_to_game: writeDebugLogsToGame,
           default_mod_view_mode: defaultModViewMode,
+          stream_mode: streamMode,
         }}
         onSavePreferences={handleSavePreferences}
         hasHiddenGuideWarnings={hideCrossOverGuide}

@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useAppStore } from '../../store/useAppStore';
+import { censorPath, uncensorPath } from '../../utils/pathCensorUtils';
 
 import type { ConfigFileInfo } from '../../tauriAdapter';
 
@@ -377,6 +379,7 @@ interface EntryEditorProps {
 }
 
 function EntryEditor({ entry, onChange }: EntryEditorProps) {
+    const { streamMode, username } = useAppStore();
     const descriptionLines = entry.comments.filter((c) => c.isDescription);
     const metaLines = entry.comments.filter((c) => !c.isDescription);
 
@@ -426,16 +429,22 @@ function EntryEditor({ entry, onChange }: EntryEditorProps) {
                     ) : entry.displayType === 'multi-select' ? (
                         <input
                             type="text"
-                            value={entry.value}
-                            onChange={(e) => onChange(e.target.value)}
+                            value={streamMode ? censorPath(entry.value, username) : entry.value}
+                            onChange={(e) => {
+                                const val = e.target.value;
+                                onChange(streamMode ? uncensorPath(val, entry.value) : val);
+                            }}
                             placeholder="value1, value2"
                             className="w-full bg-gray-700 border border-gray-600 rounded-lg px-2 py-1 text-white text-sm font-mono focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                         />
                     ) : (
                         <input
                             type="text"
-                            value={entry.value}
-                            onChange={(e) => onChange(e.target.value)}
+                            value={streamMode ? censorPath(entry.value, username) : entry.value}
+                            onChange={(e) => {
+                                const val = e.target.value;
+                                onChange(streamMode ? uncensorPath(val, entry.value) : val);
+                            }}
                             className="w-full bg-gray-700 border border-gray-600 rounded-lg px-2 py-1 text-white text-sm font-mono focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                         />
                     )}
@@ -871,6 +880,7 @@ interface ConfigEditorTabProps {
 }
 
 export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = [] }: ConfigEditorTabProps) {
+    const { streamMode, username } = useAppStore();
     const [files, setFiles] = useState<ConfigFileInfo[]>([]);
     const [loading, setLoading] = useState(true);
     const [search, setSearch] = useState('');
@@ -1087,7 +1097,7 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
     const handleSave = useCallback(async () => {
         if (!selectedFile || !isDirty) return;
         const currentContent = (!parsedCfg && textareaRef.current)
-            ? textareaRef.current.value
+            ? (streamMode ? uncensorPath(textareaRef.current.value, rawContent) : textareaRef.current.value)
             : rawContent;
 
         setIsSaving(true);
@@ -1104,7 +1114,7 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
             if (saveStatusTimerRef.current) clearTimeout(saveStatusTimerRef.current);
             saveStatusTimerRef.current = setTimeout(() => setSaveStatus('idle'), 3000);
         }
-    }, [selectedFile, isDirty, rawContent, parsedCfg, profileId]);
+    }, [selectedFile, isDirty, rawContent, parsedCfg, profileId, streamMode, username]);
 
     // ── Global keyboard shortcuts (work for ALL file types, not just textarea) ──
     useEffect(() => {
@@ -1112,6 +1122,9 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
             const isMac = e.metaKey;
             const isCtrl = e.ctrlKey;
             if (!isMac && !isCtrl) return;
+
+            const activeTag = document.activeElement?.tagName.toLowerCase();
+            const isInputFocused = activeTag === 'input' || activeTag === 'textarea' || (document.activeElement instanceof HTMLElement && document.activeElement.isContentEditable);
 
             // Cmd/Ctrl + S → Save
             if (e.key === 's' || e.key === 'S') {
@@ -1122,6 +1135,8 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
 
             // Cmd/Ctrl + Z → Undo
             if ((e.key === 'z' || e.key === 'Z') && !e.shiftKey) {
+                if (isInputFocused) return; // Let native browser undo handle text inputs
+                
                 if (parsedCfg) {
                     e.preventDefault();
                     triggerUndo();
@@ -1134,6 +1149,8 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
 
             // Cmd/Ctrl + Shift + Z → Redo
             if ((e.key === 'z' || e.key === 'Z') && e.shiftKey) {
+                if (isInputFocused) return; // Let native browser redo handle text inputs
+                
                 if (parsedCfg) {
                     e.preventDefault();
                     triggerRedo();
@@ -1174,13 +1191,6 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
             return;
         }
 
-        // B. Cmd+F / Ctrl+F (Find)
-        if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
-            e.preventDefault();
-            searchInputRef.current?.focus();
-            searchInputRef.current?.select();
-            return;
-        }
 
         // C. Cmd+/ / Ctrl+/ (Toggle Comment)
         if ((e.metaKey || e.ctrlKey) && e.key === '/') {
@@ -1723,9 +1733,9 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
 
                                         {/* Textarea */}
                                         <textarea
-                                            key={selectedFile.relative_path}
+                                            key={`${selectedFile.relative_path}_${streamMode}`}
                                             ref={textareaRef}
-                                            defaultValue={rawContent}
+                                            defaultValue={streamMode ? censorPath(rawContent, username) : rawContent}
                                             onInput={handleTextareaInput}
                                             onKeyDown={handleKeyDown}
                                             onScroll={handleScroll}

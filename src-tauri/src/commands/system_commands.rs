@@ -956,6 +956,29 @@ pub async fn select_folder(app: AppHandle) -> Result<Option<String>, String> {
 }
 
 #[command]
+pub fn get_username() -> Result<String, String> {
+    if let Ok(user) = std::env::var("USER") {
+        if !user.trim().is_empty() {
+            return Ok(user);
+        }
+    }
+    if let Ok(user) = std::env::var("USERNAME") {
+        if !user.trim().is_empty() {
+            return Ok(user);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        if let Some(name) = home.file_name() {
+            if let Some(name_str) = name.to_str() {
+                return Ok(name_str.to_string());
+            }
+        }
+    }
+    Err("Could not retrieve username".to_string())
+}
+
+
+#[command]
 pub async fn select_file(
     app: AppHandle,
     filters: Option<Vec<FileFilter>>,
@@ -1399,5 +1422,13 @@ mod tests {
             images.get("sample").map(String::as_str),
             Some("https://gcdn.thunderstore.io/live/community/sample/sample-cover-360x480.webp")
         );
+    }
+
+    #[test]
+    fn retrieves_username() {
+        let username = get_username();
+        assert!(username.is_ok());
+        let name = username.unwrap();
+        assert!(!name.trim().is_empty());
     }
 }

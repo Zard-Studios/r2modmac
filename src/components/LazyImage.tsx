@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 import { useEffect, useRef, useState } from 'react';
 
 interface LazyImageProps {
@@ -53,15 +54,20 @@ export function warmImageCache(src: string) {
  */
 export function LazyImage({ src, alt, className, fallback, eager = false }: LazyImageProps) {
     const wrapperRef = useRef<HTMLDivElement | null>(null);
+
+    const [prevSrc, setPrevSrc] = useState(src);
+    const [prevEager, setPrevEager] = useState(eager);
     const [hasError, setHasError] = useState(failedImageUrls.has(src));
     const [isLoaded, setIsLoaded] = useState(loadedImageUrls.has(src));
     const [shouldLoad, setShouldLoad] = useState(eager || loadedImageUrls.has(src));
 
-    useEffect(() => {
+    if (src !== prevSrc || eager !== prevEager) {
+        setPrevSrc(src);
+        setPrevEager(eager);
         setHasError(failedImageUrls.has(src));
         setIsLoaded(loadedImageUrls.has(src));
         setShouldLoad(eager || loadedImageUrls.has(src));
-    }, [src, eager]);
+    }
 
     useEffect(() => {
         const handleLoaded = (event: Event) => {
@@ -88,7 +94,6 @@ export function LazyImage({ src, alt, className, fallback, eager = false }: Lazy
 
     useEffect(() => {
         if (eager || loadedImageUrls.has(src)) {
-            setShouldLoad(true);
             return;
         }
 

@@ -17,12 +17,14 @@ export interface AppSettings {
     default_mod_view_mode?: 'grid' | 'list';
     hide_crossover_guide?: boolean;
     hide_macos_guide?: boolean;
+    stream_mode?: boolean;
 }
 
 export interface IElectronAPI {
     getProfiles: () => Promise<Profile[]>;
     saveProfiles: (profiles: Profile[]) => Promise<boolean>;
     selectFolder: () => Promise<string | null>;
+    getUsername: () => Promise<string>;
     selectFile: (filters?: { name: string; extensions: string[] }[]) => Promise<string | null>;
     selectImportPath: () => Promise<string | null>;
     installMod: (profileId: string, downloadUrl: string, modName: string, gamePath: string, useProfileCache?: boolean) => Promise<{ success: boolean; error?: string }>;

@@ -49,3 +49,14 @@ body {
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
   background: rgba(59, 130, 246, 0.7);
 }
+
+.stream-censor-blur {
+  display: inline-block;
+  background: rgba(255, 255, 255, 0.12);
+  padding: 0 5px;
+  border-radius: 4px;
+  color: rgba(255, 255, 255, 0.95);
+  filter: blur(4px);
+  -webkit-filter: blur(4px);
+  transform: translateZ(0); /* Force GPU acceleration */
+}

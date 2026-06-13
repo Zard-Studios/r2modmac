@@ -64,6 +64,8 @@ pub struct Settings {
     pub hide_macos_guide: bool,
     #[serde(default)]
     pub thunderstore_chunk_cache_migrated: bool,
+    #[serde(default)]
+    pub stream_mode: bool,
 }
 
 impl Settings {
@@ -84,6 +86,7 @@ impl Settings {
             hide_crossover_guide: false,
             hide_macos_guide: false,
             thunderstore_chunk_cache_migrated: false,
+            stream_mode: false,
         }
     }
 }

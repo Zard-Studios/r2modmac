@@ -8,6 +8,7 @@ export interface PreferencesSettings {
     confirm_before_apply_to_game: boolean;
     write_debug_logs_to_game: boolean;
     default_mod_view_mode: 'grid' | 'list';
+    stream_mode: boolean;
 }
 
 interface PreferencesModalProps {
@@ -23,15 +24,13 @@ function Toggle({ value, onChange }: { value: boolean; onChange: (next: boolean)
     return (
         <button
             onClick={() => onChange(!value)}
-            className={`relative w-11 h-6 rounded-full transition-colors duration-200 ease-in-out flex-shrink-0 focus:outline-none focus:ring-2 focus:ring-blue-500/50 ${
-                value ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'
-            }`}
-             aria-pressed={value}
+            className={`relative w-11 h-6 rounded-full transition-colors duration-200 ease-in-out flex-shrink-0 focus:outline-none focus:ring-2 focus:ring-blue-500/50 ${value ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'
+                }`}
+            aria-pressed={value}
         >
             <span
-                className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow-[0_2px_5px_rgba(0,0,0,0.2)] transition-transform duration-200 ease-[cubic-bezier(0.4,0,0.2,1)] ${
-                    value ? 'translate-x-5' : 'translate-x-0'
-                }`}
+                className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow-[0_2px_5px_rgba(0,0,0,0.2)] transition-transform duration-200 ease-[cubic-bezier(0.4,0,0.2,1)] ${value ? 'translate-x-5' : 'translate-x-0'
+                    }`}
             />
         </button>
     );
@@ -45,7 +44,7 @@ function IconBox({ children, colorClass }: { children: React.ReactNode; colorCla
     );
 }
 
-function RowIcon({ kind }: { kind: 'install' | 'version' | 'parallel' | 'apply' | 'logs' | 'layout' | 'warning' | 'cache' }) {
+function RowIcon({ kind }: { kind: 'install' | 'version' | 'parallel' | 'apply' | 'logs' | 'layout' | 'warning' | 'cache' | 'stream' }) {
     if (kind === 'install') return (
         <IconBox colorClass="text-blue-400">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -95,6 +94,13 @@ function RowIcon({ kind }: { kind: 'install' | 'version' | 'parallel' | 'apply' 
             </svg>
         </IconBox>
     );
+    if (kind === 'stream') return (
+        <IconBox colorClass="text-fuchsia-400">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+            </svg>
+        </IconBox>
+    );
     return (
         <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-red-500/10 border border-red-500/20 text-red-400 flex-shrink-0">
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -118,6 +124,7 @@ export default function PreferencesModal({
     const [confirmBeforeApply, setConfirmBeforeApply] = useState(settings.confirm_before_apply_to_game);
     const [writeDebugLogsToGame, setWriteDebugLogsToGame] = useState(settings.write_debug_logs_to_game);
     const [defaultModViewMode, setDefaultModViewMode] = useState<'grid' | 'list'>(settings.default_mod_view_mode);
+    const [streamMode, setStreamMode] = useState(settings.stream_mode);
     const [restoringWarnings, setRestoringWarnings] = useState(false);
 
     // Track active state for a gentle reveal animation
@@ -138,6 +145,7 @@ export default function PreferencesModal({
         setConfirmBeforeApply(settings.confirm_before_apply_to_game);
         setWriteDebugLogsToGame(settings.write_debug_logs_to_game);
         setDefaultModViewMode(settings.default_mod_view_mode);
+        setStreamMode(settings.stream_mode);
     }, [settings]);
 
     if (!isOpen) return null;
@@ -150,6 +158,7 @@ export default function PreferencesModal({
             confirm_before_apply_to_game: confirmBeforeApply,
             write_debug_logs_to_game: writeDebugLogsToGame,
             default_mod_view_mode: defaultModViewMode,
+            stream_mode: streamMode,
         });
         onClose();
     };
@@ -158,10 +167,10 @@ export default function PreferencesModal({
         <div className={`fixed inset-0 z-50 flex items-center justify-center p-4 transition-all duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] ${isVisible ? 'opacity-100 backdrop-blur-sm' : 'opacity-0 backdrop-blur-none'}`}>
             {/* Backdrop */}
             <div className="absolute inset-0 bg-black/60 transition-opacity" onClick={onClose} />
-            
+
             {/* Modal Container */}
             <div className={`relative w-full max-w-[640px] max-h-[85vh] flex flex-col bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl overflow-hidden transform transition-all duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] ${isVisible ? 'scale-100 translate-y-0 opacity-100' : 'scale-95 translate-y-4 opacity-0'}`}>
-                
+
                 {/* Header */}
                 <div className="flex items-center justify-between px-7 py-6 border-b border-gray-800 shrink-0 z-10 bg-gray-900">
                     <div>
@@ -179,11 +188,11 @@ export default function PreferencesModal({
 
                 {/* Scrollable Content */}
                 <div className="p-7 space-y-8 overflow-y-auto flex-1 bg-gray-900 relative z-0">
-                    
+
                     {/* Setup behavior Section */}
                     <div className="space-y-3">
                         <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-widest px-1">Behavior</h3>
-                        
+
                         <div className="bg-gray-800 border border-gray-700 rounded-2xl divide-y divide-gray-700/50 overflow-hidden">
                             <div className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-gray-750">
                                 <div className="flex items-center gap-4">
@@ -248,7 +257,7 @@ export default function PreferencesModal({
                                         <p className="text-[13px] text-gray-400 mt-0.5 leading-snug">Choose the initial layout when browsing mods.</p>
                                     </div>
                                 </div>
-                                
+
                                 {/* Grid/List Switcher — identical to Browse Mods header */}
                                 <div className="relative flex bg-gray-800 rounded-lg p-1 border border-gray-700 overflow-hidden">
                                     {/* Sliding background pill */}
@@ -275,13 +284,24 @@ export default function PreferencesModal({
                                     </button>
                                 </div>
                             </div>
+
+                            <div className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-gray-750">
+                                <div className="flex items-center gap-4">
+                                    <RowIcon kind="stream" />
+                                    <div>
+                                        <p className="text-[15px] font-medium text-white">Stream Mode</p>
+                                        <p className="text-[13px] text-gray-400 mt-0.5 leading-snug">Automatically censors usernames in file paths to protect your privacy during streaming or screen sharing.</p>
+                                    </div>
+                                </div>
+                                <Toggle value={streamMode} onChange={setStreamMode} />
+                            </div>
                         </div>
                     </div>
 
                     {/* Guides & Warnings Section */}
                     <div className="space-y-3">
                         <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-widest px-1">Guides & Alerts</h3>
-                        
+
                         <div className="bg-gray-800 border border-gray-700 rounded-2xl overflow-hidden">
                             <div className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-colors hover:bg-gray-750">
                                 <div className="flex items-center gap-4">
@@ -386,20 +406,20 @@ export default function PreferencesModal({
 
                 {/* Footer Action Area */}
                 <div className="flex items-center justify-end gap-3 px-7 py-5 bg-gray-900 border-t border-gray-800 shrink-0">
-                    <Button 
-                        variant="secondary" 
+                    <Button
+                        variant="secondary"
                         onClick={onClose}
                     >
                         Cancel
                     </Button>
-                    <Button 
-                        variant="primary" 
+                    <Button
+                        variant="primary"
                         onClick={handleSave}
                     >
                         Save changes
                     </Button>
                 </div>
-                
+
             </div>
         </div>
     );
