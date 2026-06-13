@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useAppStore } from '../../store/useAppStore';
 import { censorPath, uncensorPath } from '../../utils/pathCensorUtils';
+import { CensoredInput } from '../ui/PathCensor';
 
 import type { ConfigFileInfo } from '../../tauriAdapter';
 
@@ -379,7 +380,6 @@ interface EntryEditorProps {
 }
 
 function EntryEditor({ entry, onChange }: EntryEditorProps) {
-    const { streamMode, username } = useAppStore();
     const descriptionLines = entry.comments.filter((c) => c.isDescription);
     const metaLines = entry.comments.filter((c) => !c.isDescription);
 
@@ -400,20 +400,22 @@ function EntryEditor({ entry, onChange }: EntryEditorProps) {
                 {/* Value Widget */}
                 <div className="flex-shrink-0 w-56">
                     {entry.displayType === 'boolean' ? (
-                        <button
-                            onClick={() => onChange(entry.value === 'true' ? 'false' : 'true')}
-                            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                                entry.value === 'true' ? 'bg-blue-600' : 'bg-gray-600'
-                            }`}
-                            role="switch"
-                            aria-checked={entry.value === 'true'}
-                        >
-                            <span
-                                className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
-                                    entry.value === 'true' ? 'translate-x-6' : 'translate-x-1'
+                        <div className="flex justify-end">
+                            <button
+                                onClick={() => onChange(entry.value === 'true' ? 'false' : 'true')}
+                                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                                    entry.value === 'true' ? 'bg-blue-600' : 'bg-gray-600'
                                 }`}
-                            />
-                        </button>
+                                role="switch"
+                                aria-checked={entry.value === 'true'}
+                            >
+                                <span
+                                    className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+                                        entry.value === 'true' ? 'translate-x-6' : 'translate-x-1'
+                                    }`}
+                                />
+                            </button>
+                        </div>
                     ) : entry.displayType === 'single-select' ? (
                         <select
                             value={entry.value}
@@ -427,24 +429,16 @@ function EntryEditor({ entry, onChange }: EntryEditorProps) {
                             ))}
                         </select>
                     ) : entry.displayType === 'multi-select' ? (
-                        <input
-                            type="text"
-                            value={streamMode ? censorPath(entry.value, username) : entry.value}
-                            onChange={(e) => {
-                                const val = e.target.value;
-                                onChange(streamMode ? uncensorPath(val, entry.value) : val);
-                            }}
+                        <CensoredInput
+                            value={entry.value}
+                            onChange={onChange}
                             placeholder="value1, value2"
                             className="w-full bg-gray-700 border border-gray-600 rounded-lg px-2 py-1 text-white text-sm font-mono focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                         />
                     ) : (
-                        <input
-                            type="text"
-                            value={streamMode ? censorPath(entry.value, username) : entry.value}
-                            onChange={(e) => {
-                                const val = e.target.value;
-                                onChange(streamMode ? uncensorPath(val, entry.value) : val);
-                            }}
+                        <CensoredInput
+                            value={entry.value}
+                            onChange={onChange}
                             className="w-full bg-gray-700 border border-gray-600 rounded-lg px-2 py-1 text-white text-sm font-mono focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                         />
                     )}

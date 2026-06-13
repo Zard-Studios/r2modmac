@@ -76,6 +76,21 @@ export function PathCensor({ path, className = '' }: PathCensorProps) {
     );
 }
 
+function getOverlayClasses(className: string): string {
+    return className
+        .split(/\s+/)
+        .filter(c => {
+            const lower = c.toLowerCase();
+            if (lower.startsWith('px-') || lower.startsWith('py-') || lower.startsWith('p-') || lower.startsWith('pl-') || lower.startsWith('pr-')) return true;
+            if (lower.startsWith('font-')) return true;
+            if (lower.startsWith('text-') && !/text-(?:gray|white|blue|red|black|green|yellow|indigo|purple|pink)/.test(lower)) return true;
+            if (lower.startsWith('leading-')) return true;
+            if (lower.startsWith('rounded')) return true;
+            return false;
+        })
+        .join(' ');
+}
+
 interface CensoredInputProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange'> {
     value: string;
     onChange: (val: string) => void;
@@ -113,6 +128,20 @@ export function CensoredInput({ value, onChange, className = '', placeholder, ..
     const censorStr = effUsername ? '*'.repeat(effUsername.length) : '****';
     const censoredVal = censorPath(value, username);
 
+    // If nothing in the path was censored, just render a completely standard input element to avoid overlay glitches
+    if (censoredVal === value) {
+        return (
+            <input
+                type="text"
+                value={value}
+                onChange={(e) => onChange(e.target.value)}
+                className={className}
+                placeholder={placeholder}
+                {...props}
+            />
+        );
+    }
+
     const parts = censoredVal.split(/([\\/])/);
 
     return (
@@ -120,15 +149,9 @@ export function CensoredInput({ value, onChange, className = '', placeholder, ..
             {/* Overlay */}
             <div
                 ref={overlayRef}
-                className="absolute inset-0 pointer-events-none flex items-center overflow-hidden whitespace-nowrap text-sm text-gray-300"
+                className={`absolute inset-0 pointer-events-none flex items-center overflow-hidden whitespace-nowrap bg-transparent text-gray-300 border border-transparent ${getOverlayClasses(className)}`}
                 style={{
-                    paddingLeft: '12px',
-                    paddingRight: '12px',
-                    fontFamily: 'inherit',
-                    fontSize: 'inherit',
-                    lineHeight: '1.25rem',
                     boxSizing: 'border-box',
-                    border: '1px solid transparent',
                 }}
             >
                 {parts.map((part, idx) => {
@@ -163,7 +186,7 @@ export function CensoredInput({ value, onChange, className = '', placeholder, ..
                     color: 'transparent',
                     caretColor: '#fff',
                 }}
-                className={className}
+                className={`selection:text-transparent ${className}`}
                 placeholder={placeholder}
                 {...props}
             />
