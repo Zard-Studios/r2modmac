@@ -228,6 +228,11 @@ pub fn run() {
             commands::export_import::share_profile,
             commands::export_import::import_profile,
             commands::export_import::import_profile_from_file,
+            commands::profile_commands::list_profile_config_files,
+            commands::profile_commands::read_profile_config_file,
+            commands::profile_commands::write_profile_config_file,
+            commands::profile_commands::reveal_profile_config_file,
+            commands::profile_commands::open_profile_config_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

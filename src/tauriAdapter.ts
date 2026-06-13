@@ -169,4 +169,30 @@ export const tauriAPI: IElectronAPI = {
     stopGame: async (gameIdentifier: string, platform?: 'windows' | 'mac') => {
         return await invoke('stop_game', { gameIdentifier, platform });
     },
+    listProfileConfigFiles: async (profileId: string, gameIdentifier?: string, platform?: string): Promise<ConfigFileInfo[]> => {
+        return await invoke('list_profile_config_files', { profileId, gameIdentifier: gameIdentifier ?? null, platform: platform ?? null });
+    },
+    readProfileConfigFile: async (profileId: string, relativePath: string, root?: string): Promise<string> => {
+        return await invoke('read_profile_config_file', { profileId, relativePath, root: root ?? null });
+    },
+    writeProfileConfigFile: async (profileId: string, relativePath: string, content: string, root?: string): Promise<boolean> => {
+        return await invoke('write_profile_config_file', { profileId, relativePath, content, root: root ?? null });
+    },
+    revealProfileConfigFile: async (profileId: string, relativePath: string, root?: string): Promise<void> => {
+        return await invoke('reveal_profile_config_file', { profileId, relativePath, root: root ?? null });
+    },
+    openProfileConfigFile: async (profileId: string, relativePath: string, root?: string): Promise<void> => {
+        return await invoke('open_profile_config_file', { profileId, relativePath, root: root ?? null });
+    },
 };
+
+/** Metadata about a config file inside a profile directory. */
+export interface ConfigFileInfo {
+    /** Display name of the file (e.g. "BepInEx.cfg") */
+    name: string;
+    /** Path relative to the root (e.g. "BepInEx/config/BepInEx.cfg") */
+    relative_path: string;
+    /** Absolute path to the root directory. Used by read/write commands. */
+    root: string;
+}
+

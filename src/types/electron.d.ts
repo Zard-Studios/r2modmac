@@ -1,5 +1,7 @@
 import type { InstalledMod, Profile } from './profile';
 import type { Community, Package, CommunityPlatformInfo } from './thunderstore';
+import type { ConfigFileInfo } from '../tauriAdapter';
+
 
 export interface AppSettings {
     steam_path: string | null;
@@ -96,6 +98,11 @@ export interface IElectronAPI {
     launchGameWithMods: (gameIdentifier: string, profileId: string, platform?: 'windows' | 'mac') => Promise<void>;
     launchGameVanilla: (gameIdentifier: string, profileId: string, platform?: 'windows' | 'mac') => Promise<void>;
     stopGame: (gameIdentifier: string, platform?: 'windows' | 'mac') => Promise<void>;
+    listProfileConfigFiles: (profileId: string, gameIdentifier?: string, platform?: string) => Promise<ConfigFileInfo[]>;
+    readProfileConfigFile: (profileId: string, relativePath: string, root?: string) => Promise<string>;
+    writeProfileConfigFile: (profileId: string, relativePath: string, content: string, root?: string) => Promise<boolean>;
+    revealProfileConfigFile: (profileId: string, relativePath: string, root?: string) => Promise<void>;
+    openProfileConfigFile: (profileId: string, relativePath: string, root?: string) => Promise<void>;
 }
 
 export interface UpdateInfo {
