@@ -3,6 +3,7 @@ import { Button } from '../ui';
 import type { Profile, ProfilePlatform } from '../../types/profile';
 import { ConfigEditorTab } from './ConfigEditorTab';
 import { PathCensor, CensoredInput } from '../ui/PathCensor';
+import { openFolderLabel } from '../../utils/platformUtils';
 
 
 type SettingsTab = 'settings' | 'config-editor';
@@ -337,7 +338,7 @@ export function SettingsModal({ isOpen, onClose, selectedGame, activeProfile }: 
                                     <p className="text-xs text-gray-500 mt-2">
                                         {activeProfilePlatform === 'mac'
                                             ? "Select your native macOS Steam folder (e.g., ~/Library/Application Support/Steam)."
-                                            : "Select the Steam folder inside your Windows prefix or bottle (e.g., drive_c/Program Files (x86)/Steam)."}
+                                            : "Select your Steam installation folder (e.g., C:/Program Files (x86)/Steam, or drive_c/Program Files (x86)/Steam inside a compatibility layer)."}
                                     </p>
                                 </div>
                             )}
@@ -365,7 +366,7 @@ export function SettingsModal({ isOpen, onClose, selectedGame, activeProfile }: 
                                                     <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
                                                     </svg>
-                                                    Open in Finder
+                                                    {openFolderLabel()}
                                                 </button>
                                                 <button
                                                     onClick={handleManualGamePath}

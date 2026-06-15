@@ -180,7 +180,7 @@ export function useModActions({
         if (legacyInstallMode) {
             const gamePath = await window.ipcRenderer.getGamePath(selectedCommunity || '', targetProfile?.platform);
             if (!gamePath) {
-                await window.ipcRenderer.alert('Game Path Required', 'Please configure the game directory in Settings before installing mods.');
+                await window.ipcRenderer.alert('Game Path Required', 'Please configure the game directory in Settings before installing mods in Legacy mode.\n\nLegacy mode installs mods directly into the game folder. Go to Settings → Game Directory to set the path.');
                 return;
             }
             setProgressState({ isOpen: true, title: `Installing ${pkg.name}`, progress: 0, currentTask: 'Starting installation...' });
@@ -413,7 +413,7 @@ export function useModActions({
 
                 const gamePath = await window.ipcRenderer.getGamePath(selectedCommunity || '', targetProfile?.platform);
                 if (!gamePath) {
-                    throw new Error('Game path not configured. Open Settings and set the game directory.');
+                    throw new Error('Game directory not configured. Open Settings → Game Directory to set the path before updating mods in Legacy mode.');
                 }
                 await installModWithDependencies(pkg, targetVersion, new Set(), profileIdToUse, undefined, gamePath);
 

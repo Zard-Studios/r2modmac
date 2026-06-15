@@ -4,6 +4,7 @@ import type { Profile } from '../../types/profile';
 import type { CommunityPlatformInfo } from '../../types/thunderstore';
 import { Button } from '../ui';
 import { PlatformPicker } from './PlatformPicker';
+import { revealInFileManagerLabel } from '../../utils/platformUtils';
 
 function getFirstLetter(name: string): string {
     if (!name) return '';
@@ -311,7 +312,7 @@ export function ProfileList({
                                 e.preventDefault();
                                 e.stopPropagation();
                                 const menuItem = await MenuItem.new({
-                                    text: 'Reveal in Finder',
+                                    text: revealInFileManagerLabel(),
                                     action: async () => {
                                         try {
                                             await window.ipcRenderer.openProfileFolder(profile.id);

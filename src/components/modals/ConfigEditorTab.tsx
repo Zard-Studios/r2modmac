@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useAppStore } from '../../store/useAppStore';
 import { censorPath, uncensorPath } from '../../utils/pathCensorUtils';
 import { CensoredInput } from '../ui/PathCensor';
+import { revealInFileManagerLabel } from '../../utils/platformUtils';
 
 import type { ConfigFileInfo } from '../../tauriAdapter';
 
@@ -753,10 +754,10 @@ function TreeNodeView({
         const root = findRoot(node);
         const { MenuItem: MI, Menu: M } = await import('@tauri-apps/api/menu');
         const menuItem = await MI.new({
-            text: 'Reveal in Finder',
+            text: revealInFileManagerLabel(),
             action: async () => {
                 try { await window.ipcRenderer.revealProfileConfigFile(profileId, relPath, root); }
-                catch (err) { console.error('Failed to reveal folder in Finder', err); }
+                catch (err) { console.error('Failed to reveal folder in file manager', err); }
             },
         });
         const menu = await M.new({ items: [menuItem] });
@@ -829,10 +830,10 @@ function TreeNodeView({
                                 e.stopPropagation();
                                 const { MenuItem: MI, Menu: M } = await import('@tauri-apps/api/menu');
                                 const menuItem = await MI.new({
-                                    text: 'Reveal in Finder',
+                                    text: revealInFileManagerLabel(),
                                     action: async () => {
                                         try { await window.ipcRenderer.revealProfileConfigFile(profileId, f.relative_path, f.root ?? undefined); }
-                                        catch (err) { console.error('Failed to reveal file in Finder', err); }
+                                        catch (err) { console.error('Failed to reveal file in file manager', err); }
                                     },
                                 });
                                 const menu = await M.new({ items: [menuItem] });
@@ -896,13 +897,10 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
     const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set());
     const [lineCountState, setLineCountState] = useState(1);
 
-    useEffect(() => {
-        if (isHeavyFile) {
-            setLineCountState(1);
-        } else {
-            setLineCountState(rawContent.split('\n').length || 1);
-        }
-    }, [rawContent, isHeavyFile]);
+    // Helper: compute line count from raw content without triggering an effect.
+    // Threshold mirrors the isHeavyFile constant (100 000 chars).
+    const countLines = (content: string) =>
+        content.length > 100000 ? 1 : content.split('\n').length || 1;
 
     // Refs for raw editor line numbers gutter sync
     const gutterRef = useRef<HTMLDivElement>(null);
@@ -917,6 +915,7 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
                 const previousContent = undoStack.pop()!;
                 historyRef.current.redo.push(rawContent);
                 setRawContent(previousContent);
+                setLineCountState(countLines(previousContent));
                 try {
                     setParsedCfg(parseCfg(previousContent));
                 } catch (e) {
@@ -937,6 +936,7 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
                 const nextContent = redoStack.pop()!;
                 historyRef.current.undo.push(rawContent);
                 setRawContent(nextContent);
+                setLineCountState(countLines(nextContent));
                 try {
                     setParsedCfg(parseCfg(nextContent));
                 } catch (e) {
@@ -1016,6 +1016,7 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
             // Auto-format for display only — never marks dirty (user must type to dirty the file)
             const content = tryPrettyPrintJson(raw, file.name);
             setRawContent(content);
+            setLineCountState(countLines(content));
             if (textareaRef.current) {
                 textareaRef.current.value = content;
             }
@@ -1029,6 +1030,7 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
         } catch (e) {
             console.error('Failed to read config file', e);
             setRawContent('');
+            setLineCountState(1);
             if (textareaRef.current) {
                 textareaRef.current.value = '';
             }
@@ -1068,7 +1070,9 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
                     }
                 ),
             };
-            setRawContent(serializeCfg(next));
+            const serialized = serializeCfg(next);
+            setRawContent(serialized);
+            setLineCountState(countLines(serialized));
             setIsDirty(true);
             return next;
         });
@@ -1098,6 +1102,7 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
         try {
             await window.ipcRenderer.writeProfileConfigFile(profileId, selectedFile.relative_path, currentContent, selectedFile.root ?? undefined);
             setRawContent(currentContent);
+            setLineCountState(countLines(currentContent));
             setIsDirty(false);
             setSaveStatus('saved');
         } catch (e) {
@@ -1391,8 +1396,7 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
                 </div>
                 <p className="text-gray-400 font-medium mb-1">No config files found</p>
                 <p className="text-gray-600 text-sm max-w-xs">
-                    Apply your profile to the game first to generate BepInEx config files.
-                    Then come back here to edit them.
+                    Make sure the game directory is set in <strong className="text-gray-500">Settings → Game Directory</strong>, then apply your profile to the game to generate BepInEx config files.
                 </p>
             </div>
         );
@@ -1514,6 +1518,7 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
                                                     try {
                                                         const pretty = JSON.stringify(JSON.parse(current), null, 2);
                                                         setRawContent(pretty);
+                                                        setLineCountState(countLines(pretty));
                                                         if (textareaRef.current) textareaRef.current.value = pretty;
                                                         setIsDirty(true);
                                                     } catch { /* ignore if invalid JSON */ }
@@ -1538,10 +1543,10 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
                                                 selectedFile.root ?? undefined
                                             );
                                         } catch (err) {
-                                            console.error('Failed to reveal file in Finder', err);
+                                            console.error('Failed to reveal file in file manager', err);
                                         }
                                     }}
-                                    title="Reveal in Finder"
+                                    title={revealInFileManagerLabel()}
                                     className="text-xs text-gray-400 hover:text-white p-1.5 rounded-lg hover:bg-gray-700 transition-colors flex items-center justify-center"
                                 >
                                     <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -1634,7 +1639,7 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
                                             <svg className="h-3.5 w-3.5 text-blue-400/80" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                                                 <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" />
                                             </svg>
-                                            Reveal in Finder
+                                            {revealInFileManagerLabel()}
                                         </button>
                                     </div>
                                 </div>
