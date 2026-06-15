@@ -518,7 +518,18 @@ pub fn list_profile_config_files(
     }
 
     // De-duplicate by relative_path (same file found through both paths).
-    files.sort_by(|a, b| a.relative_path.cmp(&b.relative_path));
+    // If a file exists in both the profile and game directories, prioritize the game directory (which has root != profile_dir).
+    let profile_dir_str = profile_dir.to_string_lossy().to_string();
+    files.sort_by(|a, b| {
+        let cmp = a.relative_path.cmp(&b.relative_path);
+        if cmp == std::cmp::Ordering::Equal {
+            let a_is_profile = a.root == profile_dir_str;
+            let b_is_profile = b.root == profile_dir_str;
+            a_is_profile.cmp(&b_is_profile)
+        } else {
+            cmp
+        }
+    });
     files.dedup_by(|a, b| a.relative_path == b.relative_path);
     Ok(files)
 }
