@@ -130,23 +130,34 @@ export default function PreferencesModal({
     // Track active state for a gentle reveal animation
     const [isVisible, setIsVisible] = useState(false);
 
-    useEffect(() => {
+    // Track props to reset state during rendering (React-recommended pattern)
+    const [prevSettings, setPrevSettings] = useState(settings);
+    const [prevIsOpen, setPrevIsOpen] = useState(isOpen);
+
+    if (isOpen !== prevIsOpen || settings !== prevSettings) {
+        setPrevIsOpen(isOpen);
+        setPrevSettings(settings);
         if (isOpen) {
-            setIsVisible(true);
+            setLegacyMode(settings.legacy_install_mode);
+            setAskVersionBeforeInstall(settings.ask_version_before_install);
+            setInstallInParallel(settings.install_in_parallel);
+            setConfirmBeforeApply(settings.confirm_before_apply_to_game);
+            setWriteDebugLogsToGame(settings.write_debug_logs_to_game);
+            setDefaultModViewMode(settings.default_mod_view_mode);
+            setStreamMode(settings.stream_mode);
         } else {
             setIsVisible(false);
         }
-    }, [isOpen]);
+    }
 
     useEffect(() => {
-        setLegacyMode(settings.legacy_install_mode);
-        setAskVersionBeforeInstall(settings.ask_version_before_install);
-        setInstallInParallel(settings.install_in_parallel);
-        setConfirmBeforeApply(settings.confirm_before_apply_to_game);
-        setWriteDebugLogsToGame(settings.write_debug_logs_to_game);
-        setDefaultModViewMode(settings.default_mod_view_mode);
-        setStreamMode(settings.stream_mode);
-    }, [settings]);
+        if (isOpen) {
+            const raf = requestAnimationFrame(() => {
+                setIsVisible(true);
+            });
+            return () => cancelAnimationFrame(raf);
+        }
+    }, [isOpen]);
 
     if (!isOpen) return null;
 
