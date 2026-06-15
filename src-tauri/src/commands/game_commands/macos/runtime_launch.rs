@@ -70,7 +70,6 @@ pub(crate) fn launch_macos_bepinex_wrapper(
     Ok(true)
 }
 
-#[cfg(target_os = "macos")]
 pub(crate) fn find_bepinex_script_in_dir(dir: &std::path::Path) -> Option<std::path::PathBuf> {
     if !dir.exists() {
         return None;

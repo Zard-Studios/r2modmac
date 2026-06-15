@@ -76,5 +76,9 @@ pub async fn stop_game(
         return stop_game_for_windows(&game_path);
     }
 
-    stop_game_for_macos(&game_path)
+    #[cfg(target_os = "macos")]
+    return stop_game_for_macos(&game_path);
+
+    #[cfg(not(target_os = "macos"))]
+    Err("stop_game is not supported on this platform".to_string())
 }

@@ -318,6 +318,7 @@ pub(crate) fn is_game_running_for_macos(game_path: &std::path::Path) -> Result<b
     Ok(is_process_running_for_executable(&executable_path))
 }
 
+#[cfg(target_os = "macos")]
 pub(crate) fn stop_game_for_macos(game_path: &std::path::Path) -> Result<(), String> {
     let executable_path = find_macos_executable_path(game_path)
         .ok_or_else(|| "Could not determine the game executable.".to_string())?;
