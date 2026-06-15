@@ -31,23 +31,50 @@ body {
   /* Prevent body scroll */
 }
 
-/* Custom Scrollbar */
-.custom-scrollbar::-webkit-scrollbar {
+/* ── macOS-style overlay scrollbars (global) ─────────────────────────────── */
+/* Force overlay mode so the bar floats over content without shifting layout  */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.20) transparent;
+}
+
+/* WebKit (Chrome / Electron / Tauri webview) */
+::-webkit-scrollbar {
   width: 6px;
+  height: 6px;
 }
 
-.custom-scrollbar::-webkit-scrollbar-track {
-  background: rgba(0, 0, 0, 0.1);
-  border-radius: 10px;
+::-webkit-scrollbar-track {
+  background: transparent;
 }
 
-.custom-scrollbar::-webkit-scrollbar-thumb {
-  background: rgba(59, 130, 246, 0.5);
-  border-radius: 10px;
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.0);
+  border-radius: 100px;
+  transition: background 0.25s ease;
 }
 
-.custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: rgba(59, 130, 246, 0.7);
+/* Show thumb only when the parent is hovered or actively scrolling */
+*:hover::-webkit-scrollbar-thumb,
+*:focus-within::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.38) !important;
+}
+
+::-webkit-scrollbar-thumb:active {
+  background: rgba(255, 255, 255, 0.50) !important;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Legacy helper class – keep it so existing JSX doesn't break */
+.custom-scrollbar {
+  /* nothing extra needed – global rules above already apply */
 }
 
 .stream-censor-blur {
