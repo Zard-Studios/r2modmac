@@ -23,30 +23,79 @@ pub fn run() {
             {
                 if let Ok(new_data_dir) = utils::paths::app_data_dir(app) {
                     if let Some(parent_dir) = new_data_dir.parent() {
-                        let old_data_dir = parent_dir.join("com.r2modmac");
-                        if old_data_dir.exists() && !new_data_dir.exists() {
-                            eprintln!(
-                                "[startup] Windows MIGRATION: Renaming old data dir {:?} to {:?}",
-                                old_data_dir, new_data_dir
-                            );
-                            if let Err(e) = std::fs::rename(&old_data_dir, &new_data_dir) {
-                                eprintln!("[startup] Windows MIGRATION FAILED: {}", e);
-                            } else {
-                                eprintln!("[startup] Windows MIGRATION SUCCESS");
+                        // Migrate com.r2modmac -> r2modmac.
+                        // If r2modmac doesn't exist yet, a simple rename is enough.
+                        // If r2modmac already exists (created empty on a previous run before
+                        // migration ran), we fall back to a recursive merge so no user data
+                        // is left stranded inside com.r2modmac.
+                        for old_name in ["com.r2modmac", "com.r2modmac.app"] {
+                            let old_dir = parent_dir.join(old_name);
+                            if !old_dir.exists() {
+                                continue;
                             }
-                        }
-
-                        let very_old_data_dir = parent_dir.join("com.r2modmac.app");
-                        if very_old_data_dir.exists() && !new_data_dir.exists() {
-                            eprintln!(
-                                "[startup] Windows MIGRATION (legacy): Renaming old data dir {:?} to {:?}",
-                                very_old_data_dir, new_data_dir
-                            );
-                            if let Err(e) = std::fs::rename(&very_old_data_dir, &new_data_dir) {
-                                eprintln!("[startup] Windows MIGRATION FAILED: {}", e);
+                            if !new_data_dir.exists() {
+                                // Simple atomic rename (fast path).
+                                eprintln!(
+                                    "[startup] Windows MIGRATION: renaming {:?} -> {:?}",
+                                    old_dir, new_data_dir
+                                );
+                                if let Err(e) = std::fs::rename(&old_dir, &new_data_dir) {
+                                    eprintln!("[startup] Windows MIGRATION rename failed: {}", e);
+                                } else {
+                                    eprintln!("[startup] Windows MIGRATION SUCCESS (rename)");
+                                }
                             } else {
-                                eprintln!("[startup] Windows MIGRATION SUCCESS");
+                                // r2modmac already exists — merge contents from old dir into it.
+                                // This happens when the app already ran once and created an empty
+                                // r2modmac before the migration had a chance to rename.
+                                eprintln!(
+                                    "[startup] Windows MIGRATION: {:?} exists, merging {:?} into it",
+                                    new_data_dir, old_dir
+                                );
+                                fn merge_dirs(src: &std::path::Path, dst: &std::path::Path) {
+                                    let Ok(entries) = std::fs::read_dir(src) else { return };
+                                    let _ = std::fs::create_dir_all(dst);
+                                    for entry in entries.filter_map(|e| e.ok()) {
+                                        let src_path = entry.path();
+                                        let dst_path = dst.join(entry.file_name());
+                                        if src_path.is_dir() {
+                                            if dst_path.exists() {
+                                                // Recurse into existing directory.
+                                                merge_dirs(&src_path, &dst_path);
+                                            } else {
+                                                // Destination subdirectory doesn't exist — rename it.
+                                                if let Err(e) = std::fs::rename(&src_path, &dst_path) {
+                                                    eprintln!(
+                                                        "[startup] MIGRATION: failed to move dir {:?}: {}",
+                                                        src_path, e
+                                                    );
+                                                }
+                                            }
+                                        } else if !dst_path.exists() {
+                                            // Only move files that don't already exist in the destination.
+                                            if let Err(e) = std::fs::rename(&src_path, &dst_path) {
+                                                eprintln!(
+                                                    "[startup] MIGRATION: failed to move file {:?}: {}",
+                                                    src_path, e
+                                                );
+                                            }
+                                        }
+                                    }
+                                }
+                                merge_dirs(&old_dir, &new_data_dir);
+                                // Remove the old directory if it is now empty.
+                                if std::fs::read_dir(&old_dir).map(|mut d| d.next().is_none()).unwrap_or(false) {
+                                    let _ = std::fs::remove_dir(&old_dir);
+                                    eprintln!("[startup] Windows MIGRATION SUCCESS (merge+cleanup)");
+                                } else {
+                                    eprintln!(
+                                        "[startup] Windows MIGRATION: old dir {:?} not empty after merge, leaving it",
+                                        old_dir
+                                    );
+                                }
                             }
+                            // Only migrate the first old directory that exists.
+                            break;
                         }
                     }
                 }
