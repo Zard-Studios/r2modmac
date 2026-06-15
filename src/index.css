@@ -40,8 +40,8 @@ body {
 
 /* WebKit (Chrome / Electron / Tauri webview) */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
 }
 
 ::-webkit-scrollbar-track {
@@ -72,10 +72,7 @@ body {
   background: transparent;
 }
 
-/* Legacy helper class – keep it so existing JSX doesn't break */
-.custom-scrollbar {
-  /* nothing extra needed – global rules above already apply */
-}
+/* Legacy helper class – global rules above already apply to it */
 
 .stream-censor-blur {
   display: inline-block;
