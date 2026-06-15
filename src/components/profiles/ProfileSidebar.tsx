@@ -46,6 +46,18 @@ const localModToPackage = (mod: InstalledMod): Package => {
     };
 };
 
+function getFirstLetter(name: string | undefined): string {
+    if (!name) return '';
+    try {
+        const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+        const segments = segmenter.segment(name);
+        const firstSegment = [...segments][0]?.segment;
+        return firstSegment ? firstSegment.toUpperCase() : '';
+    } catch {
+        return ([...name][0] || '').toUpperCase();
+    }
+}
+
 interface ProfileSidebarProps {
     activeProfile: Profile | undefined;
     currentCommunity: Community | null;
@@ -395,7 +407,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                         />
                     ) : (
                         <div className={`w-12 h-12 bg-gradient-to-br from-blue-500 to-purple-600 rounded-xl shadow-lg flex items-center justify-center text-xl font-bold text-white ${activeProfile?.is_vanilla ? 'grayscale' : ''}`}>
-                            {activeProfile?.name.charAt(0).toUpperCase()}
+                            {getFirstLetter(activeProfile?.name)}
                         </div>
                     )}
                     <div className="min-w-0 flex-1">
@@ -673,7 +685,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                                 />
                             ) : (
                                 <div className="w-full h-full flex items-center justify-center text-gray-600 text-xs font-bold">
-                                    {currentCommunity.name.charAt(0)}
+                                    {getFirstLetter(currentCommunity.name)}
                                 </div>
                             )}
                         </div>
@@ -784,7 +796,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                                     />
                                 ) : (
                                     <div className="w-24 h-24 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-4xl font-bold text-white border-4 border-gray-700 group-hover:border-blue-500 transition-colors">
-                                        {activeProfile.name.charAt(0).toUpperCase()}
+                                        {getFirstLetter(activeProfile.name)}
                                     </div>
                                 )}
                                 <div className="absolute inset-0 bg-black/50 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
