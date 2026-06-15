@@ -104,8 +104,7 @@ fn default_false() -> bool {
 }
 
 pub fn get_settings_path(app: &tauri::AppHandle) -> std::path::PathBuf {
-    use tauri::Manager;
-    app.path().app_data_dir().unwrap().join("settings.json")
+    crate::utils::paths::app_data_dir(app).unwrap().join("settings.json")
 }
 
 pub fn load_settings_impl(app: &tauri::AppHandle) -> Settings {

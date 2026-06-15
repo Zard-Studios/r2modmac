@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 pub const GAME_MANIFEST_SCOPE: &str = "game";
 
@@ -115,9 +115,7 @@ fn manifest_slug(mod_full_name: &str) -> String {
 }
 
 fn manifest_scope_dir(app: &AppHandle, profile_id: &str, scope: &str) -> Result<PathBuf, String> {
-    Ok(app
-        .path()
-        .app_data_dir()
+    Ok(crate::utils::paths::app_data_dir(app)
         .map_err(|e| e.to_string())?
         .join("profiles")
         .join(profile_id)

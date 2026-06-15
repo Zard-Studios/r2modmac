@@ -132,9 +132,7 @@ pub(crate) async fn ensure_macos_bepinex_runtime_present(
     profile_id: &str,
     game_path: &std::path::Path,
 ) -> Result<(), String> {
-    let profiles_path = app
-        .path()
-        .app_data_dir()
+    let profiles_path = crate::utils::paths::app_data_dir(app)
         .map_err(|e| e.to_string())?
         .join("profiles.json");
     let profiles_data = fs::read_to_string(&profiles_path).map_err(|e| e.to_string())?;
@@ -182,9 +180,7 @@ pub(crate) async fn ensure_macos_bepinex_runtime_present(
         );
     }
 
-    let profile_dir = app
-        .path()
-        .app_data_dir()
+    let profile_dir = crate::utils::paths::app_data_dir(app)
         .map_err(|e| e.to_string())?
         .join("profiles")
         .join(profile_id);

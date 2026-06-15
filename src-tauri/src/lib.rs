@@ -2,7 +2,7 @@ pub mod commands;
 pub mod models;
 pub mod utils;
 
-use tauri::{Emitter, Manager};
+use tauri::Emitter;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -18,28 +18,65 @@ pub fn run() {
 
             utils::volume_watcher::start_volume_watcher(app.handle().clone());
 
-            if let Ok(new_data_dir) = app.path().app_data_dir() {
-                if let Some(parent_dir) = new_data_dir.parent() {
-                    let old_data_dir = parent_dir.join("com.r2modmac.app");
-                    if old_data_dir.exists() && !new_data_dir.exists() {
-                        eprintln!(
-                            "[startup] MIGRATION: Renaming old data dir {:?} to {:?}",
-                            old_data_dir, new_data_dir
-                        );
-                        if let Err(e) = std::fs::rename(&old_data_dir, &new_data_dir) {
-                            eprintln!("[startup] MIGRATION FAILED: {}", e);
-                        } else {
-                            eprintln!("[startup] MIGRATION SUCCESS");
+            // Migrate old directories
+            #[cfg(target_os = "windows")]
+            {
+                if let Ok(new_data_dir) = utils::paths::app_data_dir(app) {
+                    if let Some(parent_dir) = new_data_dir.parent() {
+                        let old_data_dir = parent_dir.join("com.r2modmac");
+                        if old_data_dir.exists() && !new_data_dir.exists() {
+                            eprintln!(
+                                "[startup] Windows MIGRATION: Renaming old data dir {:?} to {:?}",
+                                old_data_dir, new_data_dir
+                            );
+                            if let Err(e) = std::fs::rename(&old_data_dir, &new_data_dir) {
+                                eprintln!("[startup] Windows MIGRATION FAILED: {}", e);
+                            } else {
+                                eprintln!("[startup] Windows MIGRATION SUCCESS");
+                            }
+                        }
+
+                        let very_old_data_dir = parent_dir.join("com.r2modmac.app");
+                        if very_old_data_dir.exists() && !new_data_dir.exists() {
+                            eprintln!(
+                                "[startup] Windows MIGRATION (legacy): Renaming old data dir {:?} to {:?}",
+                                very_old_data_dir, new_data_dir
+                            );
+                            if let Err(e) = std::fs::rename(&very_old_data_dir, &new_data_dir) {
+                                eprintln!("[startup] Windows MIGRATION FAILED: {}", e);
+                            } else {
+                                eprintln!("[startup] Windows MIGRATION SUCCESS");
+                            }
                         }
                     }
                 }
             }
 
-            if let Ok(data_dir) = app.path().app_data_dir() {
+            #[cfg(target_os = "macos")]
+            {
+                if let Ok(new_data_dir) = utils::paths::app_data_dir(app) {
+                    if let Some(parent_dir) = new_data_dir.parent() {
+                        let old_data_dir = parent_dir.join("com.r2modmac.app");
+                        if old_data_dir.exists() && !new_data_dir.exists() {
+                            eprintln!(
+                                "[startup] macOS MIGRATION: Renaming old data dir {:?} to {:?}",
+                                old_data_dir, new_data_dir
+                            );
+                            if let Err(e) = std::fs::rename(&old_data_dir, &new_data_dir) {
+                                eprintln!("[startup] MIGRATION FAILED: {}", e);
+                            } else {
+                                eprintln!("[startup] MIGRATION SUCCESS");
+                            }
+                        }
+                    }
+                }
+            }
+
+            if let Ok(data_dir) = utils::paths::app_data_dir(app) {
                 let mut settings = models::shared::load_settings_impl(&app.handle());
 
                 if !settings.thunderstore_chunk_cache_migrated {
-                    if let Ok(cache_dir) = app.path().app_cache_dir() {
+                    if let Ok(cache_dir) = utils::paths::app_cache_dir(app) {
                         let chunks_dir = cache_dir.join("chunks");
                         if chunks_dir.exists() {
                             let _ = std::fs::remove_dir_all(&chunks_dir);
@@ -82,7 +119,7 @@ pub fn run() {
             {
                 use std::fs;
                 use std::os::unix::fs::PermissionsExt;
-                let bin_dir = app.path().app_data_dir().unwrap().join("bin");
+                let bin_dir = utils::paths::app_data_dir(app).unwrap().join("bin");
                 if !bin_dir.exists() {
                     let _ = fs::create_dir_all(&bin_dir);
                 }

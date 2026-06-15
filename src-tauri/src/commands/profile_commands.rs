@@ -13,7 +13,7 @@ fn is_bepinex_shell_script(name: &str) -> bool {
 
 #[command]
 pub fn get_profiles(app: AppHandle) -> Result<Vec<serde_json::Value>, String> {
-    let profile_path = app.path().app_data_dir().unwrap().join("profiles.json");
+    let profile_path = crate::utils::paths::app_data_dir(&app).unwrap().join("profiles.json");
     if !profile_path.exists() {
         return Ok(vec![]);
     }
@@ -28,7 +28,7 @@ pub async fn save_profiles(
     app: AppHandle,
     profiles: Vec<serde_json::Value>,
 ) -> Result<bool, String> {
-    let profile_path = app.path().app_data_dir().unwrap().join("profiles.json");
+    let profile_path = crate::utils::paths::app_data_dir(&app).unwrap().join("profiles.json");
 
     // Serialize first (fast operation)
     let data = serde_json::to_string_pretty(&profiles).map_err(|e| e.to_string())?;
@@ -55,9 +55,7 @@ pub async fn delete_profile_folder(
     game_identifier: Option<String>,
     platform: Option<String>,
 ) -> Result<bool, String> {
-    let profile_dir = app
-        .path()
-        .app_data_dir()
+    let profile_dir = crate::utils::paths::app_data_dir(&app)
         .unwrap()
         .join("profiles")
         .join(&profile_id);
@@ -200,9 +198,7 @@ pub async fn delete_profile_folder(
 
 #[command]
 pub async fn open_profile_folder(app: AppHandle, profile_id: String) -> Result<(), String> {
-    let profile_dir = app
-        .path()
-        .app_data_dir()
+    let profile_dir = crate::utils::paths::app_data_dir(&app)
         .unwrap()
         .join("profiles")
         .join(&profile_id);
@@ -231,9 +227,7 @@ pub async fn clear_profile_cache(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let profiles_dir = app
-        .path()
-        .app_data_dir()
+    let profiles_dir = crate::utils::paths::app_data_dir(&app)
         .map_err(|e| e.to_string())?
         .join("profiles");
 
@@ -296,7 +290,7 @@ pub async fn toggle_profile_vanilla_mode(
     app: AppHandle,
     profile_id: String,
 ) -> Result<bool, String> {
-    let profile_path = app.path().app_data_dir().unwrap().join("profiles.json");
+    let profile_path = crate::utils::paths::app_data_dir(&app).unwrap().join("profiles.json");
     if !profile_path.exists() {
         return Err("No profiles found".to_string());
     }
@@ -470,9 +464,7 @@ pub fn list_profile_config_files(
     let mut files: Vec<ConfigFileInfo> = Vec::new();
 
     // ── 1. Profile directory (covers Windows profiles where BepInEx lives here)
-    let profile_dir = app
-        .path()
-        .app_data_dir()
+    let profile_dir = crate::utils::paths::app_data_dir(&app)
         .map_err(|e| e.to_string())?
         .join("profiles")
         .join(&profile_id);
@@ -485,9 +477,7 @@ pub fn list_profile_config_files(
     //       the game folder).  Only scan BepInEx/config/ and skip DLL-heavy
     //       subdirs so we don't surface binary files.
     if let (Some(game_id), Some(plat)) = (game_identifier, platform) {
-        let settings_path = app
-            .path()
-            .app_data_dir()
+        let settings_path = crate::utils::paths::app_data_dir(&app)
             .map_err(|e| e.to_string())?
             .join("settings.json");
 
@@ -545,8 +535,7 @@ pub fn read_profile_config_file(
     let base_dir = if let Some(r) = root {
         std::path::PathBuf::from(r)
     } else {
-        app.path()
-            .app_data_dir()
+        crate::utils::paths::app_data_dir(&app)
             .map_err(|e| e.to_string())?
             .join("profiles")
             .join(&profile_id)
@@ -578,8 +567,7 @@ pub fn write_profile_config_file(
     let base_dir = if let Some(r) = root {
         std::path::PathBuf::from(r)
     } else {
-        app.path()
-            .app_data_dir()
+        crate::utils::paths::app_data_dir(&app)
             .map_err(|e| e.to_string())?
             .join("profiles")
             .join(&profile_id)
@@ -625,8 +613,7 @@ pub fn reveal_profile_config_file(
     let base_dir = if let Some(r) = root {
         std::path::PathBuf::from(r)
     } else {
-        app.path()
-            .app_data_dir()
+        crate::utils::paths::app_data_dir(&app)
             .map_err(|e| e.to_string())?
             .join("profiles")
             .join(&profile_id)
@@ -689,8 +676,7 @@ pub fn open_profile_config_file(
     let base_dir = if let Some(r) = root {
         std::path::PathBuf::from(r)
     } else {
-        app.path()
-            .app_data_dir()
+        crate::utils::paths::app_data_dir(&app)
             .map_err(|e| e.to_string())?
             .join("profiles")
             .join(&profile_id)

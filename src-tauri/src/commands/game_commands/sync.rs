@@ -11,7 +11,7 @@ pub async fn sync_profile_to_game(
     let use_cache = use_legacy_cache.unwrap_or(false);
 
     // 1. Read profile mods and platform from profiles.json
-    let profiles_path = app.path().app_data_dir().unwrap().join("profiles.json");
+    let profiles_path = crate::utils::paths::app_data_dir(&app).unwrap().join("profiles.json");
     let profiles_data = fs::read_to_string(&profiles_path).map_err(|e| e.to_string())?;
     let profiles: Vec<serde_json::Value> =
         serde_json::from_str(&profiles_data).map_err(|e| e.to_string())?;
@@ -62,9 +62,7 @@ pub async fn sync_profile_to_game(
     };
 
     // Profile cache path
-    let profile_dir = app
-        .path()
-        .app_data_dir()
+    let profile_dir = crate::utils::paths::app_data_dir(&app)
         .map_err(|e| e.to_string())?
         .join("profiles")
         .join(&profile_id);

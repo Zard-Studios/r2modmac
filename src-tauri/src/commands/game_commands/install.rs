@@ -33,9 +33,7 @@ pub async fn install_to_game(
         is_mac_profile && should_manage_steam_launch_options(&effective_distribution, &launch_mode);
 
     // 2. Get profile path
-    let profile_dir = app
-        .path()
-        .app_data_dir()
+    let profile_dir = crate::utils::paths::app_data_dir(&app)
         .map_err(|e| e.to_string())?
         .join("profiles")
         .join(&profile_id);
@@ -54,7 +52,7 @@ pub async fn install_to_game(
         override_val
     } else {
         // Fallback: Read from profiles.json
-        let profiles_path = app.path().app_data_dir().unwrap().join("profiles.json");
+        let profiles_path = crate::utils::paths::app_data_dir(&app).unwrap().join("profiles.json");
         let mut vanilla = false;
         if profiles_path.exists() {
             if let Ok(data) = fs::read_to_string(&profiles_path) {

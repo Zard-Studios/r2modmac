@@ -14,7 +14,7 @@ use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tauri::{command, AppHandle, Emitter, Manager};
+use tauri::{command, AppHandle, Emitter};
 
 const APP_USER_AGENT: &str = concat!("r2modmac/", env!("CARGO_PKG_VERSION"));
 const NEWTONSOFT_JSON_VERSION: &str = "12.0.3";
@@ -788,9 +788,7 @@ fn local_mod_dir(
     profile_id: &str,
     local_id: &str,
 ) -> Result<std::path::PathBuf, String> {
-    Ok(app
-        .path()
-        .app_data_dir()
+    Ok(crate::utils::paths::app_data_dir(app)
         .map_err(|e| e.to_string())?
         .join("profiles")
         .join(profile_id)
@@ -1386,7 +1384,7 @@ fn normalize_regular_mod_entry(
 }
 
 fn profile_is_vanilla(app: &AppHandle, profile_id: &str) -> bool {
-    let profiles_path = match app.path().app_data_dir() {
+    let profiles_path = match crate::utils::paths::app_data_dir(app) {
         Ok(path) => path.join("profiles.json"),
         Err(_) => return false,
     };
@@ -3058,9 +3056,7 @@ async fn install_mod_bytes(
             dequarantine_recursive(game_dir);
 
             if use_profile_cache.unwrap_or(false) {
-                let profile_dir = app
-                    .path()
-                    .app_data_dir()
+                let profile_dir = crate::utils::paths::app_data_dir(&app)
                     .map_err(|e| e.to_string())?
                     .join("profiles")
                     .join(&profile_id);
@@ -3095,9 +3091,7 @@ async fn install_mod_bytes(
         extract_zip_directory_to_target(&mut archive, &mod_dir)?;
 
         if use_profile_cache.unwrap_or(false) {
-            let profile_dir = app
-                .path()
-                .app_data_dir()
+            let profile_dir = crate::utils::paths::app_data_dir(&app)
                 .map_err(|e| e.to_string())?
                 .join("profiles")
                 .join(&profile_id);
@@ -3266,9 +3260,7 @@ async fn install_mod_bytes(
 
     // LEGACY MODE: Also save to profile cache folder
     if use_profile_cache.unwrap_or(false) {
-        let profile_dir = app
-            .path()
-            .app_data_dir()
+        let profile_dir = crate::utils::paths::app_data_dir(&app)
             .map_err(|e| e.to_string())?
             .join("profiles")
             .join(&profile_id);
@@ -3327,9 +3319,7 @@ pub async fn remove_mod(
     profile_id: String,
     mod_name: String,
 ) -> Result<bool, String> {
-    let profile_dir = app
-        .path()
-        .app_data_dir()
+    let profile_dir = crate::utils::paths::app_data_dir(&app)
         .unwrap()
         .join("profiles")
         .join(&profile_id);
@@ -3559,9 +3549,7 @@ pub async fn toggle_mod(
     };
 
     // Get profile cache path (may or may not exist depending on legacy mode)
-    let profile_dir = app
-        .path()
-        .app_data_dir()
+    let profile_dir = crate::utils::paths::app_data_dir(&app)
         .map_err(|e| e.to_string())?
         .join("profiles")
         .join(&profile_id);
@@ -3627,9 +3615,7 @@ pub async fn copy_mod_from_cache(
     mod_name: String,
     game_path: String,
 ) -> Result<serde_json::Value, String> {
-    let profile_dir = app
-        .path()
-        .app_data_dir()
+    let profile_dir = crate::utils::paths::app_data_dir(&app)
         .map_err(|e| e.to_string())?
         .join("profiles")
         .join(&profile_id);

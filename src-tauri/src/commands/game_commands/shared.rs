@@ -302,9 +302,7 @@ pub(super) fn manual_path_matches_platform(
 }
 
 pub(super) fn get_profile_platform(app: &AppHandle, profile_id: &str) -> String {
-    let profiles_path = app
-        .path()
-        .app_data_dir()
+    let profiles_path = crate::utils::paths::app_data_dir(app)
         .unwrap_or_default()
         .join("profiles.json");
     if profiles_path.exists() {
@@ -327,9 +325,7 @@ pub(super) fn get_profile_platform(app: &AppHandle, profile_id: &str) -> String 
 }
 
 pub(super) fn get_profile_distribution(app: &AppHandle, profile_id: &str) -> String {
-    let profiles_path = app
-        .path()
-        .app_data_dir()
+    let profiles_path = crate::utils::paths::app_data_dir(app)
         .unwrap_or_default()
         .join("profiles.json");
     if profiles_path.exists() {
@@ -352,9 +348,7 @@ pub(super) fn get_profile_distribution(app: &AppHandle, profile_id: &str) -> Str
 }
 
 pub(super) fn get_profile_launch_mode(app: &AppHandle, profile_id: &str) -> String {
-    let profiles_path = app
-        .path()
-        .app_data_dir()
+    let profiles_path = crate::utils::paths::app_data_dir(app)
         .unwrap_or_default()
         .join("profiles.json");
     if profiles_path.exists() {

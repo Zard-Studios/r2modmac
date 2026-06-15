@@ -2,7 +2,7 @@ use crate::models::shared::*;
 use base64::Engine;
 use std::fs;
 use std::io::{Seek, Write};
-use tauri::{command, AppHandle, Manager};
+use tauri::{command, AppHandle};
 
 fn profile_has_local_mods(profile: &serde_json::Value) -> bool {
     profile["mods"]
@@ -76,9 +76,7 @@ fn write_embedded_local_payloads<W: Write + std::io::Seek>(
     zip: &mut zip::ZipWriter<W>,
     options: zip::write::FileOptions,
 ) -> Result<(), String> {
-    let profile_dir = app
-        .path()
-        .app_data_dir()
+    let profile_dir = crate::utils::paths::app_data_dir(app)
         .map_err(|e| e.to_string())?
         .join("profiles")
         .join(profile_id);
@@ -165,7 +163,7 @@ fn build_profile_zip_bytes(
 }
 
 fn find_profile(app: &AppHandle, profile_id: &str) -> Result<serde_json::Value, String> {
-    let profiles_path = app.path().app_data_dir().unwrap().join("profiles.json");
+    let profiles_path = crate::utils::paths::app_data_dir(app).unwrap().join("profiles.json");
     if !profiles_path.exists() {
         return Err("No profiles found".to_string());
     }

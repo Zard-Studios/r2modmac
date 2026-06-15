@@ -5,7 +5,7 @@ use std::{
 };
 
 use sysinfo::{ProcessesToUpdate, System};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter};
 
 use crate::commands::mod_commands::{
     detect_unity_runtime_kind, download_official_macos_bepinex_runtime,
