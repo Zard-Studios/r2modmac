@@ -67,7 +67,7 @@ export interface IElectronAPI {
         categories?: string[],
         mods?: boolean,
         modpacks?: boolean
-    ): Promise<any[]>;
+    ): Promise<{ items: Package[]; total: number; }>;
     lookupPackagesByNames: (gameId: string, names: string[]) => Promise<{ found: Package[]; unknown: string[] }>;
     fetchPackageByName: (name: string, gameId?: string | null) => Promise<Package | null>;
     importProfile: (code: string) => Promise<any>;

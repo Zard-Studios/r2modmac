@@ -214,6 +214,9 @@ const mergePlatformInfo = (existing: CommunityPlatformInfo, incoming: CommunityP
 function App() {
 
   const [allPackages, setAllPackages] = useState<Package[]>([])
+  const [totalPackages, setTotalPackages] = useState(0)
+  const [currentPage, setCurrentPage] = useState(0)
+  const [isFetchingNextPage, setIsFetchingNextPage] = useState(false)
   const [loading, setLoading] = useState(true)
   const [loadingMods, setLoadingMods] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
@@ -227,7 +230,7 @@ function App() {
     modpacks: false,
     categories: [],
   })
-  const PAGE_SIZE = 10000 // Load all mods at once for instant search
+  const PAGE_SIZE = 50 
   const [availableCategories, setAvailableCategories] = useState<string[]>([])
   const [isSidebarOpen, setIsSidebarOpen] = useState(true)
 
@@ -307,7 +310,7 @@ function App() {
   const [storageVolumeEventCount, setStorageVolumeEventCount] = useState(0)
   useEffect(() => {
     if (!activeProfile) {
-      setIsGameRunning(false)
+      setTimeout(() => setIsGameRunning(false), 0)
       return
     }
 
@@ -345,8 +348,10 @@ function App() {
 
   useEffect(() => {
     if (!activeProfile) {
-      setActiveProfileGamePath(null)
-      setIsCheckingActiveProfileGamePath(false)
+      setTimeout(() => {
+        setActiveProfileGamePath(null)
+        setIsCheckingActiveProfileGamePath(false)
+      }, 0)
       return
     }
 
@@ -479,7 +484,7 @@ function App() {
     };
   }, [selectedCommunity])
 
-  const checkForUpdates = async () => {
+  async function checkForUpdates() {
     const UPDATE_CHECK_INTERVAL_MS = 12 * 60 * 60 * 1000;
     const LAST_UPDATE_CHECK_KEY = 'r2modmac:lastUpdateCheck';
     try {
@@ -514,19 +519,17 @@ function App() {
     }
   }, [selectedCommunity])
 
-  // Client-Side Search (derived state via useMemo - zero flicker!)
-  const packages = useMemo(() => {
-    const filtered = allPackages;
+  // Server-Side Search mapping
+  const packages = allPackages;
 
-    if (!searchQuery.trim()) {
-      return filtered;
-    }
-    const searchLower = searchQuery.toLowerCase()
-    return filtered.filter(pkg =>
-      pkg.name.toLowerCase().includes(searchLower) ||
-      pkg.full_name.toLowerCase().includes(searchLower)
-    )
-  }, [searchQuery, allPackages])
+  // Search Debounce Effect
+  useEffect(() => {
+    if (!selectedCommunity) return;
+    const timer = setTimeout(() => {
+      loadPackages(selectedCommunity, 0, true);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
 
   // Sort/Filter Effect
   useEffect(() => {
@@ -540,7 +543,7 @@ function App() {
 
   // loadData fetches the communities
 
-  const loadData = async () => {
+  async function loadData() {
     if (isInitialLoadRunningRef.current) return;
 
     // If we already have communities, don't re-fetch them.
@@ -693,15 +696,24 @@ function App() {
     selectProfile(profileId);
   };
 
-  const loadPackages = async (communityId: string, pageNum: number, reset: boolean = false) => {
+  const loadMorePackages = useCallback(() => {
+    if (!selectedCommunity || isFetchingNextPage || loadingMods) return;
+    setIsFetchingNextPage(true);
+    loadPackages(selectedCommunity, currentPage + 1, false).finally(() => {
+      setIsFetchingNextPage(false);
+    });
+  }, [selectedCommunity, currentPage, isFetchingNextPage, loadingMods]);
+
+  async function loadPackages(communityId: string, pageNum: number, reset: boolean = false) {
     const requestId = ++packagesLoadRequestRef.current;
     const isStaleRequest = () => requestId !== packagesLoadRequestRef.current;
 
-    setLoadingMods(true)
-
     if (reset) {
-      setAllPackages([])
-      setAvailableCategories([])
+      setLoadingMods(true);
+      setAllPackages([]);
+      setTotalPackages(0);
+      setCurrentPage(0);
+      setAvailableCategories([]);
     }
 
     const withTimeout = async <T,>(promise: Promise<T>, ms: number, label: string): Promise<T> => {
@@ -736,12 +748,12 @@ function App() {
         setAvailableCategories(cats)
       }
 
-      const newPackages = await withTimeout(
+      const response = await withTimeout(
         window.ipcRenderer.getPackages(
         communityId,
         pageNum,
         PAGE_SIZE,
-        '', // Empty search - filter client-side instead
+        searchQuery, // Use server-side search instead of empty string
         filterOptions.sort,
         filterOptions.nsfw,
         filterOptions.deprecated,
@@ -755,11 +767,13 @@ function App() {
       );
       if (isStaleRequest()) return;
 
-
-
-      // Update allPackages (packages is derived via useMemo)
-      const updated = reset ? newPackages : [...allPackages, ...newPackages]
-      setAllPackages(updated)
+      if (reset) {
+        setAllPackages(response.items);
+      } else {
+        setAllPackages(prev => [...prev, ...response.items]);
+      }
+      setTotalPackages(response.total);
+      setCurrentPage(pageNum);
     } catch (err) {
       if (isStaleRequest()) return;
       console.error('Failed to load packages', err)
@@ -1790,6 +1804,10 @@ function App() {
             isBrowsing={isBrowsingMode}
             searchQuery={searchQuery}
             legacyInstallMode={legacyInstallMode}
+            onLoadMore={loadMorePackages}
+            hasMore={packages.length < totalPackages}
+            isLoadingMore={isFetchingNextPage}
+            totalCount={totalPackages}
           />
         </div>
       </div>

@@ -8,14 +8,12 @@ export async function fetchPackages(communityIdentifier: string): Promise<number
     return window.ipcRenderer.fetchPackages(communityIdentifier);
 }
 
-export async function getPackages(communityIdentifier: string, page: number, pageSize: number, search: string): Promise<Package[]> {
+export async function getPackages(communityIdentifier: string, page: number, pageSize: number, search: string): Promise<{ items: Package[], total: number }> {
     return window.ipcRenderer.getPackages(communityIdentifier, page, pageSize, search);
 }
 
 export async function fetchPackage(communityIdentifier: string, packageName: string): Promise<Package> {
-    // Fetch all packages and search locally (backend already has them cached)
-    const packages = await getPackages(communityIdentifier, 0, 10000, '');
-    const pkg = packages.find(p => p.full_name === packageName);
+    const pkg = await window.ipcRenderer.fetchPackageByName(packageName, communityIdentifier);
     if (!pkg) throw new Error(`Package ${packageName} not found`);
     return pkg;
 }

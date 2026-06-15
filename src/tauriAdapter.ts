@@ -79,8 +79,8 @@ export const tauriAPI: IElectronAPI = {
         categories?: string[],
         mods?: boolean,
         modpacks?: boolean
-    ) {
-        return await invoke('get_packages', {
+    ): Promise<{ items: Package[], total: number }> {
+        return await invoke<{ items: Package[], total: number }>('get_packages', {
             gameId,
             page,
             pageSize,

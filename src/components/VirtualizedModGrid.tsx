@@ -15,6 +15,10 @@ interface VirtualizedModGridProps {
     isBrowsing?: boolean;
     searchQuery?: string; // For scroll-to-top on search
     legacyInstallMode?: boolean;
+    onLoadMore?: () => void;
+    hasMore?: boolean;
+    isLoadingMore?: boolean;
+    totalCount?: number;
 }
 
 const COLUMN_WIDTH = 320;
@@ -31,7 +35,7 @@ function chunkIntoRows<T>(items: T[], cols: number): T[][] {
     return rows;
 }
 
-export function VirtualizedModGrid({ packages, installedMods, onInstall, onUninstall, onModClick, viewMode = 'grid', isBrowsing, searchQuery, legacyInstallMode = false }: VirtualizedModGridProps) {
+export function VirtualizedModGrid({ packages, installedMods, onInstall, onUninstall, onModClick, viewMode = 'grid', isBrowsing, searchQuery, legacyInstallMode = false, onLoadMore, hasMore, isLoadingMore }: VirtualizedModGridProps) {
     const parentRef = useRef<HTMLDivElement>(null);
     const [columnCount, setColumnCount] = useState(3);
     const [availableWidth, setAvailableWidth] = useState(0);
@@ -126,8 +130,9 @@ export function VirtualizedModGrid({ packages, installedMods, onInstall, onUnins
         [packages, columnCount, viewMode]
     );
 
+    const gridRowCount = viewMode === 'grid' ? gridRows.length + (hasMore ? 1 : 0) : 0;
     const gridRowVirtualizer = useVirtualizer({
-        count: viewMode === 'grid' ? gridRows.length : 0,
+        count: gridRowCount,
         getScrollElement: () => parentRef.current,
         estimateSize: () => GRID_ROW_HEIGHT + GAP,
         overscan: 3,
@@ -135,14 +140,26 @@ export function VirtualizedModGrid({ packages, installedMods, onInstall, onUnins
             element?.getBoundingClientRect().height ?? GRID_ROW_HEIGHT + GAP,
     });
 
+    const listRowCount = viewMode === 'list' ? packages.length + (hasMore ? 1 : 0) : 0;
     const listRowVirtualizer = useVirtualizer({
-        count: viewMode === 'list' ? packages.length : 0,
+        count: listRowCount,
         getScrollElement: () => parentRef.current,
         estimateSize: () => LIST_ROW_HEIGHT,
         overscan: 5,
         measureElement: (element) =>
             element?.getBoundingClientRect().height ?? LIST_ROW_HEIGHT,
     });
+
+    const virtualItems = viewMode === 'grid' ? gridRowVirtualizer.getVirtualItems() : listRowVirtualizer.getVirtualItems();
+    useEffect(() => {
+        const lastItem = virtualItems[virtualItems.length - 1];
+        if (!lastItem) return;
+
+        const isNearEnd = lastItem.index >= (viewMode === 'grid' ? gridRows.length - 1 : packages.length - 1);
+        if (isNearEnd && hasMore && !isLoadingMore && onLoadMore) {
+            onLoadMore();
+        }
+    }, [virtualItems, hasMore, isLoadingMore, onLoadMore, viewMode, gridRows.length, packages.length]);
 
     if (viewMode === 'grid') {
         return (
@@ -153,7 +170,8 @@ export function VirtualizedModGrid({ packages, installedMods, onInstall, onUnins
                 {/* Virtual grid: only visible rows are in the DOM */}
                 <div style={{ height: `${gridRowVirtualizer.getTotalSize()}px`, position: 'relative' }}>
                     {gridRowVirtualizer.getVirtualItems().map((virtualRow) => {
-                        const rowPkgs = gridRows[virtualRow.index];
+                        const isLoaderRow = virtualRow.index >= gridRows.length;
+                        const rowPkgs = isLoaderRow ? [] : gridRows[virtualRow.index];
                         return (
                             <div
                                 key={virtualRow.key}
@@ -167,28 +185,34 @@ export function VirtualizedModGrid({ packages, installedMods, onInstall, onUnins
                                     transform: `translateY(${virtualRow.start}px)`,
                                 }}
                             >
-                                <div
-                                    className="grid gap-4"
-                                    style={{
-                                        gridTemplateColumns: `repeat(${columnCount}, minmax(0, ${gridColumnWidth}px))`,
-                                        justifyContent: 'start',
-                                        paddingBottom: GAP,
-                                    }}
-                                >
-                                    {rowPkgs.map((pkg) => (
-                                        <ModCard
-                                            key={pkg.uuid4}
-                                            mod={pkg.versions[0]}
-                                            likesCount={pkg.rating_score}
-                                            onInstall={() => onInstall(pkg)}
-                                            onUninstall={() => onUninstall(pkg)}
-                                            onClick={() => onModClick(pkg)}
-                                            installStatus={getInstallStatus(pkg)}
-                                            isBrowsing={isBrowsing}
-                                            legacyInstallMode={legacyInstallMode}
-                                        />
-                                    ))}
-                                </div>
+                                {isLoaderRow ? (
+                                    <div className="flex justify-center items-center py-8">
+                                        <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                                    </div>
+                                ) : (
+                                    <div
+                                        className="grid gap-4"
+                                        style={{
+                                            gridTemplateColumns: `repeat(${columnCount}, minmax(0, ${gridColumnWidth}px))`,
+                                            justifyContent: 'start',
+                                            paddingBottom: GAP,
+                                        }}
+                                    >
+                                        {rowPkgs.map((pkg) => (
+                                            <ModCard
+                                                key={pkg.uuid4}
+                                                mod={pkg.versions[0]}
+                                                likesCount={pkg.rating_score}
+                                                onInstall={() => onInstall(pkg)}
+                                                onUninstall={() => onUninstall(pkg)}
+                                                onClick={() => onModClick(pkg)}
+                                                installStatus={getInstallStatus(pkg)}
+                                                isBrowsing={isBrowsing}
+                                                legacyInstallMode={legacyInstallMode}
+                                            />
+                                        ))}
+                                    </div>
+                                )}
                             </div>
                         );
                     })}
@@ -210,6 +234,28 @@ export function VirtualizedModGrid({ packages, installedMods, onInstall, onUnins
                 }}
             >
                 {listRowVirtualizer.getVirtualItems().map((virtualRow) => {
+                    const isLoaderRow = virtualRow.index >= packages.length;
+                    if (isLoaderRow) {
+                        return (
+                            <div
+                                key={virtualRow.key}
+                                ref={listRowVirtualizer.measureElement}
+                                data-index={virtualRow.index}
+                                style={{
+                                    position: 'absolute',
+                                    top: 0,
+                                    left: 0,
+                                    width: '100%',
+                                    transform: `translateY(${virtualRow.start}px)`,
+                                    paddingBottom: '8px',
+                                }}
+                            >
+                                <div className="flex justify-center items-center py-4">
+                                    <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                                </div>
+                            </div>
+                        );
+                    }
                     const pkg = packages[virtualRow.index];
                     return (
                         <div

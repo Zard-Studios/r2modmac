@@ -82,5 +82,6 @@ body {
   color: rgba(255, 255, 255, 0.95);
   filter: blur(4px);
   -webkit-filter: blur(4px);
-  transform: translateZ(0); /* Force GPU acceleration */
+  transform: translateZ(0);
+  /* Force GPU acceleration */
 }

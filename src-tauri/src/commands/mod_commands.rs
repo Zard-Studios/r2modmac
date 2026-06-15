@@ -4142,7 +4142,7 @@ pub async fn get_packages(
     categories: Option<Vec<String>>,
     mods: Option<bool>,
     modpacks: Option<bool>,
-) -> Result<Vec<serde_json::Value>, String> {
+) -> Result<serde_json::Value, String> {
     let packages_lock = state.packages.read().await;
 
     if let Some(packages) = packages_lock.get(&game_id) {
@@ -4343,16 +4343,27 @@ pub async fn get_packages(
         }
 
         let start = page * page_size;
-        if start >= filtered.len() {
-            return Ok(vec![]);
+        let total = filtered.len();
+        if start >= total {
+            return Ok(serde_json::json!({
+                "items": [],
+                "total": total
+            }));
         }
 
-        let end = std::cmp::min(start + page_size, filtered.len());
+        let end = std::cmp::min(start + page_size, total);
         let slice: Vec<serde_json::Value> =
             filtered[start..end].iter().map(|&v| v.clone()).collect();
-        Ok(slice)
+            
+        Ok(serde_json::json!({
+            "items": slice,
+            "total": total
+        }))
     } else {
-        Ok(vec![])
+        Ok(serde_json::json!({
+            "items": [],
+            "total": 0
+        }))
     }
 }
 
