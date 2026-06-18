@@ -37,6 +37,23 @@ static CUSTOM_MOD_RATE_LIMITER: OnceLock<Mutex<HashMap<String, VecDeque<SystemTi
 static CUSTOM_MOD_IMPORT_ACTIVE: AtomicBool = AtomicBool::new(false);
 static CUSTOM_MOD_IMPORT_CANCELLED: AtomicBool = AtomicBool::new(false);
 
+// Shared HTTP client for all Thunderstore package fetching operations.
+// A single client reuses the connection pool and TLS session, avoiding the
+// overhead of creating a new pool (+ thread/socket/TLS resources) per call.
+static THUNDERSTORE_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+
+fn thunderstore_client() -> &'static reqwest::Client {
+    THUNDERSTORE_CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .user_agent(APP_USER_AGENT)
+            .connect_timeout(Duration::from_secs(8))
+            .timeout(Duration::from_secs(60))
+            .gzip(true)
+            .build()
+            .expect("Failed to build Thunderstore HTTP client")
+    })
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CustomModSecurityReport {
@@ -2950,14 +2967,16 @@ pub async fn install_mod(
     }
 
     let total_bytes = response.content_length();
-    let mut stream = response.bytes_stream();
+    // Use the streaming body directly via chunk() instead of bytes_stream() so we
+    // don't need the `stream` feature (which pulls in h2 streaming machinery).
+    let mut body = response;
     let mut bytes: Vec<u8> = Vec::new();
     let mut downloaded: u64 = 0;
     let download_started = std::time::Instant::now();
     let mut last_emit = std::time::Instant::now();
 
-    while let Some(next_chunk) = stream.next().await {
-        let chunk = next_chunk.map_err(|e| e.to_string())?;
+    while let Ok(Some(next_chunk)) = body.chunk().await {
+        let chunk = next_chunk;
         downloaded += chunk.len() as u64;
         bytes.extend_from_slice(&chunk);
 
@@ -3807,6 +3826,7 @@ pub async fn fetch_packages(
     use std::time::SystemTime;
 
     let start_time = SystemTime::now();
+    let client = thunderstore_client();
 
     // 0. Check if we already have packages in memory (instant return)
     {
@@ -3829,13 +3849,7 @@ pub async fn fetch_packages(
     );
     eprintln!("[fetch_packages] Fetching index from: {}", index_url);
 
-    let client = reqwest::Client::builder()
-        .user_agent(APP_USER_AGENT)
-        .connect_timeout(Duration::from_secs(8))
-        .timeout(Duration::from_secs(25))
-        .gzip(true)
-        .build()
-        .map_err(|e| e.to_string())?;
+    // client is the shared static THUNDERSTORE_CLIENT (already initialized above)
 
     fn decode_gzip_or_plain(bytes: &[u8], label: &str) -> Result<String, String> {
         // Thunderstore blobs are usually raw gzip bytes, but support plain JSON fallback.
@@ -3904,7 +3918,7 @@ pub async fn fetch_packages(
     async fn load_chunk(
         client: &reqwest::Client,
         url: &str,
-    ) -> Result<Vec<serde_json::Value>, String> {
+    ) -> Result<Vec<crate::models::shared::Package>, String> {
         let mut last_error: Option<String> = None;
         for attempt in 1..=3 {
             let resp = match client.get(url).send().await {
@@ -3961,25 +3975,65 @@ pub async fn fetch_packages(
                 }
             };
 
-            let mut packages: Vec<serde_json::Value> = match serde_json::from_str(&json_str) {
-                Ok(packages) => packages,
-                Err(e) => {
-                    last_error = Some(format!(
-                        "Attempt {} failed parsing JSON chunk: {}",
-                        attempt, e
-                    ));
-                    tokio::time::sleep(Duration::from_millis(250 * attempt as u64)).await;
-                    continue;
+            let mut packages: Vec<crate::models::shared::Package> =
+                match serde_json::from_str(&json_str) {
+                    Ok(packages) => packages,
+                    Err(e) => {
+                        last_error = Some(format!(
+                            "Attempt {} failed parsing JSON chunk: {}",
+                            attempt, e
+                        ));
+                        tokio::time::sleep(Duration::from_millis(250 * attempt as u64)).await;
+                        continue;
+                    }
+                };
+
+            // CRITICAL: Drop the raw JSON string immediately after deserialization.
+            // Without this, both the JSON text (~2MB) and the structs are in RAM
+            // simultaneously until the scope ends.
+            drop(json_str);
+
+            // Truncate versions to 1 (latest version) to keep memory usage extremely low
+            for pkg in &mut packages {
+                if pkg.versions.len() > 1 {
+                    pkg.versions.truncate(1);
                 }
-            };
+                // Cap dependency list: ModCard only checks .length, and the full dep
+                // list is fetched on-demand via fetch_package_by_name before install.
+                if let Some(ver) = pkg.versions.first_mut() {
+                    if ver.dependencies.len() > 20 {
+                        ver.dependencies.truncate(20);
+                    }
+                    // Truncate description to 200 chars - ModCard never shows more,
+                    // and the full description is fetched on-demand in the detail modal.
+                    if ver.description.len() > 200 {
+                        let truncated = ver
+                            .description
+                            .char_indices()
+                            .take_while(|(i, _)| *i < 200)
+                            .last()
+                            .map(|(i, c)| i + c.len_utf8())
+                            .unwrap_or(200);
+                        ver.description.truncate(truncated);
+                    }
+                }
+            }
 
             // Filter out Manager packages (e.g. r2modman, Thunderstore Mod Manager) if they appear
             packages.retain(|pkg| {
-                let full_name = pkg["full_name"].as_str().unwrap_or("");
-                !full_name.contains("ebkr-r2modman")
-                    && !full_name.contains("Tslat-ThunderstoreModManager")
-                    && !full_name.contains("Kesomannen-GaleModManager")
+                !pkg.full_name.contains("ebkr-r2modman")
+                    && !pkg.full_name.contains("Tslat-ThunderstoreModManager")
+                    && !pkg.full_name.contains("Kesomannen-GaleModManager")
             });
+
+            // Release any excess allocated capacity from serde_json
+            packages.shrink_to_fit();
+            for pkg in &mut packages {
+                pkg.versions.shrink_to_fit();
+                if let Some(ver) = pkg.versions.first_mut() {
+                    ver.dependencies.shrink_to_fit();
+                }
+            }
 
             return Ok(packages);
         }
@@ -4005,6 +4059,9 @@ pub async fn fetch_packages(
                 let mut packages_lock = state.packages.write().await;
                 packages_lock.insert(game_id.clone(), first_packages);
                 first_loaded_index = Some(idx);
+                drop(packages_lock);
+                // Track cache order so old game listings get evicted (bounded memory).
+                state.touch_packages_cache(&game_id).await;
                 break;
             }
             Err(e) => {
@@ -4042,10 +4099,12 @@ pub async fn fetch_packages(
 
         // Spawn background task for remaining chunks
         tokio::spawn(async move {
-            let parallelism = 10usize;
+            // Parallelism of 3: each chunk is ~2-3MB of JSON in memory during download
+            // + deserialization. 10 was allowing ~30MB peak; 3 cuts that to ~9MB.
+            let parallelism = 3usize;
             let mut stream = futures_util::stream::iter(remaining_urls)
                 .map(|url| {
-                    let client = client.clone();
+                    let client = thunderstore_client();
                     async move { load_chunk(&client, &url).await }
                 })
                 .buffer_unordered(parallelism);
@@ -4060,6 +4119,19 @@ pub async fn fetch_packages(
                         }
                     }
                     Err(e) => eprintln!("[fetch_packages] Chunk error: {}", e),
+                }
+            }
+
+            // All chunks loaded — do one final shrink to release excess capacity.
+            // Doing it per-chunk would cause O(n) reallocations as the Vec grows.
+            {
+                let mut packages_lock = packages_arc.write().await;
+                if let Some(existing) = packages_lock.get_mut(&game_id_clone) {
+                    existing.shrink_to_fit();
+                    eprintln!(
+                        "[fetch_packages] Final shrink: {} packages retained",
+                        existing.len()
+                    );
                 }
             }
 
@@ -4111,12 +4183,8 @@ pub async fn get_available_categories(
         let mut categories: std::collections::HashSet<String> = std::collections::HashSet::new();
 
         for p in packages.iter() {
-            if let Some(cats) = p.get("categories").and_then(|v| v.as_array()) {
-                for cat in cats {
-                    if let Some(cat_str) = cat.as_str() {
-                        categories.insert(cat_str.to_string());
-                    }
-                }
+            for cat in &p.categories {
+                categories.insert(cat.clone());
             }
         }
 
@@ -4126,6 +4194,12 @@ pub async fn get_available_categories(
     } else {
         Ok(vec![])
     }
+}
+
+#[derive(Serialize)]
+pub struct PackageListResponse {
+    pub items: Vec<crate::models::shared::Package>,
+    pub total: usize,
 }
 
 #[command]
@@ -4142,130 +4216,78 @@ pub async fn get_packages(
     categories: Option<Vec<String>>,
     mods: Option<bool>,
     modpacks: Option<bool>,
-) -> Result<serde_json::Value, String> {
+) -> Result<PackageListResponse, String> {
     let packages_lock = state.packages.read().await;
 
     if let Some(packages) = packages_lock.get(&game_id) {
         // Initial filtering
-        let mut filtered: Vec<&serde_json::Value> = packages
+        let mut filtered: Vec<&crate::models::shared::Package> = packages
             .iter()
             .filter(|p| {
                 // 1. Search Filter
                 if !search.is_empty() {
                     let search_lower = search.to_lowercase();
-                    let name = p["name"].as_str().unwrap_or("").to_lowercase();
-                    let full_name = p["full_name"].as_str().unwrap_or("").to_lowercase();
+                    let name = p.name.to_lowercase();
+                    let full_name = p.full_name.to_lowercase();
                     if !name.contains(&search_lower) && !full_name.contains(&search_lower) {
                         return false;
                     }
                 }
 
                 // 2. NSFW Filter
-                // If nsfw tag is FALSE (default): Hide NSFW content
-                // If nsfw tag is TRUE: Show ONLY NSFW content
                 let nsfw_tag_active = nsfw.unwrap_or(false);
-                let is_nsfw = p
-                    .get("has_nsfw_content")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(false);
+                let is_nsfw = p.has_nsfw_content;
                 if nsfw_tag_active {
-                    // Show ONLY NSFW
                     if !is_nsfw {
                         return false;
                     }
                 } else {
-                    // Hide NSFW
                     if is_nsfw {
                         return false;
                     }
                 }
 
                 // 3. Deprecated Filter
-                // If deprecated tag is FALSE (default): Hide Deprecated content
-                // If deprecated tag is TRUE: Show ONLY Deprecated content
                 let deprecated_tag_active = deprecated.unwrap_or(false);
-                let is_deprecated = p
-                    .get("is_deprecated")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(false);
+                let is_deprecated = p.is_deprecated;
                 if deprecated_tag_active {
-                    // Show ONLY Deprecated
                     if !is_deprecated {
                         return false;
                     }
                 } else {
-                    // Hide Deprecated
                     if is_deprecated {
                         return false;
                     }
                 }
 
                 // 4. Mods/Modpacks Filter
-                // Logic: Both OFF = show all, Both ON = show all, Only one ON = show only that type
                 let mods_active = mods.unwrap_or(false);
                 let modpacks_active = modpacks.unwrap_or(false);
 
-                // Check if package is a modpack (has "Modpacks" in categories)
-                let pkg_categories: Vec<String> = p
-                    .get("categories")
-                    .and_then(|v| v.as_array())
-                    .map(|arr| {
-                        arr.iter()
-                            .filter_map(|c| c.as_str().map(|s| s.to_string()))
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                let is_modpack = pkg_categories
-                    .iter()
-                    .any(|c| c.to_lowercase() == "modpacks");
+                let is_modpack = p.categories.iter().any(|c| c.to_lowercase() == "modpacks");
 
-                // Apply filter only if exactly one is active
                 if mods_active != modpacks_active {
                     if mods_active && is_modpack {
-                        return false; // Show only mods, this is a modpack - hide it
+                        return false;
                     }
                     if modpacks_active && !is_modpack {
-                        return false; // Show only modpacks, this is a mod - hide it
+                        return false;
                     }
                 }
 
                 // 5. Category/Tag Filter
-                // If categories is empty or None, show all
-                // If categories has values, package must match at least one:
-                // - Match in categories array
-                // - OR match in package name
-                // - OR match in package description
                 if let Some(ref filter_cats) = categories {
                     if !filter_cats.is_empty() {
-                        let pkg_categories: Vec<String> = p
-                            .get("categories")
-                            .and_then(|v| v.as_array())
-                            .map(|arr| {
-                                arr.iter()
-                                    .filter_map(|c| c.as_str().map(|s| s.to_lowercase()))
-                                    .collect()
-                            })
-                            .unwrap_or_default();
+                        let pkg_name = p.name.to_lowercase();
+                        let pkg_full_name = p.full_name.to_lowercase();
 
-                        let pkg_name = p
-                            .get("name")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_lowercase();
-                        let pkg_full_name = p
-                            .get("full_name")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_lowercase();
-
-                        // Check if any filter tag matches
                         let has_match = filter_cats.iter().any(|fc| {
                             let fc_lower = fc.to_lowercase();
-                            // Match in categories
-                            pkg_categories.iter().any(|c| c.contains(&fc_lower)) ||
-                        // Match in name
-                        pkg_name.contains(&fc_lower) ||
-                        pkg_full_name.contains(&fc_lower)
+                            p.categories
+                                .iter()
+                                .any(|c| c.to_lowercase().contains(&fc_lower))
+                                || pkg_name.contains(&fc_lower)
+                                || pkg_full_name.contains(&fc_lower)
                         });
 
                         if !has_match {
@@ -4285,16 +4307,8 @@ pub async fn get_packages(
 
             match sort_by.as_str() {
                 "downloads" => filtered.sort_by(|a, b| {
-                    let get_downloads = |p: &serde_json::Value| -> u64 {
-                        p.get("versions")
-                            .and_then(|v| v.as_array())
-                            .and_then(|arr| arr.first())
-                            .and_then(|ver| ver.get("downloads"))
-                            .and_then(|d| d.as_u64())
-                            .unwrap_or(0)
-                    };
-                    let da = get_downloads(a);
-                    let db = get_downloads(b);
+                    let da = a.versions.first().map(|ver| ver.downloads).unwrap_or(0);
+                    let db = b.versions.first().map(|ver| ver.downloads).unwrap_or(0);
                     if is_asc {
                         da.cmp(&db)
                     } else {
@@ -4302,8 +4316,8 @@ pub async fn get_packages(
                     }
                 }),
                 "rating" => filtered.sort_by(|a, b| {
-                    let ra = a.get("rating_score").and_then(|v| v.as_i64()).unwrap_or(0);
-                    let rb = b.get("rating_score").and_then(|v| v.as_i64()).unwrap_or(0);
+                    let ra = a.rating_score;
+                    let rb = b.rating_score;
                     if is_asc {
                         ra.cmp(&rb)
                     } else {
@@ -4311,8 +4325,8 @@ pub async fn get_packages(
                     }
                 }),
                 "updated" => filtered.sort_by(|a, b| {
-                    let da = a.get("date_updated").and_then(|v| v.as_str()).unwrap_or("");
-                    let db = b.get("date_updated").and_then(|v| v.as_str()).unwrap_or("");
+                    let da = &a.date_updated;
+                    let db = &b.date_updated;
                     if is_asc {
                         da.cmp(db)
                     } else {
@@ -4320,18 +4334,8 @@ pub async fn get_packages(
                     }
                 }),
                 "alphabetical" => filtered.sort_by(|a, b| {
-                    let na = a
-                        .get("name")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_lowercase();
-                    let nb = b
-                        .get("name")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_lowercase();
-                    // Ascending: A-Z (na vs nb)
-                    // Descending: Z-A (nb vs na)
+                    let na = a.name.to_lowercase();
+                    let nb = b.name.to_lowercase();
                     if is_asc {
                         na.cmp(&nb)
                     } else {
@@ -4345,25 +4349,25 @@ pub async fn get_packages(
         let start = page * page_size;
         let total = filtered.len();
         if start >= total {
-            return Ok(serde_json::json!({
-                "items": [],
-                "total": total
-            }));
+            return Ok(PackageListResponse {
+                items: Vec::new(),
+                total,
+            });
         }
 
         let end = std::cmp::min(start + page_size, total);
-        let slice: Vec<serde_json::Value> =
-            filtered[start..end].iter().map(|&v| v.clone()).collect();
-            
-        Ok(serde_json::json!({
-            "items": slice,
-            "total": total
-        }))
+        let slice: Vec<crate::models::shared::Package> =
+            filtered[start..end].iter().map(|&v| (*v).clone()).collect();
+
+        Ok(PackageListResponse {
+            items: slice,
+            total,
+        })
     } else {
-        Ok(serde_json::json!({
-            "items": [],
-            "total": 0
-        }))
+        Ok(PackageListResponse {
+            items: Vec::new(),
+            total: 0,
+        })
     }
 }
 
@@ -4373,29 +4377,37 @@ pub async fn lookup_packages_by_names(
     game_id: String,
     names: Vec<String>,
 ) -> Result<serde_json::Value, String> {
+    use std::sync::OnceLock;
+    // Compile the version-strip regex once for the process lifetime.
+    static VERSION_REGEX: OnceLock<regex::Regex> = OnceLock::new();
+    let re = VERSION_REGEX.get_or_init(|| {
+        regex::Regex::new(r"^(.*)-(\d+\.\d+\.\d+)$").expect("invalid version regex")
+    });
+
     let packages_lock = state.packages.read().await;
 
     if let Some(packages) = packages_lock.get(&game_id) {
-        let mut found = Vec::new();
-        let mut unknown = Vec::new();
+        // Build a HashMap for O(1) lookups instead of O(n) linear search per name.
+        let index: std::collections::HashMap<&str, &crate::models::shared::Package> =
+            packages.iter().map(|p| (p.full_name.as_str(), p)).collect();
 
-        let re = regex::Regex::new(r"^(.*)-(\d+\.\d+\.\d+)$").unwrap();
+        let mut found = Vec::with_capacity(names.len());
+        let mut unknown = Vec::new();
 
         for name in names {
             // Strip version if present: "Author-Mod-1.0.0" -> "Author-Mod"
             let clean_name = if let Some(caps) = re.captures(&name) {
-                caps.get(1).map_or(name.clone(), |m| m.as_str().to_string())
+                caps.get(1)
+                    .map_or(name.as_str(), |m| m.as_str())
+                    .to_string()
             } else {
                 name.clone()
             };
 
-            if let Some(pkg) = packages
-                .iter()
-                .find(|p| p["full_name"].as_str().unwrap_or("") == clean_name)
-            {
-                found.push(pkg.clone());
+            if let Some(pkg) = index.get(clean_name.as_str()) {
+                found.push((*pkg).clone());
             } else {
-                unknown.push(name.clone());
+                unknown.push(name);
             }
         }
 
@@ -4410,10 +4422,10 @@ pub async fn lookup_packages_by_names(
 
 #[command]
 pub async fn fetch_package_by_name(
-    state: tauri::State<'_, AppState>,
+    _state: tauri::State<'_, AppState>,
     name: String,
-    game_id: Option<String>,
-) -> Result<Option<serde_json::Value>, String> {
+    _game_id: Option<String>,
+) -> Result<Option<crate::models::shared::Package>, String> {
     // name might be "Namespace-Name" or "Namespace-Name-Version"
 
     // 1. Strip version if present (Regex: ^(.*)-(\d+\.\d+\.\d+)$)
@@ -4424,36 +4436,12 @@ pub async fn fetch_package_by_name(
         name.clone()
     };
 
-    // 2. Check Cache if game_id is provided
-    if let Some(gid) = game_id {
-        let packages_lock = state.packages.read().await;
-        if let Some(packages) = packages_lock.get(&gid) {
-            // Find package in cache
-            // Cache structure: Array of package objects
-            // We need to match full_name or name
-            // The cache stores objects with "full_name": "Namespace-Name"
-
-            let target_name = clean_name.to_lowercase();
-
-            if let Some(pkg) = packages
-                .iter()
-                .find(|p| p["full_name"].as_str().unwrap_or("").to_lowercase() == target_name)
-            {
-                eprintln!(
-                    "[fetch_package_by_name] Found {} in cache for game {}",
-                    clean_name, gid
-                );
-                return Ok(Some(pkg.clone()));
-            }
-        }
-    }
-
     eprintln!(
-        "[fetch_package_by_name] Cache miss for {}. Fetching from API...",
+        "[fetch_package_by_name] Fetching {} from API to retrieve all versions...",
         clean_name
     );
 
-    // 3. Split Namespace and Name
+    // 2. Split Namespace and Name
     let parts: Vec<&str> = clean_name.splitn(2, '-').collect();
     if parts.len() != 2 {
         return Ok(None);
@@ -4480,7 +4468,7 @@ pub async fn fetch_package_by_name(
         return Err(format!("Failed to fetch package: {}", response.status()));
     }
 
-    let json: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
+    let json: crate::models::shared::Package = response.json().await.map_err(|e| e.to_string())?;
     Ok(Some(json))
 }
 

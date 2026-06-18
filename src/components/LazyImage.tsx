@@ -108,7 +108,9 @@ export function LazyImage({ src, alt, className, fallback, eager = false }: Lazy
                 }
             },
             {
-                rootMargin: '2400px 0px',
+                // Preload a bit below the fold so scrolling feels instant, but
+                // don't keep hundreds of off-screen images in memory.
+                rootMargin: '600px 0px',
                 threshold: 0,
             }
         );

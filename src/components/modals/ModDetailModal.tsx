@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { PackageVersion, Package } from '../../types/thunderstore';
 import type { InstalledMod } from '../../types/profile';
 import DOMPurify from 'dompurify';
@@ -38,7 +38,13 @@ export function ModDetailModal({
     const installedLabel = legacyInstallMode ? 'Installed' : 'Added';
     const installActionLabel = legacyInstallMode ? 'Install' : 'Add';
 
-    const [selectedVersionNumber, setSelectedVersionNumber] = useState<string>(pkg.versions[0]?.version_number || '');
+    const [selectedVersionChoice, setSelectedVersionChoice] = useState(() => ({
+        pkgUuid: pkg.uuid4,
+        versionNumber: pkg.versions[0]?.version_number || '',
+    }));
+    const selectedVersionNumber = selectedVersionChoice.pkgUuid === pkg.uuid4
+        ? selectedVersionChoice.versionNumber
+        : pkg.versions[0]?.version_number || '';
     const [activeTab, setActiveTab] = useState<Tab>('description');
     const [readmeContent, setReadmeContent] = useState<string | null>(null);
     const [changelogContent, setChangelogContent] = useState<string | null>(null);
@@ -60,42 +66,25 @@ export function ModDetailModal({
     const isSelectedInstalled = !!installedVersionNumber && installedVersionNumber === mod.version_number;
     const isSelectedLatest = pkg.versions[0]?.version_number === mod.version_number;
 
-    useEffect(() => {
-        setSelectedVersionNumber(pkg.versions[0]?.version_number || '');
-    }, [pkg.uuid4]);
+    const handleVersionChange = (versionNumber: string) => {
+        setSelectedVersionChoice({ pkgUuid: pkg.uuid4, versionNumber });
+    };
 
-    useEffect(() => {
-        if (isOpen && mod && loadingKey !== mod.full_name) {
-            setLoadingKey(mod.full_name);
-            setReadmeContent(null);
-            setChangelogContent(null);
-            setDependencies([]);
-            setActiveTab('description');
-            if (!isLocalMod) {
-                fetchContent('readme');
-
-                if (mod.dependencies?.length > 0 && gameId) {
-                    fetchDependencies();
-                }
-            }
-        }
-    }, [isOpen, mod.full_name, gameId, isLocalMod]);
-
-    const fetchDependencies = async () => {
+    const fetchDependencies = useCallback(async (targetMod: PackageVersion) => {
         try {
-            const result = await window.ipcRenderer.lookupPackagesByNames(gameId, mod.dependencies);
+            const result = await window.ipcRenderer.lookupPackagesByNames(gameId, targetMod.dependencies);
             if (result && Array.isArray(result.found)) {
                 setDependencies(result.found);
             }
         } catch (e) {
             console.error("Failed to fetch dependencies", e);
         }
-    };
+    }, [gameId]);
 
-    const fetchContent = async (type: 'readme' | 'changelog') => {
+    const fetchContent = useCallback(async (targetMod: PackageVersion, type: 'readme' | 'changelog') => {
         setLoadingContent(true);
         try {
-            const parts = mod.full_name.split('-');
+            const parts = targetMod.full_name.split('-');
             const owner = parts[0];
             const name = parts[1];
             const version = parts[2];
@@ -115,13 +104,52 @@ export function ModDetailModal({
         } finally {
             setLoadingContent(false);
         }
-    };
+    }, []);
+
+    useEffect(() => {
+        if (!isOpen || loadingKey === mod.full_name) return;
+
+        let cancelled = false;
+        const loadModDetails = async () => {
+            await Promise.resolve();
+            if (cancelled) return;
+
+            setLoadingKey(mod.full_name);
+            setReadmeContent(null);
+            setChangelogContent(null);
+            setDependencies([]);
+            setActiveTab('description');
+            if (!isLocalMod) {
+                void fetchContent(mod, 'readme');
+
+                if (mod.dependencies?.length > 0 && gameId) {
+                    void fetchDependencies(mod);
+                }
+            }
+        };
+
+        void loadModDetails();
+        return () => {
+            cancelled = true;
+        };
+    }, [fetchContent, fetchDependencies, gameId, isLocalMod, isOpen, loadingKey, mod]);
 
     useEffect(() => {
         if (!isLocalMod && activeTab === 'changelog' && !changelogContent) {
-            fetchContent('changelog');
+            let cancelled = false;
+            const loadChangelog = async () => {
+                await Promise.resolve();
+                if (!cancelled) {
+                    void fetchContent(mod, 'changelog');
+                }
+            };
+
+            void loadChangelog();
+            return () => {
+                cancelled = true;
+            };
         }
-    }, [activeTab, isLocalMod]);
+    }, [activeTab, changelogContent, fetchContent, isLocalMod, mod]);
 
     if (!isOpen) return null;
 
@@ -251,7 +279,7 @@ export function ModDetailModal({
                             <span className="text-xs uppercase tracking-wider text-gray-500 font-bold">Version</span>
                             <select
                                 value={selectedVersionNumber}
-                                onChange={(e) => setSelectedVersionNumber(e.target.value)}
+                                onChange={(e) => handleVersionChange(e.target.value)}
                                 className="bg-gray-800 border border-gray-700 text-gray-200 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:border-blue-500"
                             >
                                 {pkg.versions.map((v) => (

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { Button } from './components/ui'
 import { Layout } from './components/Layout'
 import type { FilterOptions } from './components/FilterPopover'
@@ -12,6 +12,7 @@ import { useProfileStore } from './store/useProfileStore';
 import { useAppStore } from './store/useAppStore';
 import type { CommunityPlatformInfo, Package, PackageVersion } from './types/thunderstore';
 import { getVersion } from '@tauri-apps/api/app';
+import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { flushSync } from 'react-dom';
@@ -87,6 +88,16 @@ interface ProfileArchiveMergeSummary {
 }
 
 const ARCHIVE_IMPORT_PATTERN = /\.(r2z|zip)$/i;
+const APP_CONTEXT_MENU_WIDTH = 184;
+const APP_CONTEXT_MENU_ROW_HEIGHT = 36;
+const APP_CONTEXT_MENU_PADDING = 8;
+const APP_CONTEXT_MENU_GAP = 8;
+const SHOW_DEVTOOLS_CONTEXT_MENU_ITEM = import.meta.env.DEV;
+
+type AppContextMenuState = {
+  x: number;
+  y: number;
+};
 
 const isArchiveImportPath = (path: string) => ARCHIVE_IMPORT_PATTERN.test(path.trim());
 
@@ -277,6 +288,7 @@ function App() {
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
   const [showUpdateModal, setShowUpdateModal] = useState(false)
   const [showPreferences, setShowPreferences] = useState(false)
+  const [appContextMenu, setAppContextMenu] = useState<AppContextMenuState | null>(null)
   const [legacyInstallMode, setLegacyInstallMode] = useState(false)
   const [askVersionBeforeInstall, setAskVersionBeforeInstall] = useState(true)
   const [installInParallel, setInstallInParallel] = useState(true)
@@ -308,181 +320,6 @@ function App() {
   const [activeProfileGamePath, setActiveProfileGamePath] = useState<string | null>(null)
   const [isCheckingActiveProfileGamePath, setIsCheckingActiveProfileGamePath] = useState(false)
   const [storageVolumeEventCount, setStorageVolumeEventCount] = useState(0)
-  useEffect(() => {
-    if (!activeProfile) {
-      setTimeout(() => setIsGameRunning(false), 0)
-      return
-    }
-
-    let cancelled = false
-    const pollRunningState = async () => {
-      try {
-        const running = await window.ipcRenderer.isGameRunning(activeProfile.gameIdentifier, activeProfile.platform)
-        if (!cancelled) {
-          if (running) {
-            launchGraceUntilRef.current = 0
-            setIsGameRunning(true)
-          } else if (Date.now() >= launchGraceUntilRef.current) {
-            setIsGameRunning(false)
-          }
-        }
-      } catch {
-        if (!cancelled) {
-          if (Date.now() >= launchGraceUntilRef.current) {
-            setIsGameRunning(false)
-          }
-        }
-      }
-    }
-
-    void pollRunningState()
-    const intervalId = window.setInterval(() => {
-      void pollRunningState()
-    }, 1500)
-
-    return () => {
-      cancelled = true
-      window.clearInterval(intervalId)
-    }
-  }, [activeProfile?.gameIdentifier, activeProfile?.platform])
-
-  useEffect(() => {
-    if (!activeProfile) {
-      setTimeout(() => {
-        setActiveProfileGamePath(null)
-        setIsCheckingActiveProfileGamePath(false)
-      }, 0)
-      return
-    }
-
-    let cancelled = false
-    const checkGamePath = async () => {
-      setIsCheckingActiveProfileGamePath(true)
-      try {
-        const path = await window.ipcRenderer.getGamePath(activeProfile.gameIdentifier, activeProfile.platform)
-        if (!cancelled) {
-          setActiveProfileGamePath(typeof path === 'string' && path.trim().length > 0 ? path : null)
-        }
-      } catch {
-        if (!cancelled) {
-          setActiveProfileGamePath(null)
-        }
-      } finally {
-        if (!cancelled) {
-          setIsCheckingActiveProfileGamePath(false)
-        }
-      }
-    }
-
-    void checkGamePath()
-
-    return () => {
-      cancelled = true
-    }
-  }, [activeProfile?.gameIdentifier, activeProfile?.platform, showSettings, storageVolumeEventCount])
-
-  useEffect(() => {
-    loadData()
-    loadProfiles()
-    checkForUpdates()
-
-    // Load app preferences
-    window.ipcRenderer.getSettings().then((s: AppSettings) => {
-      setLegacyInstallMode(!!s.legacy_install_mode);
-      setAskVersionBeforeInstall(s.ask_version_before_install ?? true);
-      setInstallInParallel(s.install_in_parallel ?? true);
-      setConfirmBeforeApplyToGame(!!s.confirm_before_apply_to_game);
-      setWriteDebugLogsToGame(s.write_debug_logs_to_game ?? false);
-      const storedViewMode = s.default_mod_view_mode === 'list' ? 'list' : 'grid';
-      setDefaultModViewMode(storedViewMode);
-      setViewMode(storedViewMode);
-      setHideCrossOverGuide(!!s.hide_crossover_guide);
-      setStreamMode(!!s.stream_mode);
-    });
-
-    window.ipcRenderer.getUsername().then((u: string) => {
-      setUsername(u);
-    }).catch((err) => {
-      console.error('Failed to get username', err);
-    });
-
-    // Listen for preferences menu event
-    const unlistenPrefs = listen('show-preferences', () => {
-      setShowPreferences(true);
-    });
-
-    const unlistenStorageVolumes = listen('storage-volumes-changed', () => {
-      setStorageVolumeEventCount((count) => count + 1);
-    });
-
-    const unlistenSteamLaunchOptionsRestart = listen('steam-launch-options-restart', () => {
-      steamRestartingRef.current = true;
-      setIsSteamRestarting(true);
-      void window.ipcRenderer.alert(
-        'Restarting Steam',
-        'Steam is being restarted to apply the launch options for this profile.'
-      );
-    });
-
-    return () => {
-      unlistenPrefs.then(fn => fn());
-      unlistenStorageVolumes.then(fn => fn());
-      unlistenSteamLaunchOptionsRestart.then(fn => fn());
-    };
-  }, [])
-
-  const clearSteamRestartingState = () => {
-    steamRestartingRef.current = false;
-    setIsSteamRestarting(false);
-  };
-
-  const beginLaunchGraceWindow = (milliseconds: number = 20000) => {
-    launchGraceUntilRef.current = Date.now() + milliseconds;
-  };
-
-  const clearLaunchGraceWindow = () => {
-    launchGraceUntilRef.current = 0;
-  };
-
-  const waitForLaunchStateToSettle = async (
-    gameIdentifier: string,
-    platform?: 'windows' | 'mac'
-  ) => {
-    const shouldPollLonger = steamRestartingRef.current;
-    const deadline = Date.now() + (shouldPollLonger ? 12000 : 7000);
-
-    while (Date.now() < deadline) {
-      try {
-        const running = await window.ipcRenderer.isGameRunning(gameIdentifier, platform);
-        if (running) {
-          clearSteamRestartingState();
-          clearLaunchGraceWindow();
-          return true;
-        }
-      } catch {
-        // Keep polling until deadline; transient query failures should not flip UI immediately.
-      }
-
-      await new Promise((resolve) => setTimeout(resolve, 300));
-    }
-
-    clearSteamRestartingState();
-    return false;
-  };
-
-  useEffect(() => {
-    const unlistenPackages = listen<{ game_id: string, total_count: number }>('packages-loaded', (event) => {
-      console.log(`[packages-loaded] Game ${event.payload.game_id} now has ${event.payload.total_count} packages`);
-
-      if (selectedCommunity && event.payload.game_id === selectedCommunity) {
-        loadPackages(selectedCommunity, 0, true);
-      }
-    });
-
-    return () => {
-      unlistenPackages.then(fn => fn());
-    };
-  }, [selectedCommunity])
 
   async function checkForUpdates() {
     const UPDATE_CHECK_INTERVAL_MS = 12 * 60 * 60 * 1000;
@@ -507,41 +344,6 @@ function App() {
       console.warn("Update check skipped", e);
     }
   };
-
-  useEffect(() => {
-    if (selectedCommunity) {
-      // Initial load for game (categories now fetched inside loadPackages after cache is populated)
-      loadPackages(selectedCommunity, 0, true)
-      // Reset profile selection when changing game
-      if (activeProfileId) {
-        selectProfile('')
-      }
-    }
-  }, [selectedCommunity])
-
-  // Server-Side Search mapping
-  const packages = allPackages;
-
-  // Search Debounce Effect
-  useEffect(() => {
-    if (!selectedCommunity) return;
-    const timer = setTimeout(() => {
-      loadPackages(selectedCommunity, 0, true);
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [searchQuery]);
-
-  // Sort/Filter Effect
-  useEffect(() => {
-    if (selectedCommunity) {
-      loadPackages(selectedCommunity, 0, true)
-    }
-  }, [filterOptions])
-
-  // Update Search Effect to depend on sortOrder? No, loadPackages uses current state.
-  // Actually, loadPackages reads sortOrder from state closure.
-
-  // loadData fetches the communities
 
   async function loadData() {
     if (isInitialLoadRunningRef.current) return;
@@ -691,19 +493,6 @@ function App() {
     }
   }
 
-  const handleSelectProfile = (profileId: string) => {
-    setIsBrowsingMode(false);
-    selectProfile(profileId);
-  };
-
-  const loadMorePackages = useCallback(() => {
-    if (!selectedCommunity || isFetchingNextPage || loadingMods) return;
-    setIsFetchingNextPage(true);
-    loadPackages(selectedCommunity, currentPage + 1, false).finally(() => {
-      setIsFetchingNextPage(false);
-    });
-  }, [selectedCommunity, currentPage, isFetchingNextPage, loadingMods]);
-
   async function loadPackages(communityId: string, pageNum: number, reset: boolean = false) {
     const requestId = ++packagesLoadRequestRef.current;
     const isStaleRequest = () => requestId !== packagesLoadRequestRef.current;
@@ -750,17 +539,17 @@ function App() {
 
       const response = await withTimeout(
         window.ipcRenderer.getPackages(
-        communityId,
-        pageNum,
-        PAGE_SIZE,
-        searchQuery, // Use server-side search instead of empty string
-        filterOptions.sort,
-        filterOptions.nsfw,
-        filterOptions.deprecated,
-        filterOptions.sortDirection,
-        filterOptions.categories,
-        filterOptions.mods,
-        filterOptions.modpacks
+          communityId,
+          pageNum,
+          PAGE_SIZE,
+          searchQuery,
+          filterOptions.sort,
+          filterOptions.nsfw,
+          filterOptions.deprecated,
+          filterOptions.sortDirection,
+          filterOptions.categories,
+          filterOptions.mods,
+          filterOptions.modpacks
         ),
         20_000,
         'Package query'
@@ -790,6 +579,283 @@ function App() {
       }
     }
   }
+
+  useEffect(() => {
+    if (!activeProfile) {
+      setTimeout(() => setIsGameRunning(false), 0)
+      return
+    }
+
+    let cancelled = false
+    const pollRunningState = async () => {
+      try {
+        const running = await window.ipcRenderer.isGameRunning(activeProfile.gameIdentifier, activeProfile.platform)
+        if (!cancelled) {
+          if (running) {
+            launchGraceUntilRef.current = 0
+            setIsGameRunning(true)
+          } else if (Date.now() >= launchGraceUntilRef.current) {
+            setIsGameRunning(false)
+          }
+        }
+      } catch {
+        if (!cancelled) {
+          if (Date.now() >= launchGraceUntilRef.current) {
+            setIsGameRunning(false)
+          }
+        }
+      }
+    }
+
+    void pollRunningState()
+    const intervalId = window.setInterval(() => {
+      void pollRunningState()
+    }, 1500)
+
+    return () => {
+      cancelled = true
+      window.clearInterval(intervalId)
+    }
+  }, [activeProfile?.gameIdentifier, activeProfile?.platform])
+
+  useEffect(() => {
+    if (!activeProfile) {
+      setTimeout(() => {
+        setActiveProfileGamePath(null)
+        setIsCheckingActiveProfileGamePath(false)
+      }, 0)
+      return
+    }
+
+    let cancelled = false
+    const checkGamePath = async () => {
+      setIsCheckingActiveProfileGamePath(true)
+      try {
+        const path = await window.ipcRenderer.getGamePath(activeProfile.gameIdentifier, activeProfile.platform)
+        if (!cancelled) {
+          setActiveProfileGamePath(typeof path === 'string' && path.trim().length > 0 ? path : null)
+        }
+      } catch {
+        if (!cancelled) {
+          setActiveProfileGamePath(null)
+        }
+      } finally {
+        if (!cancelled) {
+          setIsCheckingActiveProfileGamePath(false)
+        }
+      }
+    }
+
+    void checkGamePath()
+
+    return () => {
+      cancelled = true
+    }
+  }, [activeProfile?.gameIdentifier, activeProfile?.platform, showSettings, storageVolumeEventCount])
+
+  useEffect(() => {
+    setTimeout(() => {
+      loadData()
+      loadProfiles()
+      checkForUpdates()
+    }, 0);
+
+    // Load app preferences
+    window.ipcRenderer.getSettings().then((s: AppSettings) => {
+      setLegacyInstallMode(!!s.legacy_install_mode);
+      setAskVersionBeforeInstall(s.ask_version_before_install ?? true);
+      setInstallInParallel(s.install_in_parallel ?? true);
+      setConfirmBeforeApplyToGame(!!s.confirm_before_apply_to_game);
+      setWriteDebugLogsToGame(s.write_debug_logs_to_game ?? false);
+      const storedViewMode = s.default_mod_view_mode === 'list' ? 'list' : 'grid';
+      setDefaultModViewMode(storedViewMode);
+      setViewMode(storedViewMode);
+      setHideCrossOverGuide(!!s.hide_crossover_guide);
+      setStreamMode(!!s.stream_mode);
+    });
+
+    window.ipcRenderer.getUsername().then((u: string) => {
+      setUsername(u);
+    }).catch((err) => {
+      console.error('Failed to get username', err);
+    });
+
+    // Listen for preferences menu event
+    const unlistenPrefs = listen('show-preferences', () => {
+      setShowPreferences(true);
+    });
+
+    const unlistenStorageVolumes = listen('storage-volumes-changed', () => {
+      setStorageVolumeEventCount((count) => count + 1);
+    });
+
+    const unlistenSteamLaunchOptionsRestart = listen('steam-launch-options-restart', () => {
+      steamRestartingRef.current = true;
+      setIsSteamRestarting(true);
+      void window.ipcRenderer.alert(
+        'Restarting Steam',
+        'Steam is being restarted to apply the launch options for this profile.'
+      );
+    });
+
+    return () => {
+      unlistenPrefs.then(fn => fn());
+      unlistenStorageVolumes.then(fn => fn());
+      unlistenSteamLaunchOptionsRestart.then(fn => fn());
+    };
+  }, [])
+
+  const clearSteamRestartingState = () => {
+    steamRestartingRef.current = false;
+    setIsSteamRestarting(false);
+  };
+
+  const beginLaunchGraceWindow = (milliseconds: number = 20000) => {
+    launchGraceUntilRef.current = Date.now() + milliseconds;
+  };
+
+  const clearLaunchGraceWindow = () => {
+    launchGraceUntilRef.current = 0;
+  };
+
+  const waitForLaunchStateToSettle = async (
+    gameIdentifier: string,
+    platform?: 'windows' | 'mac'
+  ) => {
+    const shouldPollLonger = steamRestartingRef.current;
+    const deadline = Date.now() + (shouldPollLonger ? 12000 : 7000);
+
+    while (Date.now() < deadline) {
+      try {
+        const running = await window.ipcRenderer.isGameRunning(gameIdentifier, platform);
+        if (running) {
+          clearSteamRestartingState();
+          clearLaunchGraceWindow();
+          return true;
+        }
+      } catch {
+        // Keep polling until deadline; transient query failures should not flip UI immediately.
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+
+    clearSteamRestartingState();
+    return false;
+  };
+
+  // Keep a stable ref to selectedCommunity so the packages-loaded listener
+  // doesn't need to re-register on every game change (avoids stale closures).
+  const selectedCommunityRef = useRef<string | null>(null);
+  useEffect(() => { selectedCommunityRef.current = selectedCommunity; }, [selectedCommunity]);
+
+  useEffect(() => {
+    const menuHeight =
+      APP_CONTEXT_MENU_PADDING * 2 +
+      APP_CONTEXT_MENU_ROW_HEIGHT * (SHOW_DEVTOOLS_CONTEXT_MENU_ITEM ? 2 : 1);
+
+    const closeContextMenu = () => setAppContextMenu(null);
+
+    const onContextMenu = (event: MouseEvent) => {
+      if (event.defaultPrevented) return;
+
+      event.preventDefault();
+      setAppContextMenu({
+        x: Math.max(
+          APP_CONTEXT_MENU_GAP,
+          Math.min(event.clientX, window.innerWidth - APP_CONTEXT_MENU_WIDTH - APP_CONTEXT_MENU_GAP)
+        ),
+        y: Math.max(
+          APP_CONTEXT_MENU_GAP,
+          Math.min(event.clientY, window.innerHeight - menuHeight - APP_CONTEXT_MENU_GAP)
+        ),
+      });
+    };
+
+    window.addEventListener('contextmenu', onContextMenu);
+    window.addEventListener('click', closeContextMenu);
+    window.addEventListener('blur', closeContextMenu);
+    window.addEventListener('resize', closeContextMenu);
+    window.addEventListener('scroll', closeContextMenu, true);
+
+    return () => {
+      window.removeEventListener('contextmenu', onContextMenu);
+      window.removeEventListener('click', closeContextMenu);
+      window.removeEventListener('blur', closeContextMenu);
+      window.removeEventListener('resize', closeContextMenu);
+      window.removeEventListener('scroll', closeContextMenu, true);
+    };
+  }, []);
+
+  useEffect(() => {
+    const unlistenPackages = listen<{ game_id: string, total_count: number }>('packages-loaded', (event) => {
+      console.log(`[packages-loaded] Game ${event.payload.game_id} now has ${event.payload.total_count} packages`);
+      const current = selectedCommunityRef.current;
+      if (current && event.payload.game_id === current) {
+        loadPackages(current, 0, true);
+      }
+    });
+
+    return () => {
+      unlistenPackages.then(fn => fn());
+    };
+  }, [])
+
+
+
+  useEffect(() => {
+    if (selectedCommunity) {
+      // Initial load for game (categories now fetched inside loadPackages after cache is populated)
+      setTimeout(() => {
+        loadPackages(selectedCommunity, 0, true)
+        // Reset profile selection when changing game
+        if (activeProfileId) {
+          selectProfile('')
+        }
+      }, 0);
+    }
+  }, [selectedCommunity])
+
+  // Server-Side Search mapping
+  const packages = allPackages;
+
+  // Search Debounce Effect
+  useEffect(() => {
+    if (!selectedCommunity) return;
+    const timer = setTimeout(() => {
+      loadPackages(selectedCommunity, 0, true);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  // Sort/Filter Effect
+  useEffect(() => {
+    if (selectedCommunity) {
+      setTimeout(() => {
+        loadPackages(selectedCommunity, 0, true)
+      }, 0);
+    }
+  }, [filterOptions])
+
+  // Update Search Effect to depend on sortOrder? No, loadPackages uses current state.
+  // Actually, loadPackages reads sortOrder from state closure.
+
+
+
+  const handleSelectProfile = (profileId: string) => {
+    setIsBrowsingMode(false);
+    selectProfile(profileId);
+  };
+
+  const loadMorePackages = useCallback(() => {
+    if (!selectedCommunity || isFetchingNextPage || loadingMods) return;
+    setIsFetchingNextPage(true);
+    loadPackages(selectedCommunity, currentPage + 1, false).finally(() => {
+      setIsFetchingNextPage(false);
+    });
+  }, [selectedCommunity, currentPage, isFetchingNextPage, loadingMods]);
+
+
 
 
 
@@ -1386,6 +1452,22 @@ function App() {
     );
   };
 
+  const handleReloadFromContextMenu = () => {
+    setAppContextMenu(null);
+    window.location.reload();
+  };
+
+  const handleOpenDevtoolsFromContextMenu = async () => {
+    setAppContextMenu(null);
+    if (!SHOW_DEVTOOLS_CONTEXT_MENU_ITEM) return;
+
+    try {
+      await invoke('open_devtools');
+    } catch (error) {
+      console.error('Failed to open devtools', error);
+    }
+  };
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) {
@@ -1840,6 +1922,41 @@ function App() {
             </div>
             <div className="text-lg font-bold text-white">Drop Custom Mod</div>
             <div className="mt-1 text-sm text-gray-400">Folder, .zip, or .r2z</div>
+          </div>
+        </div>
+      )}
+
+      {appContextMenu && (
+        <div
+          className="fixed inset-0 z-[90]"
+          onClick={() => setAppContextMenu(null)}
+          onContextMenu={(event) => {
+            event.preventDefault();
+            setAppContextMenu(null);
+          }}
+        >
+          <div
+            className="fixed w-[184px] rounded-md border border-gray-700 bg-gray-950/95 p-1 shadow-2xl backdrop-blur"
+            style={{ left: appContextMenu.x, top: appContextMenu.y }}
+            onClick={(event) => event.stopPropagation()}
+            onContextMenu={(event) => event.preventDefault()}
+          >
+            <button
+              type="button"
+              className="flex h-9 w-full items-center rounded px-3 text-left text-sm font-medium text-gray-100 transition-colors hover:bg-gray-800 focus:bg-gray-800 focus:outline-none"
+              onClick={handleReloadFromContextMenu}
+            >
+              Aggiorna
+            </button>
+            {SHOW_DEVTOOLS_CONTEXT_MENU_ITEM && (
+              <button
+                type="button"
+                className="flex h-9 w-full items-center rounded px-3 text-left text-sm font-medium text-gray-100 transition-colors hover:bg-gray-800 focus:bg-gray-800 focus:outline-none"
+                onClick={handleOpenDevtoolsFromContextMenu}
+              >
+                Ispeziona pagina
+              </button>
+            )}
           </div>
         </div>
       )}

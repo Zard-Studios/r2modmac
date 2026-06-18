@@ -977,7 +977,6 @@ pub fn get_username() -> Result<String, String> {
     Err("Could not retrieve username".to_string())
 }
 
-
 #[command]
 pub async fn select_file(
     app: AppHandle,
@@ -1180,7 +1179,6 @@ pub async fn install_update(app: AppHandle, download_url: String) -> Result<(), 
     eprintln!("[install_update] Downloading to {:?}", file_path);
 
     // Stream download to calculate progress
-    use futures_util::StreamExt;
     use std::io::Write;
 
     let response = reqwest::get(&download_url)
@@ -1190,10 +1188,10 @@ pub async fn install_update(app: AppHandle, download_url: String) -> Result<(), 
 
     let mut file = fs::File::create(&file_path).map_err(|e| e.to_string())?;
     let mut downloaded: u64 = 0;
-    let mut stream = response.bytes_stream();
+    let mut body = response;
 
-    while let Some(item) = stream.next().await {
-        let chunk = item.map_err(|e| e.to_string())?;
+    while let Ok(Some(item)) = body.chunk().await {
+        let chunk = item;
         file.write_all(&chunk).map_err(|e| e.to_string())?;
 
         downloaded += chunk.len() as u64;

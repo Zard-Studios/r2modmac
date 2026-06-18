@@ -2,11 +2,75 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
+use tokio::sync::Mutex;
 use tokio::sync::RwLock;
 
+/// Maximum number of game package-lists kept in memory at once. Each game's
+/// Thunderstore listing can be tens of MB of JSON; without eviction the cache
+/// grows unbounded as the user browses different games.
+const MAX_CACHED_GAMES: usize = 1;
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct PackageVersion {
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub icon: String,
+    pub version_number: String,
+    #[serde(default)]
+    pub dependencies: Vec<String>,
+    pub download_url: String,
+    #[serde(default)]
+    pub downloads: i64,
+    #[serde(default)]
+    pub website_url: String,
+    #[serde(default)]
+    pub file_size: u64,
+    // Fields below are skipped from deserialization to save memory.
+    // date_created and is_active are truly unused in the install/UI flow.
+    pub uuid4: String,
+    pub full_name: String,
+    #[serde(skip_deserializing, default)]
+    pub date_created: String,
+    #[serde(skip_deserializing, default)]
+    pub is_active: bool,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Package {
+    pub name: String,
+    pub full_name: String,
+    // owner is never accessed directly — derived from full_name.split('-')[0] in the frontend.
+    #[serde(skip_deserializing, default)]
+    pub owner: String,
+    // package_url is never read from real data (only from mocks in ProfileSidebar).
+    #[serde(skip_deserializing, default)]
+    pub package_url: String,
+    // date_created on Package is unused; only date_updated is used for sorting.
+    #[serde(skip_deserializing, default)]
+    pub date_created: String,
+    pub date_updated: String,
+    pub uuid4: String,
+    #[serde(default)]
+    pub rating_score: i64,
+    #[serde(default)]
+    pub is_pinned: bool,
+    #[serde(default)]
+    pub is_deprecated: bool,
+    #[serde(default)]
+    pub has_nsfw_content: bool,
+    #[serde(default)]
+    pub categories: Vec<String>,
+    pub versions: Vec<PackageVersion>,
+}
+
 pub struct AppState {
-    pub packages: Arc<RwLock<HashMap<String, Vec<serde_json::Value>>>>,
+    pub packages: Arc<RwLock<HashMap<String, Vec<Package>>>>,
     pub platform_cache: Arc<RwLock<HashMap<String, CachedPlatform>>>,
+    /// Insertion order of cached game ids (most-recent at the end) so we can
+    /// evict the oldest entry when the cache grows past MAX_CACHED_GAMES.
+    packages_order: Arc<Mutex<Vec<String>>>,
 }
 
 impl Default for AppState {
@@ -14,6 +78,36 @@ impl Default for AppState {
         Self {
             packages: Arc::new(RwLock::new(HashMap::new())),
             platform_cache: Arc::new(RwLock::new(HashMap::new())),
+            packages_order: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+}
+
+impl AppState {
+    /// Record that a game's packages were (re)cached, then evict the oldest
+    /// entries beyond MAX_CACHED_GAMES to keep memory bounded.
+    pub async fn touch_packages_cache(&self, game_id: &str) {
+        let mut order = self.packages_order.lock().await;
+        order.retain(|id| id != game_id);
+        order.push(game_id.to_string());
+
+        if order.len() > MAX_CACHED_GAMES {
+            let drop_count = order.len() - MAX_CACHED_GAMES;
+            let to_drop: Vec<String> = order.drain(..drop_count).collect();
+            drop(order);
+            if !to_drop.is_empty() {
+                let mut packages_lock = self.packages.write().await;
+                let mut order = self.packages_order.lock().await;
+                for id in &to_drop {
+                    if packages_lock.remove(id).is_some() {
+                        eprintln!(
+                            "[packages-cache] evicted {} (limit {})",
+                            id, MAX_CACHED_GAMES
+                        );
+                    }
+                }
+                order.retain(|id| !to_drop.contains(id));
+            }
         }
     }
 }
@@ -104,7 +198,9 @@ fn default_false() -> bool {
 }
 
 pub fn get_settings_path(app: &tauri::AppHandle) -> std::path::PathBuf {
-    crate::utils::paths::app_data_dir(app).unwrap().join("settings.json")
+    crate::utils::paths::app_data_dir(app)
+        .unwrap()
+        .join("settings.json")
 }
 
 pub fn load_settings_impl(app: &tauri::AppHandle) -> Settings {

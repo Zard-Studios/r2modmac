@@ -2,7 +2,29 @@ pub mod commands;
 pub mod models;
 pub mod utils;
 
+// Use mimalloc as the global allocator. It returns freed memory pages back to
+// the OS much more aggressively than the default macOS system allocator, which
+// significantly reduces RSS after browsing large mod stores.
+use mimalloc::MiMalloc;
+#[global_allocator]
+static GLOBAL: MiMalloc = MiMalloc;
+
 use tauri::Emitter;
+
+#[tauri::command]
+fn open_devtools(window: tauri::WebviewWindow) -> Result<(), String> {
+    #[cfg(debug_assertions)]
+    {
+        window.open_devtools();
+        Ok(())
+    }
+
+    #[cfg(not(debug_assertions))]
+    {
+        let _ = window;
+        Err("DevTools are only available in dev builds.".to_string())
+    }
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -320,6 +342,7 @@ pub fn run() {
             commands::profile_commands::write_profile_config_file,
             commands::profile_commands::reveal_profile_config_file,
             commands::profile_commands::open_profile_config_file,
+            open_devtools,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
