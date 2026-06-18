@@ -214,7 +214,7 @@ export function ModDetailModal({
                                 </div>
                                 <div className="text-right flex flex-col items-end">
                                     <span className="text-[10px] uppercase text-gray-500 font-bold tracking-wider">Updated</span>
-                                    <span className="text-sm text-gray-300">{new Date(mod.date_created).toLocaleDateString()}</span>
+                                    <span className="text-sm text-gray-300">{new Date(pkg.date_updated).toLocaleDateString()}</span>
                                     {mod.website_url && (
                                         <button
                                             onClick={() => {

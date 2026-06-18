@@ -188,6 +188,8 @@ export function FilterPopover({ options, onChange, availableCategories }: Filter
                                             updateOption('categories', []);
                                             updateOption('nsfw', false);
                                             updateOption('deprecated', false);
+                                            updateOption('mods', false);
+                                            updateOption('modpacks', false);
                                         }}
                                         className="text-sm text-gray-400 hover:text-white transition-colors"
                                     >

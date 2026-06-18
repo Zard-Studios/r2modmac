@@ -63,6 +63,7 @@ interface ProfileSidebarProps {
     currentCommunity: Community | null;
     communityImage: string | undefined;
     packages: Package[];
+    packageIndex: Record<string, Package>;
     legacyInstallMode: boolean;
     installInParallel: boolean;
     onSelectProfile: (profileId: string) => void;
@@ -93,6 +94,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
     currentCommunity,
     communityImage,
     packages,
+    packageIndex,
     legacyInstallMode,
     installInParallel,
     onSelectProfile,
@@ -230,14 +232,14 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
 
     const latestVersionByPackage = useMemo(() => {
         const map = new Map<string, string>();
-        for (const pkg of packages) {
+        for (const pkg of Object.values(packageIndex)) {
             const latest = pkg.versions?.[0]?.version_number;
             if (latest) {
                 map.set(pkg.full_name, latest);
             }
         }
         return map;
-    }, [packages]);
+    }, [packageIndex]);
 
     const updatesInView = useMemo(() => {
         return displayedMods.reduce((count, mod) => {
@@ -546,7 +548,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
 
                 {displayedMods.map(mod => {
                     const modNameWithoutVersion = mod.fullName.replace(/-\d+\.\d+\.\d+$/, '');
-                    const pkg = mod.source === 'local' ? undefined : packages.find(p => p.full_name === modNameWithoutVersion);
+                    const pkg = mod.source === 'local' ? undefined : packageIndex[modNameWithoutVersion];
                     const latestVersion = pkg?.versions[0].version_number;
                     const hasUpdate = latestVersion && latestVersion !== mod.versionNumber;
                     const isSelected = selectedModIdSet.has(mod.uuid4);
@@ -585,6 +587,11 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                                     {mod.source === 'local' && (
                                         <span className="text-[10px] px-1.5 py-0.5 rounded-full border border-blue-500/25 bg-blue-500/10 text-blue-300">
                                             Custom
+                                        </span>
+                                    )}
+                                    {pkg?.is_deprecated && (
+                                        <span className="text-[10px] px-1.5 py-0.5 rounded-full border border-red-500/40 bg-red-500/10 text-red-300">
+                                            Deprecated
                                         </span>
                                     )}
                                 </div>

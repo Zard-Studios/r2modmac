@@ -243,6 +243,7 @@ function App() {
   })
   const PAGE_SIZE = 50 
   const [availableCategories, setAvailableCategories] = useState<string[]>([])
+  const [profilePackageIndex, setProfilePackageIndex] = useState<Record<string, Package>>({})
   const [isSidebarOpen, setIsSidebarOpen] = useState(true)
 
   const [selectedMod, setSelectedMod] = useState<Package | null>(null)
@@ -787,12 +788,47 @@ function App() {
     };
   }, []);
 
+  const activeProfileRef = useRef(activeProfile);
+  activeProfileRef.current = activeProfile;
+
+  const rebuildProfilePackageIndex = useCallback(async (communityId: string) => {
+    const profile = activeProfileRef.current;
+    if (!profile || profile.mods.length === 0) {
+      setProfilePackageIndex({});
+      return;
+    }
+
+    const modNames = profile.mods
+      .filter(m => m.source !== 'local')
+      .map(m => m.fullName.replace(/-\d+\.\d+\.\d+$/, ''));
+
+    if (modNames.length === 0) {
+      setProfilePackageIndex({});
+      return;
+    }
+
+    try {
+      const result = await window.ipcRenderer.lookupPackagesByNames(communityId, modNames);
+      const index: Record<string, Package> = {};
+      if (result?.found) {
+        for (const pkg of result.found) {
+          index[pkg.full_name] = pkg;
+        }
+      }
+      setProfilePackageIndex(index);
+    } catch (err) {
+      console.error('Failed to build profile package index', err);
+      setProfilePackageIndex({});
+    }
+  }, []);
+
   useEffect(() => {
     const unlistenPackages = listen<{ game_id: string, total_count: number }>('packages-loaded', (event) => {
       console.log(`[packages-loaded] Game ${event.payload.game_id} now has ${event.payload.total_count} packages`);
       const current = selectedCommunityRef.current;
       if (current && event.payload.game_id === current) {
         loadPackages(current, 0, true);
+        rebuildProfilePackageIndex(current);
       }
     });
 
@@ -837,8 +873,12 @@ function App() {
     }
   }, [filterOptions])
 
-  // Update Search Effect to depend on sortOrder? No, loadPackages uses current state.
-  // Actually, loadPackages reads sortOrder from state closure.
+  // Build package index for profile mods (only fetch installed mods, not all packages)
+  useEffect(() => {
+    if (selectedCommunity) {
+      rebuildProfilePackageIndex(selectedCommunity);
+    }
+  }, [activeProfile?.id, selectedCommunity, activeProfile?.mods.length])
 
 
 
@@ -1731,6 +1771,7 @@ function App() {
         currentCommunity={currentCommunity || null}
         communityImage={currentCommunity ? communityImages[currentCommunity.identifier] : undefined}
         packages={packages}
+        packageIndex={profilePackageIndex}
         legacyInstallMode={legacyInstallMode}
         installInParallel={installInParallel}
         onSelectProfile={handleSelectProfile}
