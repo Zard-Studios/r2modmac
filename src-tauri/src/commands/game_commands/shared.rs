@@ -279,7 +279,10 @@ pub(super) fn manual_path_matches_platform(
         return false;
     }
 
-    let mut has_app_bundle = false;
+    let mut has_app_bundle = path
+        .file_name()
+        .map(|name| name.to_string_lossy().ends_with(".app"))
+        .unwrap_or(false);
     let mut has_windows_exe = false;
 
     if let Ok(entries) = fs::read_dir(path) {

@@ -62,7 +62,6 @@ interface ProfileSidebarProps {
     activeProfile: Profile | undefined;
     currentCommunity: Community | null;
     communityImage: string | undefined;
-    packages: Package[];
     packageIndex: Record<string, Package>;
     legacyInstallMode: boolean;
     installInParallel: boolean;
@@ -93,7 +92,6 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
     activeProfile,
     currentCommunity,
     communityImage,
-    packages,
     packageIndex,
     legacyInstallMode,
     installInParallel,

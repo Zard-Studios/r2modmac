@@ -350,11 +350,11 @@ pub async fn import_profile(_app: AppHandle, code: String) -> Result<serde_json:
         "[import_profile] Strategy 2: Namespace: {}, Name: {}",
         namespace, name
     );
-
     let package_url = format!(
-        "https://thunderstore.io/api/v1/package/{}/{}/",
+        "https://thunderstore.io/api/experimental/package/{}/{}/",
         namespace, name
     );
+
     eprintln!(
         "[import_profile] Strategy 2: Fetching package from: {}",
         package_url
@@ -377,8 +377,24 @@ pub async fn import_profile(_app: AppHandle, code: String) -> Result<serde_json:
         ));
     }
 
-    let pkg: serde_json::Value = pkg_response.json().await.map_err(|e| e.to_string())?;
+    let mut pkg: serde_json::Value = pkg_response.json().await.map_err(|e| e.to_string())?;
     eprintln!("[import_profile] Strategy 2: Successfully got package");
+
+    if pkg["uuid4"].is_null() {
+        pkg["uuid4"] = serde_json::json!("");
+    }
+
+    if pkg["versions"].is_null() || !pkg["versions"].is_array() {
+        let mut latest_ver = pkg["latest"].clone();
+        if !latest_ver.is_null() {
+            if latest_ver["uuid4"].is_null() {
+                latest_ver["uuid4"] = serde_json::json!("");
+            }
+            pkg["versions"] = serde_json::json!(vec![latest_ver]);
+        } else {
+            pkg["versions"] = serde_json::json!(Vec::<serde_json::Value>::new());
+        }
+    }
 
     Ok(serde_json::json!({
         "type": "package",

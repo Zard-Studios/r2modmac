@@ -252,11 +252,8 @@ pub fn is_balatro_game_path(path: &std::path::Path) -> bool {
 }
 
 pub fn get_balatro_mods_dir() -> Option<std::path::PathBuf> {
-    dirs::home_dir().map(|home| {
-        home.join("Library")
-            .join("Application Support")
-            .join("Balatro")
-            .join("Mods")
+    dirs::data_dir().map(|dir| {
+        dir.join("Balatro").join("Mods")
     })
 }
 

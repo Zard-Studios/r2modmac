@@ -1400,6 +1400,17 @@ fn normalize_regular_mod_entry(
     }
 }
 
+fn get_profile_game_identifier(app: &AppHandle, profile_id: &str) -> Option<String> {
+    let profiles_path = crate::utils::paths::app_data_dir(app).ok()?.join("profiles.json");
+    let profiles_data = fs::read_to_string(profiles_path).ok()?;
+    let profiles: Vec<serde_json::Value> = serde_json::from_str(&profiles_data).ok()?;
+    profiles
+        .iter()
+        .find(|profile| profile["id"].as_str() == Some(profile_id))
+        .and_then(|profile| profile["gameIdentifier"].as_str())
+        .map(|s| s.to_string())
+}
+
 fn profile_is_vanilla(app: &AppHandle, profile_id: &str) -> bool {
     let profiles_path = match crate::utils::paths::app_data_dir(app) {
         Ok(path) => path.join("profiles.json"),
@@ -2861,6 +2872,13 @@ fn find_mod_folder_in(base: &std::path::Path, mod_name: &str) -> Option<String> 
 }
 
 fn is_macos_game_dir(path: &std::path::Path) -> bool {
+    if path
+        .file_name()
+        .map(|name| name.to_string_lossy().ends_with(".app"))
+        .unwrap_or(false)
+    {
+        return true;
+    }
     fs::read_dir(path)
         .map(|entries| {
             entries
@@ -3043,7 +3061,8 @@ async fn install_mod_bytes(
     // Install DIRECTLY to game folder
     let game_dir = std::path::Path::new(&game_path);
     let target_is_macos = is_macos_game_dir(game_dir);
-    let target_is_balatro = target_is_macos && is_balatro_game_path(game_dir);
+    let game_identifier = get_profile_game_identifier(&app, &profile_id).unwrap_or_default();
+    let target_is_balatro = crate::models::shared::is_balatro_identifier(&game_identifier) || is_balatro_game_path(game_dir);
     let install_into_disabled_runtime =
         target_is_macos && !target_is_balatro && profile_is_vanilla(&app, &profile_id);
 
@@ -4422,23 +4441,26 @@ pub async fn lookup_packages_by_names(
 
 #[command]
 pub async fn fetch_package_by_name(
-    _state: tauri::State<'_, AppState>,
+    state: tauri::State<'_, AppState>,
     name: String,
-    _game_id: Option<String>,
+    game_id: Option<String>,
 ) -> Result<Option<crate::models::shared::Package>, String> {
     // name might be "Namespace-Name" or "Namespace-Name-Version"
 
     // 1. Strip version if present (Regex: ^(.*)-(\d+\.\d+\.\d+)$)
     let re = regex::Regex::new(r"^(.*)-(\d+\.\d+\.\d+)$").unwrap();
-    let clean_name = if let Some(caps) = re.captures(&name) {
-        caps.get(1).map_or(name.clone(), |m| m.as_str().to_string())
+    let (clean_name, version_str) = if let Some(caps) = re.captures(&name) {
+        (
+            caps.get(1).map_or(name.clone(), |m| m.as_str().to_string()),
+            Some(caps.get(2).unwrap().as_str().to_string()),
+        )
     } else {
-        name.clone()
+        (name.clone(), None)
     };
 
     eprintln!(
-        "[fetch_package_by_name] Fetching {} from API to retrieve all versions...",
-        clean_name
+        "[fetch_package_by_name] Resolving package {} (version: {:?})...",
+        clean_name, version_str
     );
 
     // 2. Split Namespace and Name
@@ -4449,14 +4471,69 @@ pub async fn fetch_package_by_name(
     let namespace = parts[0];
     let package_name = parts[1];
 
-    let url = format!(
-        "https://thunderstore.io/api/v1/package/{}/{}/",
-        namespace, package_name
-    );
+    // 3. Try memory search first
+    {
+        let packages_guard = state.packages.read().await;
+        let mut found_pkg: Option<crate::models::shared::Package> = None;
+        if let Some(ref gid) = game_id {
+            if let Some(game_packages) = packages_guard.get(gid) {
+                for pkg in game_packages {
+                    if pkg.full_name.eq_ignore_ascii_case(&clean_name)
+                        || pkg.name.eq_ignore_ascii_case(&clean_name)
+                    {
+                        found_pkg = Some(pkg.clone());
+                        break;
+                    }
+                }
+            }
+        } else {
+            for game_packages in packages_guard.values() {
+                for pkg in game_packages {
+                    if pkg.full_name.eq_ignore_ascii_case(&clean_name)
+                        || pkg.name.eq_ignore_ascii_case(&clean_name)
+                    {
+                        found_pkg = Some(pkg.clone());
+                        break;
+                    }
+                }
+            }
+        }
+
+        if let Some(pkg) = found_pkg {
+            if let Some(ref v) = version_str {
+                if pkg.versions.iter().any(|ver| ver.version_number == *v) {
+                    eprintln!("[fetch_package_by_name] Found package version in cache");
+                    return Ok(Some(pkg));
+                }
+            } else {
+                eprintln!("[fetch_package_by_name] Found package in cache");
+                return Ok(Some(pkg));
+            }
+        }
+    }
+
+    // 4. Fallback to network
     let client = reqwest::Client::builder()
         .user_agent(APP_USER_AGENT)
         .build()
         .map_err(|e| e.to_string())?;
+
+    let url = if let Some(ref v) = version_str {
+        format!(
+            "https://thunderstore.io/api/experimental/package/{}/{}/{}/",
+            namespace, package_name, v
+        )
+    } else {
+        format!(
+            "https://thunderstore.io/api/experimental/package/{}/{}/",
+            namespace, package_name
+        )
+    };
+
+    eprintln!(
+        "[fetch_package_by_name] Cache miss. Fetching from: {}",
+        url
+    );
 
     let response = client.get(&url).send().await.map_err(|e| e.to_string())?;
 
@@ -4468,8 +4545,135 @@ pub async fn fetch_package_by_name(
         return Err(format!("Failed to fetch package: {}", response.status()));
     }
 
-    let json: crate::models::shared::Package = response.json().await.map_err(|e| e.to_string())?;
-    Ok(Some(json))
+    let val: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
+
+    let pkg = if version_str.is_some() {
+        // Response is a single version object
+        let ver_name = val["name"].as_str().unwrap_or(package_name).to_string();
+        let ver_desc = val["description"].as_str().unwrap_or("").to_string();
+        let ver_icon = val["icon"].as_str().unwrap_or("").to_string();
+        let ver_num = val["version_number"].as_str().unwrap_or("").to_string();
+        let ver_deps = val["dependencies"]
+            .as_array()
+            .unwrap_or(&vec![])
+            .iter()
+            .filter_map(|v| v.as_str().map(|s| s.to_string()))
+            .collect::<Vec<_>>();
+        let ver_download = val["download_url"].as_str().unwrap_or("").to_string();
+        let ver_downloads = val["downloads"].as_i64().unwrap_or(0);
+        let ver_website = val["website_url"].as_str().unwrap_or("").to_string();
+        let ver_full = val["full_name"].as_str().unwrap_or("").to_string();
+        let ver_uuid = val["uuid4"].as_str().unwrap_or("").to_string();
+
+        let version_struct = crate::models::shared::PackageVersion {
+            name: ver_name,
+            description: ver_desc,
+            icon: ver_icon,
+            version_number: ver_num,
+            dependencies: ver_deps,
+            download_url: ver_download,
+            downloads: ver_downloads,
+            website_url: ver_website,
+            file_size: val["file_size"].as_u64().unwrap_or(0),
+            uuid4: ver_uuid,
+            full_name: ver_full,
+            date_created: val["date_created"].as_str().unwrap_or("").to_string(),
+            is_active: val["is_active"].as_bool().unwrap_or(true),
+        };
+
+        crate::models::shared::Package {
+            name: package_name.to_string(),
+            full_name: clean_name.to_string(),
+            owner: namespace.to_string(),
+            package_url: format!("https://thunderstore.io/package/{}/{}/", namespace, package_name),
+            date_created: "".to_string(),
+            date_updated: "".to_string(),
+            uuid4: "".to_string(),
+            rating_score: 0,
+            is_pinned: false,
+            is_deprecated: false,
+            has_nsfw_content: false,
+            categories: vec![],
+            versions: vec![version_struct],
+        }
+    } else {
+        // Response is the top-level package metadata with a "latest" version object
+        let latest_val = &val["latest"];
+        let ver_name = latest_val["name"].as_str().unwrap_or(package_name).to_string();
+        let ver_desc = latest_val["description"].as_str().unwrap_or("").to_string();
+        let ver_icon = latest_val["icon"].as_str().unwrap_or("").to_string();
+        let ver_num = latest_val["version_number"].as_str().unwrap_or("").to_string();
+        let ver_deps = latest_val["dependencies"]
+            .as_array()
+            .unwrap_or(&vec![])
+            .iter()
+            .filter_map(|v| v.as_str().map(|s| s.to_string()))
+            .collect::<Vec<_>>();
+        let ver_download = latest_val["download_url"].as_str().unwrap_or("").to_string();
+        let ver_downloads = latest_val["downloads"].as_i64().unwrap_or(0);
+        let ver_website = latest_val["website_url"].as_str().unwrap_or("").to_string();
+        let ver_full = latest_val["full_name"].as_str().unwrap_or("").to_string();
+        let ver_uuid = latest_val["uuid4"].as_str().unwrap_or("").to_string();
+
+        let version_struct = crate::models::shared::PackageVersion {
+            name: ver_name,
+            description: ver_desc,
+            icon: ver_icon,
+            version_number: ver_num,
+            dependencies: ver_deps,
+            download_url: ver_download,
+            downloads: ver_downloads,
+            website_url: ver_website,
+            file_size: latest_val["file_size"].as_u64().unwrap_or(0),
+            uuid4: ver_uuid,
+            full_name: ver_full,
+            date_created: latest_val["date_created"].as_str().unwrap_or("").to_string(),
+            is_active: latest_val["is_active"].as_bool().unwrap_or(true),
+        };
+
+        let pkg_name = val["name"].as_str().unwrap_or(package_name).to_string();
+        let pkg_full = val["full_name"].as_str().unwrap_or(&clean_name).to_string();
+        let pkg_owner = val["owner"].as_str().unwrap_or(namespace).to_string();
+        let pkg_url = val["package_url"].as_str().unwrap_or("").to_string();
+        let pkg_uuid = val["uuid4"].as_str().unwrap_or("").to_string();
+        let pkg_date_created = val["date_created"].as_str().unwrap_or("").to_string();
+        let pkg_date_updated = val["date_updated"].as_str().unwrap_or("").to_string();
+        let pkg_rating = val["rating_score"].as_i64().unwrap_or(0);
+        let pkg_pinned = val["is_pinned"].as_bool().unwrap_or(false);
+        let pkg_deprecated = val["is_deprecated"].as_bool().unwrap_or(false);
+
+        let mut has_nsfw = false;
+        let mut categories = vec![];
+        if let Some(listings) = val["community_listings"].as_array() {
+            if let Some(first_listing) = listings.first() {
+                has_nsfw = first_listing["has_nsfw_content"].as_bool().unwrap_or(false);
+                categories = first_listing["categories"]
+                    .as_array()
+                    .unwrap_or(&vec![])
+                    .iter()
+                    .filter_map(|c| c.as_str().map(|s| s.to_string()))
+                    .collect();
+            }
+        }
+
+        crate::models::shared::Package {
+            name: pkg_name,
+            full_name: pkg_full,
+            owner: pkg_owner,
+            package_url: pkg_url,
+            date_created: pkg_date_created,
+            date_updated: pkg_date_updated,
+            uuid4: pkg_uuid,
+            rating_score: pkg_rating,
+            is_pinned: pkg_pinned,
+            is_deprecated: pkg_deprecated,
+            has_nsfw_content: has_nsfw,
+            categories,
+            versions: vec![version_struct],
+        }
+    };
+
+    Ok(Some(pkg))
 }
 
 #[cfg(test)]
@@ -4542,5 +4746,17 @@ mod tests {
         let written = fs::read(dir.join(ROR2_CROSSOVER_NEWTONSOFT_TARGET)).unwrap();
         assert_eq!(written, b"newtonsoft dll");
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_is_macos_game_dir() {
+        let app_path = std::path::Path::new("/Applications/Balatro.app");
+        assert!(is_macos_game_dir(app_path));
+
+        let temp = temp_dir("is_macos_game_dir");
+        let app_inside = temp.join("SomeGame.app");
+        fs::create_dir_all(&app_inside).unwrap();
+        assert!(is_macos_game_dir(&temp));
+        let _ = fs::remove_dir_all(temp);
     }
 }

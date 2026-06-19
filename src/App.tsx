@@ -88,16 +88,7 @@ interface ProfileArchiveMergeSummary {
 }
 
 const ARCHIVE_IMPORT_PATTERN = /\.(r2z|zip)$/i;
-const APP_CONTEXT_MENU_WIDTH = 184;
-const APP_CONTEXT_MENU_ROW_HEIGHT = 36;
-const APP_CONTEXT_MENU_PADDING = 8;
-const APP_CONTEXT_MENU_GAP = 8;
 const SHOW_DEVTOOLS_CONTEXT_MENU_ITEM = import.meta.env.DEV;
-
-type AppContextMenuState = {
-  x: number;
-  y: number;
-};
 
 const isArchiveImportPath = (path: string) => ARCHIVE_IMPORT_PATTERN.test(path.trim());
 
@@ -289,7 +280,6 @@ function App() {
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
   const [showUpdateModal, setShowUpdateModal] = useState(false)
   const [showPreferences, setShowPreferences] = useState(false)
-  const [appContextMenu, setAppContextMenu] = useState<AppContextMenuState | null>(null)
   const [legacyInstallMode, setLegacyInstallMode] = useState(false)
   const [askVersionBeforeInstall, setAskVersionBeforeInstall] = useState(true)
   const [installInParallel, setInstallInParallel] = useState(true)
@@ -751,48 +741,48 @@ function App() {
   useEffect(() => { selectedCommunityRef.current = selectedCommunity; }, [selectedCommunity]);
 
   useEffect(() => {
-    const menuHeight =
-      APP_CONTEXT_MENU_PADDING * 2 +
-      APP_CONTEXT_MENU_ROW_HEIGHT * (SHOW_DEVTOOLS_CONTEXT_MENU_ITEM ? 2 : 1);
-
-    const closeContextMenu = () => setAppContextMenu(null);
-
-    const onContextMenu = (event: MouseEvent) => {
+    const onContextMenu = async (event: MouseEvent) => {
       if (event.defaultPrevented) return;
 
       event.preventDefault();
-      setAppContextMenu({
-        x: Math.max(
-          APP_CONTEXT_MENU_GAP,
-          Math.min(event.clientX, window.innerWidth - APP_CONTEXT_MENU_WIDTH - APP_CONTEXT_MENU_GAP)
-        ),
-        y: Math.max(
-          APP_CONTEXT_MENU_GAP,
-          Math.min(event.clientY, window.innerHeight - menuHeight - APP_CONTEXT_MENU_GAP)
-        ),
-      });
+
+      const { Menu: M, MenuItem: MI } = await import('@tauri-apps/api/menu');
+
+      const items = [];
+      items.push(await MI.new({
+        text: 'Aggiorna',
+        action: () => {
+          window.location.reload();
+        }
+      }));
+
+      if (SHOW_DEVTOOLS_CONTEXT_MENU_ITEM) {
+        items.push(await MI.new({
+          text: 'Ispeziona pagina',
+          action: async () => {
+            try {
+              await invoke('open_devtools');
+            } catch (error) {
+              console.error('Failed to open devtools', error);
+            }
+          }
+        }));
+      }
+
+      const menu = await M.new({ items });
+      await menu.popup();
     };
 
     window.addEventListener('contextmenu', onContextMenu);
-    window.addEventListener('click', closeContextMenu);
-    window.addEventListener('blur', closeContextMenu);
-    window.addEventListener('resize', closeContextMenu);
-    window.addEventListener('scroll', closeContextMenu, true);
 
     return () => {
       window.removeEventListener('contextmenu', onContextMenu);
-      window.removeEventListener('click', closeContextMenu);
-      window.removeEventListener('blur', closeContextMenu);
-      window.removeEventListener('resize', closeContextMenu);
-      window.removeEventListener('scroll', closeContextMenu, true);
     };
   }, []);
 
-  const activeProfileRef = useRef(activeProfile);
-  activeProfileRef.current = activeProfile;
-
   const rebuildProfilePackageIndex = useCallback(async (communityId: string) => {
-    const profile = activeProfileRef.current;
+    const { profiles, activeProfileId } = useProfileStore.getState();
+    const profile = profiles.find((p) => p.id === activeProfileId) ?? null;
     if (!profile || profile.mods.length === 0) {
       setProfilePackageIndex({});
       return;
@@ -876,9 +866,12 @@ function App() {
   // Build package index for profile mods (only fetch installed mods, not all packages)
   useEffect(() => {
     if (selectedCommunity) {
-      rebuildProfilePackageIndex(selectedCommunity);
+      const timer = setTimeout(() => {
+        rebuildProfilePackageIndex(selectedCommunity);
+      }, 0);
+      return () => clearTimeout(timer);
     }
-  }, [activeProfile?.id, selectedCommunity, activeProfile?.mods.length])
+  }, [activeProfile?.id, selectedCommunity, activeProfile?.mods.length, rebuildProfilePackageIndex])
 
 
 
@@ -1492,21 +1485,7 @@ function App() {
     );
   };
 
-  const handleReloadFromContextMenu = () => {
-    setAppContextMenu(null);
-    window.location.reload();
-  };
 
-  const handleOpenDevtoolsFromContextMenu = async () => {
-    setAppContextMenu(null);
-    if (!SHOW_DEVTOOLS_CONTEXT_MENU_ITEM) return;
-
-    try {
-      await invoke('open_devtools');
-    } catch (error) {
-      console.error('Failed to open devtools', error);
-    }
-  };
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -1770,7 +1749,6 @@ function App() {
         activeProfile={activeProfile ?? undefined}
         currentCommunity={currentCommunity || null}
         communityImage={currentCommunity ? communityImages[currentCommunity.identifier] : undefined}
-        packages={packages}
         packageIndex={profilePackageIndex}
         legacyInstallMode={legacyInstallMode}
         installInParallel={installInParallel}
@@ -1967,40 +1945,7 @@ function App() {
         </div>
       )}
 
-      {appContextMenu && (
-        <div
-          className="fixed inset-0 z-[90]"
-          onClick={() => setAppContextMenu(null)}
-          onContextMenu={(event) => {
-            event.preventDefault();
-            setAppContextMenu(null);
-          }}
-        >
-          <div
-            className="fixed w-[184px] rounded-md border border-gray-700 bg-gray-950/95 p-1 shadow-2xl backdrop-blur"
-            style={{ left: appContextMenu.x, top: appContextMenu.y }}
-            onClick={(event) => event.stopPropagation()}
-            onContextMenu={(event) => event.preventDefault()}
-          >
-            <button
-              type="button"
-              className="flex h-9 w-full items-center rounded px-3 text-left text-sm font-medium text-gray-100 transition-colors hover:bg-gray-800 focus:bg-gray-800 focus:outline-none"
-              onClick={handleReloadFromContextMenu}
-            >
-              Aggiorna
-            </button>
-            {SHOW_DEVTOOLS_CONTEXT_MENU_ITEM && (
-              <button
-                type="button"
-                className="flex h-9 w-full items-center rounded px-3 text-left text-sm font-medium text-gray-100 transition-colors hover:bg-gray-800 focus:bg-gray-800 focus:outline-none"
-                onClick={handleOpenDevtoolsFromContextMenu}
-              >
-                Ispeziona pagina
-              </button>
-            )}
-          </div>
-        </div>
-      )}
+
 
       {/* Modals */}
       <AppModals
