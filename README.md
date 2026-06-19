@@ -14,6 +14,9 @@
   <a href="https://ko-fi.com/zardstudios">
     <img src="https://img.shields.io/badge/Ko--fi-Support%20me-ff5f5f?logo=ko-fi&logoColor=white" alt="Ko-fi">
   </a>
+  <a href="https://paypal.me/FedexPower">
+    <img src="https://img.shields.io/badge/PayPal-Donate-00457C?logo=paypal&logoColor=white" alt="PayPal">
+  </a>
 </p>
 
 ## Description
