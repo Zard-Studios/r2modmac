@@ -239,15 +239,18 @@ pub async fn clear_profile_cache(
         if let Ok(entries) = fs::read_dir(&profiles_dir) {
             for entry in entries.filter_map(|e| e.ok()) {
                 if entry.path().is_dir() {
-                    let bepinex_dir = entry.path().join("BepInEx");
-                    if bepinex_dir.exists() {
-                        // Calculate size before deleting
-                        if let Ok(size) = calculate_dir_size(&bepinex_dir) {
-                            size_freed += size;
+                    let cache_dirs = ["BepInEx", "Balatro", "MelonLoader"];
+                    for dir_name in cache_dirs.iter() {
+                        let cache_dir = entry.path().join(dir_name);
+                        if cache_dir.exists() {
+                            // Calculate size before deleting
+                            if let Ok(size) = calculate_dir_size(&cache_dir) {
+                                size_freed += size;
+                            }
+                            eprintln!("[clear_profile_cache] Removing: {:?}", cache_dir);
+                            let _ = fs::remove_dir_all(&cache_dir);
+                            cleared += 1;
                         }
-                        eprintln!("[clear_profile_cache] Removing: {:?}", bepinex_dir);
-                        let _ = fs::remove_dir_all(&bepinex_dir);
-                        cleared += 1;
                     }
                 }
             }
