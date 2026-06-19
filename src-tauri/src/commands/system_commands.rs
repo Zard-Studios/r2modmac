@@ -1116,32 +1116,46 @@ pub async fn check_update(current_version: String) -> Result<UpdateInfo, String>
     // Use semver crate if available, or simple split compare
     let is_newer = compare_versions(clean_tag, &current_version);
 
-    // Detect system architecture
-    let arch = std::env::consts::ARCH; // "aarch64" for Apple Silicon, "x86_64" for Intel
-    eprintln!("[check_update] Detected architecture: {}", arch);
+    // Detect system architecture and OS
+    let os = std::env::consts::OS;
+    let arch = std::env::consts::ARCH;
+    eprintln!("[check_update] Detected OS: {}, architecture: {}", os, arch);
 
-    // Map architecture to expected asset name patterns
-    let arch_pattern = match arch {
-        "aarch64" => "aarch64",
-        "x86_64" => "x64",
-        _ => "universal", // Fallback to universal for unknown archs
+    // Map architecture and OS to expected asset name patterns
+    let arch_pattern = match (os, arch) {
+        ("macos", "aarch64") => "aarch64",
+        ("macos", "x86_64") => "x86_64",
+        ("windows", "x86_64") => "x64",
+        ("windows", "x86") | ("windows", "i686") => "x86",
+        ("windows", "aarch64") => "arm64",
+        (_, _) => "universal", // Fallback to universal for unknown archs
     };
 
-    // Find matching DMG/archive: prioritize exact arch match, fallback to universal
+    let allowed_extensions = match os {
+        "windows" => vec![".exe"],
+        "macos" => vec![".dmg", ".tar.gz", ".zip"],
+        _ => vec![".tar.gz", ".zip"],
+    };
+
+    // Find matching DMG/archive: prioritize exact arch match, fallback to universal/x64
     let asset = release
         .assets
         .iter()
         .find(|a| {
             let name = a.name.to_lowercase();
-            (name.ends_with(".dmg") || name.ends_with(".tar.gz") || name.ends_with(".zip"))
-                && name.contains(arch_pattern)
+            let matches_ext = allowed_extensions.iter().any(|ext| name.ends_with(ext));
+            matches_ext && name.contains(arch_pattern)
         })
         .or_else(|| {
-            // Fallback to universal if exact arch not found
+            // Fallback to universal (on macOS) or x64 (on Windows) if exact arch not found
             release.assets.iter().find(|a| {
                 let name = a.name.to_lowercase();
-                (name.ends_with(".dmg") || name.ends_with(".tar.gz") || name.ends_with(".zip"))
-                    && name.contains("universal")
+                let matches_ext = allowed_extensions.iter().any(|ext| name.ends_with(ext));
+                if os == "windows" {
+                    matches_ext && name.contains("x64")
+                } else {
+                    matches_ext && name.contains("universal")
+                }
             })
         });
 
@@ -1203,80 +1217,97 @@ pub async fn install_update(app: AppHandle, download_url: String) -> Result<(), 
         }
     }
 
-    // 2. Prepare Update Script
-    let script_path = temp_dir.join("update.sh");
+    #[cfg(target_os = "windows")]
+    {
+        // 2. Spawn Windows Installer
+        eprintln!("[install_update] Spawning Windows installer: {:?}", file_path);
+        Command::new(&file_path)
+            .spawn()
+            .map_err(|e| format!("Failed to launch installer: {}", e))?;
 
-    // GUARD: Check if we are in dev mode or not in a standard .app bundle
-    // If current_exe is inside "target/debug" or "target/release", we are likely in dev/build.
-    // Abort update to prevent deleting source code!
-    let current_exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    let exe_string = current_exe.to_string_lossy();
-    if exe_string.contains("/target/debug/") || exe_string.contains("/target/release/") {
-        eprintln!("Dev/Build environment detected. Skipping destructive update.");
-        return Err(
-            "Cannot auto-update in development environment. Build a release bundle to test."
-                .to_string(),
-        );
+        // 3. Exit App to allow installer to proceed
+        eprintln!("[install_update] Exiting app to allow update...");
+        app.exit(0);
+
+        Ok(())
     }
 
-    // Determine extraction/mount commands based on file type
-    let (extract_command, app_source) =
-        if filename.ends_with(".tar.gz") {
-            (
-                format!(
-                    "tar -xzf '{}' -C '{}'",
-                    file_path.to_string_lossy(),
-                    temp_dir.to_string_lossy()
+    #[cfg(not(target_os = "windows"))]
+    {
+        // 2. Prepare Update Script
+        let script_path = temp_dir.join("update.sh");
+
+        // GUARD: Check if we are in dev mode or not in a standard .app bundle
+        // If current_exe is inside "target/debug" or "target/release", we are likely in dev/build.
+        // Abort update to prevent deleting source code!
+        let current_exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        let exe_string = current_exe.to_string_lossy();
+        if exe_string.contains("/target/debug/") || exe_string.contains("/target/release/") {
+            eprintln!("Dev/Build environment detected. Skipping destructive update.");
+            return Err(
+                "Cannot auto-update in development environment. Build a release bundle to test."
+                    .to_string(),
+            );
+        }
+
+        // Determine extraction/mount commands based on file type
+        let (extract_command, app_source) =
+            if filename.ends_with(".tar.gz") {
+                (
+                    format!(
+                        "tar -xzf '{}' -C '{}'",
+                        file_path.to_string_lossy(),
+                        temp_dir.to_string_lossy()
+                    ),
+                    format!("{}/r2modmac.app", temp_dir.to_string_lossy()),
+                )
+            } else if filename.ends_with(".zip") {
+                (
+                    format!(
+                        "unzip -o '{}' -d '{}'",
+                        file_path.to_string_lossy(),
+                        temp_dir.to_string_lossy()
+                    ),
+                    format!("{}/r2modmac.app", temp_dir.to_string_lossy()),
+                )
+            } else if filename.ends_with(".dmg") {
+                // DMG: mount readonly to private folder, copy app, unmount
+                // "Extracting with style": hdiutil attach ...
+                let mount_point = format!("{}/dmg_mount", temp_dir.to_string_lossy());
+                (
+                    format!(
+                    "mkdir -p '{}' && hdiutil attach '{}' -mountpoint '{}' -nobrowse -quiet -readonly",
+                    mount_point, file_path.to_string_lossy(), mount_point
                 ),
-                format!("{}/r2modmac.app", temp_dir.to_string_lossy()),
-            )
-        } else if filename.ends_with(".zip") {
-            (
-                format!(
-                    "unzip -o '{}' -d '{}'",
-                    file_path.to_string_lossy(),
-                    temp_dir.to_string_lossy()
-                ),
-                format!("{}/r2modmac.app", temp_dir.to_string_lossy()),
-            )
-        } else if filename.ends_with(".dmg") {
-            // DMG: mount readonly to private folder, copy app, unmount
-            // "Extracting with style": hdiutil attach ...
-            let mount_point = format!("{}/dmg_mount", temp_dir.to_string_lossy());
-            (
-                format!(
-                "mkdir -p '{}' && hdiutil attach '{}' -mountpoint '{}' -nobrowse -quiet -readonly",
-                mount_point, file_path.to_string_lossy(), mount_point
-            ),
-                format!("{}/r2modmac.app", mount_point),
-            )
+                    format!("{}/r2modmac.app", mount_point),
+                )
+            } else {
+                return Err("Unknown update format".to_string());
+            };
+
+        let is_dmg = filename.ends_with(".dmg");
+        let mount_point = format!("{}/dmg_mount", temp_dir.to_string_lossy());
+
+        // Navigate up from Contents/MacOS/executable to .app
+        // Bundle path usually ends in .app.
+        // Guard ensured we are likely safe, but let's defaulting to /Applications just in case.
+        let current_app_path = current_exe
+            .parent()
+            .and_then(|p| p.parent())
+            .and_then(|p| p.parent())
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or("/Applications/r2modmac.app".to_string());
+
+        // Build script with conditional DMG unmount
+        let unmount_command = if is_dmg {
+            format!("hdiutil detach '{}' -force -quiet || true", mount_point)
         } else {
-            return Err("Unknown update format".to_string());
+            String::new()
         };
 
-    let is_dmg = filename.ends_with(".dmg");
-    let mount_point = format!("{}/dmg_mount", temp_dir.to_string_lossy());
-
-    // Navigate up from Contents/MacOS/executable to .app
-    // Bundle path usually ends in .app.
-    // Guard ensured we are likely safe, but let's defaulting to /Applications just in case.
-    let current_app_path = current_exe
-        .parent()
-        .and_then(|p| p.parent())
-        .and_then(|p| p.parent())
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or("/Applications/r2modmac.app".to_string());
-
-    // Build script with conditional DMG unmount
-    let unmount_command = if is_dmg {
-        format!("hdiutil detach '{}' -force -quiet || true", mount_point)
-    } else {
-        String::new()
-    };
-
-    // The script waits for PID, mounts/extracts, deletes OLD app, moves NEW app, launches NEW app, cleans up.
-    let script = format!(
-        r#"#!/bin/bash
+        // The script waits for PID, mounts/extracts, deletes OLD app, moves NEW app, launches NEW app, cleans up.
+        let script = format!(
+            r#"#!/bin/bash
 PID={}
 APP_PATH="{}"
 UPDATE_DIR="{}"
@@ -1306,32 +1337,33 @@ open "$APP_PATH"
 echo "Cleaning up..."
 rm -rf "$UPDATE_DIR"
 "#,
-        std::process::id(),
-        current_app_path,
-        temp_dir.to_string_lossy(),
-        app_source,
-        extract_command,
-        unmount_command
-    );
+            std::process::id(),
+            current_app_path,
+            temp_dir.to_string_lossy(),
+            app_source,
+            extract_command,
+            unmount_command
+        );
 
-    fs::write(&script_path, script).map_err(|e| e.to_string())?;
-    #[cfg(unix)]
-    {
-        fs::set_permissions(&script_path, fs::Permissions::from_mode(0o755))
-            .map_err(|e| e.to_string())?;
+        fs::write(&script_path, script).map_err(|e| e.to_string())?;
+        #[cfg(unix)]
+        {
+            fs::set_permissions(&script_path, fs::Permissions::from_mode(0o755))
+                .map_err(|e| e.to_string())?;
+        }
+        // 3. Launch Script detached
+        eprintln!("[install_update] Launching update script...");
+        Command::new("sh")
+            .arg(&script_path)
+            .spawn()
+            .map_err(|e| format!("Failed to launch script: {}", e))?;
+
+        // 4. Exit App to allow script to proceed
+        eprintln!("[install_update] Exiting app to allow update...");
+        app.exit(0);
+
+        Ok(())
     }
-    // 3. Launch Script detached
-    eprintln!("[install_update] Launching update script...");
-    Command::new("sh")
-        .arg(&script_path)
-        .spawn()
-        .map_err(|e| format!("Failed to launch script: {}", e))?;
-
-    // 4. Exit App to allow script to proceed
-    eprintln!("[install_update] Exiting app to allow update...");
-    app.exit(0);
-
-    Ok(())
 }
 
 pub fn compare_versions(v1: &str, v2: &str) -> bool {

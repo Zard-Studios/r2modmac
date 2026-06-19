@@ -753,7 +753,7 @@ function App() {
 
       const items = [];
       items.push(await MI.new({
-        text: 'Aggiorna',
+        text: 'Reload',
         action: () => {
           window.location.reload();
         }
@@ -761,7 +761,7 @@ function App() {
 
       if (SHOW_DEVTOOLS_CONTEXT_MENU_ITEM) {
         items.push(await MI.new({
-          text: 'Ispeziona pagina',
+          text: 'Inspect Element',
           action: async () => {
             try {
               await invoke('open_devtools');

@@ -101,3 +101,16 @@ Then apply/sync a game mod profile and press the launch button. Check `LastRunWi
 - Verifies files listed in kept manifests exist in the game directory using `manifest_files_exist`. If a mod's manifest is kept and its files are found, it is skipped from `to_install`, preventing a reinstall loop for core and patcher mods (like `UniTask` or `AutoHookGenPatcher`) which are not deployed in `BepInEx/plugins`.
 - Properly distinguishes between vanilla/modded runtimes, preventing duplicate copies of requirements (like BepInEx/Lovely) if they are already fully populated.
 
+## Windows Builds & Autoupdate
+
+- **GitHub Release Workflow:**
+  - Build matrix configured for dual-runner platforms: `macos-latest` (aarch64, x86_64, universal) and `windows-latest` (x64, x86, arm64).
+  - On Windows, compiles using target-specific MSVC toolchains (`npm run tauri build -- --target <target> --bundles nsis`), outputs the installer, and copies it to a standardized `r2modmac_<arch>_setup.exe` path.
+  - Cross-platform tag version synchronization runs a quick Node.js script to update `package.json` and `src-tauri/tauri.conf.json` synchronously.
+- **Tauri Custom Updater:**
+  - `check_update` resolves OS and architecture combinations (e.g., Windows x86_64 -> `"x64"`, Windows i686/x86 -> `"x86"`, Windows aarch64 -> `"arm64"`) and targets `.exe` file extensions on Windows while targeting `.dmg`/`.tar.gz`/`.zip` on macOS.
+  - `install_update` uses a `#[cfg(target_os = "windows")]` block to spawn the downloaded `.exe` installer as a detached child process, then immediately exits the application so that the installer can overwrite `r2modmac.exe` without encountering file lock conflicts.
+- **Native Context Menus:**
+  - Intercepts default context menu events and overrides them in [App.tsx](file:///Users/federicofeduzi/Github/r2modmac/src/App.tsx) using English options ("Reload", "Inspect Element") for cross-platform visual consistency.
+
+
