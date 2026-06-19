@@ -3835,13 +3835,206 @@ pub async fn copy_mod_from_cache(
     Ok(serde_json::json!({ "success": false, "copied": false }))
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct GamePackagesCache {
+    pub chunk_urls: Vec<String>,
+    pub packages: Vec<crate::models::shared::Package>,
+}
+
+fn load_packages_from_disk(app: &AppHandle, game_id: &str) -> Option<GamePackagesCache> {
+    use std::io::Read;
+    let cache_dir = crate::utils::paths::app_cache_dir(app).ok()?;
+    let cache_file = cache_dir.join(format!("{}_packages.json.gz", game_id));
+    if !cache_file.exists() {
+        return None;
+    }
+    let file = std::fs::File::open(cache_file).ok()?;
+    let mut gz = flate2::read::GzDecoder::new(file);
+    let mut data = Vec::new();
+    gz.read_to_end(&mut data).ok()?;
+    serde_json::from_slice(&data).ok()
+}
+
+fn save_packages_to_disk(app: &AppHandle, game_id: &str, cache: &GamePackagesCache) -> Result<(), String> {
+    use std::io::Write;
+    let cache_dir = crate::utils::paths::app_cache_dir(app)
+        .map_err(|e| format!("Failed to get cache dir: {}", e))?;
+    std::fs::create_dir_all(&cache_dir).map_err(|e| format!("Failed to create cache dir: {}", e))?;
+    let cache_file = cache_dir.join(format!("{}_packages.json.gz", game_id));
+    let file = std::fs::File::create(cache_file).map_err(|e| format!("Failed to create cache file: {}", e))?;
+    let mut encoder = flate2::write::GzEncoder::new(file, flate2::Compression::default());
+    let serialized = serde_json::to_vec(cache).map_err(|e| format!("Failed to serialize cache: {}", e))?;
+    encoder.write_all(&serialized).map_err(|e| format!("Failed to compress cache: {}", e))?;
+    encoder.finish().map_err(|e| format!("Failed to finalize gzip: {}", e))?;
+    Ok(())
+}
+
+fn decode_gzip_or_plain(bytes: &[u8], label: &str) -> Result<String, String> {
+    if bytes.starts_with(&[0x1f, 0x8b]) {
+        let mut gz = flate2::read::GzDecoder::new(bytes);
+        let mut out = String::new();
+        std::io::Read::read_to_string(&mut gz, &mut out)
+            .map_err(|e| format!("Failed to decompress {}: {}", label, e))?;
+        Ok(out)
+    } else {
+        String::from_utf8(bytes.to_vec())
+            .map_err(|e| format!("Failed to decode {} as utf-8: {}", label, e))
+    }
+}
+
+fn parse_index_chunk_urls(index_json: &str) -> Result<Vec<String>, String> {
+    let parsed: serde_json::Value = serde_json::from_str(index_json)
+        .map_err(|e| format!("Failed to parse index JSON: {}", e))?;
+
+    let extract_urls = |arr: &[serde_json::Value]| -> Vec<String> {
+        arr.iter()
+            .filter_map(|v| v.as_str().map(|s| s.to_string()))
+            .collect()
+    };
+
+    if let Some(arr) = parsed.as_array() {
+        let urls = extract_urls(arr);
+        if !urls.is_empty() {
+            return Ok(urls);
+        }
+    }
+
+    if let Some(arr) = parsed.get("chunks").and_then(|v| v.as_array()) {
+        let urls = extract_urls(arr);
+        if !urls.is_empty() {
+            return Ok(urls);
+        }
+    }
+
+    Err("Index JSON has no valid chunk URLs".to_string())
+}
+
+async fn load_chunk(
+    client: &reqwest::Client,
+    url: &str,
+) -> Result<Vec<crate::models::shared::Package>, String> {
+    use std::time::Duration;
+    let mut last_error: Option<String> = None;
+    for attempt in 1..=3 {
+        let resp = match client.get(url).send().await {
+            Ok(resp) => resp,
+            Err(e) => {
+                last_error = Some(format!("Attempt {} network error: {}", attempt, e));
+                tokio::time::sleep(Duration::from_millis(250 * attempt as u64)).await;
+                continue;
+            }
+        };
+
+        if !resp.status().is_success() {
+            last_error = Some(format!(
+                "Attempt {} failed with status {}",
+                attempt,
+                resp.status()
+            ));
+            tokio::time::sleep(Duration::from_millis(250 * attempt as u64)).await;
+            continue;
+        }
+
+        let bytes = match resp.bytes().await {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                last_error = Some(format!("Attempt {} failed reading body: {}", attempt, e));
+                tokio::time::sleep(Duration::from_millis(250 * attempt as u64)).await;
+                continue;
+            }
+        };
+
+        let json_str = if bytes.starts_with(&[0x1f, 0x8b]) {
+            let mut gz = flate2::read::GzDecoder::new(&bytes[..]);
+            let mut out = String::new();
+            match std::io::Read::read_to_string(&mut gz, &mut out) {
+                Ok(_) => out,
+                Err(e) => {
+                    last_error = Some(format!(
+                        "Attempt {} failed decompressing gzip: {}",
+                        attempt, e
+                    ));
+                    tokio::time::sleep(Duration::from_millis(250 * attempt as u64)).await;
+                    continue;
+                }
+            }
+        } else {
+            match String::from_utf8(bytes.to_vec()) {
+                Ok(out) => out,
+                Err(e) => {
+                    last_error =
+                        Some(format!("Attempt {} invalid utf-8 chunk: {}", attempt, e));
+                    tokio::time::sleep(Duration::from_millis(250 * attempt as u64)).await;
+                    continue;
+                }
+            }
+        };
+
+        let mut packages: Vec<crate::models::shared::Package> =
+            match serde_json::from_str(&json_str) {
+                Ok(packages) => packages,
+                Err(e) => {
+                    last_error = Some(format!(
+                        "Attempt {} failed parsing JSON chunk: {}",
+                        attempt, e
+                    ));
+                    tokio::time::sleep(Duration::from_millis(250 * attempt as u64)).await;
+                    continue;
+                }
+            };
+
+        drop(json_str);
+
+        // Truncate versions to 1 (latest version) to keep memory usage extremely low
+        for pkg in &mut packages {
+            if pkg.versions.len() > 1 {
+                pkg.versions.truncate(1);
+            }
+            if let Some(ver) = pkg.versions.first_mut() {
+                if ver.dependencies.len() > 20 {
+                    ver.dependencies.truncate(20);
+                }
+                if ver.description.len() > 200 {
+                    let truncated = ver
+                        .description
+                        .char_indices()
+                        .take_while(|(i, _)| *i < 200)
+                        .last()
+                        .map(|(i, c)| i + c.len_utf8())
+                        .unwrap_or(200);
+                    ver.description.truncate(truncated);
+                }
+            }
+        }
+
+        // Filter out Manager packages
+        packages.retain(|pkg| {
+            !pkg.full_name.contains("ebkr-r2modman")
+                && !pkg.full_name.contains("Tslat-ThunderstoreModManager")
+                && !pkg.full_name.contains("Kesomannen-GaleModManager")
+        });
+
+        // Release excess capacity
+        packages.shrink_to_fit();
+        for pkg in &mut packages {
+            pkg.versions.shrink_to_fit();
+            if let Some(ver) = pkg.versions.first_mut() {
+                ver.dependencies.shrink_to_fit();
+            }
+        }
+
+        return Ok(packages);
+    }
+
+    Err(last_error.unwrap_or_else(|| "Failed to load chunk".to_string()))
+}
+
 #[command]
 pub async fn fetch_packages(
     app: AppHandle,
     state: tauri::State<'_, AppState>,
     game_id: String,
 ) -> Result<usize, String> {
-    use std::time::Duration;
     use std::time::SystemTime;
 
     let start_time = SystemTime::now();
@@ -3861,55 +4054,139 @@ pub async fn fetch_packages(
         }
     }
 
-    // 1. Fetch the index (list of chunk URLs)
+    // 1. Try to load from disk cache first
+    if let Some(cache) = load_packages_from_disk(&app, &game_id) {
+        let count = cache.packages.len();
+        eprintln!(
+            "[fetch_packages] Loaded {} packages from disk cache for {} (instant)",
+            count, game_id
+        );
+        let cached_urls = cache.chunk_urls;
+
+        // Put them into memory state immediately so user sees them
+        {
+            let mut packages_lock = state.packages.write().await;
+            packages_lock.insert(game_id.clone(), cache.packages);
+        }
+        state.touch_packages_cache(&game_id).await;
+
+        // Spawn background task to check index and update in background if needed
+        let packages_arc = state.packages.clone();
+        let game_id_clone = game_id.clone();
+        let app_handle = app.clone();
+        tokio::spawn(async move {
+            let client = thunderstore_client();
+            let index_url = format!(
+                "https://thunderstore.io/c/{}/api/v1/package-listing-index/",
+                game_id_clone
+            );
+            
+            let resp = match client.get(&index_url).send().await {
+                Ok(r) => r,
+                Err(e) => {
+                    eprintln!("[fetch_packages] Background index check failed: {}", e);
+                    return;
+                }
+            };
+            if !resp.status().is_success() {
+                eprintln!("[fetch_packages] Background index check status failed: {}", resp.status());
+                return;
+            }
+            let bytes = match resp.bytes().await {
+                Ok(b) => b,
+                Err(e) => {
+                    eprintln!("[fetch_packages] Background index body read failed: {}", e);
+                    return;
+                }
+            };
+            let index_json = match decode_gzip_or_plain(&bytes, "index") {
+                Ok(j) => j,
+                Err(e) => {
+                    eprintln!("[fetch_packages] Background index decode failed: {}", e);
+                    return;
+                }
+            };
+            let online_chunk_urls = match parse_index_chunk_urls(&index_json) {
+                Ok(urls) => urls,
+                Err(e) => {
+                    eprintln!("[fetch_packages] Background index parse failed: {}", e);
+                    return;
+                }
+            };
+
+            // Compare URLs with cached URLs
+            if cached_urls == online_chunk_urls {
+                eprintln!("[fetch_packages] Disk cache is fully up-to-date for {}. No updates needed.", game_id_clone);
+                return;
+            }
+
+            // Chunks differ! Fetch all chunks in parallel.
+            eprintln!("[fetch_packages] Chunk URLs differ from cache. Updating cache in background for {}...", game_id_clone);
+            
+            let total_chunks = online_chunk_urls.len();
+            if total_chunks == 0 {
+                return;
+            }
+
+            let parallelism = 3usize;
+            let mut stream = futures_util::stream::iter(online_chunk_urls.clone())
+                .map(|url| {
+                    let client = thunderstore_client();
+                    async move { load_chunk(&client, &url).await }
+                })
+                .buffer_unordered(parallelism);
+
+            let mut all_packages = Vec::new();
+            while let Some(result) = stream.next().await {
+                match result {
+                    Ok(packages) => {
+                        all_packages.extend(packages);
+                    }
+                    Err(e) => {
+                        eprintln!("[fetch_packages] Background update chunk load error: {}", e);
+                        return;
+                    }
+                }
+            }
+
+            all_packages.shrink_to_fit();
+            let count = all_packages.len();
+            eprintln!("[fetch_packages] Background update fetched {} packages for {}", count, game_id_clone);
+
+            // Update in-memory state
+            {
+                let mut packages_lock = packages_arc.write().await;
+                packages_lock.insert(game_id_clone.clone(), all_packages.clone());
+            }
+
+            // Save to disk cache
+            let new_cache = GamePackagesCache {
+                chunk_urls: online_chunk_urls,
+                packages: all_packages,
+            };
+            if let Err(e) = save_packages_to_disk(&app_handle, &game_id_clone, &new_cache) {
+                eprintln!("[fetch_packages] Failed to save updated cache to disk: {}", e);
+            }
+
+            // Emit event so frontend knows packages are updated
+            let _ = app_handle.emit(
+                "packages-loaded",
+                serde_json::json!({
+                    "game_id": game_id_clone,
+                    "total_count": count
+                }),
+            );
+        });
+
+        return Ok(count);
+    }
+
+    // 2. Cache miss: Fetch the index (list of chunk URLs)
     let index_url = format!(
         "https://thunderstore.io/c/{}/api/v1/package-listing-index/",
         game_id
     );
     eprintln!("[fetch_packages] Fetching index from: {}", index_url);
-
-    // client is the shared static THUNDERSTORE_CLIENT (already initialized above)
-
-    fn decode_gzip_or_plain(bytes: &[u8], label: &str) -> Result<String, String> {
-        // Thunderstore blobs are usually raw gzip bytes, but support plain JSON fallback.
-        if bytes.starts_with(&[0x1f, 0x8b]) {
-            let mut gz = flate2::read::GzDecoder::new(bytes);
-            let mut out = String::new();
-            std::io::Read::read_to_string(&mut gz, &mut out)
-                .map_err(|e| format!("Failed to decompress {}: {}", label, e))?;
-            Ok(out)
-        } else {
-            String::from_utf8(bytes.to_vec())
-                .map_err(|e| format!("Failed to decode {} as utf-8: {}", label, e))
-        }
-    }
-
-    fn parse_index_chunk_urls(index_json: &str) -> Result<Vec<String>, String> {
-        let parsed: serde_json::Value = serde_json::from_str(index_json)
-            .map_err(|e| format!("Failed to parse index JSON: {}", e))?;
-
-        let extract_urls = |arr: &[serde_json::Value]| -> Vec<String> {
-            arr.iter()
-                .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                .collect()
-        };
-
-        if let Some(arr) = parsed.as_array() {
-            let urls = extract_urls(arr);
-            if !urls.is_empty() {
-                return Ok(urls);
-            }
-        }
-
-        if let Some(arr) = parsed.get("chunks").and_then(|v| v.as_array()) {
-            let urls = extract_urls(arr);
-            if !urls.is_empty() {
-                return Ok(urls);
-            }
-        }
-
-        Err("Index JSON has no valid chunk URLs".to_string())
-    }
 
     let resp = client
         .get(&index_url)
@@ -3932,136 +4209,7 @@ pub async fn fetch_packages(
         return Ok(0);
     }
 
-    // 2. Load chunks directly from the network and keep them in memory only.
-    // This avoids creating large per-game cache files on disk.
-    async fn load_chunk(
-        client: &reqwest::Client,
-        url: &str,
-    ) -> Result<Vec<crate::models::shared::Package>, String> {
-        let mut last_error: Option<String> = None;
-        for attempt in 1..=3 {
-            let resp = match client.get(url).send().await {
-                Ok(resp) => resp,
-                Err(e) => {
-                    last_error = Some(format!("Attempt {} network error: {}", attempt, e));
-                    tokio::time::sleep(Duration::from_millis(250 * attempt as u64)).await;
-                    continue;
-                }
-            };
-
-            if !resp.status().is_success() {
-                last_error = Some(format!(
-                    "Attempt {} failed with status {}",
-                    attempt,
-                    resp.status()
-                ));
-                tokio::time::sleep(Duration::from_millis(250 * attempt as u64)).await;
-                continue;
-            }
-
-            let bytes = match resp.bytes().await {
-                Ok(bytes) => bytes,
-                Err(e) => {
-                    last_error = Some(format!("Attempt {} failed reading body: {}", attempt, e));
-                    tokio::time::sleep(Duration::from_millis(250 * attempt as u64)).await;
-                    continue;
-                }
-            };
-
-            let json_str = if bytes.starts_with(&[0x1f, 0x8b]) {
-                let mut gz = flate2::read::GzDecoder::new(&bytes[..]);
-                let mut out = String::new();
-                match std::io::Read::read_to_string(&mut gz, &mut out) {
-                    Ok(_) => out,
-                    Err(e) => {
-                        last_error = Some(format!(
-                            "Attempt {} failed decompressing gzip: {}",
-                            attempt, e
-                        ));
-                        tokio::time::sleep(Duration::from_millis(250 * attempt as u64)).await;
-                        continue;
-                    }
-                }
-            } else {
-                match String::from_utf8(bytes.to_vec()) {
-                    Ok(out) => out,
-                    Err(e) => {
-                        last_error =
-                            Some(format!("Attempt {} invalid utf-8 chunk: {}", attempt, e));
-                        tokio::time::sleep(Duration::from_millis(250 * attempt as u64)).await;
-                        continue;
-                    }
-                }
-            };
-
-            let mut packages: Vec<crate::models::shared::Package> =
-                match serde_json::from_str(&json_str) {
-                    Ok(packages) => packages,
-                    Err(e) => {
-                        last_error = Some(format!(
-                            "Attempt {} failed parsing JSON chunk: {}",
-                            attempt, e
-                        ));
-                        tokio::time::sleep(Duration::from_millis(250 * attempt as u64)).await;
-                        continue;
-                    }
-                };
-
-            // CRITICAL: Drop the raw JSON string immediately after deserialization.
-            // Without this, both the JSON text (~2MB) and the structs are in RAM
-            // simultaneously until the scope ends.
-            drop(json_str);
-
-            // Truncate versions to 1 (latest version) to keep memory usage extremely low
-            for pkg in &mut packages {
-                if pkg.versions.len() > 1 {
-                    pkg.versions.truncate(1);
-                }
-                // Cap dependency list: ModCard only checks .length, and the full dep
-                // list is fetched on-demand via fetch_package_by_name before install.
-                if let Some(ver) = pkg.versions.first_mut() {
-                    if ver.dependencies.len() > 20 {
-                        ver.dependencies.truncate(20);
-                    }
-                    // Truncate description to 200 chars - ModCard never shows more,
-                    // and the full description is fetched on-demand in the detail modal.
-                    if ver.description.len() > 200 {
-                        let truncated = ver
-                            .description
-                            .char_indices()
-                            .take_while(|(i, _)| *i < 200)
-                            .last()
-                            .map(|(i, c)| i + c.len_utf8())
-                            .unwrap_or(200);
-                        ver.description.truncate(truncated);
-                    }
-                }
-            }
-
-            // Filter out Manager packages (e.g. r2modman, Thunderstore Mod Manager) if they appear
-            packages.retain(|pkg| {
-                !pkg.full_name.contains("ebkr-r2modman")
-                    && !pkg.full_name.contains("Tslat-ThunderstoreModManager")
-                    && !pkg.full_name.contains("Kesomannen-GaleModManager")
-            });
-
-            // Release any excess allocated capacity from serde_json
-            packages.shrink_to_fit();
-            for pkg in &mut packages {
-                pkg.versions.shrink_to_fit();
-                if let Some(ver) = pkg.versions.first_mut() {
-                    ver.dependencies.shrink_to_fit();
-                }
-            }
-
-            return Ok(packages);
-        }
-
-        Err(last_error.unwrap_or_else(|| "Failed to load chunk".to_string()))
-    }
-
     // 3. Load FIRST successful chunk immediately for instant UI
-    // If chunk #0 is slow/unavailable, try next few chunks to avoid infinite spinner.
     let mut first_loaded_index: Option<usize> = None;
     let first_attempts = std::cmp::min(5, chunk_urls.len());
     for idx in 0..first_attempts {
@@ -4079,7 +4227,6 @@ pub async fn fetch_packages(
                 packages_lock.insert(game_id.clone(), first_packages);
                 first_loaded_index = Some(idx);
                 drop(packages_lock);
-                // Track cache order so old game listings get evicted (bounded memory).
                 state.touch_packages_cache(&game_id).await;
                 break;
             }
@@ -4100,6 +4247,7 @@ pub async fn fetch_packages(
 
     // 4. Load remaining chunks in parallel (streaming to state)
     let remaining_urls: Vec<String> = chunk_urls
+        .clone()
         .into_iter()
         .enumerate()
         .filter_map(|(idx, url)| {
@@ -4115,11 +4263,9 @@ pub async fn fetch_packages(
         let packages_arc = state.packages.clone();
         let game_id_clone = game_id.clone();
         let app_handle = app.clone();
+        let chunk_urls_clone = chunk_urls.clone();
 
-        // Spawn background task for remaining chunks
         tokio::spawn(async move {
-            // Parallelism of 3: each chunk is ~2-3MB of JSON in memory during download
-            // + deserialization. 10 was allowing ~30MB peak; 3 cuts that to ~9MB.
             let parallelism = 3usize;
             let mut stream = futures_util::stream::iter(remaining_urls)
                 .map(|url| {
@@ -4128,7 +4274,6 @@ pub async fn fetch_packages(
                 })
                 .buffer_unordered(parallelism);
 
-            // Collect and add to state as they complete
             while let Some(result) = stream.next().await {
                 match result {
                     Ok(packages) => {
@@ -4141,8 +4286,6 @@ pub async fn fetch_packages(
                 }
             }
 
-            // All chunks loaded — do one final shrink to release excess capacity.
-            // Doing it per-chunk would cause O(n) reallocations as the Vec grows.
             {
                 let mut packages_lock = packages_arc.write().await;
                 if let Some(existing) = packages_lock.get_mut(&game_id_clone) {
@@ -4154,38 +4297,59 @@ pub async fn fetch_packages(
                 }
             }
 
-            // Get final count and emit event for frontend
-            let final_count = {
+            let final_packages = {
                 let packages_lock = packages_arc.read().await;
-                packages_lock
-                    .get(&game_id_clone)
-                    .map(|p| p.len())
-                    .unwrap_or(0)
+                packages_lock.get(&game_id_clone).cloned()
             };
 
-            eprintln!(
-                "[fetch_packages] Background loading complete. Total: {} packages",
-                final_count
-            );
+            if let Some(pkgs) = final_packages {
+                let final_count = pkgs.len();
+                eprintln!(
+                    "[fetch_packages] Background loading complete. Total: {} packages",
+                    final_count
+                );
 
-            // Emit event so frontend knows more packages are available
-            let _ = app_handle.emit(
-                "packages-loaded",
-                serde_json::json!({
-                    "game_id": game_id_clone,
-                    "total_count": final_count
-                }),
-            );
+                let cache = GamePackagesCache {
+                    chunk_urls: chunk_urls_clone,
+                    packages: pkgs,
+                };
+                if let Err(e) = save_packages_to_disk(&app_handle, &game_id_clone, &cache) {
+                    eprintln!("[fetch_packages] Failed to save cache to disk: {}", e);
+                }
+
+                let _ = app_handle.emit(
+                    "packages-loaded",
+                    serde_json::json!({
+                        "game_id": game_id_clone,
+                        "total_count": final_count
+                    }),
+                );
+            }
         });
+    } else {
+        let final_packages = {
+            let packages_lock = state.packages.read().await;
+            packages_lock.get(&game_id).cloned()
+        };
+        if let Some(pkgs) = final_packages {
+            let cache = GamePackagesCache {
+                chunk_urls,
+                packages: pkgs,
+            };
+            let _ = save_packages_to_disk(&app, &game_id, &cache);
+        }
     }
 
-    // 5. Return immediately with first chunk count
     let packages_lock = state.packages.read().await;
     let count = packages_lock.get(&game_id).map(|p| p.len()).unwrap_or(0);
 
     if let Ok(elapsed) = start_time.elapsed() {
-        eprintln!("[fetch_packages] Initial load in {:.2?} ({} packages ready, {} chunks loading in background)", 
-            elapsed, count, total_chunks - 1);
+        eprintln!(
+            "[fetch_packages] Initial load in {:.2?} ({} packages ready, {} chunks loading in background)",
+            elapsed,
+            count,
+            total_chunks - 1
+        );
     }
 
     Ok(count)
