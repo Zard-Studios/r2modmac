@@ -518,6 +518,7 @@ function App() {
           'Package fetch'
         );
         if (isStaleRequest()) return;
+        rebuildProfilePackageIndex(communityId);
         // Now that cache is populated, fetch available categories
         const cats = await withTimeout(
           window.ipcRenderer.getAvailableCategories(communityId),
