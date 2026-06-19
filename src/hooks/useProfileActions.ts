@@ -108,7 +108,7 @@ export function useProfileActions({
                                 addMod(newProfileId, installedMod);
                                 installedCount++;
                             }
-                        } catch (e) {
+                        } catch {
                             failedMods.push(mod.name);
                         } finally {
                             completedCount++;
