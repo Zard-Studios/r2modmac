@@ -925,6 +925,7 @@ function App() {
     installInParallel,
     setProgressState,
     onInstallMod: handleInstallMod,
+    autoApplyProfileRef,
   });
 
   // ── Game Sync (Apply to Game) ─────────────────────────────────────────────────

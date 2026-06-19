@@ -222,10 +222,7 @@ fn main() {
         println!("PROFILE: '{}' (Game: {}, Platform: {}, Vanilla: {})", name, game_id, platform, is_vanilla);
         println!("Game path: {}", game_path_str);
 
-        let game_plugins = if platform == "mac"
-            && is_vanilla
-            && game_path.join("BepInEx_DISABLED").is_dir()
-        {
+        let game_plugins = if game_path.join("BepInEx_DISABLED").is_dir() {
             game_path.join("BepInEx_DISABLED").join("plugins")
         } else {
             game_path.join("BepInEx").join("plugins")
@@ -344,7 +341,9 @@ fn main() {
             }
         }
 
-        let bepinex_installed = game_path.join("BepInEx").join("core").exists() || game_path.join("run_bepinex.sh").exists();
+        let bepinex_installed = game_path.join("BepInEx").join("core").exists()
+            || game_path.join("BepInEx_DISABLED").join("core").exists()
+            || game_path.join("run_bepinex.sh").exists();
 
         let mut to_install: Vec<String> = desired_key_set
             .iter()
@@ -359,7 +358,10 @@ fn main() {
                     .unwrap_or_default();
                 let desired_version = desired_version_by_key.get(*pm_key);
 
-                let has_exact_version = game_mod_folders.iter().any(|(folder_name, gm_key)| {
+                let has_exact_version = manifests_to_keep.iter().any(|manifest| {
+                    manifest.mod_key == **pm_key
+                        && manifest_files_exist(game_path, &manifest.files)
+                }) || game_mod_folders.iter().any(|(folder_name, gm_key)| {
                     if gm_key != *pm_key {
                         return false;
                     }
@@ -385,4 +387,17 @@ fn main() {
         println!("TO REMOVE: {:?}", to_remove);
         println!("TO INSTALL: {:?}", to_install);
     }
+}
+
+fn manifest_files_exist(target_root: &Path, files: &[String]) -> bool {
+    if files.is_empty() {
+        return false;
+    }
+    for file in files {
+        let path = target_root.join(file);
+        if !path.exists() {
+            return false;
+        }
+    }
+    true
 }

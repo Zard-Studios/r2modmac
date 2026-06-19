@@ -52,10 +52,7 @@ pub async fn sync_profile_to_game(
         game_path.to_path_buf()
     };
     let runtime_game_path = runtime_game_path_buf.as_path();
-    let game_plugins = if profile_platform == "mac"
-        && profile_is_vanilla
-        && runtime_game_path.join("BepInEx_DISABLED").is_dir()
-    {
+    let game_plugins = if runtime_game_path.join("BepInEx_DISABLED").is_dir() {
         runtime_game_path.join("BepInEx_DISABLED").join("plugins")
     } else {
         runtime_game_path.join("BepInEx").join("plugins")
@@ -403,6 +400,7 @@ pub async fn sync_profile_to_game(
         }
     } else {
         game_path.join("BepInEx").join("core").exists()
+            || game_path.join("BepInEx_DISABLED").join("core").exists()
     };
 
     let mut to_install: Vec<String> = desired_key_set
@@ -419,7 +417,10 @@ pub async fn sync_profile_to_game(
                 .unwrap_or_default();
             let desired_version = desired_version_by_key.get(*pm_key);
 
-            let has_exact_version = game_mod_folders.iter().any(|(folder_name, gm_key)| {
+            let has_exact_version = manifests_to_keep.iter().any(|entry| {
+                entry.manifest.mod_key == **pm_key
+                    && manifest_files_exist(runtime_game_path, &entry.manifest.files)
+            }) || game_mod_folders.iter().any(|(folder_name, gm_key)| {
                 if gm_key != *pm_key {
                     return false;
                 }
@@ -510,5 +511,18 @@ pub async fn sync_profile_to_game(
         "already_installed": already_installed,
         "cached": cached
     }))
+}
+
+fn manifest_files_exist(target_root: &std::path::Path, files: &[String]) -> bool {
+    if files.is_empty() {
+        return false;
+    }
+    for file in files {
+        let path = target_root.join(file);
+        if !path.exists() {
+            return false;
+        }
+    }
+    true
 }
 
