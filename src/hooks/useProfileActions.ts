@@ -44,15 +44,6 @@ export function useProfileActions({
         if (result.type === 'profile') {
             let profileName: string = result.name;
 
-            const gamePath = await window.ipcRenderer.getGamePath(selectedCommunity || '', chosenPlatform);
-            if (!gamePath) {
-                await window.ipcRenderer.alert(
-                    'Game Path Required',
-                    'Please configure the game directory in Settings before importing profiles.\n\nGo to Settings → Game Directory and set the path to your game installation folder.'
-                );
-                return;
-            }
-
             if (profileName.startsWith('Imported: ')) profileName = profileName.substring(10);
 
             const localMods = result.mods.filter((m: any) => m.source === 'local');
@@ -174,6 +165,15 @@ export function useProfileActions({
             }
 
             // ── Legacy Mode: Direct download & install ───────────────────────────
+            const gamePath = await window.ipcRenderer.getGamePath(selectedCommunity || '', chosenPlatform);
+            if (!gamePath) {
+                await window.ipcRenderer.alert(
+                    'Game Path Required',
+                    'Please configure the game directory in Settings before importing profiles.\n\nGo to Settings → Game Directory and set the path to your game installation folder.'
+                );
+                return;
+            }
+
             const concurrency = installInParallel ? MAX_PARALLEL_OPS : 1;
             setProgressState({
                 isOpen: true,
