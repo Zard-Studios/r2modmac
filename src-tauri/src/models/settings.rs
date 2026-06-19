@@ -10,7 +10,7 @@ pub struct Settings {
     pub game_paths: HashMap<String, String>,
     #[serde(default)]
     pub legacy_install_mode: bool,
-    #[serde(default = "default_true")]
+    #[serde(default = "default_false")]
     pub ask_version_before_install: bool,
     #[serde(default = "default_true")]
     pub install_in_parallel: bool,
@@ -33,7 +33,7 @@ impl Settings {
             favorite_games: Vec::new(),
             game_paths: HashMap::new(),
             legacy_install_mode: false,
-            ask_version_before_install: true,
+            ask_version_before_install: false,
             install_in_parallel: true,
             confirm_before_apply_to_game: false,
             write_debug_logs_to_game: false,

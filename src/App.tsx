@@ -281,7 +281,7 @@ function App() {
   const [showUpdateModal, setShowUpdateModal] = useState(false)
   const [showPreferences, setShowPreferences] = useState(false)
   const [legacyInstallMode, setLegacyInstallMode] = useState(false)
-  const [askVersionBeforeInstall, setAskVersionBeforeInstall] = useState(true)
+  const [askVersionBeforeInstall, setAskVersionBeforeInstall] = useState(false)
   const [installInParallel, setInstallInParallel] = useState(true)
   const [confirmBeforeApplyToGame, setConfirmBeforeApplyToGame] = useState(false)
   const [writeDebugLogsToGame, setWriteDebugLogsToGame] = useState(false)
@@ -657,7 +657,7 @@ function App() {
     // Load app preferences
     window.ipcRenderer.getSettings().then((s: AppSettings) => {
       setLegacyInstallMode(!!s.legacy_install_mode);
-      setAskVersionBeforeInstall(s.ask_version_before_install ?? true);
+      setAskVersionBeforeInstall(s.ask_version_before_install ?? false);
       setInstallInParallel(s.install_in_parallel ?? true);
       setConfirmBeforeApplyToGame(!!s.confirm_before_apply_to_game);
       setWriteDebugLogsToGame(s.write_debug_logs_to_game ?? false);
