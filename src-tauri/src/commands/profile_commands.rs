@@ -266,6 +266,20 @@ pub async fn clear_profile_cache(
             let _ = fs::remove_dir_all(&chunks_dir);
             let _ = fs::create_dir_all(&chunks_dir);
         }
+
+        // Clean up gzipped package index caches
+        if let Ok(entries) = fs::read_dir(&cache_dir) {
+            for entry in entries.filter_map(|e| e.ok()) {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name.ends_with("_packages.json.gz") || name.ends_with("_packages_v2.json.gz") {
+                    if let Ok(meta) = entry.metadata() {
+                        size_freed += meta.len();
+                    }
+                    eprintln!("[clear_profile_cache] Removing package cache file: {}", name);
+                    let _ = fs::remove_file(entry.path());
+                }
+            }
+        }
     }
 
     {
