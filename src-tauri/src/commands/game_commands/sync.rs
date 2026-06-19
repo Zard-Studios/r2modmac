@@ -339,6 +339,28 @@ pub async fn sync_profile_to_game(
     let mut to_remove: Vec<String> = invalid_game_mod_folders.clone();
     for (folder_name, gm_key) in &game_mod_folders {
         if !desired_key_set.contains(gm_key) {
+            // Check if this folder is owned by any manifest we want to keep
+            let folder_prefix_1 = format!("bepinex/plugins/{}/", folder_name.to_lowercase());
+            let folder_prefix_2 = format!("bepinex_disabled/plugins/{}/", folder_name.to_lowercase());
+            let folder_exact_1 = format!("bepinex/plugins/{}", folder_name.to_lowercase());
+            let folder_exact_2 = format!("bepinex_disabled/plugins/{}", folder_name.to_lowercase());
+            let is_owned_by_kept_manifest = manifests_to_keep.iter().any(|entry| {
+                entry.manifest.files.iter().any(|file| {
+                    let file_lower = file.to_lowercase();
+                    file_lower.starts_with(&folder_prefix_1)
+                        || file_lower.starts_with(&folder_prefix_2)
+                        || file_lower == folder_exact_1
+                        || file_lower == folder_exact_2
+                })
+            });
+            if is_owned_by_kept_manifest {
+                eprintln!(
+                    "[sync_profile_to_game] Keeping folder owned by kept manifest: {}",
+                    folder_name
+                );
+                continue;
+            }
+
             if game_mod_folder_is_auxiliary_payload(folder_name, gm_key, &desired_full_by_key) {
                 eprintln!(
                     "[sync_profile_to_game] Keeping auxiliary payload folder: {}",
@@ -352,7 +374,8 @@ pub async fn sync_profile_to_game(
 
         let desired_version = desired_version_by_key.get(gm_key);
         let desired_full = desired_full_by_key.get(gm_key);
-        let game_version = extract_version_suffix(folder_name);
+        let game_version = extract_version_suffix(folder_name)
+            .or_else(|| read_manifest_version(&game_plugins.join(folder_name)));
         let full_mismatch = desired_full
             .map(|full| folder_name.to_lowercase() != *full)
             .unwrap_or(false);
@@ -402,7 +425,9 @@ pub async fn sync_profile_to_game(
                 }
 
                 if let Some(dv) = desired_version {
-                    if let Some(gv) = extract_version_suffix(folder_name) {
+                    let game_version = extract_version_suffix(folder_name)
+                        .or_else(|| read_manifest_version(&game_plugins.join(folder_name)));
+                    if let Some(gv) = game_version {
                         return gv == *dv;
                     }
                     // Fallback for unusual folder naming: compare full folder name.
@@ -486,3 +511,4 @@ pub async fn sync_profile_to_game(
         "cached": cached
     }))
 }
+

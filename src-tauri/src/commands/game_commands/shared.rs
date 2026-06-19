@@ -155,6 +155,10 @@ pub(super) fn game_mod_folder_has_payload(
     folder_name: &str,
     mod_key: &str,
 ) -> bool {
+    if folder_path.join("manifest.json").exists() {
+        return true;
+    }
+
     if path_has_plugin_payload(folder_path, 6) {
         return true;
     }
