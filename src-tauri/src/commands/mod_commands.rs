@@ -3835,16 +3835,21 @@ pub async fn copy_mod_from_cache(
     Ok(serde_json::json!({ "success": false, "copied": false }))
 }
 
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
+pub struct ChunkCache {
+    pub url: String,
+    pub packages: Vec<crate::models::shared::Package>,
+}
+
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct GamePackagesCache {
-    pub chunk_urls: Vec<String>,
-    pub packages: Vec<crate::models::shared::Package>,
+    pub chunks: Vec<ChunkCache>,
 }
 
 fn load_packages_from_disk(app: &AppHandle, game_id: &str) -> Option<GamePackagesCache> {
     use std::io::Read;
     let cache_dir = crate::utils::paths::app_cache_dir(app).ok()?;
-    let cache_file = cache_dir.join(format!("{}_packages.json.gz", game_id));
+    let cache_file = cache_dir.join(format!("{}_packages_v2.json.gz", game_id));
     if !cache_file.exists() {
         return None;
     }
@@ -3860,7 +3865,7 @@ fn save_packages_to_disk(app: &AppHandle, game_id: &str, cache: &GamePackagesCac
     let cache_dir = crate::utils::paths::app_cache_dir(app)
         .map_err(|e| format!("Failed to get cache dir: {}", e))?;
     std::fs::create_dir_all(&cache_dir).map_err(|e| format!("Failed to create cache dir: {}", e))?;
-    let cache_file = cache_dir.join(format!("{}_packages.json.gz", game_id));
+    let cache_file = cache_dir.join(format!("{}_packages_v2.json.gz", game_id));
     let file = std::fs::File::create(cache_file).map_err(|e| format!("Failed to create cache file: {}", e))?;
     let mut encoder = flate2::write::GzEncoder::new(file, flate2::Compression::default());
     let serialized = serde_json::to_vec(cache).map_err(|e| format!("Failed to serialize cache: {}", e))?;
@@ -4054,19 +4059,22 @@ pub async fn fetch_packages(
         }
     }
 
-    // 1. Try to load from disk cache first
+    // 1. Try to load from chunk-level disk cache first
     if let Some(cache) = load_packages_from_disk(&app, &game_id) {
-        let count = cache.packages.len();
+        let mut all_packages = Vec::new();
+        for chunk in &cache.chunks {
+            all_packages.extend(chunk.packages.clone());
+        }
+        let count = all_packages.len();
         eprintln!(
-            "[fetch_packages] Loaded {} packages from disk cache for {} (instant)",
+            "[fetch_packages] Loaded {} packages from chunk disk cache for {} (instant)",
             count, game_id
         );
-        let cached_urls = cache.chunk_urls;
 
         // Put them into memory state immediately so user sees them
         {
             let mut packages_lock = state.packages.write().await;
-            packages_lock.insert(game_id.clone(), cache.packages);
+            packages_lock.insert(game_id.clone(), all_packages);
         }
         state.touch_packages_cache(&game_id).await;
 
@@ -4114,58 +4122,73 @@ pub async fn fetch_packages(
                 }
             };
 
-            // Compare URLs with cached URLs
+            // Compare online chunk URLs with cached chunk URLs
+            let cached_urls: Vec<String> = cache.chunks.iter().map(|c| c.url.clone()).collect();
             if cached_urls == online_chunk_urls {
-                eprintln!("[fetch_packages] Disk cache is fully up-to-date for {}. No updates needed.", game_id_clone);
+                eprintln!("[fetch_packages] Chunk disk cache is fully up-to-date for {}. No updates needed.", game_id_clone);
                 return;
             }
 
-            // Chunks differ! Fetch all chunks in parallel.
-            eprintln!("[fetch_packages] Chunk URLs differ from cache. Updating cache in background for {}...", game_id_clone);
+            // Chunks differ! Keep chunks that are still online, and download only the new ones!
+            eprintln!("[fetch_packages] Chunk URLs differ from cache. Updating changed chunks in background for {}...", game_id_clone);
             
-            let total_chunks = online_chunk_urls.len();
-            if total_chunks == 0 {
-                return;
-            }
+            let mut kept_chunks: Vec<ChunkCache> = cache.chunks.into_iter()
+                .filter(|c| online_chunk_urls.contains(&c.url))
+                .collect();
 
-            let parallelism = 3usize;
-            let mut stream = futures_util::stream::iter(online_chunk_urls.clone())
-                .map(|url| {
-                    let client = thunderstore_client();
-                    async move { load_chunk(&client, &url).await }
-                })
-                .buffer_unordered(parallelism);
+            let urls_to_download: Vec<String> = online_chunk_urls.iter()
+                .filter(|url| !cached_urls.contains(url))
+                .cloned()
+                .collect();
 
-            let mut all_packages = Vec::new();
-            while let Some(result) = stream.next().await {
-                match result {
-                    Ok(packages) => {
-                        all_packages.extend(packages);
-                    }
-                    Err(e) => {
-                        eprintln!("[fetch_packages] Background update chunk load error: {}", e);
-                        return;
+            if !urls_to_download.is_empty() {
+                let parallelism = 3usize;
+                let mut stream = futures_util::stream::iter(urls_to_download)
+                    .map(|url| {
+                        let client = thunderstore_client();
+                        async move {
+                            match load_chunk(&client, &url).await {
+                                Ok(packages) => Ok(ChunkCache { url, packages }),
+                                Err(e) => Err(e),
+                            }
+                        }
+                    })
+                    .buffer_unordered(parallelism);
+
+                while let Some(result) = stream.next().await {
+                    match result {
+                        Ok(new_chunk) => {
+                            kept_chunks.push(new_chunk);
+                        }
+                        Err(e) => {
+                            eprintln!("[fetch_packages] Background update chunk load error: {}", e);
+                            return;
+                        }
                     }
                 }
             }
 
-            all_packages.shrink_to_fit();
-            let count = all_packages.len();
-            eprintln!("[fetch_packages] Background update fetched {} packages for {}", count, game_id_clone);
+            // Merge everything
+            let mut final_packages = Vec::new();
+            for chunk in &kept_chunks {
+                final_packages.extend(chunk.packages.clone());
+            }
+            final_packages.shrink_to_fit();
+            let count = final_packages.len();
+            eprintln!("[fetch_packages] Background update complete. Loaded {} packages for {}", count, game_id_clone);
 
             // Update in-memory state
             {
                 let mut packages_lock = packages_arc.write().await;
-                packages_lock.insert(game_id_clone.clone(), all_packages.clone());
+                packages_lock.insert(game_id_clone.clone(), final_packages);
             }
 
-            // Save to disk cache
+            // Save new cache to disk
             let new_cache = GamePackagesCache {
-                chunk_urls: online_chunk_urls,
-                packages: all_packages,
+                chunks: kept_chunks,
             };
             if let Err(e) = save_packages_to_disk(&app_handle, &game_id_clone, &new_cache) {
-                eprintln!("[fetch_packages] Failed to save updated cache to disk: {}", e);
+                eprintln!("[fetch_packages] Failed to save updated chunk cache: {}", e);
             }
 
             // Emit event so frontend knows packages are updated
@@ -4211,6 +4234,7 @@ pub async fn fetch_packages(
 
     // 3. Load FIRST successful chunk immediately for instant UI
     let mut first_loaded_index: Option<usize> = None;
+    let mut first_chunk: Option<ChunkCache> = None;
     let first_attempts = std::cmp::min(5, chunk_urls.len());
     for idx in 0..first_attempts {
         let first_url = &chunk_urls[idx];
@@ -4224,8 +4248,12 @@ pub async fn fetch_packages(
 
                 // Update state immediately so UI can show something
                 let mut packages_lock = state.packages.write().await;
-                packages_lock.insert(game_id.clone(), first_packages);
+                packages_lock.insert(game_id.clone(), first_packages.clone());
                 first_loaded_index = Some(idx);
+                first_chunk = Some(ChunkCache {
+                    url: first_url.clone(),
+                    packages: first_packages,
+                });
                 drop(packages_lock);
                 state.touch_packages_cache(&game_id).await;
                 break;
@@ -4263,81 +4291,74 @@ pub async fn fetch_packages(
         let packages_arc = state.packages.clone();
         let game_id_clone = game_id.clone();
         let app_handle = app.clone();
-        let chunk_urls_clone = chunk_urls.clone();
+        let first_chunk = first_chunk.unwrap();
 
         tokio::spawn(async move {
             let parallelism = 3usize;
             let mut stream = futures_util::stream::iter(remaining_urls)
                 .map(|url| {
                     let client = thunderstore_client();
-                    async move { load_chunk(&client, &url).await }
+                    async move {
+                        match load_chunk(&client, &url).await {
+                            Ok(packages) => Ok(ChunkCache { url, packages }),
+                            Err(e) => Err(e),
+                        }
+                    }
                 })
                 .buffer_unordered(parallelism);
 
+            let mut chunks = vec![first_chunk];
             while let Some(result) = stream.next().await {
                 match result {
-                    Ok(packages) => {
+                    Ok(chunk) => {
                         let mut packages_lock = packages_arc.write().await;
                         if let Some(existing) = packages_lock.get_mut(&game_id_clone) {
-                            existing.extend(packages);
+                            existing.extend(chunk.packages.clone());
                         }
+                        chunks.push(chunk);
                     }
                     Err(e) => eprintln!("[fetch_packages] Chunk error: {}", e),
                 }
             }
 
+            // Shrink final in-memory vector
             {
                 let mut packages_lock = packages_arc.write().await;
                 if let Some(existing) = packages_lock.get_mut(&game_id_clone) {
                     existing.shrink_to_fit();
-                    eprintln!(
-                        "[fetch_packages] Final shrink: {} packages retained",
-                        existing.len()
-                    );
                 }
             }
 
-            let final_packages = {
+            // Save cache
+            let final_count = {
                 let packages_lock = packages_arc.read().await;
-                packages_lock.get(&game_id_clone).cloned()
+                packages_lock.get(&game_id_clone).map(|p| p.len()).unwrap_or(0)
             };
 
-            if let Some(pkgs) = final_packages {
-                let final_count = pkgs.len();
-                eprintln!(
-                    "[fetch_packages] Background loading complete. Total: {} packages",
-                    final_count
-                );
+            eprintln!(
+                "[fetch_packages] Background loading complete. Total: {} packages",
+                final_count
+            );
 
-                let cache = GamePackagesCache {
-                    chunk_urls: chunk_urls_clone,
-                    packages: pkgs,
-                };
-                if let Err(e) = save_packages_to_disk(&app_handle, &game_id_clone, &cache) {
-                    eprintln!("[fetch_packages] Failed to save cache to disk: {}", e);
-                }
-
-                let _ = app_handle.emit(
-                    "packages-loaded",
-                    serde_json::json!({
-                        "game_id": game_id_clone,
-                        "total_count": final_count
-                    }),
-                );
+            let cache = GamePackagesCache { chunks };
+            if let Err(e) = save_packages_to_disk(&app_handle, &game_id_clone, &cache) {
+                eprintln!("[fetch_packages] Failed to save chunk cache to disk: {}", e);
             }
+
+            let _ = app_handle.emit(
+                "packages-loaded",
+                serde_json::json!({
+                    "game_id": game_id_clone,
+                    "total_count": final_count
+                }),
+            );
         });
     } else {
-        let final_packages = {
-            let packages_lock = state.packages.read().await;
-            packages_lock.get(&game_id).cloned()
+        // Only 1 chunk total
+        let cache = GamePackagesCache {
+            chunks: vec![first_chunk.unwrap()],
         };
-        if let Some(pkgs) = final_packages {
-            let cache = GamePackagesCache {
-                chunk_urls,
-                packages: pkgs,
-            };
-            let _ = save_packages_to_disk(&app, &game_id, &cache);
-        }
+        let _ = save_packages_to_disk(&app, &game_id, &cache);
     }
 
     let packages_lock = state.packages.read().await;
@@ -4922,5 +4943,35 @@ mod tests {
         fs::create_dir_all(&app_inside).unwrap();
         assert!(is_macos_game_dir(&temp));
         let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn test_packages_caching_serialization() {
+        let pkg = crate::models::shared::Package {
+            name: "TestMod".to_string(),
+            full_name: "Test-TestMod".to_string(),
+            owner: "".to_string(),
+            package_url: "".to_string(),
+            date_created: "".to_string(),
+            date_updated: "2026-06-19".to_string(),
+            uuid4: "some-uuid".to_string(),
+            rating_score: 10,
+            is_pinned: false,
+            is_deprecated: false,
+            has_nsfw_content: false,
+            categories: vec![],
+            versions: vec![],
+        };
+        let cache = GamePackagesCache {
+            chunks: vec![ChunkCache {
+                url: "http://example.com/chunk1.json".to_string(),
+                packages: vec![pkg],
+            }],
+        };
+        let serialized = serde_json::to_vec(&cache).unwrap();
+        let decompressed: GamePackagesCache = serde_json::from_slice(&serialized).unwrap();
+        assert_eq!(decompressed.chunks.len(), 1);
+        assert_eq!(decompressed.chunks[0].url, "http://example.com/chunk1.json");
+        assert_eq!(decompressed.chunks[0].packages[0].name, "TestMod");
     }
 }
