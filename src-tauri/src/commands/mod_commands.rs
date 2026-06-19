@@ -3848,16 +3848,38 @@ pub struct GamePackagesCache {
 
 fn load_packages_from_disk(app: &AppHandle, game_id: &str) -> Option<GamePackagesCache> {
     use std::io::Read;
-    let cache_dir = crate::utils::paths::app_cache_dir(app).ok()?;
+    let cache_dir = match crate::utils::paths::app_cache_dir(app) {
+        Ok(dir) => dir,
+        Err(e) => {
+            eprintln!("[load_packages_from_disk] Failed to resolve cache dir: {}", e);
+            return None;
+        }
+    };
     let cache_file = cache_dir.join(format!("{}_packages_v2.json.gz", game_id));
     if !cache_file.exists() {
+        eprintln!("[load_packages_from_disk] Cache file does not exist: {:?}", cache_file);
         return None;
     }
-    let file = std::fs::File::open(cache_file).ok()?;
+    let file = match std::fs::File::open(&cache_file) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("[load_packages_from_disk] Failed to open cache file: {}", e);
+            return None;
+        }
+    };
     let mut gz = flate2::read::GzDecoder::new(file);
     let mut data = Vec::new();
-    gz.read_to_end(&mut data).ok()?;
-    serde_json::from_slice(&data).ok()
+    if let Err(e) = gz.read_to_end(&mut data) {
+        eprintln!("[load_packages_from_disk] Failed to decompress cache file: {}", e);
+        return None;
+    }
+    match serde_json::from_slice(&data) {
+        Ok(cache) => Some(cache),
+        Err(e) => {
+            eprintln!("[load_packages_from_disk] Failed to deserialize cache: {}", e);
+            return None;
+        }
+    }
 }
 
 fn save_packages_to_disk(app: &AppHandle, game_id: &str, cache: &GamePackagesCache) -> Result<(), String> {

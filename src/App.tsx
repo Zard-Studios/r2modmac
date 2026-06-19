@@ -484,16 +484,18 @@ function App() {
     }
   }
 
-  async function loadPackages(communityId: string, pageNum: number, reset: boolean = false) {
+  async function loadPackages(communityId: string, pageNum: number, reset: boolean = false, silent: boolean = false) {
     const requestId = ++packagesLoadRequestRef.current;
     const isStaleRequest = () => requestId !== packagesLoadRequestRef.current;
 
     if (reset) {
-      setLoadingMods(true);
-      setAllPackages([]);
-      setTotalPackages(0);
-      setCurrentPage(0);
-      setAvailableCategories([]);
+      if (!silent) {
+        setLoadingMods(true);
+        setAllPackages([]);
+        setTotalPackages(0);
+        setCurrentPage(0);
+        setAvailableCategories([]);
+      }
     }
 
     const withTimeout = async <T,>(promise: Promise<T>, ms: number, label: string): Promise<T> => {
@@ -566,7 +568,7 @@ function App() {
         );
       }
     } finally {
-      if (requestId === packagesLoadRequestRef.current) {
+      if (requestId === packagesLoadRequestRef.current && !silent) {
         setLoadingMods(false)
       }
     }
@@ -818,7 +820,7 @@ function App() {
       console.log(`[packages-loaded] Game ${event.payload.game_id} now has ${event.payload.total_count} packages`);
       const current = selectedCommunityRef.current;
       if (current && event.payload.game_id === current) {
-        loadPackages(current, 0, true);
+        loadPackages(current, 0, true, true);
         rebuildProfilePackageIndex(current);
       }
     });
