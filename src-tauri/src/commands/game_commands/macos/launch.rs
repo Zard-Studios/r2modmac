@@ -30,12 +30,31 @@ pub(crate) async fn launch_game_with_mods_for_macos(
 
     // Outer Wilds: launch OWML.Launcher.exe via Wine/CrossOver
     if is_outerwilds_identifier(game_identifier) || is_outerwilds_game_path(game_path) {
+        let owml_folder = game_path.join("OWML");
+        let owml_disabled = game_path.join("OWML_DISABLED");
+        if owml_disabled.exists() && !owml_folder.exists() {
+            let _ = fs::rename(&owml_disabled, &owml_folder);
+            eprintln!("[launch_game_with_mods] Restored OWML_DISABLED -> OWML");
+        }
+
+        let managed_dir = game_path.join("OuterWilds_Data").join("Managed");
+        if managed_dir.exists() {
+            let dll_path = managed_dir.join("Assembly-CSharp.dll");
+            let disabled_path = managed_dir.join("Assembly-CSharp.dll_DISABLED");
+            let bak_path = managed_dir.join("Assembly-CSharp.dll.bak");
+            if disabled_path.exists() {
+                let _ = fs::rename(&dll_path, &bak_path);
+                let _ = fs::rename(&disabled_path, &dll_path);
+                eprintln!("[launch_game_with_mods] Restored modded Assembly-CSharp.dll for Outer Wilds");
+            }
+        }
+
         let owml_launcher = game_path.join("OWML").join("OWML.Launcher.exe");
         if !owml_launcher.exists() {
             return Err("OWML.Launcher.exe not found. Please install OWML first.".to_string());
         }
         eprintln!("[launch_game_with_mods] Launching OWML for Outer Wilds: {:?}", owml_launcher);
-        return launch_windows_direct_game(&owml_launcher.parent().unwrap_or(game_path));
+        return launch_windows_direct_game_with_working_dir(&owml_launcher, Some(game_path));
     }
 
     if is_balatro_identifier(game_identifier) || is_balatro_game_path(game_path) {
@@ -161,14 +180,25 @@ pub(crate) async fn launch_game_vanilla_for_macos(
 
     let is_outerwilds = is_outerwilds_identifier(game_identifier) || is_outerwilds_game_path(&game_path);
     if is_outerwilds {
-        // Unpatch the game before launching vanilla
+        let owml_folder = game_path.join("OWML");
+        let owml_disabled = game_path.join("OWML_DISABLED");
+        if owml_folder.exists() {
+            if owml_disabled.exists() {
+                let _ = fs::remove_dir_all(&owml_disabled);
+            }
+            let _ = fs::rename(&owml_folder, &owml_disabled);
+            eprintln!("[launch_game_vanilla] Renamed OWML -> OWML_DISABLED");
+        }
+
+        // Swap modded dll to Assembly-CSharp.dll_DISABLED, and make vanilla active
         let managed_dir = game_path.join("OuterWilds_Data").join("Managed");
         if managed_dir.exists() {
             let dll_path = managed_dir.join("Assembly-CSharp.dll");
+            let disabled_path = managed_dir.join("Assembly-CSharp.dll_DISABLED");
             let bak_path = managed_dir.join("Assembly-CSharp.dll.bak");
-            if bak_path.exists() {
-                let _ = fs::copy(&bak_path, &dll_path);
-                let _ = fs::remove_file(&bak_path);
+            if !disabled_path.exists() && bak_path.exists() {
+                let _ = fs::rename(&dll_path, &disabled_path);
+                let _ = fs::rename(&bak_path, &dll_path);
                 eprintln!("[launch_game_vanilla] Restored vanilla Assembly-CSharp.dll for Outer Wilds");
             }
         }

@@ -145,6 +145,15 @@ pub async fn sync_profile_to_game(
 
     // --- Outer Wilds (OWML) sync branch ---
     if is_outerwilds_profile {
+        let owml_folder = game_path.join("OWML");
+        let owml_disabled = game_path.join("OWML_DISABLED");
+        if !profile_is_vanilla {
+            if owml_disabled.exists() && !owml_folder.exists() {
+                let _ = fs::rename(&owml_disabled, &owml_folder);
+                eprintln!("[sync_profile_to_game] Restored OWML_DISABLED -> OWML");
+            }
+        }
+
         let owml_dir = game_path.join("OWML");
         let owml_mods_dir = owml_dir.join("Mods");
         let profile_owml_cache = profile_dir.join("OWML").join("Mods");
@@ -393,16 +402,38 @@ pub async fn sync_profile_to_game(
             }
         }
 
-        // If profile is vanilla, unpatch the game (restore Assembly-CSharp.dll from Assembly-CSharp.dll.bak)
-        if profile_is_vanilla {
-            let managed_dir = game_path.join("OuterWilds_Data").join("Managed");
-            if managed_dir.exists() {
-                let dll_path = managed_dir.join("Assembly-CSharp.dll");
-                let bak_path = managed_dir.join("Assembly-CSharp.dll.bak");
-                if bak_path.exists() {
-                    let _ = fs::copy(&bak_path, &dll_path);
-                    let _ = fs::remove_file(&bak_path);
-                    eprintln!("[sync_profile_to_game] Restored vanilla Assembly-CSharp.dll for Outer Wilds");
+        // Toggle vanilla mode via renaming/swapping the patched and vanilla Assembly-CSharp.dll, and the OWML folder
+        let managed_dir = game_path.join("OuterWilds_Data").join("Managed");
+        let owml_folder = game_path.join("OWML");
+        let owml_disabled = game_path.join("OWML_DISABLED");
+
+        if managed_dir.exists() {
+            let dll_path = managed_dir.join("Assembly-CSharp.dll");
+            let disabled_path = managed_dir.join("Assembly-CSharp.dll_DISABLED");
+            let bak_path = managed_dir.join("Assembly-CSharp.dll.bak");
+
+            if profile_is_vanilla {
+                if !disabled_path.exists() && bak_path.exists() {
+                    let _ = fs::rename(&dll_path, &disabled_path);
+                    let _ = fs::rename(&bak_path, &dll_path);
+                    eprintln!("[sync_profile_to_game] Restored vanilla Assembly-CSharp.dll via rename");
+                }
+                if owml_folder.exists() {
+                    if owml_disabled.exists() {
+                        let _ = fs::remove_dir_all(&owml_disabled);
+                    }
+                    let _ = fs::rename(&owml_folder, &owml_disabled);
+                    eprintln!("[sync_profile_to_game] Renamed OWML -> OWML_DISABLED");
+                }
+            } else {
+                if owml_disabled.exists() && !owml_folder.exists() {
+                    let _ = fs::rename(&owml_disabled, &owml_folder);
+                    eprintln!("[sync_profile_to_game] Restored OWML_DISABLED -> OWML");
+                }
+                if disabled_path.exists() {
+                    let _ = fs::rename(&dll_path, &bak_path);
+                    let _ = fs::rename(&disabled_path, &dll_path);
+                    eprintln!("[sync_profile_to_game] Restored modded Assembly-CSharp.dll via rename");
                 }
             }
         }

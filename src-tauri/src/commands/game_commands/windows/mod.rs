@@ -7,6 +7,13 @@ pub(crate) use self::process::*;
 use super::*;
 
 pub(crate) fn launch_windows_direct_game(game_path: &std::path::Path) -> Result<(), String> {
+    launch_windows_direct_game_with_working_dir(game_path, None)
+}
+
+pub(crate) fn launch_windows_direct_game_with_working_dir(
+    game_path: &std::path::Path,
+    working_dir: Option<&std::path::Path>,
+) -> Result<(), String> {
     let executable_path = find_pe_game_executable_path(game_path).ok_or_else(|| {
         "Could not find a Windows game executable in the selected folder.".to_string()
     })?;
@@ -16,7 +23,7 @@ pub(crate) fn launch_windows_direct_game(game_path: &std::path::Path) -> Result<
         return Err("Game is already running.".to_string());
     }
 
-    let executable_dir = executable_path.parent().unwrap_or(game_path);
+    let executable_dir = working_dir.unwrap_or_else(|| executable_path.parent().unwrap_or(game_path));
 
     #[cfg(unix)]
     {
