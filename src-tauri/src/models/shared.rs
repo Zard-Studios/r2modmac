@@ -257,6 +257,43 @@ pub fn get_balatro_mods_dir() -> Option<std::path::PathBuf> {
     })
 }
 
+pub fn is_outerwilds_identifier(game_identifier: &str) -> bool {
+    normalize_for_matching(game_identifier) == "outerwilds"
+}
+
+pub fn is_outerwilds_game_path(path: &std::path::Path) -> bool {
+    // Detect by OuterWilds.exe in the game directory or inside a bottle prefix
+    if path.join("OuterWilds.exe").exists() {
+        return true;
+    }
+    // If we're given the bottle/prefix root, look inside drive_c
+    if path
+        .join("drive_c")
+        .join("Program Files (x86)")
+        .join("Steam")
+        .join("steamapps")
+        .join("common")
+        .join("Outer Wilds")
+        .join("OuterWilds.exe")
+        .exists()
+    {
+        return true;
+    }
+    false
+}
+
+/// Returns the path to OWML inside the game directory (or bottle AppData).
+/// Priority: <game_path>/OWML/ (CrossOver/Wine AppData install)
+pub fn get_owml_dir(game_path: &std::path::Path) -> Option<std::path::PathBuf> {
+    let direct = game_path.join("OWML");
+    if direct.exists() {
+        return Some(direct);
+    }
+    None
+}
+
+
+
 pub fn get_steam_library_folders(steam_path: &std::path::Path) -> Vec<std::path::PathBuf> {
     let mut folders = vec![steam_path.to_path_buf()];
     let library_folders_path = steam_path.join("steamapps").join("libraryfolders.vdf");

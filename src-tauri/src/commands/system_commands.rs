@@ -35,6 +35,15 @@ pub async fn fetch_communities() -> Result<Vec<serde_json::Value>, String> {
             .map(|s| s.to_string());
     }
 
+    // Inject the synthetic Outer Wilds community (not on Thunderstore; uses ow-mod-db).
+    all_results.push(serde_json::json!({
+        "identifier": "outerwilds",
+        "name": "Outer Wilds",
+        "discord_url": "https://discord.gg/outerwilds",
+        "wiki_url": "https://outerwildsmods.com",
+        "require_package_listing_approval": false
+    }));
+
     eprintln!(
         "[fetch_communities] Total communities fetched: {}",
         all_results.len()
@@ -42,13 +51,21 @@ pub async fn fetch_communities() -> Result<Vec<serde_json::Value>, String> {
     Ok(all_results)
 }
 
+
 #[command]
 pub async fn fetch_community_images() -> Result<std::collections::HashMap<String, String>, String> {
     let url = "https://thunderstore.io/communities/";
     let resp = reqwest::get(url).await.map_err(|e| e.to_string())?;
     let html = resp.text().await.map_err(|e| e.to_string())?;
 
-    extract_community_images_from_html(&html)
+    let mut images = extract_community_images_from_html(&html)?;
+
+    // Inject Outer Wilds cover image (not on Thunderstore CDN).
+    images.entry("outerwilds".to_string()).or_insert_with(|| {
+        "https://i.ibb.co/xKCBqXM7/apps-7475-67120997535715720-38c3e502-0019-4560-826e-634bbaf5cb4b.jpg".to_string()
+    });
+
+    Ok(images)
 }
 
 fn normalize_community_image_url(url: &str) -> String {
@@ -152,7 +169,11 @@ fn extract_community_images_from_html(html: &str) -> Result<HashMap<String, Stri
 
 #[command]
 pub async fn fetch_text_content(url: String) -> Result<String, String> {
-    let resp = reqwest::get(url).await.map_err(|e| e.to_string())?;
+    let client = reqwest::Client::builder()
+        .user_agent("r2modmac")
+        .build()
+        .map_err(|e| e.to_string())?;
+    let resp = client.get(&url).send().await.map_err(|e| e.to_string())?;
     let text = resp.text().await.map_err(|e| e.to_string())?;
     Ok(text)
 }
