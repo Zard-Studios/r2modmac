@@ -172,6 +172,7 @@ pub(crate) async fn launch_game_vanilla_for_macos(
                 eprintln!("[launch_game_vanilla] Restored vanilla Assembly-CSharp.dll for Outer Wilds");
             }
         }
+        return launch_windows_game(app, &game_path);
     }
 
     let executable_path = find_macos_executable_path(&runtime_game_path);

@@ -47,13 +47,13 @@ pub async fn is_game_running(
     platform: Option<String>,
 ) -> Result<bool, String> {
     let is_windows_profile = normalized_platform(platform.as_deref()) == Some("windows");
-    let game_path_str = match get_game_path(app.clone(), game_identifier, platform).await? {
+    let game_path_str = match get_game_path(app.clone(), game_identifier.clone(), platform).await? {
         Some(path) => path,
         None => return Ok(false),
     };
     let game_path = std::path::PathBuf::from(&game_path_str);
 
-    if is_windows_profile {
+    if is_windows_profile || is_outerwilds_identifier(&game_identifier) || is_outerwilds_game_path(&game_path) {
         return is_game_running_for_windows(&game_path);
     }
 
@@ -67,12 +67,12 @@ pub async fn stop_game(
     platform: Option<String>,
 ) -> Result<(), String> {
     let is_windows_profile = normalized_platform(platform.as_deref()) == Some("windows");
-    let game_path_str = get_game_path(app.clone(), game_identifier, platform)
+    let game_path_str = get_game_path(app.clone(), game_identifier.clone(), platform)
         .await?
         .ok_or_else(|| "Game path not found".to_string())?;
     let game_path = std::path::PathBuf::from(&game_path_str);
 
-    if is_windows_profile {
+    if is_windows_profile || is_outerwilds_identifier(&game_identifier) || is_outerwilds_game_path(&game_path) {
         return stop_game_for_windows(&game_path);
     }
 

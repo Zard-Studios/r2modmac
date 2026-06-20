@@ -274,6 +274,12 @@ pub async fn sync_profile_to_game(
             }
         }
 
+        let game_wine_path = convert_to_wine_path(game_path);
+        let mut owml_wine_path = convert_to_wine_path(&owml_dir);
+        if !owml_wine_path.ends_with('/') && !owml_wine_path.ends_with('\\') {
+            owml_wine_path.push('\\');
+        }
+
         // Write/update OWML.Config.json with socketPort=0 to prevent Wine socket crashes.
         // This is done on every sync so the setting is always enforced.
         if owml_dir.exists() {
@@ -290,6 +296,8 @@ pub async fn sync_profile_to_game(
             // Force socketPort=0 to prevent SocketListener from binding in Wine/CrossOver
             config["socketPort"] = serde_json::json!(0);
             config["incrementalGC"] = serde_json::json!(true);
+            config["gamePath"] = serde_json::json!(&game_wine_path);
+            config["owmlPath"] = serde_json::json!(&owml_wine_path);
             if let Some(obj) = config.as_object_mut() {
                 obj.entry("forceExe").or_insert(serde_json::json!(false));
                 obj.entry("disableVersionPopup").or_insert(serde_json::json!(true));
@@ -314,15 +322,8 @@ pub async fn sync_profile_to_game(
                 serde_json::json!({})
             };
 
-            let game_path_str = game_path;
-            // Append trailing slash to owmlPath so it behaves correctly (e.g. "/path/to/OWML/")
-            let mut owml_path_str = owml_dir.to_string_lossy().to_string();
-            if !owml_path_str.ends_with('/') && !owml_path_str.ends_with('\\') {
-                owml_path_str.push('/');
-            }
-
-            config["gamePath"] = serde_json::json!(game_path_str);
-            config["owmlPath"] = serde_json::json!(owml_path_str);
+            config["gamePath"] = serde_json::json!(&game_wine_path);
+            config["owmlPath"] = serde_json::json!(&owml_wine_path);
             config["socketPort"] = serde_json::json!(0);
             config["incrementalGC"] = serde_json::json!(true);
             if let Some(obj) = config.as_object_mut() {
@@ -802,5 +803,37 @@ fn manifest_files_exist(target_root: &std::path::Path, files: &[String]) -> bool
         }
     }
     true
+}
+
+fn convert_to_wine_path(path: &std::path::Path) -> String {
+    if cfg!(windows) {
+        return path.to_string_lossy().to_string();
+    }
+    // Unix platforms (macOS/Linux) running Wine
+    if let Some(prefix_root) = find_wine_prefix_root(path) {
+        let drive_c = prefix_root.join("drive_c");
+        let canonical_path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        let canonical_drive_c = drive_c.canonicalize().unwrap_or_else(|_| drive_c.clone());
+        if let Ok(rel) = canonical_path.strip_prefix(&canonical_drive_c) {
+            let components: Vec<String> = rel
+                .components()
+                .map(|c| c.as_os_str().to_string_lossy().to_string())
+                .collect();
+            return format!("C:\\{}", components.join("\\"));
+        }
+
+        // Fallback simple string match
+        let path_str = path.to_string_lossy().to_string();
+        let drive_c_str = drive_c.to_string_lossy().to_string();
+        if path_str.starts_with(&drive_c_str) {
+            let rel = path_str[drive_c_str.len()..].trim_start_matches('/').trim_start_matches('\\');
+            return format!("C:\\{}", rel.replace('/', "\\"));
+        }
+    }
+
+    // Fallback: translate absolute Unix path to Wine Z:\ path
+    let path_str = path.to_string_lossy().to_string();
+    let clean_path = path_str.replace('/', "\\");
+    format!("Z:{}", clean_path)
 }
 
