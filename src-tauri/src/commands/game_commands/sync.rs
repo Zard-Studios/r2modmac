@@ -292,10 +292,44 @@ pub async fn sync_profile_to_game(
                 obj.entry("disableVersionPopup").or_insert(serde_json::json!(true));
             }
 
-
             if let Ok(serialized) = serde_json::to_string_pretty(&config) {
                 let _ = fs::write(&config_path, serialized);
                 eprintln!("[sync_profile_to_game] Wrote OWML.Config.json (socketPort=0) at {:?}", config_path);
+            }
+        }
+
+        // Also write/update the OWML.Config.json in OuterWilds_Data/Managed/ to make sure it points to our OWML folder!
+        let managed_dir = game_path.join("OuterWilds_Data").join("Managed");
+        if managed_dir.exists() {
+            let config_path = managed_dir.join("OWML.Config.json");
+            let mut config: serde_json::Value = if config_path.exists() {
+                fs::read_to_string(&config_path)
+                    .ok()
+                    .and_then(|s| serde_json::from_str(&s).ok())
+                    .unwrap_or_else(|| serde_json::json!({}))
+            } else {
+                serde_json::json!({})
+            };
+
+            let game_path_str = game_path;
+            // Append trailing slash to owmlPath so it behaves correctly (e.g. "/path/to/OWML/")
+            let mut owml_path_str = owml_dir.to_string_lossy().to_string();
+            if !owml_path_str.ends_with('/') && !owml_path_str.ends_with('\\') {
+                owml_path_str.push('/');
+            }
+
+            config["gamePath"] = serde_json::json!(game_path_str);
+            config["owmlPath"] = serde_json::json!(owml_path_str);
+            config["socketPort"] = serde_json::json!(0);
+            config["incrementalGC"] = serde_json::json!(true);
+            if let Some(obj) = config.as_object_mut() {
+                obj.entry("forceExe").or_insert(serde_json::json!(false));
+                obj.entry("disableVersionPopup").or_insert(serde_json::json!(true));
+            }
+
+            if let Ok(serialized) = serde_json::to_string_pretty(&config) {
+                let _ = fs::write(&config_path, serialized);
+                eprintln!("[sync_profile_to_game] Wrote Managed/OWML.Config.json at {:?}", config_path);
             }
         }
 
