@@ -14,8 +14,8 @@ export const tauriAPI: IElectronAPI = {
     selectImportPath: async () => invoke<string | null>('select_import_path'),
     installMod: async (profileId, downloadUrl, modName, gamePath, useProfileCache) => {
         try {
-            await invoke('install_mod', { profileId, downloadUrl, modName, gamePath, useProfileCache: useProfileCache ?? false });
-            return { success: true };
+            const res = await invoke<any>('install_mod', { profileId, downloadUrl, modName, gamePath, useProfileCache: useProfileCache ?? false });
+            return res;
         } catch (e) {
             return { success: false, error: String(e) };
         }
