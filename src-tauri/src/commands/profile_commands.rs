@@ -518,15 +518,28 @@ pub fn list_profile_config_files(
 
                     if let Some(gp) = game_path_str {
                         let game_path = std::path::Path::new(&gp);
-                        // BepInEx/config  — flat scan
-                        let bep_config = game_path.join("BepInEx").join("config");
-                        if bep_config.is_dir() {
-                            collect_config_files_flat(&bep_config, game_path, &mut files);
-                        }
-                        // BepInEx/plugins — recursive, but only config-extension files
-                        let bep_plugins = game_path.join("BepInEx").join("plugins");
-                        if bep_plugins.is_dir() {
-                            collect_config_files(&bep_plugins, game_path, &mut files);
+                        if game_id == "outerwilds" {
+                            let owml_dir = game_path.join("OWML");
+                            if owml_dir.is_dir() {
+                                // 1. Flat scan OWML root for global configs
+                                collect_config_files_flat(&owml_dir, game_path, &mut files);
+                                // 2. Recursive scan OWML/Mods for mod configs
+                                let owml_mods = owml_dir.join("Mods");
+                                if owml_mods.is_dir() {
+                                    collect_config_files(&owml_mods, game_path, &mut files);
+                                }
+                            }
+                        } else {
+                            // BepInEx/config  — flat scan
+                            let bep_config = game_path.join("BepInEx").join("config");
+                            if bep_config.is_dir() {
+                                collect_config_files_flat(&bep_config, game_path, &mut files);
+                            }
+                            // BepInEx/plugins — recursive, but only config-extension files
+                            let bep_plugins = game_path.join("BepInEx").join("plugins");
+                            if bep_plugins.is_dir() {
+                                collect_config_files(&bep_plugins, game_path, &mut files);
+                            }
                         }
                     }
                 }
@@ -581,7 +594,12 @@ pub fn read_profile_config_file(
         return Err("Path traversal detected".to_string());
     }
 
-    fs::read_to_string(&canonical_target).map_err(|e| format!("Failed to read file: {}", e))
+    let content = fs::read_to_string(&canonical_target)
+        .map_err(|e| format!("Failed to read file: {}", e))?;
+    
+    // Strip UTF-8 BOM (Byte Order Mark) if present.
+    let stripped = content.strip_prefix('\u{FEFF}').unwrap_or(&content);
+    Ok(stripped.to_string())
 }
 
 #[command]
