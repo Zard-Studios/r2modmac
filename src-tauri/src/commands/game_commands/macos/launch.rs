@@ -158,6 +158,22 @@ pub(crate) async fn launch_game_vanilla_for_macos(
             }
             resolved
         };
+
+    let is_outerwilds = is_outerwilds_identifier(game_identifier) || is_outerwilds_game_path(&game_path);
+    if is_outerwilds {
+        // Unpatch the game before launching vanilla
+        let managed_dir = game_path.join("OuterWilds_Data").join("Managed");
+        if managed_dir.exists() {
+            let dll_path = managed_dir.join("Assembly-CSharp.dll");
+            let bak_path = managed_dir.join("Assembly-CSharp.dll.bak");
+            if bak_path.exists() {
+                let _ = fs::copy(&bak_path, &dll_path);
+                let _ = fs::remove_file(&bak_path);
+                eprintln!("[launch_game_vanilla] Restored vanilla Assembly-CSharp.dll for Outer Wilds");
+            }
+        }
+    }
+
     let executable_path = find_macos_executable_path(&runtime_game_path);
 
     #[cfg(target_os = "macos")]

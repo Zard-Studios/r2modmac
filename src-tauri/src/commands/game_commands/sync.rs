@@ -75,22 +75,25 @@ pub async fn sync_profile_to_game(
         use_cache
     );
 
+    let is_outerwilds_profile = is_outerwilds_identifier(&game_identifier)
+        || is_outerwilds_game_path(game_path);
+
     // Get list of mod names from profile (format: "Author-ModName-Version")
     // We keep the full name for matching
     // IMPORTANT: Only include ENABLED mods (disabled mods should not be installed)
+    // Note: For Outer Wilds, we want to include all mods in the sync so that disabled
+    // mods aren't physically deleted. Instead, we toggle their 'enabled' field inside config.json.
     let profile_mod_full_names: Vec<String> = profile["mods"]
         .as_array()
         .unwrap_or(&vec![])
         .iter()
-        .filter(|m| m["enabled"].as_bool().unwrap_or(true)) // Only enabled mods (default true for backwards compat)
+        .filter(|m| is_outerwilds_profile || m["enabled"].as_bool().unwrap_or(true)) // Include all mods for Outer Wilds
         .filter_map(|m| m["fullName"].as_str().map(|s| s.to_string()))
         .collect();
 
     let is_mac_profile = profile_platform == "mac";
     let is_balatro_profile = is_mac_profile
         && (is_balatro_identifier(&game_identifier) || is_balatro_game_path(game_path));
-    let is_outerwilds_profile = is_outerwilds_identifier(&game_identifier)
-        || is_outerwilds_game_path(game_path);
     let profile_requires_bepinex = profile_mod_full_names
         .iter()
         .any(|name| name.to_lowercase().contains("bepinexpack"));
@@ -330,6 +333,76 @@ pub async fn sync_profile_to_game(
             if let Ok(serialized) = serde_json::to_string_pretty(&config) {
                 let _ = fs::write(&config_path, serialized);
                 eprintln!("[sync_profile_to_game] Wrote Managed/OWML.Config.json at {:?}", config_path);
+            }
+        }
+
+        // Set mod enabled/disabled state in OWML mods configs
+        if owml_mods_dir.exists() {
+            if let Some(mods_arr) = profile["mods"].as_array() {
+                for m in mods_arr {
+                    if let (Some(full_name), Some(is_enabled)) = (m["fullName"].as_str(), m["enabled"].as_bool()) {
+                        let mod_key = extract_mod_key(full_name);
+                        
+                        // Find installed folder for this mod_key
+                        let mut found_folder = None;
+                        if let Ok(entries) = fs::read_dir(&owml_mods_dir) {
+                            for entry in entries.filter_map(|e| e.ok()) {
+                                if entry.path().is_dir() {
+                                    let f_name = entry.file_name().to_string_lossy().to_string();
+                                    let m_key = read_owml_unique_name(&entry.path())
+                                        .unwrap_or_else(|| extract_mod_key(&f_name));
+                                    if m_key == mod_key {
+                                        found_folder = Some(f_name);
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+
+                        if let Some(folder) = found_folder {
+                            let mod_config_path = owml_mods_dir.join(&folder).join("config.json");
+                            
+                            let mut config: serde_json::Value = if mod_config_path.exists() {
+                                fs::read_to_string(&mod_config_path)
+                                    .ok()
+                                    .and_then(|s| serde_json::from_str(&s).ok())
+                                    .unwrap_or_else(|| serde_json::json!({}))
+                            } else {
+                                // Fallback: try default-config.json first if config.json doesn't exist
+                                let def_config_path = owml_mods_dir.join(&folder).join("default-config.json");
+                                if def_config_path.exists() {
+                                    fs::read_to_string(&def_config_path)
+                                        .ok()
+                                        .and_then(|s| serde_json::from_str(&s).ok())
+                                        .unwrap_or_else(|| serde_json::json!({}))
+                                } else {
+                                    serde_json::json!({})
+                                }
+                            };
+
+                            config["enabled"] = serde_json::json!(is_enabled);
+
+                            if let Ok(serialized) = serde_json::to_string_pretty(&config) {
+                                let _ = fs::write(&mod_config_path, serialized);
+                                eprintln!("[sync_profile_to_game] Set Outer Wilds mod {} enabled={}", folder, is_enabled);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // If profile is vanilla, unpatch the game (restore Assembly-CSharp.dll from Assembly-CSharp.dll.bak)
+        if profile_is_vanilla {
+            let managed_dir = game_path.join("OuterWilds_Data").join("Managed");
+            if managed_dir.exists() {
+                let dll_path = managed_dir.join("Assembly-CSharp.dll");
+                let bak_path = managed_dir.join("Assembly-CSharp.dll.bak");
+                if bak_path.exists() {
+                    let _ = fs::copy(&bak_path, &dll_path);
+                    let _ = fs::remove_file(&bak_path);
+                    eprintln!("[sync_profile_to_game] Restored vanilla Assembly-CSharp.dll for Outer Wilds");
+                }
             }
         }
 

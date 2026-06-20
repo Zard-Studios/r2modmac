@@ -226,6 +226,7 @@ const SYSTEM_FOLDERS = new Set([
     'plugins',
     'patchers',
     'bepinex',
+    'mods',
     'core',
     'cache',
     'monomod',
@@ -328,6 +329,12 @@ function buildTree(
         let inheritedIconUrl: string | undefined;
         for (let i = 0; i < dirParts.length; i++) {
             const segment = dirParts[i];
+            
+            // If this is a system folder, clear inherited icon so child mods inside it can resolve their own icons
+            if (SYSTEM_FOLDERS.has(segment.toLowerCase())) {
+                inheritedIconUrl = undefined;
+            }
+
             const node = getOrCreate(currentMap, parentKey, segment, i, inheritedIconUrl);
             // Propagate mod icon to child folders once we have one
             if (!inheritedIconUrl && node.iconUrl) inheritedIconUrl = node.iconUrl;
@@ -342,7 +349,13 @@ function buildTree(
                 // Move into the children of this node
                 const childrenMap = new Map<string, TreeNode>();
                 for (const c of node.children) childrenMap.set(c.key, c);
-                const childNode = getOrCreate(childrenMap, parentKey, dirParts[i + 1], i + 1, inheritedIconUrl);
+                
+                let nextInheritedIconUrl = inheritedIconUrl;
+                if (SYSTEM_FOLDERS.has(dirParts[i + 1].toLowerCase())) {
+                    nextInheritedIconUrl = undefined;
+                }
+
+                const childNode = getOrCreate(childrenMap, parentKey, dirParts[i + 1], i + 1, nextInheritedIconUrl);
                 if (!node.children.find(c => c.key === childNode.key)) {
                     node.children.push(childNode);
                 }
