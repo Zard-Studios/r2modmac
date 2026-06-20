@@ -18,6 +18,7 @@ interface PreferencesModalProps {
     onSave: (settings: PreferencesSettings) => void;
     hasHiddenGuideWarnings: boolean;
     onRestoreGuideWarnings: () => Promise<void>;
+    onCheckForUpdates: () => Promise<void>;
 }
 
 function Toggle({ value, onChange }: { value: boolean; onChange: (next: boolean) => void }) {
@@ -44,7 +45,7 @@ function IconBox({ children, colorClass }: { children: React.ReactNode; colorCla
     );
 }
 
-function RowIcon({ kind }: { kind: 'install' | 'version' | 'parallel' | 'apply' | 'logs' | 'layout' | 'warning' | 'cache' | 'stream' }) {
+function RowIcon({ kind }: { kind: 'install' | 'version' | 'parallel' | 'apply' | 'logs' | 'layout' | 'warning' | 'cache' | 'stream' | 'update' }) {
     if (kind === 'install') return (
         <IconBox colorClass="text-blue-400">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -94,6 +95,13 @@ function RowIcon({ kind }: { kind: 'install' | 'version' | 'parallel' | 'apply' 
             </svg>
         </IconBox>
     );
+    if (kind === 'update') return (
+        <IconBox colorClass="text-green-400">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+            </svg>
+        </IconBox>
+    );
     if (kind === 'stream') return (
         <IconBox colorClass="text-fuchsia-400">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -117,6 +125,7 @@ export default function PreferencesModal({
     onSave,
     hasHiddenGuideWarnings,
     onRestoreGuideWarnings,
+    onCheckForUpdates,
 }: PreferencesModalProps) {
     const [legacyMode, setLegacyMode] = useState(settings.legacy_install_mode);
     const [askVersionBeforeInstall, setAskVersionBeforeInstall] = useState(settings.ask_version_before_install);
@@ -126,6 +135,7 @@ export default function PreferencesModal({
     const [defaultModViewMode, setDefaultModViewMode] = useState<'grid' | 'list'>(settings.default_mod_view_mode);
     const [streamMode, setStreamMode] = useState(settings.stream_mode);
     const [restoringWarnings, setRestoringWarnings] = useState(false);
+    const [checkingUpdates, setCheckingUpdates] = useState(false);
 
     // Track active state for a gentle reveal animation
     const [isVisible, setIsVisible] = useState(false);
@@ -340,6 +350,39 @@ export default function PreferencesModal({
                                         }`}
                                 >
                                     {restoringWarnings ? 'Restoring...' : 'Show again'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Updates Section */}
+                    <div className="space-y-3">
+                        <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-widest px-1">Updates</h3>
+
+                        <div className="bg-gray-800 border border-gray-700 rounded-2xl overflow-hidden">
+                            <div className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-colors hover:bg-gray-750">
+                                <div className="flex items-center gap-4">
+                                    <RowIcon kind="update" />
+                                    <div>
+                                        <p className="text-[15px] font-medium text-white">Check for updates</p>
+                                        <p className="text-[13px] text-gray-400 mt-0.5 leading-snug">
+                                            Manually check for new versions of r2modmac.
+                                        </p>
+                                    </div>
+                                </div>
+                                <button
+                                    disabled={checkingUpdates}
+                                    onClick={async () => {
+                                        setCheckingUpdates(true);
+                                        try {
+                                            await onCheckForUpdates();
+                                        } finally {
+                                            setCheckingUpdates(false);
+                                        }
+                                    }}
+                                    className="px-4 py-2 rounded-xl text-[13px] font-medium transition-all duration-200 shrink-0 bg-blue-600/10 hover:bg-blue-600/20 text-blue-400 border border-blue-600/30"
+                                >
+                                    {checkingUpdates ? 'Checking...' : 'Check now'}
                                 </button>
                             </div>
                         </div>

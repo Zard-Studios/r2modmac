@@ -5,9 +5,10 @@ interface ExportModalProps {
     onExportFile: () => void;
     onExportCode: () => void;
     hasLocalMods?: boolean;
+    codeShareDisabled?: boolean;
 }
 
-export function ExportModal({ isOpen, onClose, onExportFile, onExportCode, hasLocalMods = false }: ExportModalProps) {
+export function ExportModal({ isOpen, onClose, onExportFile, onExportCode, hasLocalMods = false, codeShareDisabled = false }: ExportModalProps) {
     if (!isOpen) return null;
 
     return (
@@ -25,12 +26,12 @@ export function ExportModal({ isOpen, onClose, onExportFile, onExportCode, hasLo
                 <div className="space-y-4">
                     <button
                         onClick={() => {
-                            if (hasLocalMods) return;
+                            if (hasLocalMods || codeShareDisabled) return;
                             onExportCode();
                             onClose();
                         }}
-                        disabled={hasLocalMods}
-                        className={`w-full bg-gray-800 border-2 border-dashed rounded-xl p-6 flex flex-col items-center justify-center text-center transition-all group ${hasLocalMods
+                        disabled={hasLocalMods || codeShareDisabled}
+                        className={`w-full bg-gray-800 border-2 border-dashed rounded-xl p-6 flex flex-col items-center justify-center text-center transition-all group ${hasLocalMods || codeShareDisabled
                             ? 'border-gray-700 opacity-60 cursor-not-allowed'
                             : 'border-gray-600 hover:border-blue-500 hover:bg-gray-700/50'
                             }`}
@@ -42,7 +43,11 @@ export function ExportModal({ isOpen, onClose, onExportFile, onExportCode, hasLo
                         </div>
                         <h3 className="text-lg font-bold text-white mb-1">Share Code</h3>
                         <p className="text-sm text-gray-400">
-                            {hasLocalMods ? 'Unavailable for profiles with custom mods' : 'Generate a code to share with friends'}
+                            {codeShareDisabled
+                                ? 'Not available — this game uses an external mod source'
+                                : hasLocalMods
+                                    ? 'Unavailable for profiles with custom mods'
+                                    : 'Generate a code to share with friends'}
                         </p>
                     </button>
 

@@ -214,9 +214,18 @@ pub async fn export_profile(
 pub async fn share_profile(app: AppHandle, profile_id: String) -> Result<String, String> {
     let profile = find_profile(&app, &profile_id)?;
 
+    // Outer Wilds (and any game using a non-Thunderstore mod source) cannot be shared
+    // via Thunderstore codes: the mods are not in the Thunderstore registry, so the
+    // generated code would be unresolvable on import. Use Export as File instead.
+    let game_identifier = profile["gameIdentifier"].as_str().unwrap_or("").to_lowercase();
+    if crate::models::shared::is_outerwilds_identifier(&game_identifier) {
+        return Err("Outer Wilds profiles cannot be shared via code — the mods are not on Thunderstore. Use Export as File instead.".to_string());
+    }
+
     if profile_has_local_mods(&profile) {
         return Err("This profile contains custom local mods. Thunderstore share codes cannot carry local files; use Export as File instead.".to_string());
     }
+
 
     let zip_buffer = build_profile_zip_bytes(&app, &profile_id, &profile, false)?;
 
