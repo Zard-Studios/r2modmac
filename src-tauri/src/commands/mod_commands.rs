@@ -3941,6 +3941,62 @@ pub async fn copy_mod_from_cache(
         return Ok(serde_json::json!({ "success": false, "copied": false }));
     }
 
+    let game_identifier = get_profile_game_identifier(&app, &profile_id).unwrap_or_default();
+    let target_is_outerwilds = crate::models::shared::is_outerwilds_identifier(&game_identifier)
+        || crate::models::shared::is_outerwilds_game_path(game_dir);
+
+    if target_is_outerwilds {
+        let profile_mods_dir = profile_dir.join("OWML").join("Mods");
+        let game_mods_dir = game_dir.join("OWML").join("Mods");
+        fs::create_dir_all(&game_mods_dir).map_err(|e| e.to_string())?;
+
+        let read_owml_unique_name = |mod_dir: &std::path::Path| -> Option<String> {
+            let manifest_path = mod_dir.join("manifest.json");
+            if let Ok(data) = fs::read_to_string(&manifest_path) {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&data) {
+                    if let Some(unique_name) = v["uniqueName"].as_str() {
+                        return Some(unique_name.replace('.', "-").to_lowercase());
+                    }
+                }
+            }
+            None
+        };
+
+        let mut found_folder = None;
+        if let Ok(entries) = fs::read_dir(&profile_mods_dir) {
+            for entry in entries.filter_map(|e| e.ok()) {
+                if entry.path().is_dir() {
+                    let folder_name = entry.file_name().to_string_lossy().to_string();
+                    let mod_key = read_owml_unique_name(&entry.path())
+                        .unwrap_or_else(|| extract_mod_key(&folder_name));
+                    let query_key = extract_mod_key(&mod_name);
+                    if mod_key == query_key {
+                        found_folder = Some(folder_name);
+                        break;
+                    }
+                }
+            }
+        }
+
+        if let Some(folder) = found_folder {
+            let src_path = profile_mods_dir.join(&folder);
+            let dst_path = game_mods_dir.join(&folder);
+            if src_path.exists() {
+                if dst_path.exists() {
+                    let _ = fs::remove_dir_all(&dst_path);
+                }
+                copy_dir_recursive(&src_path, &dst_path).map_err(|e| e.to_string())?;
+                return Ok(serde_json::json!({ "success": true, "copied": true }));
+            }
+        }
+
+        eprintln!(
+            "[copy_mod_from_cache] Outer Wilds mod {} not found in profile cache",
+            mod_name
+        );
+        return Ok(serde_json::json!({ "success": false, "copied": false }));
+    }
+
     if is_macos_game_dir(game_dir) && mod_name_lower.contains("bepinexpack") {
         let profile_has_runtime = profile_dir.join("BepInEx").join("core").is_dir()
             && profile_dir.join("doorstop_libs").is_dir()

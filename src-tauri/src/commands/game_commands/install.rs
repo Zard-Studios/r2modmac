@@ -119,6 +119,19 @@ pub async fn install_to_game(
     }
 
     if is_outerwilds_profile {
+        if is_vanilla {
+            // Restore vanilla Assembly-CSharp.dll for Outer Wilds
+            let managed_dir = game_path.join("OuterWilds_Data").join("Managed");
+            if managed_dir.exists() {
+                let dll_path = managed_dir.join("Assembly-CSharp.dll");
+                let bak_path = managed_dir.join("Assembly-CSharp.dll.bak");
+                if bak_path.exists() {
+                    let _ = fs::copy(&bak_path, &dll_path);
+                    let _ = fs::remove_file(&bak_path);
+                    eprintln!("[install_to_game] Restored vanilla Assembly-CSharp.dll for Outer Wilds");
+                }
+            }
+        }
         // Outer Wilds uses OWML; no BepInEx operations needed here.
         // install_mod_bytes handles all OWML-specific installation.
         eprintln!("[install_to_game] Outer Wilds profile - skipping BepInEx install, OWML manages mods.");

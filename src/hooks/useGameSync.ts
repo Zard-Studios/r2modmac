@@ -257,7 +257,7 @@ export function useGameSync({
                         });
 
                     if (modInProfile) {
-                        if (legacyInstallMode) {
+                        if (legacyInstallMode || community === 'outerwilds') {
                             const cacheResult = await window.ipcRenderer.copyModFromCache(activeProfile.id, modInProfile.fullName, gamePath);
                             if (cacheResult.copied) {
                                 actuallyInstalled++;

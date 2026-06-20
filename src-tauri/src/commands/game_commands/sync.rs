@@ -87,7 +87,7 @@ pub async fn sync_profile_to_game(
         .as_array()
         .unwrap_or(&vec![])
         .iter()
-        .filter(|m| is_outerwilds_profile || m["enabled"].as_bool().unwrap_or(true)) // Include all mods for Outer Wilds
+        .filter(|m| m["enabled"].as_bool().unwrap_or(true))
         .filter_map(|m| m["fullName"].as_str().map(|s| s.to_string()))
         .collect();
 
