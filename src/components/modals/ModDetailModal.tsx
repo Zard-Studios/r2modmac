@@ -3,6 +3,20 @@ import type { PackageVersion, Package } from '../../types/thunderstore';
 import type { InstalledMod } from '../../types/profile';
 import DOMPurify from 'dompurify';
 import { LikeStat } from '../LikeStat';
+import { marked } from 'marked';
+
+const getGithubRepo = (url: string | undefined): { owner: string; repo: string } | null => {
+    if (!url) return null;
+    const match = url.match(/github\.com\/([^/]+)\/([^/]+)/);
+    if (!match) return null;
+    const owner = match[1];
+    let repo = match[2];
+    if (repo.endsWith('.git')) {
+        repo = repo.slice(0, -4);
+    }
+    repo = repo.split(/[?#]/)[0].replace(/\/$/, '');
+    return { owner, repo };
+};
 
 interface ModDetailModalProps {
     pkg: Package;
@@ -45,16 +59,15 @@ export function ModDetailModal({
     const selectedVersionNumber = selectedVersionChoice.pkgUuid === pkg.uuid4
         ? selectedVersionChoice.versionNumber
         : pkg.versions[0]?.version_number || '';
-    const [activeTab, setActiveTab] = useState<Tab>('description');
-    const [readmeContent, setReadmeContent] = useState<string | null>(null);
-    const [changelogContent, setChangelogContent] = useState<string | null>(null);
-    const [loadingContent, setLoadingContent] = useState(false);
-    const [dependencies, setDependencies] = useState<Package[]>([]);
-    const [loadingKey, setLoadingKey] = useState<string>('');
-    const [showImageLightbox, setShowImageLightbox] = useState(false);
+    const [versionsList, setVersionsList] = useState<PackageVersion[]>(pkg.versions);
+
+    useEffect(() => {
+        setVersionsList(pkg.versions);
+    }, [pkg]);
+
     const selectedVersion = useMemo(
-        () => pkg.versions.find(v => v.version_number === selectedVersionNumber) || pkg.versions[0],
-        [pkg, selectedVersionNumber]
+        () => versionsList.find(v => v.version_number === selectedVersionNumber) || versionsList[0] || pkg.versions[0],
+        [versionsList, selectedVersionNumber, pkg.versions]
     );
     const mod = selectedVersion;
     const isLocalMod = !!mod.isLocal;
@@ -64,7 +77,120 @@ export function ModDetailModal({
         [installedMods, pkg.full_name]
     );
     const isSelectedInstalled = !!installedVersionNumber && installedVersionNumber === mod.version_number;
-    const isSelectedLatest = pkg.versions[0]?.version_number === mod.version_number;
+    const isSelectedLatest = versionsList[0]?.version_number === mod.version_number;
+
+    const [activeTab, setActiveTab] = useState<Tab>('description');
+    const [readmeContent, setReadmeContent] = useState<string | null>(null);
+    const [changelogContent, setChangelogContent] = useState<string | null>(null);
+    const [loadingContent, setLoadingContent] = useState(false);
+    const [dependencies, setDependencies] = useState<Package[]>([]);
+    const [loadingKey, setLoadingKey] = useState<string>('');
+    const [showImageLightbox, setShowImageLightbox] = useState(false);
+
+    const fetchGithubReadme = useCallback(async (owner: string, repo: string) => {
+        setLoadingContent(true);
+        try {
+            const url = `https://api.github.com/repos/${owner}/${repo}/readme`;
+            const jsonString = await window.ipcRenderer.fetchTextContent(url);
+            const data = JSON.parse(jsonString);
+            if (data.content && data.encoding === 'base64') {
+                const base64Content = data.content.replace(/\s/g, '');
+                const rawMarkdown = decodeURIComponent(escape(window.atob(base64Content)));
+                const parsedHtml = await marked.parse(rawMarkdown);
+                const sanitized = DOMPurify.sanitize(parsedHtml);
+                setReadmeContent(sanitized);
+            }
+        } catch (e) {
+            console.error("Failed to fetch README from GitHub:", e);
+        } finally {
+            setLoadingContent(false);
+        }
+    }, []);
+
+    const fetchGithubChangelog = useCallback(async (owner: string, repo: string) => {
+        setLoadingContent(true);
+        try {
+            const candidates = ['CHANGELOG.md', 'changelog.md', 'History.md', 'HISTORY.md'];
+            let content = '';
+            for (const file of candidates) {
+                try {
+                    const url = `https://api.github.com/repos/${owner}/${repo}/contents/${file}`;
+                    const jsonString = await window.ipcRenderer.fetchTextContent(url);
+                    const data = JSON.parse(jsonString);
+                    if (data.content && data.encoding === 'base64') {
+                        const base64Content = data.content.replace(/\s/g, '');
+                        content = decodeURIComponent(escape(window.atob(base64Content)));
+                        break;
+                    }
+                } catch {
+                    // try next candidate
+                }
+            }
+            if (content) {
+                const parsedHtml = await marked.parse(content);
+                const sanitized = DOMPurify.sanitize(parsedHtml);
+                setChangelogContent(sanitized);
+            } else {
+                setChangelogContent("<p>No changelog found in repository.</p>");
+            }
+        } catch (e) {
+            console.error("Failed to fetch changelog from GitHub:", e);
+            setChangelogContent("<p>No changelog found in repository.</p>");
+        } finally {
+            setLoadingContent(false);
+        }
+    }, []);
+
+    useEffect(() => {
+        if (!isOpen || gameId !== 'outerwilds' || isLocalMod) return;
+
+        const githubInfo = getGithubRepo(pkg.versions[0]?.website_url || pkg.package_url);
+        if (!githubInfo) return;
+
+        let cancelled = false;
+        const fetchGithubReleases = async () => {
+            try {
+                const url = `https://api.github.com/repos/${githubInfo.owner}/${githubInfo.repo}/releases?per_page=100`;
+                const jsonString = await window.ipcRenderer.fetchTextContent(url);
+                const releases = JSON.parse(jsonString);
+                if (Array.isArray(releases) && !cancelled) {
+                    const mapped: PackageVersion[] = [];
+                    for (const rel of releases) {
+                        const zipAsset = rel.assets?.find((a: any) => a.name.toLowerCase().endsWith('.zip')) || rel.assets?.[0];
+                        if (!zipAsset) continue;
+                        const version_number = rel.tag_name.replace(/^v/, '');
+                        mapped.push({
+                            name: pkg.versions[0]?.name || pkg.name,
+                            full_name: `${pkg.owner}-${pkg.name}-${version_number}`,
+                            description: rel.name || pkg.versions[0]?.description || '',
+                            icon: pkg.versions[0]?.icon || '',
+                            version_number,
+                            dependencies: [],
+                            download_url: zipAsset.browser_download_url,
+                            downloads: zipAsset.download_count || 0,
+                            date_created: rel.published_at || rel.created_at || pkg.date_created,
+                            website_url: pkg.versions[0]?.website_url || pkg.package_url,
+                            is_active: true,
+                            uuid4: String(rel.id || rel.tag_name),
+                            file_size: zipAsset.size || 0,
+                        });
+                    }
+                    if (mapped.length > 0 && !cancelled) {
+                        setVersionsList(mapped);
+                    }
+                }
+            } catch (e) {
+                console.error("Failed to fetch GitHub releases for version history:", e);
+            }
+        };
+
+        void fetchGithubReleases();
+        return () => {
+            cancelled = true;
+        };
+    }, [isOpen, gameId, pkg, isLocalMod]);
+
+
 
     const handleVersionChange = (versionNumber: string) => {
         setSelectedVersionChoice({ pkgUuid: pkg.uuid4, versionNumber });
@@ -120,7 +246,14 @@ export function ModDetailModal({
             setDependencies([]);
             setActiveTab('description');
             if (!isLocalMod) {
-                void fetchContent(mod, 'readme');
+                if (gameId === 'outerwilds') {
+                    const githubInfo = getGithubRepo(mod.website_url || pkg.package_url);
+                    if (githubInfo) {
+                        void fetchGithubReadme(githubInfo.owner, githubInfo.repo);
+                    }
+                } else {
+                    void fetchContent(mod, 'readme');
+                }
 
                 if (mod.dependencies?.length > 0 && gameId) {
                     void fetchDependencies(mod);
@@ -132,7 +265,7 @@ export function ModDetailModal({
         return () => {
             cancelled = true;
         };
-    }, [fetchContent, fetchDependencies, gameId, isLocalMod, isOpen, loadingKey, mod]);
+    }, [fetchContent, fetchDependencies, gameId, isLocalMod, isOpen, loadingKey, mod, pkg, fetchGithubReadme]);
 
     useEffect(() => {
         if (!isLocalMod && activeTab === 'changelog' && !changelogContent) {
@@ -140,7 +273,14 @@ export function ModDetailModal({
             const loadChangelog = async () => {
                 await Promise.resolve();
                 if (!cancelled) {
-                    void fetchContent(mod, 'changelog');
+                    if (gameId === 'outerwilds') {
+                        const githubInfo = getGithubRepo(mod.website_url || pkg.package_url);
+                        if (githubInfo) {
+                            void fetchGithubChangelog(githubInfo.owner, githubInfo.repo);
+                        }
+                    } else {
+                        void fetchContent(mod, 'changelog');
+                    }
                 }
             };
 
@@ -149,7 +289,7 @@ export function ModDetailModal({
                 cancelled = true;
             };
         }
-    }, [activeTab, changelogContent, fetchContent, isLocalMod, mod]);
+    }, [activeTab, changelogContent, fetchContent, isLocalMod, mod, gameId, pkg, fetchGithubChangelog]);
 
     if (!isOpen) return null;
 
@@ -282,7 +422,7 @@ export function ModDetailModal({
                                 onChange={(e) => handleVersionChange(e.target.value)}
                                 className="bg-gray-800 border border-gray-700 text-gray-200 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:border-blue-500"
                             >
-                                {pkg.versions.map((v) => (
+                                {versionsList.map((v) => (
                                     <option key={v.uuid4} value={v.version_number}>
                                         v{v.version_number}
                                     </option>
