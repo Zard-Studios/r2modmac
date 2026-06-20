@@ -48,6 +48,8 @@ export interface AppModalsProps {
     onRestoreGuideWarnings: () => Promise<void>;
     onSetGuideHidden: (guide: 'crossover' | 'macos', hidden: boolean) => Promise<void>;
     legacyInstallMode: boolean;
+    onCheckForUpdates: () => Promise<void>;
+    codeShareDisabled?: boolean;
 }
 
 export function AppModals({
@@ -63,7 +65,9 @@ export function AppModals({
     showCrossOverGuide, setShowCrossOverGuide, hideCrossOverGuide, setHideCrossOverGuide,
     showPreferences, setShowPreferences, preferences, onSavePreferences,
     hasHiddenGuideWarnings, onRestoreGuideWarnings, onSetGuideHidden,
-    legacyInstallMode
+    legacyInstallMode,
+    onCheckForUpdates,
+    codeShareDisabled = false,
 }: AppModalsProps) {
 
     const activeProfile = activeProfileId ? profiles.find(p => p.id === activeProfileId) || null : null;
@@ -157,6 +161,7 @@ export function AppModals({
                     onExportCode={handleExportCode}
                     onExportFile={handleExportFile}
                     hasLocalMods={!!activeProfile?.mods?.some((mod: any) => mod.source === 'local')}
+                    codeShareDisabled={codeShareDisabled}
                 />
             )}
 
@@ -214,6 +219,7 @@ export function AppModals({
                 onSave={onSavePreferences}
                 hasHiddenGuideWarnings={hasHiddenGuideWarnings}
                 onRestoreGuideWarnings={onRestoreGuideWarnings}
+                onCheckForUpdates={onCheckForUpdates}
             />
         </>
     );

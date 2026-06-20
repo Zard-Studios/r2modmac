@@ -51,6 +51,7 @@ const QUICK_MAC_HINTS = new Set([
   'rimworld',
   'terraria',
   'hytale',
+  'outerwilds',
 ]);
 
 interface StoredMacPlatformCache {
@@ -335,6 +336,22 @@ function App() {
       console.warn("Update check skipped", e);
     }
   };
+
+  async function forceCheckForUpdates() {
+    try {
+      const ver = await getVersion();
+      const info = await window.ipcRenderer.checkUpdate(ver);
+      if (info.available) {
+        setUpdateInfo(info);
+        setShowUpdateModal(true);
+      } else {
+        await window.ipcRenderer.alert("No Update Available", "You are on the latest version.");
+      }
+    } catch (e) {
+      console.error("Update check failed", e);
+      await window.ipcRenderer.alert("Error", `Failed to check for updates: ${e}`);
+    }
+  }
 
   async function loadData() {
     if (isInitialLoadRunningRef.current) return;
@@ -1998,6 +2015,8 @@ function App() {
         onRestoreGuideWarnings={handleRestoreGuideWarnings}
         onSetGuideHidden={handleSetGuideHidden}
         legacyInstallMode={legacyInstallMode}
+        onCheckForUpdates={forceCheckForUpdates}
+        codeShareDisabled={selectedCommunity === 'outerwilds'}
       />
     </div>
   )

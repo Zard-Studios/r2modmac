@@ -151,7 +151,6 @@ export function useModActions({
             gamePath,
             true
         );
-
         if (result.success) {
             addMod(profileIdToUse, {
                 uuid4: version.uuid4,
@@ -160,8 +159,36 @@ export function useModActions({
                 iconUrl: version.icon,
                 enabled: true,
             });
+
+            // If Outer Wilds, dynamically load and install post-install dependencies!
+            if (selectedCommunity === 'outerwilds' && Array.isArray(result.dependencies) && result.dependencies.length > 0) {
+                for (const depUniqueName of result.dependencies) {
+                    if (depUniqueName.toLowerCase() === 'alek.owml' || depUniqueName.toLowerCase() === 'owml') continue;
+
+                    const depName = depUniqueName.replace('.', '-'); // normalized to hyphen
+                    const activeProfile = useProfileStore.getState().profiles.find(p => p.id === profileIdToUse);
+                    const isAlreadyAdded = activeProfile?.mods.some(m => {
+                        const parts = m.fullName.split('-');
+                        const matchKey = parts.length >= 2 ? `${parts[0]}-${parts[1]}` : m.fullName;
+                        return matchKey.replace('.', '-').toLowerCase() === depName.toLowerCase();
+                    });
+
+                    if (isAlreadyAdded || installedCache.has(depName)) continue;
+
+                    // Fetch package information
+                    const depPkg = await window.ipcRenderer.fetchPackageByName(depUniqueName, 'outerwilds');
+                    if (depPkg) {
+                        const depVersion = depPkg.versions[0];
+                        if (depVersion) {
+                            if (progressCounter) progressCounter.total++;
+                            // Install dependency recursively
+                            await installModWithDependencies(depPkg, depVersion, installedCache, profileIdToUse, progressCounter, gamePath);
+                        }
+                    }
+                }
+            }
         } else {
-            throw new Error(result.error);
+            throw new Error(result.error || 'Failed to install mod');
         }
     };
 

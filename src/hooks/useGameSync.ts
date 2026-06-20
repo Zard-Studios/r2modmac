@@ -115,22 +115,29 @@ export function useGameSync({
                 return;
             }
 
-            // ── BepInEx auto-install ───────────────────────────────────────────────
+            // ── Loader auto-install ───────────────────────────────────────────────
             const isBalatro = community === 'balatro';
+            const isOuterWilds = community === 'outerwilds';
             const hasLoaderInstalled = isBalatro
                 ? activeProfile.mods.some(m => m.fullName.toLowerCase().includes('-lovely-'))
+                : isOuterWilds
+                ? activeProfile.mods.some(m => m.fullName.toLowerCase().includes('owml'))
                 : activeProfile.mods.some(m => m.fullName.toLowerCase().includes('bepinexpack'));
             if (!hasLoaderInstalled) {
-                const requirementQuery = isBalatro ? 'lovely' : 'BepInExPack';
+                const requirementQuery = isOuterWilds ? 'OWML' : isBalatro ? 'lovely' : 'BepInExPack';
                 setProgressState({
                     isOpen: true,
                     title: 'Checking Requirements',
                     progress: 0,
-                    currentTask: `Searching for ${isBalatro ? 'Lovely' : 'BepInExPack'}...`
+                    currentTask: `Searching for ${isOuterWilds ? 'OWML' : isBalatro ? 'Lovely' : 'BepInExPack'}...`
                 });
-                const packages = await window.ipcRenderer.getPackages(community, 0, 20, requirementQuery, 'downloads');
-                const loaderPkg = Array.isArray(packages)
-                    ? packages.find((p: Package) => isBalatro
+                const res = await window.ipcRenderer.getPackages(community, 0, 20, requirementQuery, 'downloads');
+                const packagesList = res && typeof res === 'object' && 'items' in res ? res.items : (Array.isArray(res) ? res : []);
+                
+                const loaderPkg = Array.isArray(packagesList)
+                    ? packagesList.find((p: Package) => isOuterWilds
+                        ? p.name.toLowerCase() === 'owml'
+                        : isBalatro
                         ? p.full_name?.toLowerCase().includes('thunderstore-lovely') || p.name.toLowerCase() === 'lovely'
                         : p.name.toLowerCase().includes('bepinexpack'))
                     : null;
@@ -290,8 +297,59 @@ export function useGameSync({
                                 return;
                             }
                             trackedFullName = version.full_name;
-                            await window.ipcRenderer.installMod(activeProfile.id, version.download_url, version.full_name, gamePath, legacyInstallMode);
-                            actuallyInstalled++;
+
+                            const installModAndDeps = async (currentPkg: any, currentVer: any) => {
+                                const result = await window.ipcRenderer.installMod(
+                                    activeProfile.id,
+                                    currentVer.download_url,
+                                    currentVer.full_name,
+                                    gamePath,
+                                    legacyInstallMode
+                                );
+                                if (!result.success) {
+                                    throw new Error(result.error || `Failed to install ${currentPkg.name}`);
+                                }
+                                actuallyInstalled++;
+
+                                if (community === 'outerwilds' && Array.isArray(result.dependencies) && result.dependencies.length > 0) {
+                                    for (const depUniqueName of result.dependencies) {
+                                        if (depUniqueName.toLowerCase() === 'alek.owml' || depUniqueName.toLowerCase() === 'owml') continue;
+
+                                        const depName = depUniqueName.replace('.', '-'); // normalized to hyphen
+                                        const activeProfileState = useProfileStore.getState().profiles.find(p => p.id === activeProfile.id);
+                                        const isAlreadyAdded = activeProfileState?.mods.some(m => {
+                                            const parts = m.fullName.split('-');
+                                            const matchKey = parts.length >= 2 ? `${parts[0]}-${parts[1]}` : m.fullName;
+                                            return matchKey.replace('.', '-').toLowerCase() === depName.toLowerCase();
+                                        });
+
+                                        if (isAlreadyAdded) continue;
+
+                                        // Fetch dependency package info
+                                        const depPkg = await window.ipcRenderer.fetchPackageByName(depUniqueName, 'outerwilds');
+                                        if (depPkg) {
+                                            const depVersion = depPkg.versions[0];
+                                            if (depVersion) {
+                                                // Add to profile
+                                                useProfileStore.getState().addMod(activeProfile.id, {
+                                                    uuid4: depVersion.uuid4,
+                                                    fullName: depVersion.full_name,
+                                                    versionNumber: depVersion.version_number,
+                                                    iconUrl: depVersion.icon,
+                                                    enabled: true,
+                                                    pending_sync: false,
+                                                    synced_enabled: true
+                                                });
+
+                                                // Recursively install dependency
+                                                await installModAndDeps(depPkg, depVersion);
+                                            }
+                                        }
+                                    }
+                                }
+                            };
+
+                            await installModAndDeps(pkg, version);
                             status = 'Installed';
                         }
                     }
