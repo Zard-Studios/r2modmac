@@ -3063,8 +3063,10 @@ async fn install_mod_bytes(
     let target_is_macos = is_macos_game_dir(game_dir);
     let game_identifier = get_profile_game_identifier(&app, &profile_id).unwrap_or_default();
     let target_is_balatro = crate::models::shared::is_balatro_identifier(&game_identifier) || is_balatro_game_path(game_dir);
+    let target_is_outerwilds = crate::models::shared::is_outerwilds_identifier(&game_identifier)
+        || crate::models::shared::is_outerwilds_game_path(game_dir);
     let install_into_disabled_runtime =
-        target_is_macos && !target_is_balatro && profile_is_vanilla(&app, &profile_id);
+        target_is_macos && !target_is_balatro && !target_is_outerwilds && profile_is_vanilla(&app, &profile_id);
 
     eprintln!(
         "[install_mod] Installing {} directly to game: {:?}",
@@ -3072,6 +3074,180 @@ async fn install_mod_bytes(
     );
 
     let mut runtime_bytes = bytes;
+
+    if target_is_outerwilds {
+        let cursor = std::io::Cursor::new(&runtime_bytes);
+        let mut archive = zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
+
+        // Detect if this is the OWML loader itself (contains OWML.Launcher.exe at root or in a subdirectory)
+        let is_owml_loader = (0..archive.len()).any(|i| {
+            archive.by_index_raw(i).ok()
+                .and_then(|f| normalize_zip_entry_name(f.name()))
+                .map(|name| {
+                    let lower = name.to_lowercase();
+                    lower.ends_with("owml.launcher.exe")
+                })
+                .unwrap_or(false)
+        });
+
+        let owml_root = game_dir.join("OWML");
+
+        if is_owml_loader {
+            // Extract OWML loader to <game_path>/OWML/
+            fs::create_dir_all(&owml_root).map_err(|e| e.to_string())?;
+            let cursor = std::io::Cursor::new(&runtime_bytes);
+            let mut archive = zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
+            extract_zip_directory_to_target(&mut archive, &owml_root)?;
+
+            if use_profile_cache.unwrap_or(false) {
+                let profile_dir = crate::utils::paths::app_data_dir(&app)
+                    .map_err(|e| e.to_string())?
+                    .join("profiles")
+                    .join(&profile_id);
+                let cache_owml = profile_dir.join("OWML");
+                fs::create_dir_all(&cache_owml).map_err(|e| e.to_string())?;
+                let cursor = std::io::Cursor::new(&runtime_bytes);
+                let mut cache_archive = zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
+                let _ = extract_zip_directory_to_target(&mut cache_archive, &cache_owml);
+            }
+
+            eprintln!("[install_mod] Installed OWML loader to {:?}", owml_root);
+            return Ok(serde_json::json!({ "success": true }));
+        }
+
+        // Regular OWML mod: read manifest.json from zip to get uniqueName, dependencies and nesting prefix
+        let (unique_name, dependencies, manifest_prefix) = {
+            let cursor = std::io::Cursor::new(&runtime_bytes);
+            let mut archive = zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
+            let mut found_un: Option<String> = None;
+            let mut found_deps: Vec<String> = Vec::new();
+            let mut prefix_path: Option<String> = None;
+            for i in 0..archive.len() {
+                if let Ok(mut file) = archive.by_index(i) {
+                    let name = file.name().to_string();
+                    let normalized = normalize_zip_entry_name(&name);
+                    if let Some(ref n) = normalized {
+                        // Find manifest.json at any nesting level
+                        let segments: Vec<&str> = n.split('/').collect();
+                        if segments.last().map(|s| s.eq_ignore_ascii_case("manifest.json")).unwrap_or(false) {
+                            let mut content = String::new();
+                            use std::io::Read;
+                            if file.read_to_string(&mut content).is_ok() {
+                                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&content) {
+                                    if let Some(un) = v["uniqueName"].as_str() {
+                                        found_un = Some(un.to_string());
+                                    }
+                                    if let Some(arr) = v["dependencies"].as_array() {
+                                        for dep in arr {
+                                            if let Some(dep_str) = dep.as_str() {
+                                                found_deps.push(dep_str.to_string());
+                                            }
+                                        }
+                                    }
+                                    // Derive the prefix path of manifest.json
+                                    let mut prefix = segments[0..segments.len()-1].join("/");
+                                    if !prefix.is_empty() {
+                                        prefix.push('/');
+                                    }
+                                    prefix_path = Some(prefix);
+                                    
+                                    if found_un.is_some() {
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            (found_un, found_deps, prefix_path.unwrap_or_default())
+        };
+
+        let mod_folder_name = unique_name.unwrap_or_else(|| {
+            // Fallback: derive folder name from mod_name (Author-ModName-Version -> ModName)
+            let parts: Vec<&str> = mod_name.split('-').collect();
+            if parts.len() >= 2 { parts[1].to_string() } else { mod_name.clone() }
+        });
+
+        let mod_dir = owml_root.join("Mods").join(&mod_folder_name);
+        if mod_dir.exists() {
+            let _ = fs::remove_dir_all(&mod_dir);
+        }
+        fs::create_dir_all(&mod_dir).map_err(|e| e.to_string())?;
+
+        let cursor = std::io::Cursor::new(&runtime_bytes);
+        let mut archive = zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
+        for i in 0..archive.len() {
+            let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
+            let name = file.name().to_string();
+            let normalized = normalize_zip_entry_name(&name).unwrap_or(name);
+            
+            if normalized.starts_with(&manifest_prefix) {
+                let relative_path_str = &normalized[manifest_prefix.len()..];
+                if relative_path_str.is_empty() {
+                    continue;
+                }
+                
+                let outpath = mod_dir.join(relative_path_str);
+                
+                if zip_entry_is_dir(file.name()) {
+                    fs::create_dir_all(&outpath).map_err(|e| e.to_string())?;
+                } else {
+                    if let Some(parent) = outpath.parent() {
+                        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+                    }
+                    let mut outfile = fs::File::create(&outpath).map_err(|e| e.to_string())?;
+                    std::io::copy(&mut file, &mut outfile).map_err(|e| e.to_string())?;
+                }
+            }
+        }
+
+        if use_profile_cache.unwrap_or(false) {
+            let profile_dir = crate::utils::paths::app_data_dir(&app)
+                .map_err(|e| e.to_string())?
+                .join("profiles")
+                .join(&profile_id);
+            let profile_mod_dir = profile_dir.join("OWML").join("Mods").join(&mod_folder_name);
+            if profile_mod_dir.exists() {
+                let _ = fs::remove_dir_all(&profile_mod_dir);
+            }
+            fs::create_dir_all(&profile_mod_dir).map_err(|e| e.to_string())?;
+            
+            let cursor = std::io::Cursor::new(&runtime_bytes);
+            let mut cache_archive = zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
+            for i in 0..cache_archive.len() {
+                let mut file = cache_archive.by_index(i).map_err(|e| e.to_string())?;
+                let name = file.name().to_string();
+                let normalized = normalize_zip_entry_name(&name).unwrap_or(name);
+                
+                if normalized.starts_with(&manifest_prefix) {
+                    let relative_path_str = &normalized[manifest_prefix.len()..];
+                    if relative_path_str.is_empty() {
+                        continue;
+                    }
+                    
+                    let outpath = profile_mod_dir.join(relative_path_str);
+                    
+                    if zip_entry_is_dir(file.name()) {
+                        fs::create_dir_all(&outpath).map_err(|e| e.to_string())?;
+                    } else {
+                        if let Some(parent) = outpath.parent() {
+                            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+                        }
+                        let mut outfile = fs::File::create(&outpath).map_err(|e| e.to_string())?;
+                        std::io::copy(&mut file, &mut outfile).map_err(|e| e.to_string())?;
+                    }
+                }
+            }
+        }
+
+        eprintln!("[install_mod] Installed OWML mod '{}' to {:?}", mod_folder_name, mod_dir);
+        return Ok(serde_json::json!({
+            "success": true,
+            "uniqueName": mod_folder_name,
+            "dependencies": dependencies
+        }));
+    }
 
     if target_is_balatro {
         if is_balatro_lovely_mod(&mod_name) {
@@ -3408,11 +3584,70 @@ pub async fn open_mod_folder(
     game_identifier: String,
     platform: Option<String>,
 ) -> Result<(), String> {
-    let game_path = get_game_path(app.clone(), game_identifier, platform)
+    let game_path = get_game_path(app.clone(), game_identifier.clone(), platform)
         .await?
         .ok_or_else(|| "GAME_PATH_NOT_CONFIGURED".to_string())?;
     let game_root = std::path::Path::new(&game_path);
     let mod_key = extract_mod_key(&mod_name);
+
+    if crate::models::shared::is_outerwilds_identifier(&game_identifier)
+        || crate::models::shared::is_outerwilds_game_path(game_root)
+    {
+        let owml_root = game_root.join("OWML");
+        if !owml_root.exists() {
+            return Err("MODS_NOT_APPLIED".to_string());
+        }
+
+        if mod_key.contains("owml") || mod_key.contains("outerwildsmodmanager") {
+            open::that(&owml_root).map_err(|e| format!("Failed to open OWML folder: {}", e))?;
+            return Ok(());
+        }
+
+        let mods_root = owml_root.join("Mods");
+        if !mods_root.exists() {
+            return Err("MODS_NOT_APPLIED".to_string());
+        }
+
+        let mut target_dir = None;
+        if let Ok(entries) = fs::read_dir(&mods_root) {
+            for entry in entries.filter_map(|e| e.ok()) {
+                if entry.path().is_dir() {
+                    let folder_name = entry.file_name().to_string_lossy().to_string();
+                    let normalized_folder = folder_name.replace('.', "-").to_lowercase();
+                    let normalized_mod = mod_key.replace('.', "-").to_lowercase();
+                    
+                    if normalized_folder == normalized_mod || normalized_folder.contains(&normalized_mod) || normalized_mod.contains(&normalized_folder) {
+                        target_dir = Some(entry.path());
+                        break;
+                    }
+
+                    let manifest_path = entry.path().join("manifest.json");
+                    if manifest_path.exists() {
+                        if let Ok(data) = fs::read_to_string(&manifest_path) {
+                            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&data) {
+                                if let Some(un) = v["uniqueName"].as_str() {
+                                    let un_normalized = un.replace('.', "-").to_lowercase();
+                                    if un_normalized == normalized_mod {
+                                        target_dir = Some(entry.path());
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Some(target) = target_dir {
+            if target.exists() {
+                open::that(&target).map_err(|e| format!("Failed to open OWML mod folder: {}", e))?;
+                return Ok(());
+            }
+        }
+
+        return Err("MOD_NOT_INSTALLED".to_string());
+    }
 
     if is_balatro_game_path(game_root) {
         let mods_root = get_balatro_mods_dir().ok_or_else(|| "MODS_NOT_APPLIED".to_string())?;
@@ -4067,6 +4302,461 @@ pub async fn fetch_packages(
     let start_time = SystemTime::now();
     let client = thunderstore_client();
 
+    // --- Outer Wilds: use ow-mod-db instead of Thunderstore ---
+    if crate::models::shared::is_outerwilds_identifier(&game_id) {
+        // Check memory cache first
+        {
+            let packages_lock = state.packages.read().await;
+            if let Some(packages) = packages_lock.get(&game_id) {
+                if !packages.is_empty() {
+                    eprintln!("[fetch_packages/ow] Serving {} packages from memory (instant)", packages.len());
+                    return Ok(packages.len());
+                }
+            }
+        }
+
+        // Try to load from disk cache first
+        if let Some(cache) = load_packages_from_disk(&app, &game_id) {
+            let mut all_packages = Vec::new();
+            for chunk in &cache.chunks {
+                all_packages.extend(chunk.packages.clone());
+            }
+            let count = all_packages.len();
+            eprintln!(
+                "[fetch_packages/ow] Loaded {} packages from disk cache for {} (instant)",
+                count, game_id
+            );
+
+            // Put them into memory state immediately so user sees them
+            {
+                let mut packages_lock = state.packages.write().await;
+                packages_lock.insert(game_id.clone(), all_packages);
+            }
+            state.touch_packages_cache(&game_id).await;
+
+            // Spawn background task to check/fetch network db and update sizes/disk cache
+            let packages_arc = state.packages.clone();
+            let game_id_clone = game_id.clone();
+            let app_handle = app.clone();
+            tokio::spawn(async move {
+                let client = thunderstore_client();
+                const OW_DB_URL: &str = "https://ow-mods.github.io/ow-mod-db/database.json";
+                const OW_THUMBNAIL_BASE: &str = "https://ow-mods.github.io/ow-mod-db/thumbnails/";
+
+                // Build size cache from existing packages in memory
+                let mut size_cache = std::collections::HashMap::new();
+                {
+                    let lock = packages_arc.read().await;
+                    if let Some(existing_pkgs) = lock.get(&game_id_clone) {
+                        for p in existing_pkgs {
+                            for v in &p.versions {
+                                if v.file_size > 0 {
+                                    size_cache.insert(v.download_url.clone(), v.file_size);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                let resp = match client.get(OW_DB_URL).send().await {
+                    Ok(r) => r,
+                    Err(e) => {
+                        eprintln!("[fetch_packages/ow] Background fetch failed: {}", e);
+                        return;
+                    }
+                };
+                if !resp.status().is_success() {
+                    eprintln!("[fetch_packages/ow] Background fetch status failed: {}", resp.status());
+                    return;
+                }
+                let db: serde_json::Value = match resp.json().await {
+                    Ok(val) => val,
+                    Err(e) => {
+                        eprintln!("[fetch_packages/ow] Background JSON parse failed: {}", e);
+                        return;
+                    }
+                };
+
+                let releases = db["releases"].as_array().cloned().unwrap_or_default();
+                let mut packages: Vec<crate::models::shared::Package> = Vec::with_capacity(releases.len());
+
+                for entry in &releases {
+                    let unique_name = entry["uniqueName"].as_str().unwrap_or("");
+                    if unique_name.is_empty() { continue; }
+
+                    let (owner, mod_name) = if let Some(dot) = unique_name.find('.') {
+                        (&unique_name[..dot], &unique_name[dot + 1..])
+                    } else {
+                        (unique_name, unique_name)
+                    };
+
+                    let name = entry["name"].as_str().unwrap_or(mod_name).to_string();
+                    let description = entry["description"].as_str().unwrap_or("").to_string();
+                    let version = entry["version"].as_str().unwrap_or("0.0.0")
+                        .trim_start_matches('v').to_string();
+                    let download_url = entry["downloadUrl"].as_str().unwrap_or("").to_string();
+                    let download_count = entry["downloadCount"].as_i64().unwrap_or(0);
+                    let repo = entry["repo"].as_str().unwrap_or("").to_string();
+                    let latest_release_date = entry["latestReleaseDate"].as_str().unwrap_or("").to_string();
+                    let first_release_date = entry["firstReleaseDate"].as_str().unwrap_or("").to_string();
+                    let is_required = entry["required"].as_bool().unwrap_or(false);
+
+                    let icon_url = entry["thumbnail"]["main"].as_str()
+                        .map(|thumb| format!("{}{}", OW_THUMBNAIL_BASE, thumb))
+                        .unwrap_or_default();
+
+                    let categories: Vec<String> = entry["tags"].as_array()
+                        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+                        .unwrap_or_default();
+
+                    let full_name = format!("{}-{}", owner, mod_name);
+                    let package_url = if repo.is_empty() {
+                        format!("https://outerwildsmods.com/mods/{}/", entry["slug"].as_str().unwrap_or(""))
+                    } else {
+                        repo.clone()
+                    };
+
+                    let cached_size = size_cache.get(&download_url).copied().unwrap_or(0);
+
+                    let version_struct = crate::models::shared::PackageVersion {
+                        name: mod_name.to_string(),
+                        description: description.clone(),
+                        icon: icon_url.clone(),
+                        version_number: version,
+                        dependencies: vec![],
+                        download_url,
+                        downloads: download_count,
+                        website_url: repo.clone(),
+                        file_size: cached_size,
+                        uuid4: unique_name.to_string(),
+                        full_name: full_name.clone(),
+                        date_created: latest_release_date.clone(),
+                        is_active: true,
+                    };
+
+                    let mut versions_list = vec![version_struct];
+
+                    // Check for prerelease and add it to version list
+                    if let Some(prerelease) = entry.get("prerelease") {
+                        if let Some(pre_version) = prerelease["version"].as_str() {
+                            let pre_version_clean = pre_version.trim_start_matches('v').to_string();
+                            let pre_download_url = prerelease["downloadUrl"].as_str().unwrap_or("").to_string();
+                            let pre_date = prerelease["date"].as_str().unwrap_or("").to_string();
+                            
+                            if !pre_version_clean.is_empty() && !pre_download_url.is_empty() {
+                                let cached_pre_size = size_cache.get(&pre_download_url).copied().unwrap_or(0);
+                                versions_list.push(crate::models::shared::PackageVersion {
+                                    name: mod_name.to_string(),
+                                    description: format!("(Prerelease) {}", description.clone()),
+                                    icon: icon_url.clone(),
+                                    version_number: pre_version_clean,
+                                    dependencies: vec![],
+                                    download_url: pre_download_url,
+                                    downloads: download_count,
+                                    website_url: repo.clone(),
+                                    file_size: cached_pre_size,
+                                    uuid4: format!("{}-prerelease", unique_name),
+                                    full_name: full_name.clone(),
+                                    date_created: pre_date,
+                                    is_active: true,
+                                });
+                            }
+                        }
+                    }
+
+                    packages.push(crate::models::shared::Package {
+                        name: name.clone(),
+                        full_name,
+                        owner: owner.to_string(),
+                        package_url,
+                        date_created: first_release_date,
+                        date_updated: latest_release_date,
+                        uuid4: unique_name.to_string(),
+                        rating_score: download_count as i64,
+                        is_pinned: is_required,
+                        is_deprecated: false,
+                        has_nsfw_content: false,
+                        categories,
+                        versions: versions_list,
+                    });
+                }
+
+                // Resolve file sizes for background-fetched packages in parallel ONLY if we don't have them
+                let urls: Vec<(usize, usize, String)> = packages.iter().enumerate()
+                    .flat_map(|(pkg_idx, p)| {
+                        p.versions.iter().enumerate().filter_map(move |(ver_idx, v)| {
+                            if v.download_url.is_empty() || v.file_size > 0 {
+                                None
+                            } else {
+                                Some((pkg_idx, ver_idx, v.download_url.clone()))
+                            }
+                        })
+                    })
+                    .collect();
+
+                if !urls.is_empty() {
+                    let head_client = thunderstore_client();
+                    let parallelism = 8usize;
+                    let mut stream = futures_util::stream::iter(urls)
+                        .map(|(pkg_idx, ver_idx, url)| {
+                            let c = head_client.clone();
+                            async move {
+                                let size = c.head(&url).send().await.ok()
+                                    .and_then(|r| r.headers().get("content-length")
+                                        .and_then(|v| v.to_str().ok())
+                                        .and_then(|s| s.parse::<u64>().ok()))
+                                    .unwrap_or(0);
+                                (pkg_idx, ver_idx, size)
+                            }
+                        })
+                        .buffer_unordered(parallelism);
+
+                    while let Some((pkg_idx, ver_idx, size)) = stream.next().await {
+                        if size == 0 { continue; }
+                        if let Some(pkg) = packages.get_mut(pkg_idx) {
+                            if let Some(ver) = pkg.versions.get_mut(ver_idx) {
+                                ver.file_size = size;
+                            }
+                        }
+                    }
+                }
+
+                // Put them into memory state and save to disk
+                {
+                    let mut packages_lock = packages_arc.write().await;
+                    packages_lock.insert(game_id_clone.clone(), packages.clone());
+                }
+
+                let first_chunk = ChunkCache {
+                    url: "ow-mod-db".to_string(),
+                    packages: packages,
+                };
+                let cache = GamePackagesCache {
+                    chunks: vec![first_chunk],
+                };
+                let _ = save_packages_to_disk(&app_handle, &game_id_clone, &cache);
+
+                let total = cache.chunks[0].packages.len();
+                let _ = app_handle.emit(
+                    "packages-loaded",
+                    serde_json::json!({ "game_id": game_id_clone, "total_count": total }),
+                );
+            });
+
+            return Ok(count);
+        }
+
+        const OW_DB_URL: &str = "https://ow-mods.github.io/ow-mod-db/database.json";
+        const OW_THUMBNAIL_BASE: &str = "https://ow-mods.github.io/ow-mod-db/thumbnails/";
+
+        eprintln!("[fetch_packages/ow] Fetching ow-mod-db from {}", OW_DB_URL);
+        let resp = client.get(OW_DB_URL).send().await.map_err(|e| e.to_string())?;
+        if !resp.status().is_success() {
+            return Err(format!("[fetch_packages/ow] ow-mod-db fetch failed: {}", resp.status()));
+        }
+        let db: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+
+        let releases = db["releases"].as_array().cloned().unwrap_or_default();
+        let mut packages: Vec<crate::models::shared::Package> = Vec::with_capacity(releases.len());
+
+        for entry in &releases {
+            let unique_name = entry["uniqueName"].as_str().unwrap_or("");
+            if unique_name.is_empty() { continue; }
+
+            // Split "Namespace.ModName" → owner="Namespace", name="ModName"
+            let (owner, mod_name) = if let Some(dot) = unique_name.find('.') {
+                (&unique_name[..dot], &unique_name[dot + 1..])
+            } else {
+                (unique_name, unique_name)
+            };
+
+            let name = entry["name"].as_str().unwrap_or(mod_name).to_string();
+            let description = entry["description"].as_str().unwrap_or("").to_string();
+            let version = entry["version"].as_str().unwrap_or("0.0.0")
+                .trim_start_matches('v').to_string();
+            let download_url = entry["downloadUrl"].as_str().unwrap_or("").to_string();
+            let download_count = entry["downloadCount"].as_i64().unwrap_or(0);
+            let repo = entry["repo"].as_str().unwrap_or("").to_string();
+            let latest_release_date = entry["latestReleaseDate"].as_str().unwrap_or("").to_string();
+            let first_release_date = entry["firstReleaseDate"].as_str().unwrap_or("").to_string();
+            let is_required = entry["required"].as_bool().unwrap_or(false);
+
+            let icon_url = entry["thumbnail"]["main"].as_str()
+                .map(|thumb| format!("{}{}", OW_THUMBNAIL_BASE, thumb))
+                .unwrap_or_default();
+
+            let categories: Vec<String> = entry["tags"].as_array()
+                .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+                .unwrap_or_default();
+
+            let full_name = format!("{}-{}", owner, mod_name);
+            let package_url = if repo.is_empty() {
+                format!("https://outerwildsmods.com/mods/{}/", entry["slug"].as_str().unwrap_or(""))
+            } else {
+                repo.clone()
+            };
+
+            let version_struct = crate::models::shared::PackageVersion {
+                name: mod_name.to_string(),
+                description: description.clone(),
+                icon: icon_url.clone(),
+                version_number: version,
+                dependencies: vec![],
+                download_url,
+                downloads: download_count,
+                website_url: repo.clone(),
+                file_size: 0,
+                uuid4: unique_name.to_string(),
+                full_name: full_name.clone(),
+                date_created: latest_release_date.clone(),
+                is_active: true,
+            };
+
+            let mut versions_list = vec![version_struct];
+
+            // Check for prerelease and add it to version list
+            if let Some(prerelease) = entry.get("prerelease") {
+                if let Some(pre_version) = prerelease["version"].as_str() {
+                    let pre_version_clean = pre_version.trim_start_matches('v').to_string();
+                    let pre_download_url = prerelease["downloadUrl"].as_str().unwrap_or("").to_string();
+                    let pre_date = prerelease["date"].as_str().unwrap_or("").to_string();
+                    
+                    if !pre_version_clean.is_empty() && !pre_download_url.is_empty() {
+                        versions_list.push(crate::models::shared::PackageVersion {
+                            name: mod_name.to_string(),
+                            description: format!("(Prerelease) {}", description.clone()),
+                            icon: icon_url,
+                            version_number: pre_version_clean,
+                            dependencies: vec![],
+                            download_url: pre_download_url,
+                            downloads: download_count,
+                            website_url: repo.clone(),
+                            file_size: 0,
+                            uuid4: format!("{}-prerelease", unique_name),
+                            full_name: full_name.clone(),
+                            date_created: pre_date,
+                            is_active: true,
+                        });
+                    }
+                }
+            }
+
+            packages.push(crate::models::shared::Package {
+                name: name.clone(),
+                full_name,
+                owner: owner.to_string(),
+                package_url,
+                date_created: first_release_date,
+                date_updated: latest_release_date,
+                uuid4: unique_name.to_string(),
+                rating_score: download_count as i64,
+                is_pinned: is_required,
+                is_deprecated: false,
+                has_nsfw_content: false,
+                categories,
+                versions: versions_list,
+            });
+        }
+
+        let count = packages.len();
+        eprintln!("[fetch_packages/ow] Loaded {} mods from ow-mod-db", count);
+
+        {
+            let mut packages_lock = state.packages.write().await;
+            packages_lock.insert(game_id.clone(), packages);
+        }
+
+        let _ = app.emit(
+            "packages-loaded",
+            serde_json::json!({ "game_id": game_id, "total_count": count }),
+        );
+
+        if let Ok(elapsed) = start_time.elapsed() {
+            eprintln!("[fetch_packages/ow] Loaded in {:.2?}", elapsed);
+        }
+
+        // Background: resolve file sizes via HEAD requests in parallel
+        {
+            let packages_arc = state.packages.clone();
+            let game_id_clone = game_id.clone();
+            let app_handle = app.clone();
+
+            tokio::spawn(async move {
+                // Collect (pkg_idx, ver_idx, download_url) for mods that have a URL and don't have a size yet
+                let urls: Vec<(usize, usize, String)> = {
+                    let lock = packages_arc.read().await;
+                    if let Some(pkgs) = lock.get(&game_id_clone) {
+                        pkgs.iter().enumerate()
+                            .flat_map(|(pkg_idx, p)| {
+                                p.versions.iter().enumerate().filter_map(move |(ver_idx, v)| {
+                                    if v.download_url.is_empty() || v.file_size > 0 {
+                                        None
+                                    } else {
+                                        Some((pkg_idx, ver_idx, v.download_url.clone()))
+                                    }
+                                })
+                            })
+                            .collect()
+                    } else {
+                        return;
+                    }
+                };
+
+                if !urls.is_empty() {
+                    let head_client = thunderstore_client();
+                    let parallelism = 8usize;
+                    let mut stream = futures_util::stream::iter(urls)
+                        .map(|(pkg_idx, ver_idx, url)| {
+                            let c = head_client.clone();
+                            async move {
+                                let size = c.head(&url).send().await.ok()
+                                    .and_then(|r| r.headers().get("content-length")
+                                        .and_then(|v| v.to_str().ok())
+                                        .and_then(|s| s.parse::<u64>().ok()))
+                                    .unwrap_or(0);
+                                (pkg_idx, ver_idx, size)
+                            }
+                        })
+                        .buffer_unordered(parallelism);
+
+                    while let Some((pkg_idx, ver_idx, size)) = stream.next().await {
+                        if size == 0 { continue; }
+                        let mut lock = packages_arc.write().await;
+                        if let Some(pkgs) = lock.get_mut(&game_id_clone) {
+                            if let Some(pkg) = pkgs.get_mut(pkg_idx) {
+                                if let Some(ver) = pkg.versions.get_mut(ver_idx) {
+                                    ver.file_size = size;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Save chunk cache to disk to preserve the parsed database structure
+                let (total, cache_to_save) = {
+                    let lock = packages_arc.read().await;
+                    let total = lock.get(&game_id_clone).map(|p| p.len()).unwrap_or(0);
+                    let pkgs = lock.get(&game_id_clone).cloned().unwrap_or_default();
+                    let first_chunk = ChunkCache {
+                        url: "ow-mod-db".to_string(),
+                        packages: pkgs,
+                    };
+                    let cache = GamePackagesCache {
+                        chunks: vec![first_chunk],
+                    };
+                    (total, cache)
+                };
+                let _ = save_packages_to_disk(&app_handle, &game_id_clone, &cache_to_save);
+                let _ = app_handle.emit(
+                    "packages-loaded",
+                    serde_json::json!({ "game_id": game_id_clone, "total_count": total }),
+                );
+            });
+        }
+
+        return Ok(count);
+    }
+
     // 0. Check if we already have packages in memory (instant return)
     {
         let packages_lock = state.packages.read().await;
@@ -4648,10 +5338,25 @@ pub async fn lookup_packages_by_names(
 
 #[command]
 pub async fn fetch_package_by_name(
+    app: AppHandle,
     state: tauri::State<'_, AppState>,
     name: String,
     game_id: Option<String>,
 ) -> Result<Option<crate::models::shared::Package>, String> {
+    // If this is Outer Wilds and the cache is empty, fetch the package list first
+    if game_id.as_deref() == Some("outerwilds") {
+        let is_empty = {
+            let packages_guard = state.packages.read().await;
+            packages_guard.get("outerwilds").map(|p| p.is_empty()).unwrap_or(true)
+        };
+        if is_empty {
+            eprintln!("[fetch_package_by_name] Outer Wilds packages not loaded in cache. Loading now...");
+            use tauri::Manager;
+            let app_state = app.state::<AppState>();
+            let _ = fetch_packages(app.clone(), app_state, "outerwilds".to_string()).await;
+        }
+    }
+
     // name might be "Namespace-Name" or "Namespace-Name-Version"
 
     // 1. Strip version if present (Regex: ^(.*)-(\d+\.\d+\.\d+)$)
@@ -4670,8 +5375,9 @@ pub async fn fetch_package_by_name(
         clean_name, version_str
     );
 
-    // 2. Split Namespace and Name
-    let parts: Vec<&str> = clean_name.splitn(2, '-').collect();
+    // 2. Split Namespace and Name (dots replaced with hyphens for Outer Wilds compatibility)
+    let clean_name_normalized = clean_name.replace('.', "-");
+    let parts: Vec<&str> = clean_name_normalized.splitn(2, '-').collect();
     if parts.len() != 2 {
         return Ok(None);
     }
@@ -4685,7 +5391,9 @@ pub async fn fetch_package_by_name(
         if let Some(ref gid) = game_id {
             if let Some(game_packages) = packages_guard.get(gid) {
                 for pkg in game_packages {
-                    if pkg.full_name.eq_ignore_ascii_case(&clean_name)
+                    if pkg.full_name.eq_ignore_ascii_case(&clean_name_normalized)
+                        || pkg.name.eq_ignore_ascii_case(&clean_name_normalized)
+                        || pkg.full_name.eq_ignore_ascii_case(&clean_name)
                         || pkg.name.eq_ignore_ascii_case(&clean_name)
                     {
                         found_pkg = Some(pkg.clone());
@@ -4696,7 +5404,9 @@ pub async fn fetch_package_by_name(
         } else {
             for game_packages in packages_guard.values() {
                 for pkg in game_packages {
-                    if pkg.full_name.eq_ignore_ascii_case(&clean_name)
+                    if pkg.full_name.eq_ignore_ascii_case(&clean_name_normalized)
+                        || pkg.name.eq_ignore_ascii_case(&clean_name_normalized)
+                        || pkg.full_name.eq_ignore_ascii_case(&clean_name)
                         || pkg.name.eq_ignore_ascii_case(&clean_name)
                     {
                         found_pkg = Some(pkg.clone());
