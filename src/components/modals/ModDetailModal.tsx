@@ -59,11 +59,13 @@ export function ModDetailModal({
     const selectedVersionNumber = selectedVersionChoice.pkgUuid === pkg.uuid4
         ? selectedVersionChoice.versionNumber
         : pkg.versions[0]?.version_number || '';
+    const [prevPkgUuid, setPrevPkgUuid] = useState(pkg.uuid4);
     const [versionsList, setVersionsList] = useState<PackageVersion[]>(pkg.versions);
 
-    useEffect(() => {
+    if (pkg.uuid4 !== prevPkgUuid) {
+        setPrevPkgUuid(pkg.uuid4);
         setVersionsList(pkg.versions);
-    }, [pkg]);
+    }
 
     const selectedVersion = useMemo(
         () => versionsList.find(v => v.version_number === selectedVersionNumber) || versionsList[0] || pkg.versions[0],
