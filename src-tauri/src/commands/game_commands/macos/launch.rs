@@ -11,7 +11,9 @@ pub(crate) async fn launch_game_with_mods_for_macos(
     let use_direct_launch = profile_prefers_direct_launch(&launch_mode);
 
     let runtime_game_path =
-        if is_balatro_identifier(game_identifier) || is_balatro_game_path(game_path) {
+        if is_balatro_identifier(game_identifier) || is_balatro_game_path(game_path)
+            || is_outerwilds_identifier(game_identifier) || is_outerwilds_game_path(game_path)
+        {
             game_path.to_path_buf()
         } else {
             let resolved = resolve_macos_runtime_root(game_path);
@@ -25,6 +27,16 @@ pub(crate) async fn launch_game_with_mods_for_macos(
             resolved
         };
     let executable_path = find_macos_executable_path(&runtime_game_path);
+
+    // Outer Wilds: launch OWML.Launcher.exe via Wine/CrossOver
+    if is_outerwilds_identifier(game_identifier) || is_outerwilds_game_path(game_path) {
+        let owml_launcher = game_path.join("OWML").join("OWML.Launcher.exe");
+        if !owml_launcher.exists() {
+            return Err("OWML.Launcher.exe not found. Please install OWML first.".to_string());
+        }
+        eprintln!("[launch_game_with_mods] Launching OWML for Outer Wilds: {:?}", owml_launcher);
+        return launch_windows_direct_game(&owml_launcher.parent().unwrap_or(game_path));
+    }
 
     if is_balatro_identifier(game_identifier) || is_balatro_game_path(game_path) {
         let run_script = game_path.join(BALATRO_LOVELY_SCRIPT);
@@ -131,7 +143,9 @@ pub(crate) async fn launch_game_vanilla_for_macos(
     let use_direct_launch = profile_prefers_direct_launch(&launch_mode);
 
     let runtime_game_path =
-        if is_balatro_identifier(game_identifier) || is_balatro_game_path(&game_path) {
+        if is_balatro_identifier(game_identifier) || is_balatro_game_path(&game_path)
+            || is_outerwilds_identifier(game_identifier) || is_outerwilds_game_path(&game_path)
+        {
             game_path.clone()
         } else {
             let resolved = resolve_macos_runtime_root(&game_path);

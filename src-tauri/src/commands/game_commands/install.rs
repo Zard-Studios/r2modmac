@@ -92,7 +92,9 @@ pub async fn install_to_game(
 
     let is_balatro_profile = is_mac_profile
         && (is_balatro_identifier(&game_identifier) || is_balatro_game_path(game_path));
-    let runtime_game_path_buf = if is_mac_profile && !is_balatro_profile {
+    let is_outerwilds_profile = is_outerwilds_identifier(&game_identifier)
+        || is_outerwilds_game_path(game_path);
+    let runtime_game_path_buf = if is_mac_profile && !is_balatro_profile && !is_outerwilds_profile {
         let resolved = resolve_macos_runtime_root(game_path);
         if resolved != game_path {
             eprintln!(
@@ -109,10 +111,18 @@ pub async fn install_to_game(
     let mac_runtime_present_before_sync = is_mac_profile
         && !is_vanilla
         && !is_balatro_profile
+        && !is_outerwilds_profile
         && has_complete_macos_bepinex_runtime(runtime_game_path);
 
-    if is_mac_profile && !is_vanilla && !is_balatro_profile {
+    if is_mac_profile && !is_vanilla && !is_balatro_profile && !is_outerwilds_profile {
         validate_macos_bepinex_support(runtime_game_path)?;
+    }
+
+    if is_outerwilds_profile {
+        // Outer Wilds uses OWML; no BepInEx operations needed here.
+        // install_mod_bytes handles all OWML-specific installation.
+        eprintln!("[install_to_game] Outer Wilds profile - skipping BepInEx install, OWML manages mods.");
+        return Ok(());
     }
 
     if is_balatro_profile {

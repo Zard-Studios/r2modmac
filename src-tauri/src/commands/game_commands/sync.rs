@@ -38,6 +38,8 @@ pub async fn sync_profile_to_game(
     let runtime_game_path_buf = if profile_platform == "mac"
         && !is_balatro_identifier(&game_identifier)
         && !is_balatro_game_path(game_path)
+        && !is_outerwilds_identifier(&game_identifier)
+        && !is_outerwilds_game_path(game_path)
     {
         let resolved = resolve_macos_runtime_root(game_path);
         if resolved != game_path {
@@ -87,11 +89,13 @@ pub async fn sync_profile_to_game(
     let is_mac_profile = profile_platform == "mac";
     let is_balatro_profile = is_mac_profile
         && (is_balatro_identifier(&game_identifier) || is_balatro_game_path(game_path));
+    let is_outerwilds_profile = is_outerwilds_identifier(&game_identifier)
+        || is_outerwilds_game_path(game_path);
     let profile_requires_bepinex = profile_mod_full_names
         .iter()
         .any(|name| name.to_lowercase().contains("bepinexpack"));
 
-    if is_mac_profile && !is_balatro_profile && profile_requires_bepinex {
+    if is_mac_profile && !is_balatro_profile && !is_outerwilds_profile && profile_requires_bepinex {
         validate_macos_bepinex_support(runtime_game_path)?;
     }
 
@@ -135,6 +139,173 @@ pub async fn sync_profile_to_game(
 
     let is_balatro_profile = profile["platform"].as_str() == Some("mac")
         && (is_balatro_identifier(&game_identifier) || is_balatro_game_path(game_path));
+
+    // --- Outer Wilds (OWML) sync branch ---
+    if is_outerwilds_profile {
+        let owml_dir = game_path.join("OWML");
+        let owml_mods_dir = owml_dir.join("Mods");
+        let profile_owml_cache = profile_dir.join("OWML").join("Mods");
+
+        // Read manifest.json uniqueName from a mod folder to derive the mod key.
+        let read_owml_unique_name = |mod_dir: &std::path::Path| -> Option<String> {
+            let manifest_path = mod_dir.join("manifest.json");
+            if let Ok(data) = fs::read_to_string(&manifest_path) {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&data) {
+                    if let Some(unique_name) = v["uniqueName"].as_str() {
+                        // Convert dots to hyphens for Thunderstore key matching
+                        return Some(unique_name.replace('.', "-").to_lowercase());
+                    }
+                }
+            }
+            None
+        };
+
+        // Read installed version from a mod's manifest.json
+        let read_owml_version = |mod_dir: &std::path::Path| -> Option<String> {
+            let manifest_path = mod_dir.join("manifest.json");
+            if let Ok(data) = fs::read_to_string(&manifest_path) {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&data) {
+                    return v["version"].as_str().map(|s| s.to_string());
+                }
+            }
+            None
+        };
+
+        let owml_installed = owml_dir.join("OWML.Launcher.exe").exists();
+
+        // Scan installed mods
+        let mut game_mod_folders: Vec<(String, String, Option<String>)> = vec![]; // (folder, key, version)
+        if owml_mods_dir.exists() {
+            if let Ok(entries) = fs::read_dir(&owml_mods_dir) {
+                for entry in entries.filter_map(|e| e.ok()) {
+                    if entry.path().is_dir() {
+                        let folder_name = entry.file_name().to_string_lossy().to_string();
+                        let mod_key = read_owml_unique_name(&entry.path())
+                            .unwrap_or_else(|| extract_mod_key(&folder_name));
+                        let version = read_owml_version(&entry.path())
+                            .or_else(|| extract_version_suffix(&folder_name));
+                        game_mod_folders.push((folder_name, mod_key, version));
+                    }
+                }
+            }
+        }
+
+        let mut to_remove: Vec<String> = Vec::new();
+        for (folder_name, gm_key, game_version) in &game_mod_folders {
+            if !desired_key_set.contains(gm_key) {
+                to_remove.push(folder_name.clone());
+                continue;
+            }
+
+            let desired_version = desired_version_by_key.get(gm_key);
+            let needs_replacement = match desired_version {
+                Some(dv) => match game_version.as_ref() {
+                    Some(gv) => gv != dv,
+                    None => false,
+                },
+                None => false,
+            };
+            if needs_replacement {
+                to_remove.push(folder_name.clone());
+            }
+        }
+
+        let mut to_install: Vec<String> = desired_key_set
+            .iter()
+            .filter(|pm_key| {
+                // If this is the OWML loader itself, check if already installed
+                if pm_key.contains("owml") || pm_key.contains("outerwildsmodmanager") {
+                    return !owml_installed;
+                }
+
+                let desired_version = desired_version_by_key.get(*pm_key);
+
+
+                let has_exact_version = game_mod_folders.iter().any(|(_, gm_key, game_version)| {
+                    if gm_key != *pm_key {
+                        return false;
+                    }
+                    if let Some(dv) = desired_version {
+                        if let Some(gv) = game_version {
+                            return gv == dv;
+                        }
+                        return false;
+                    }
+                    true
+                });
+
+                !has_exact_version
+            })
+            .map(|k| k.to_string())
+            .collect();
+        to_install.sort();
+
+        // Remove mods not in profile
+        let mut removed = 0;
+        for folder_name in &to_remove {
+            let folder_path = owml_mods_dir.join(folder_name);
+            if folder_path.exists() {
+                let _ = fs::remove_dir_all(&folder_path);
+                removed += 1;
+            }
+        }
+
+        // Cache: copy installed mods to profile cache
+        let mut cached = 0;
+        if use_cache && owml_mods_dir.exists() {
+            if !profile_owml_cache.exists() {
+                let _ = fs::create_dir_all(&profile_owml_cache);
+            }
+            if let Ok(entries) = fs::read_dir(&owml_mods_dir) {
+                for entry in entries.filter_map(|e| e.ok()) {
+                    if entry.path().is_dir() {
+                        let folder_name = entry.file_name().to_string_lossy().to_string();
+                        let cache_path = profile_owml_cache.join(&folder_name);
+                        if !cache_path.exists() {
+                            if copy_dir_recursive(&entry.path(), &cache_path).is_ok() {
+                                cached += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Write/update OWML.Config.json with socketPort=0 to prevent Wine socket crashes.
+        // This is done on every sync so the setting is always enforced.
+        if owml_dir.exists() {
+            let config_path = owml_dir.join("OWML.Config.json");
+            let mut config: serde_json::Value = if config_path.exists() {
+                fs::read_to_string(&config_path)
+                    .ok()
+                    .and_then(|s| serde_json::from_str(&s).ok())
+                    .unwrap_or_else(|| serde_json::json!({}))
+            } else {
+                serde_json::json!({})
+            };
+
+            // Force socketPort=0 to prevent SocketListener from binding in Wine/CrossOver
+            config["socketPort"] = serde_json::json!(0);
+            config["incrementalGC"] = serde_json::json!(true);
+            if let Some(obj) = config.as_object_mut() {
+                obj.entry("forceExe").or_insert(serde_json::json!(false));
+                obj.entry("disableVersionPopup").or_insert(serde_json::json!(true));
+            }
+
+
+            if let Ok(serialized) = serde_json::to_string_pretty(&config) {
+                let _ = fs::write(&config_path, serialized);
+                eprintln!("[sync_profile_to_game] Wrote OWML.Config.json (socketPort=0) at {:?}", config_path);
+            }
+        }
+
+        return Ok(serde_json::json!({
+            "removed": removed,
+            "to_install": to_install,
+            "already_installed": game_mod_folders.len(),
+            "cached": cached
+        }));
+    }
 
     if is_balatro_profile {
         let mods_root = get_balatro_mods_dir().ok_or_else(|| {
