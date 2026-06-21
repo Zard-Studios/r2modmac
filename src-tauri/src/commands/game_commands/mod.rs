@@ -35,8 +35,10 @@ mod process;
 mod shared;
 mod steam;
 pub(crate) mod sync;
+pub(crate) mod owml_patcher;
 mod windows;
 mod windows_support;
+
 
 #[allow(unused_imports)]
 pub(super) use self::linux::*;
@@ -60,3 +62,4 @@ pub use self::paths::{
     find_game_executable, get_game_path, get_game_source, open_game_folder, set_game_path,
 };
 pub use self::sync::sync_profile_to_game;
+pub use self::shared::{restore_outerwilds_vanilla, restore_mscorlib_vanilla};

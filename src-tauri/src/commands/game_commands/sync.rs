@@ -283,10 +283,14 @@ pub async fn sync_profile_to_game(
             }
         }
 
-        let game_wine_path = convert_to_wine_path(game_path);
-        let mut owml_wine_path = convert_to_wine_path(&owml_dir);
-        if !owml_wine_path.ends_with('/') && !owml_wine_path.ends_with('\\') {
-            owml_wine_path.push('\\');
+        // OWML detects Wine via wine_get_version() and prepends "Z:" to gamePath/owmlPath.
+        // So these must be Unix-style paths relative to drive_c root: /Program Files/...
+        // NOT Windows-style C:\Program Files\ (which would become Z:C:\... = broken)
+        let game_wine_path = convert_to_owml_unix_path(game_path);
+        let owml_unix_path_raw = convert_to_owml_unix_path(&owml_dir);
+        let mut owml_wine_path = owml_unix_path_raw.clone();
+        if !owml_wine_path.ends_with('/') {
+            owml_wine_path.push('/');
         }
 
         // Write/update OWML.Config.json with socketPort=0 to prevent Wine socket crashes.
@@ -402,40 +406,23 @@ pub async fn sync_profile_to_game(
             }
         }
 
-        // Toggle vanilla mode via renaming/swapping the patched and vanilla Assembly-CSharp.dll, and the OWML folder
-        let managed_dir = game_path.join("OuterWilds_Data").join("Managed");
-        let owml_folder = game_path.join("OWML");
-        let owml_disabled = game_path.join("OWML_DISABLED");
-
-        if managed_dir.exists() {
-            let dll_path = managed_dir.join("Assembly-CSharp.dll");
-            let disabled_path = managed_dir.join("Assembly-CSharp.dll_DISABLED");
-            let bak_path = managed_dir.join("Assembly-CSharp.dll.bak");
-
-            if profile_is_vanilla {
-                if !disabled_path.exists() && bak_path.exists() {
-                    let _ = fs::rename(&dll_path, &disabled_path);
-                    let _ = fs::rename(&bak_path, &dll_path);
-                    eprintln!("[sync_profile_to_game] Restored vanilla Assembly-CSharp.dll via rename");
+        // Toggle vanilla mode via shared helpers (covers Assembly-CSharp + mscorlib)
+        if profile_is_vanilla {
+            let _ = restore_outerwilds_vanilla(&game_path);
+            let _ = restore_mscorlib_vanilla(&game_path, false);
+            if owml_folder.exists() {
+                if owml_disabled.exists() {
+                    let _ = fs::remove_dir_all(&owml_disabled);
                 }
-                if owml_folder.exists() {
-                    if owml_disabled.exists() {
-                        let _ = fs::remove_dir_all(&owml_disabled);
-                    }
-                    let _ = fs::rename(&owml_folder, &owml_disabled);
-                    eprintln!("[sync_profile_to_game] Renamed OWML -> OWML_DISABLED");
-                }
-            } else {
-                if owml_disabled.exists() && !owml_folder.exists() {
-                    let _ = fs::rename(&owml_disabled, &owml_folder);
-                    eprintln!("[sync_profile_to_game] Restored OWML_DISABLED -> OWML");
-                }
-                if disabled_path.exists() {
-                    let _ = fs::rename(&dll_path, &bak_path);
-                    let _ = fs::rename(&disabled_path, &dll_path);
-                    eprintln!("[sync_profile_to_game] Restored modded Assembly-CSharp.dll via rename");
-                }
+                let _ = fs::rename(&owml_folder, &owml_disabled);
+                eprintln!("[sync_profile_to_game] Renamed OWML -> OWML_DISABLED");
             }
+        } else {
+            if owml_disabled.exists() && !owml_folder.exists() {
+                let _ = fs::rename(&owml_disabled, &owml_folder);
+                eprintln!("[sync_profile_to_game] Restored OWML_DISABLED -> OWML");
+            }
+            let _ = restore_outerwilds_modded(&game_path);
         }
 
         return Ok(serde_json::json!({
@@ -836,35 +823,11 @@ fn manifest_files_exist(target_root: &std::path::Path, files: &[String]) -> bool
     true
 }
 
-fn convert_to_wine_path(path: &std::path::Path) -> String {
+
+
+fn convert_to_owml_unix_path(path: &std::path::Path) -> String {
     if cfg!(windows) {
         return path.to_string_lossy().to_string();
     }
-    // Unix platforms (macOS/Linux) running Wine
-    if let Some(prefix_root) = find_wine_prefix_root(path) {
-        let drive_c = prefix_root.join("drive_c");
-        let canonical_path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-        let canonical_drive_c = drive_c.canonicalize().unwrap_or_else(|_| drive_c.clone());
-        if let Ok(rel) = canonical_path.strip_prefix(&canonical_drive_c) {
-            let components: Vec<String> = rel
-                .components()
-                .map(|c| c.as_os_str().to_string_lossy().to_string())
-                .collect();
-            return format!("C:\\{}", components.join("\\"));
-        }
-
-        // Fallback simple string match
-        let path_str = path.to_string_lossy().to_string();
-        let drive_c_str = drive_c.to_string_lossy().to_string();
-        if path_str.starts_with(&drive_c_str) {
-            let rel = path_str[drive_c_str.len()..].trim_start_matches('/').trim_start_matches('\\');
-            return format!("C:\\{}", rel.replace('/', "\\"));
-        }
-    }
-
-    // Fallback: translate absolute Unix path to Wine Z:\ path
-    let path_str = path.to_string_lossy().to_string();
-    let clean_path = path_str.replace('/', "\\");
-    format!("Z:{}", clean_path)
+    path.to_string_lossy().replace('\\', "/")
 }
-

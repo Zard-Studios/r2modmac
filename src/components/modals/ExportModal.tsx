@@ -44,7 +44,7 @@ export function ExportModal({ isOpen, onClose, onExportFile, onExportCode, hasLo
                         <h3 className="text-lg font-bold text-white mb-1">Share Code</h3>
                         <p className="text-sm text-gray-400">
                             {codeShareDisabled
-                                ? 'Not available — this game uses an external mod source'
+                                ? 'Not available. This game uses an external mod source'
                                 : hasLocalMods
                                     ? 'Unavailable for profiles with custom mods'
                                     : 'Generate a code to share with friends'}

@@ -122,36 +122,22 @@ pub async fn install_to_game(
         let owml_folder = game_path.join("OWML");
         let owml_disabled = game_path.join("OWML_DISABLED");
 
-        let managed_dir = game_path.join("OuterWilds_Data").join("Managed");
-        if managed_dir.exists() {
-            let dll_path = managed_dir.join("Assembly-CSharp.dll");
-            let disabled_path = managed_dir.join("Assembly-CSharp.dll_DISABLED");
-            let bak_path = managed_dir.join("Assembly-CSharp.dll.bak");
-
-            if is_vanilla {
-                if !disabled_path.exists() && bak_path.exists() {
-                    let _ = fs::rename(&dll_path, &disabled_path);
-                    let _ = fs::rename(&bak_path, &dll_path);
-                    eprintln!("[install_to_game] Restored vanilla Assembly-CSharp.dll for Outer Wilds");
+        if is_vanilla {
+            restore_outerwilds_vanilla(&game_path).ok();
+            restore_mscorlib_vanilla(&game_path, false).ok();
+            if owml_folder.exists() {
+                if owml_disabled.exists() {
+                    let _ = fs::remove_dir_all(&owml_disabled);
                 }
-                if owml_folder.exists() {
-                    if owml_disabled.exists() {
-                        let _ = fs::remove_dir_all(&owml_disabled);
-                    }
-                    let _ = fs::rename(&owml_folder, &owml_disabled);
-                    eprintln!("[install_to_game] Renamed OWML -> OWML_DISABLED");
-                }
-            } else {
-                if owml_disabled.exists() && !owml_folder.exists() {
-                    let _ = fs::rename(&owml_disabled, &owml_folder);
-                    eprintln!("[install_to_game] Restored OWML_DISABLED -> OWML");
-                }
-                if disabled_path.exists() {
-                    let _ = fs::rename(&dll_path, &bak_path);
-                    let _ = fs::rename(&disabled_path, &dll_path);
-                    eprintln!("[install_to_game] Restored modded Assembly-CSharp.dll for Outer Wilds");
-                }
+                let _ = fs::rename(&owml_folder, &owml_disabled);
+                eprintln!("[install_to_game] Renamed OWML -> OWML_DISABLED");
             }
+        } else {
+            if owml_disabled.exists() && !owml_folder.exists() {
+                let _ = fs::rename(&owml_disabled, &owml_folder);
+                eprintln!("[install_to_game] Restored OWML_DISABLED -> OWML");
+            }
+            restore_outerwilds_modded(&game_path).ok();
         }
         // Outer Wilds uses OWML; no BepInEx operations needed here.
         // install_mod_bytes handles all OWML-specific installation.

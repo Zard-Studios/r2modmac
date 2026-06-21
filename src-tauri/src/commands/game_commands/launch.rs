@@ -1,4 +1,5 @@
 use super::*;
+use super::owml_patcher;
 use tauri::command;
 
 #[command]
@@ -16,6 +17,7 @@ pub async fn launch_game_with_mods(
 
     let is_outerwilds = is_outerwilds_identifier(&game_identifier) || is_outerwilds_game_path(&game_path);
     if is_outerwilds {
+        // 1. Restore OWML folder if it was disabled
         let owml_folder = game_path.join("OWML");
         let owml_disabled = game_path.join("OWML_DISABLED");
         if owml_disabled.exists() && !owml_folder.exists() {
@@ -23,24 +25,30 @@ pub async fn launch_game_with_mods(
             eprintln!("[launch_game_with_mods] Restored OWML_DISABLED -> OWML");
         }
 
-        let managed_dir = game_path.join("OuterWilds_Data").join("Managed");
-        if managed_dir.exists() {
-            let dll_path = managed_dir.join("Assembly-CSharp.dll");
-            let disabled_path = managed_dir.join("Assembly-CSharp.dll_DISABLED");
-            let bak_path = managed_dir.join("Assembly-CSharp.dll.bak");
-            if disabled_path.exists() {
-                let _ = std::fs::rename(&dll_path, &bak_path);
-                let _ = std::fs::rename(&disabled_path, &dll_path);
-                eprintln!("[launch_game_with_mods] Restored modded Assembly-CSharp.dll for Outer Wilds");
-            }
+        if !owml_folder.exists() {
+            return Err("OWML folder not found. Please install OWML first.".to_string());
         }
 
-        let owml_launcher = game_path.join("OWML").join("OWML.Launcher.exe");
-        if !owml_launcher.exists() {
-            return Err("OWML.Launcher.exe not found. Please install OWML first.".to_string());
+        // 2. Save a one-time vanilla backup so we always have a clean base to patch from.
+        if let Err(e) = backup_outerwilds_vanilla_dll(&game_path) {
+            eprintln!("[launch_game_with_mods] Could not create vanilla backup (non-fatal): {}", e);
         }
-        eprintln!("[launch_game_with_mods] Launching OWML for Outer Wilds: {:?}", owml_launcher);
-        return launch_windows_direct_game_with_working_dir(&owml_launcher, Some(&game_path));
+
+        // 3. Restore vanilla DLL so the patcher always starts from a clean, unpatched state.
+        //    This prevents double-patching corruption if the DLL is already patched from a
+        //    previous modded launch.
+        if let Err(e) = restore_outerwilds_vanilla(&game_path) {
+            eprintln!("[launch_game_with_mods] Could not restore vanilla DLL (non-fatal): {}", e);
+        }
+
+        // 4. Patch Assembly-CSharp.dll via our socket-free Wine patcher.
+        eprintln!("[launch_game_with_mods] Running OWMLPatcher.exe via Wine");
+        owml_patcher::run_owml_patcher(&game_path)
+            .map_err(|e| format!("Failed to patch the game for mods. Make sure OWML is installed and the game path is correct.\nPatcher error: {}", e))?;
+
+        // 5. Launch OuterWilds.exe — mods are injected via the patched Assembly-CSharp.dll.
+        eprintln!("[launch_game_with_mods] Launching OuterWilds.exe directly");
+        return launch_windows_game(&app, &game_path);
     }
 
     if is_windows_profile {
@@ -65,6 +73,7 @@ pub async fn launch_game_vanilla(
 
     let is_outerwilds = is_outerwilds_identifier(&game_identifier) || is_outerwilds_game_path(&game_path);
     if is_outerwilds {
+        // Disable OWML by renaming the folder
         let owml_folder = game_path.join("OWML");
         let owml_disabled = game_path.join("OWML_DISABLED");
         if owml_folder.exists() {
@@ -75,18 +84,12 @@ pub async fn launch_game_vanilla(
             eprintln!("[launch_game_vanilla] Renamed OWML -> OWML_DISABLED");
         }
 
-        // Swap modded dll to Assembly-CSharp.dll_DISABLED, and make vanilla active
-        let managed_dir = game_path.join("OuterWilds_Data").join("Managed");
-        if managed_dir.exists() {
-            let dll_path = managed_dir.join("Assembly-CSharp.dll");
-            let disabled_path = managed_dir.join("Assembly-CSharp.dll_DISABLED");
-            let bak_path = managed_dir.join("Assembly-CSharp.dll.bak");
-            if !disabled_path.exists() && bak_path.exists() {
-                let _ = std::fs::rename(&dll_path, &disabled_path);
-                let _ = std::fs::rename(&bak_path, &dll_path);
-                eprintln!("[launch_game_vanilla] Restored vanilla Assembly-CSharp.dll for Outer Wilds");
-            }
-        }
+        // Restore vanilla Assembly-CSharp.dll from .vanilla or .bak backup
+        let _ = restore_outerwilds_vanilla(&game_path);
+        let _ = restore_mscorlib_vanilla(&game_path, false);
+
+        // Launch OuterWilds.exe directly — vanilla, no mods
+        eprintln!("[launch_game_vanilla] Launching OuterWilds.exe directly (vanilla)");
         return launch_windows_game(&app, &game_path);
     }
 

@@ -1,6 +1,8 @@
 use crate::commands::game_commands::{ensure_macos_steam_launch_options, get_game_path};
+use crate::commands::game_commands::{restore_outerwilds_vanilla, restore_mscorlib_vanilla};
 use crate::models::shared::{
-    get_balatro_mods_dir, is_balatro_game_path, is_balatro_identifier, AppState,
+    get_balatro_mods_dir, is_balatro_game_path, is_balatro_identifier,
+    is_outerwilds_identifier, is_outerwilds_game_path, AppState,
 };
 use crate::utils::file_ops::*;
 use std::fs;
@@ -64,7 +66,7 @@ pub async fn delete_profile_folder(
     if let Some(game_id) = game_identifier {
         let is_mac_profile = platform.as_deref() == Some("mac");
         let is_balatro_game = is_balatro_identifier(&game_id);
-        if let Ok(Some(game_path_str)) = get_game_path(app.clone(), game_id, platform.clone()).await
+        if let Ok(Some(game_path_str)) = get_game_path(app.clone(), game_id.clone(), platform.clone()).await
         {
             let game_path = std::path::Path::new(&game_path_str);
             let mut removed_runtime_artifact = false;
@@ -93,6 +95,60 @@ pub async fn delete_profile_folder(
                 let _ = fs::remove_file(&doorstop_path);
                 removed_runtime_artifact = true;
             }
+
+            // --- Outer Wilds (OWML) cleanup: restore full vanilla state ---
+            let is_outerwilds = is_outerwilds_identifier(&game_id)
+                || is_outerwilds_game_path(game_path);
+            if is_outerwilds {
+                // 1. Restore vanilla Assembly-CSharp.dll BEFORE removing OWML,
+                //    so the backup lookup still works if it was inside the game root.
+                if let Err(e) = restore_outerwilds_vanilla(game_path) {
+                    eprintln!("[delete_profile] Could not restore vanilla DLL (non-fatal): {}", e);
+                } else {
+                    eprintln!("[delete_profile] Restored vanilla Assembly-CSharp.dll");
+                }
+
+                // 1a. Restore vanilla mscorlib.dll and delete its backup.
+                if let Err(e) = restore_mscorlib_vanilla(game_path, true) {
+                    eprintln!("[delete_profile] Could not restore vanilla mscorlib.dll (non-fatal): {}", e);
+                } else {
+                    eprintln!("[delete_profile] Restored vanilla mscorlib.dll");
+                }
+
+                // 1b. Clean up boot.config modifications.
+                let boot_config_path = game_path.join("OuterWilds_Data").join("boot.config");
+                if boot_config_path.exists() {
+                    if let Ok(content) = fs::read_to_string(&boot_config_path) {
+                        let updated = content.replace("gc-max-time-slice=3", "").replace("\r\n\r\n", "\r\n").replace("\n\n", "\n");
+                        let _ = fs::write(&boot_config_path, updated);
+                        eprintln!("[delete_profile] Restored boot.config");
+                    }
+                }
+
+                // 2. Remove OWML folder (the whole mod runtime, not just Mods/).
+                let owml_dir = game_path.join("OWML");
+                if owml_dir.exists() {
+                    eprintln!("[delete_profile] Removing OWML folder from game");
+                    let _ = fs::remove_dir_all(&owml_dir);
+                    removed_runtime_artifact = true;
+                }
+
+                // 3. Also remove OWML_DISABLED if it was left from a vanilla launch.
+                let owml_disabled_dir = game_path.join("OWML_DISABLED");
+                if owml_disabled_dir.exists() {
+                    eprintln!("[delete_profile] Removing OWML_DISABLED folder from game");
+                    let _ = fs::remove_dir_all(&owml_disabled_dir);
+                    removed_runtime_artifact = true;
+                }
+
+                // 4. Remove the OWMLPatcher.exe we dropped in the game root.
+                let patcher_exe = game_path.join("OWMLPatcher.exe");
+                if patcher_exe.exists() {
+                    let _ = fs::remove_file(&patcher_exe);
+                    eprintln!("[delete_profile] Removed OWMLPatcher.exe");
+                }
+            }
+
 
             if is_mac_profile {
                 let _ = ensure_macos_steam_launch_options(&app, game_path, false, true);

@@ -402,3 +402,104 @@ pub(super) fn game_path_matches_install_root(
         || canonical_game.starts_with(&canonical_install)
         || canonical_install.starts_with(&canonical_game)
 }
+
+/// Save a one-time vanilla backup of Assembly-CSharp.dll before any patching.
+/// The backup is written to Assembly-CSharp.dll.vanilla and is NEVER overwritten.
+/// Also checks the legacy .bak path as a fallback source.
+pub(crate) fn backup_outerwilds_vanilla_dll(game_path: &std::path::Path) -> Result<(), String> {
+    let managed_dir = game_path.join("OuterWilds_Data").join("Managed");
+    if !managed_dir.exists() {
+        return Ok(());
+    }
+
+    let vanilla_path = managed_dir.join("Assembly-CSharp.dll.vanilla");
+    if vanilla_path.exists() {
+        // Backup already exists — never overwrite it.
+        return Ok(());
+    }
+
+    // Prefer the legacy .bak as source if present (created by the original OWML.Launcher.exe).
+    let bak_path = managed_dir.join("Assembly-CSharp.dll.bak");
+    let dll_path = managed_dir.join("Assembly-CSharp.dll");
+
+    let src = if bak_path.exists() {
+        &bak_path
+    } else if dll_path.exists() {
+        &dll_path
+    } else {
+        eprintln!("[OuterWilds] WARNING: Assembly-CSharp.dll not found, cannot create vanilla backup.");
+        return Ok(());
+    };
+
+    fs::copy(src, &vanilla_path)
+        .map_err(|e| format!("Failed to create vanilla DLL backup {:?}: {}", vanilla_path, e))?;
+    eprintln!("[OuterWilds] Created vanilla backup from {:?} -> {:?}", src, vanilla_path);
+    Ok(())
+}
+
+/// Restore the vanilla Assembly-CSharp.dll by copying the .vanilla backup.
+/// Falls back to .bak (legacy) if .vanilla is absent.
+/// Does NOT touch mscorlib.dll — that file must not be swapped.
+pub fn restore_outerwilds_vanilla(game_path: &std::path::Path) -> Result<(), String> {
+    let managed_dir = game_path.join("OuterWilds_Data").join("Managed");
+    if !managed_dir.exists() {
+        return Ok(());
+    }
+
+    let dll_path = managed_dir.join("Assembly-CSharp.dll");
+    let vanilla_path = managed_dir.join("Assembly-CSharp.dll.vanilla");
+    let bak_path = managed_dir.join("Assembly-CSharp.dll.bak");
+
+    let src = if vanilla_path.exists() {
+        Some(vanilla_path)
+    } else if bak_path.exists() {
+        Some(bak_path)
+    } else {
+        None
+    };
+
+    match src {
+        Some(src_path) => {
+            fs::copy(&src_path, &dll_path)
+                .map_err(|e| format!("Failed to restore vanilla Assembly-CSharp.dll from {:?}: {}", src_path, e))?;
+            eprintln!("[OuterWilds] Restored vanilla Assembly-CSharp.dll from {:?}", src_path);
+        }
+        None => {
+            eprintln!("[OuterWilds] WARNING: No vanilla DLL backup found (tried .vanilla, .bak). Cannot restore clean state.");
+        }
+    }
+    Ok(())
+}
+
+/// No-op placeholder kept for callers in sync.rs that previously called restore_outerwilds_modded.
+/// The actual patching is now always deferred to launch time via run_owml_patcher().
+/// This function just ensures the vanilla base is in place so the launcher can patch it cleanly.
+#[allow(dead_code)]
+pub fn restore_outerwilds_modded(game_path: &std::path::Path) -> Result<(), String> {
+    // Ensure vanilla base is ready for the patcher that will run at launch time.
+    // We do NOT try to swap back a previously-patched DLL — that approach led to double-patching.
+    restore_outerwilds_vanilla(game_path)
+}
+
+/// Restore the vanilla mscorlib.dll from mscorlib.dll.bak.
+/// If `delete_bak` is true, the backup file is deleted after successful restoration.
+pub fn restore_mscorlib_vanilla(game_path: &std::path::Path, delete_bak: bool) -> Result<(), String> {
+    let managed_dir = game_path.join("OuterWilds_Data").join("Managed");
+    if !managed_dir.exists() {
+        return Ok(());
+    }
+
+    let mscorlib_path = managed_dir.join("mscorlib.dll");
+    let bak_path = managed_dir.join("mscorlib.dll.bak");
+
+    if bak_path.exists() {
+        fs::copy(&bak_path, &mscorlib_path)
+            .map_err(|e| format!("Failed to restore vanilla mscorlib.dll from {:?}: {}", bak_path, e))?;
+        eprintln!("[OuterWilds] Restored vanilla mscorlib.dll from {:?}", bak_path);
+        if delete_bak {
+            let _ = fs::remove_file(&bak_path);
+            eprintln!("[OuterWilds] Cleaned up mscorlib.dll.bak");
+        }
+    }
+    Ok(())
+}
