@@ -210,6 +210,39 @@ export default function PreferencesModal({
                 {/* Scrollable Content */}
                 <div className="p-7 space-y-8 overflow-y-auto flex-1 bg-gray-900 relative z-0">
 
+                    {/* Updates Section */}
+                    <div className="space-y-3">
+                        <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-widest px-1">Updates</h3>
+
+                        <div className="bg-gray-800 border border-gray-700 rounded-2xl overflow-hidden">
+                            <div className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-colors hover:bg-gray-750">
+                                <div className="flex items-center gap-4">
+                                    <RowIcon kind="update" />
+                                    <div>
+                                        <p className="text-[15px] font-medium text-white">Check updates</p>
+                                        <p className="text-[13px] text-gray-400 mt-0.5 leading-snug">
+                                            Check for new versions of r2modmac.
+                                        </p>
+                                    </div>
+                                </div>
+                                <button
+                                    disabled={checkingUpdates}
+                                    onClick={async () => {
+                                        setCheckingUpdates(true);
+                                        try {
+                                            await onCheckForUpdates();
+                                        } finally {
+                                            setCheckingUpdates(false);
+                                        }
+                                    }}
+                                    className="px-4 py-2 rounded-xl text-[13px] font-medium transition-all duration-200 shrink-0 bg-green-600/10 hover:bg-green-600/20 active:bg-green-600/30 text-green-400 hover:text-green-300 active:text-green-200 border border-green-600/30 hover:border-green-600/40 active:border-green-600/50 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    {checkingUpdates ? 'Checking...' : 'Check updates'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
                     {/* Setup behavior Section */}
                     <div className="space-y-3">
                         <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-widest px-1">Behavior</h3>
@@ -355,38 +388,6 @@ export default function PreferencesModal({
                         </div>
                     </div>
 
-                    {/* Updates Section */}
-                    <div className="space-y-3">
-                        <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-widest px-1">Updates</h3>
-
-                        <div className="bg-gray-800 border border-gray-700 rounded-2xl overflow-hidden">
-                            <div className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-colors hover:bg-gray-750">
-                                <div className="flex items-center gap-4">
-                                    <RowIcon kind="update" />
-                                    <div>
-                                        <p className="text-[15px] font-medium text-white">Check for updates</p>
-                                        <p className="text-[13px] text-gray-400 mt-0.5 leading-snug">
-                                            Manually check for new versions of r2modmac.
-                                        </p>
-                                    </div>
-                                </div>
-                                <button
-                                    disabled={checkingUpdates}
-                                    onClick={async () => {
-                                        setCheckingUpdates(true);
-                                        try {
-                                            await onCheckForUpdates();
-                                        } finally {
-                                            setCheckingUpdates(false);
-                                        }
-                                    }}
-                                    className="px-4 py-2 rounded-xl text-[13px] font-medium transition-all duration-200 shrink-0 bg-blue-600/10 hover:bg-blue-600/20 text-blue-400 border border-blue-600/30"
-                                >
-                                    {checkingUpdates ? 'Checking...' : 'Check now'}
-                                </button>
-                            </div>
-                        </div>
-                    </div>
 
                     {/* Danger Zone */}
                     <div className="space-y-3">
