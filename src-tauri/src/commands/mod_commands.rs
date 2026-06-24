@@ -3090,7 +3090,12 @@ async fn install_mod_bytes(
                 .unwrap_or(false)
         });
 
-        let owml_root = game_dir.join("OWML");
+        // Resolve the real OWML runtime folder: OWML (modded) or OWML_DISABLED
+        // (vanilla mode). Installing a mod while in vanilla mode must land inside
+        // the existing OWML_DISABLED/Mods, not spawn a stray OWML folder. For a
+        // fresh install (neither exists), default to the canonical OWML.
+        let owml_root = crate::models::shared::get_owml_dir(game_dir)
+            .unwrap_or_else(|| game_dir.join("OWML"));
 
         if is_owml_loader {
             // Extract OWML loader to <game_path>/OWML/
@@ -3593,10 +3598,17 @@ pub async fn open_mod_folder(
     if crate::models::shared::is_outerwilds_identifier(&game_identifier)
         || crate::models::shared::is_outerwilds_game_path(game_root)
     {
-        let owml_root = game_root.join("OWML");
-        if !owml_root.exists() {
+        // Resolve the actual OWML directory: could be OWML (normal) or OWML_DISABLED (vanilla mode).
+        let owml_normal = game_root.join("OWML");
+        let owml_disabled_dir = game_root.join("OWML_DISABLED");
+        let owml_root = if owml_normal.exists() {
+            owml_normal
+        } else if owml_disabled_dir.exists() {
+            // Profile is in vanilla mode: mods still physically live in OWML_DISABLED/Mods.
+            owml_disabled_dir
+        } else {
             return Err("MODS_NOT_APPLIED".to_string());
-        }
+        };
 
         if mod_key.contains("owml") || mod_key.contains("outerwildsmodmanager") {
             open::that(&owml_root).map_err(|e| format!("Failed to open OWML folder: {}", e))?;
@@ -3608,15 +3620,18 @@ pub async fn open_mod_folder(
             return Err("MODS_NOT_APPLIED".to_string());
         }
 
+        let normalized_mod = mod_key.replace('.', "-").to_lowercase();
         let mut target_dir = None;
         if let Ok(entries) = fs::read_dir(&mods_root) {
             for entry in entries.filter_map(|e| e.ok()) {
                 if entry.path().is_dir() {
                     let folder_name = entry.file_name().to_string_lossy().to_string();
                     let normalized_folder = folder_name.replace('.', "-").to_lowercase();
-                    let normalized_mod = mod_key.replace('.', "-").to_lowercase();
-                    
-                    if normalized_folder == normalized_mod || normalized_folder.contains(&normalized_mod) || normalized_mod.contains(&normalized_folder) {
+
+                    if normalized_folder == normalized_mod
+                        || normalized_folder.contains(&normalized_mod)
+                        || normalized_mod.contains(&normalized_folder)
+                    {
                         target_dir = Some(entry.path());
                         break;
                     }
@@ -3947,7 +3962,12 @@ pub async fn copy_mod_from_cache(
 
     if target_is_outerwilds {
         let profile_mods_dir = profile_dir.join("OWML").join("Mods");
-        let game_mods_dir = game_dir.join("OWML").join("Mods");
+        // The game-side OWML folder may be at OWML (modded) or OWML_DISABLED
+        // (vanilla mode). Resolve the real runtime folder so the copy lands in
+        // the right place instead of creating a stray OWML/Mods.
+        let game_owml = crate::models::shared::get_owml_dir(game_dir)
+            .ok_or_else(|| "OWML runtime folder not found (OWML/OWML_DISABLED)".to_string())?;
+        let game_mods_dir = game_owml.join("Mods");
         fs::create_dir_all(&game_mods_dir).map_err(|e| e.to_string())?;
 
         let read_owml_unique_name = |mod_dir: &std::path::Path| -> Option<String> {

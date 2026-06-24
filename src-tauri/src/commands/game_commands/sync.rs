@@ -80,9 +80,10 @@ pub async fn sync_profile_to_game(
 
     // Get list of mod names from profile (format: "Author-ModName-Version")
     // We keep the full name for matching
-    // IMPORTANT: Only include ENABLED mods (disabled mods should not be installed)
-    // Note: For Outer Wilds, we want to include all mods in the sync so that disabled
-    // mods aren't physically deleted. Instead, we toggle their 'enabled' field inside config.json.
+    // IMPORTANT: Only include ENABLED mods for BepInEx (disabled mods should not be installed).
+    // For Outer Wilds, OWML uses config.json "enabled" flag — mods should stay physically present
+    // in OWML/Mods even when individually disabled. A separate all-mods set is built inside the
+    // OWML branch to prevent disabled mods from being physically removed.
     let profile_mod_full_names: Vec<String> = profile["mods"]
         .as_array()
         .unwrap_or(&vec![])
@@ -216,10 +217,32 @@ pub async fn sync_profile_to_game(
             }
         }
 
+        // Build a set of ALL mod keys in the profile (enabled + disabled). OWML keeps mods
+        // physically present on disk and uses config.json to enable/disable them, so we must
+        // NOT remove a mod just because the user individually disabled it in the UI.
+        let owml_all_key_set: std::collections::HashSet<String> = {
+            let mut set = std::collections::HashSet::new();
+            if let Some(arr) = profile["mods"].as_array() {
+                for m in arr {
+                    if let Some(full_name) = m["fullName"].as_str() {
+                        set.insert(extract_mod_key(full_name));
+                    }
+                }
+            }
+            set
+        };
+
         let mut to_remove: Vec<String> = Vec::new();
         for (folder_name, gm_key, game_version) in &game_mod_folders {
-            if !desired_key_set.contains(gm_key) {
+            // Use owml_all_key_set so disabled mods are NOT removed from disk.
+            if !owml_all_key_set.contains(gm_key) {
                 to_remove.push(folder_name.clone());
+                continue;
+            }
+
+            // Only check version replacement for mods that are ENABLED (and thus will be
+            // re-installed if out of date). Disabled mods stay at whatever version they have.
+            if !desired_key_set.contains(gm_key) {
                 continue;
             }
 

@@ -575,8 +575,12 @@ pub fn list_profile_config_files(
                     if let Some(gp) = game_path_str {
                         let game_path = std::path::Path::new(&gp);
                         if game_id == "outerwilds" {
-                            let owml_dir = game_path.join("OWML");
-                            if owml_dir.is_dir() {
+                            // The OWML folder may be at OWML (modded mode) or OWML_DISABLED
+                            // (vanilla mode, where mods stay on disk but the runtime is hidden).
+                            // Resolve whichever actually exists so configs are always listed.
+                            if let Some(owml_dir) =
+                                crate::models::shared::get_owml_dir(game_path)
+                            {
                                 // 1. Flat scan OWML root for global configs
                                 collect_config_files_flat(&owml_dir, game_path, &mut files);
                                 // 2. Recursive scan OWML/Mods for mod configs

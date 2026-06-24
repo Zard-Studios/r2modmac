@@ -533,9 +533,15 @@ pub(crate) fn run_owml_patcher(game_path: &Path) -> Result<(), String> {
     use super::find_host_compat_runner_binary;
     use super::configure_host_compat_runner_command;
 
-    // Write patcher to OWML subfolder so that all DLL dependencies
-    // are resolved successfully when run via Wine/Mono.
-    let owml_dir = game_path.join("OWML");
+    // Write patcher to the OWML subfolder so that all DLL dependencies are
+    // resolved successfully when run via Wine/Mono. Resolve the *actual*
+    // runtime folder (OWML, or OWML_DISABLED while in vanilla mode) so the
+    // patcher always lands next to the real OWML content, regardless of which
+    // code path invokes us. Every current caller restores OWML before patching,
+    // so this is a no-op today — but it removes the implicit "must restore
+    // first" contract that would silently break if the call site ever moves.
+    let owml_dir = crate::models::shared::get_owml_dir(game_path)
+        .unwrap_or_else(|| game_path.join("OWML"));
     let patcher_path = write_owml_patcher(&owml_dir)?;
     eprintln!("[run_owml_patcher] Wrote OWMLPatcher.exe to {:?}", patcher_path);
 

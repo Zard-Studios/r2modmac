@@ -282,12 +282,23 @@ pub fn is_outerwilds_game_path(path: &std::path::Path) -> bool {
     false
 }
 
-/// Returns the path to OWML inside the game directory (or bottle AppData).
-/// Priority: <game_path>/OWML/ (CrossOver/Wine AppData install)
+/// Returns the path to the OWML runtime folder inside the game directory.
+///
+/// The folder is physically at `<game_path>/OWML/` while the profile is in
+/// modded mode, but it gets renamed to `<game_path>/OWML_DISABLED/` when the
+/// profile is in vanilla mode (mods stay on disk, only the runtime is hidden
+/// from the game). Callers that need to find mods/configs must therefore look
+/// in whichever of the two actually exists, preferring the active `OWML`.
+///
+/// Priority: <game_path>/OWML/ (active) -> <game_path>/OWML_DISABLED/ (vanilla).
 pub fn get_owml_dir(game_path: &std::path::Path) -> Option<std::path::PathBuf> {
-    let direct = game_path.join("OWML");
-    if direct.exists() {
-        return Some(direct);
+    let normal = game_path.join("OWML");
+    if normal.exists() {
+        return Some(normal);
+    }
+    let disabled = game_path.join("OWML_DISABLED");
+    if disabled.exists() {
+        return Some(disabled);
     }
     None
 }
