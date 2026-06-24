@@ -154,7 +154,21 @@ pub async fn sync_profile_to_game(
             }
         }
 
-        let owml_dir = game_path.join("OWML");
+        // Resolve the actual OWML directory: it may be OWML or OWML_DISABLED depending on
+        // whether the profile is currently in vanilla mode. After the potential restore above
+        // (lines 150-154), OWML should be back if !profile_is_vanilla. For vanilla mode, the
+        // folder may still be at OWML_DISABLED from a previous sync, so we check both.
+        let owml_dir = if owml_folder.exists() {
+            owml_folder.clone()
+        } else if owml_disabled.exists() {
+            // OWML was previously disabled (vanilla mode). Use OWML_DISABLED as the working dir
+            // for reading mods and writing config.json so that individually-disabled mods are
+            // correctly updated even while the profile stays in vanilla mode.
+            owml_disabled.clone()
+        } else {
+            // Neither exists yet (fresh install). Default to OWML.
+            owml_folder.clone()
+        };
         let owml_mods_dir = owml_dir.join("Mods");
         let profile_owml_cache = profile_dir.join("OWML").join("Mods");
 
@@ -286,8 +300,11 @@ pub async fn sync_profile_to_game(
         // OWML detects Wine via wine_get_version() and prepends "Z:" to gamePath/owmlPath.
         // So these must be Unix-style paths relative to drive_c root: /Program Files/...
         // NOT Windows-style C:\Program Files\ (which would become Z:C:\... = broken)
+        // Always use the canonical "OWML" path (not "OWML_DISABLED") in OWML.Config.json,
+        // because the folder will be restored to OWML/ before launch.
         let game_wine_path = convert_to_owml_unix_path(game_path);
-        let owml_unix_path_raw = convert_to_owml_unix_path(&owml_dir);
+        let owml_canonical_dir = game_path.join("OWML");
+        let owml_unix_path_raw = convert_to_owml_unix_path(&owml_canonical_dir);
         let mut owml_wine_path = owml_unix_path_raw.clone();
         if !owml_wine_path.ends_with('/') {
             owml_wine_path.push('/');
