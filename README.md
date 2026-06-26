@@ -1,7 +1,7 @@
 # r2modmac
 
 <p align="center">
-  <img src="https://i.ibb.co/60j664sL/i-OS-Default-1024x1024-1x.png" alt="r2modmac-icon" width="200" height="200">
+  <img alt="1024x1024@1x" src="https://github.com/user-attachments/assets/0069e8c1-79be-4edc-a235-7a351e0d5a49" />
   <br>
   <strong>A modern and native mod manager for macOS, inspired by r2modman, redesigned from scratch</strong>
   <br><br>
