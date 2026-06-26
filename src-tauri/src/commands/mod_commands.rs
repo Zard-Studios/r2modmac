@@ -2973,7 +2973,18 @@ pub async fn install_mod(
     game_path: String,
     use_profile_cache: Option<bool>,
 ) -> Result<serde_json::Value, String> {
-    let client = reqwest::Client::new();
+    // Build a real HTTP client with a User-Agent. GitHub — which hosts every
+    // Outer Wilds mod release asset (ow-mod-db downloadUrls all point to
+    // github.com/.../releases/download/...) — responds 403 Forbidden to any
+    // request lacking a User-Agent header. A bare reqwest::Client::new() sends
+    // no UA, so installs intermittently failed with "Download failed with
+    // status 403" depending on GitHub's cache/rate-limit state. The same UA is
+    // already used by every other HTTP call in this module (APP_USER_AGENT).
+    let client = reqwest::Client::builder()
+        .user_agent(APP_USER_AGENT)
+        .redirect(reqwest::redirect::Policy::limited(10))
+        .build()
+        .map_err(|e| e.to_string())?;
     let response = client
         .get(&download_url)
         .send()
