@@ -148,6 +148,31 @@ function serializeCfg(parsed: ParsedCfg): string {
     return out;
 }
 
+// ─── Search Highlight helpers ──────────────────────────────────────────────────
+
+function escapeRegExp(str: string): string {
+    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function highlightText(text: string, search: string): React.ReactElement {
+    if (!search.trim()) return <span>{text}</span>;
+    const cleanSearch = search.trim();
+    const parts = text.split(new RegExp(`(${escapeRegExp(cleanSearch)})`, 'gi'));
+    return (
+        <span>
+            {parts.map((part, i) =>
+                part.toLowerCase() === cleanSearch.toLowerCase() ? (
+                    <mark key={i} className="bg-yellow-500/40 text-yellow-100 rounded px-0.5 font-semibold">
+                        {part}
+                    </mark>
+                ) : (
+                    part
+                )
+            )}
+        </span>
+    );
+}
+
 // ─── File-type helpers ────────────────────────────────────────────────────────
 
 function isCfgFile(name: string): boolean {
@@ -399,9 +424,10 @@ function countFiles(node: TreeNode): number {
 interface EntryEditorProps {
     entry: CfgEntry;
     onChange: (newValue: string) => void;
+    searchQuery?: string;
 }
 
-function EntryEditor({ entry, onChange }: EntryEditorProps) {
+function EntryEditor({ entry, onChange, searchQuery }: EntryEditorProps) {
     const [showAllOptions, setShowAllOptions] = useState(false);
     const [showAllMeta, setShowAllMeta] = useState(false);
 
@@ -419,7 +445,7 @@ function EntryEditor({ entry, onChange }: EntryEditorProps) {
 
             <div className="flex items-center gap-3">
                 <label className="text-sm font-medium text-gray-200 min-w-0 flex-1 truncate" title={entry.key}>
-                    {entry.key}
+                    {searchQuery ? highlightText(entry.key, searchQuery) : entry.key}
                 </label>
 
                 {/* Value Widget */}
@@ -945,6 +971,7 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
     const [parsedCfg, setParsedCfg] = useState<ParsedCfg | null>(null);
     const [fileLoading, setFileLoading] = useState(false);
     const [forceRawView, setForceRawView] = useState(false);
+    const [settingsSearch, setSettingsSearch] = useState('');
 
     const [isDirty, setIsDirty] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
@@ -1068,6 +1095,7 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
         setSaveStatus('idle');
         setCollapsedSections(new Set());
         setForceRawView(false);
+        setSettingsSearch('');
         historyRef.current = { undo: [], redo: [] };
         try {
             const raw = await window.ipcRenderer.readProfileConfigFile(profileId, file.relative_path, file.root ?? undefined);
@@ -1539,6 +1567,30 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
                                 <p className="text-[10px] text-gray-500 truncate">{selectedFile.relative_path}</p>
                             </div>
                             <div className="flex items-center gap-2 flex-shrink-0 ml-3">
+                                {parsedCfg && !forceRawView && (
+                                    <div className="relative mr-2 w-44">
+                                        <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-500 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                                        </svg>
+                                        <input
+                                            type="text"
+                                            value={settingsSearch}
+                                            onChange={(e) => setSettingsSearch(e.target.value)}
+                                            placeholder="Search settings..."
+                                            className="w-full pl-8 pr-6 py-1 bg-gray-800 border border-gray-700 rounded-md text-xs text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 focus:bg-gray-800"
+                                        />
+                                        {settingsSearch && (
+                                            <button
+                                                onClick={() => setSettingsSearch('')}
+                                                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300"
+                                            >
+                                                <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                                                </svg>
+                                            </button>
+                                        )}
+                                    </div>
+                                )}
                                 {saveStatus === 'saved' && (
                                     <span className="text-xs text-green-400 flex items-center gap-1">
                                         <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 20 20">
@@ -1733,59 +1785,75 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
                                 </div>
                             ) : (parsedCfg && !forceRawView) ? (
                                 /* ── Structured .cfg editor ────────────────────── */
-                                <div className="p-4 space-y-4">
-                                    {parsedCfg.sections.length === 0 ? (
-                                        <p className="text-gray-500 text-sm text-center py-6">
-                                            No structured sections found. Try the raw editor view.
-                                        </p>
-                                    ) : (
-                                        parsedCfg.sections.map((section, si) => (
-                                            <div key={section.name} className="rounded-xl border border-gray-700 overflow-hidden">
-                                                {/* Section Header */}
-                                                <button
-                                                    className="w-full flex items-center justify-between px-4 py-2.5 bg-gray-800 hover:bg-gray-750 transition-colors text-left"
-                                                    onClick={() => toggleSection(section.name)}
-                                                >
-                                                    <span className="text-sm font-bold text-gray-200">
-                                                        {section.name || "Global Settings"}
-                                                    </span>
-                                                    <span className="flex items-center gap-2">
-                                                        <span className="text-xs text-gray-500">
-                                                            {section.entries.length} {section.entries.length === 1 ? 'setting' : 'settings'}
-                                                        </span>
-                                                        <svg
-                                                            className={`h-4 w-4 text-gray-500 transition-transform ${
-                                                                collapsedSections.has(section.name) ? '-rotate-90' : ''
-                                                            }`}
-                                                            fill="none"
-                                                            stroke="currentColor"
-                                                            viewBox="0 0 24 24"
-                                                        >
-                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                                                        </svg>
-                                                    </span>
-                                                </button>
+                                (() => {
+                                    const query = settingsSearch.trim().toLowerCase();
+                                    const filteredSections = parsedCfg.sections.map((section, si) => {
+                                        const matchingEntries = section.entries.map((entry, ei) => ({
+                                            ...entry,
+                                            originalEntryIdx: ei
+                                        })).filter(entry => 
+                                            entry.key.toLowerCase().includes(query)
+                                        );
+                                        return {
+                                            ...section,
+                                            entries: matchingEntries,
+                                            originalSectionIdx: si
+                                        };
+                                    }).filter(section => section.entries.length > 0);
 
-                                                {/* Section Entries */}
-                                                {!collapsedSections.has(section.name) && (
-                                                    <div className="px-4 bg-gray-900">
-                                                        {section.entries.length === 0 ? (
-                                                            <p className="text-xs text-gray-600 py-3">No entries in this section</p>
-                                                        ) : (
-                                                            section.entries.map((entry, ei) => (
-                                                                <EntryEditor
-                                                                    key={entry.key}
-                                                                    entry={entry}
-                                                                    onChange={(v) => handleEntryChange(si, ei, v)}
-                                                                />
-                                                            ))
+                                    return (
+                                        <div className="p-4 space-y-4">
+                                            {filteredSections.length === 0 ? (
+                                                <p className="text-gray-500 text-sm text-center py-6">
+                                                    {settingsSearch ? 'No matching settings found.' : 'No settings in this file.'}
+                                                </p>
+                                            ) : (
+                                                filteredSections.map((section) => (
+                                                    <div key={section.name} className="rounded-xl border border-gray-700 overflow-hidden">
+                                                        {/* Section Header */}
+                                                        <button
+                                                            className="w-full flex items-center justify-between px-4 py-2.5 bg-gray-800 hover:bg-gray-750 transition-colors text-left"
+                                                            onClick={() => toggleSection(section.name)}
+                                                        >
+                                                            <span className="text-sm font-bold text-gray-200">
+                                                                {section.name || "Global Settings"}
+                                                            </span>
+                                                            <span className="flex items-center gap-2">
+                                                                <span className="text-xs text-gray-500">
+                                                                    {section.entries.length} {section.entries.length === 1 ? 'setting' : 'settings'}
+                                                                </span>
+                                                                <svg
+                                                                    className={`h-4 w-4 text-gray-500 transition-transform ${
+                                                                        collapsedSections.has(section.name) ? '-rotate-90' : ''
+                                                                    }`}
+                                                                    fill="none"
+                                                                    stroke="currentColor"
+                                                                    viewBox="0 0 24 24"
+                                                                >
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                                                </svg>
+                                                            </span>
+                                                        </button>
+
+                                                        {/* Section Entries */}
+                                                        {!collapsedSections.has(section.name) && (
+                                                            <div className="px-4 bg-gray-900">
+                                                                {section.entries.map((entry) => (
+                                                                    <EntryEditor
+                                                                        key={entry.key}
+                                                                        entry={entry}
+                                                                        searchQuery={settingsSearch}
+                                                                        onChange={(v) => handleEntryChange(section.originalSectionIdx, entry.originalEntryIdx, v)}
+                                                                    />
+                                                                ))}
+                                                            </div>
                                                         )}
                                                     </div>
-                                                )}
-                                            </div>
-                                        ))
-                                    )}
-                                </div>
+                                                ))
+                                            )}
+                                        </div>
+                                    );
+                                })()
                             ) : (
                                 /* ── Raw text editor ───────────────────────────── */
                                 <div className="h-full flex flex-col min-h-0 bg-gray-950 border border-gray-700 overflow-hidden">
