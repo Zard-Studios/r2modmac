@@ -26,7 +26,7 @@ export const CrossOverGuideModal: React.FC<CrossOverGuideModalProps> = ({ isOpen
                 <div className="flex items-center justify-between p-5 border-b border-gray-800">
                     <h2 className="text-xl font-bold text-white flex items-center gap-2">
                         <span className="text-2xl">🍷</span>
-                        CrossOver Configuration Required
+                        Wine / CrossOver Configuration Required
                     </h2>
                     <button
                         onClick={handleClose}
@@ -49,27 +49,27 @@ export const CrossOverGuideModal: React.FC<CrossOverGuideModalProps> = ({ isOpen
                         </div>
                         <div className="text-sm text-blue-200">
                             <p className="font-semibold mb-1">One-time Setup Required</p>
-                            <p>To make mods work with CrossOver, you must configure a library override for <code className="bg-blue-900/50 px-1.5 py-0.5 rounded text-blue-100 font-mono text-xs">winhttp.dll</code>. This only needs to be done once per bottle.</p>
+                            <p>To make mods work under Wine (CrossOver, Wineskin, Whisky, Porting Kit, etc.), you must configure a library override for <code className="bg-blue-900/50 px-1.5 py-0.5 rounded text-blue-100 font-mono text-xs">winhttp.dll</code>. This only needs to be done once per Wine prefix/bottle.</p>
                         </div>
                     </div>
 
                     <div className="space-y-4">
                         <h3 className="text-lg font-semibold text-white">Instructions:</h3>
                         <ol className="list-decimal list-inside space-y-3 text-gray-300 text-sm">
-                            <li>Open <strong>CrossOver</strong> and select your bottle (e.g., "Steam")</li>
-                            <li>In the right sidebar, click on <strong>"Wine Configuration"</strong></li>
+                            <li>Open your Wine wrapper (<strong>CrossOver, Wineskin, Whisky, Porting Kit</strong>, etc.)</li>
+                            <li>Locate and open the <strong>"Wine Configuration"</strong> (winecfg) for your bottle/prefix</li>
                             <li>Go to the <strong>"Libraries"</strong> tab</li>
                             <li>In "New override for library", type or select <strong>winhttp</strong></li>
                             <li>Click <strong>"Add"</strong></li>
-                            <li>Click <strong>"Apply"</strong> and then "OK"</li>
-                            <li className="text-white font-bold bg-blue-900/30 px-2 py-0.5 rounded mt-2 border border-blue-500/30">Finally, launch the game via Steam!</li>
+                            <li>Click <strong>"Apply"</strong> and then <strong>"OK"</strong></li>
+                            <li className="text-white font-bold bg-blue-900/30 px-2 py-0.5 rounded mt-2 border border-blue-500/30">Finally, launch the game!</li>
                         </ol>
                     </div>
 
                     <div className="rounded-xl overflow-hidden border border-gray-700 shadow-lg bg-black">
                         <img
                             src="https://i.ibb.co/hFnfqV1q/tut.gif"
-                            alt="CrossOver Configuration Tutorial"
+                            alt="Wine Configuration Tutorial"
                             className="w-full h-auto"
                         />
                     </div>

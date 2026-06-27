@@ -1364,29 +1364,64 @@ fn normalize_regular_mod_entry(
 
     match first.as_str() {
         "bepinex" => {
-            let mut root = std::path::PathBuf::from("BepInEx");
-            for part in &remainder {
-                root.push(part);
+            if remainder.is_empty() {
+                return Some(std::path::PathBuf::from("BepInEx"));
             }
-            return Some(root);
+            let sub_route = remainder[0].to_lowercase();
+            let sub_remainder = remainder.iter().skip(1).cloned().collect::<Vec<_>>();
+            match sub_route.as_str() {
+                "plugins" | "patchers" | "core" | "monomod" => {
+                    let mut root = std::path::PathBuf::from("BepInEx");
+                    root.push(&sub_route);
+                    root.push(mod_name);
+                    for part in &sub_remainder {
+                        root.push(part);
+                    }
+                    Some(root)
+                }
+                "config" => {
+                    let mut root = std::path::PathBuf::from("BepInEx");
+                    root.push("config");
+                    for part in &sub_remainder {
+                        root.push(part);
+                    }
+                    Some(root)
+                }
+                _ => {
+                    let mut root = std::path::PathBuf::from("BepInEx");
+                    for part in &remainder {
+                        root.push(part);
+                    }
+                    Some(root)
+                }
+            }
         }
-        "plugins" | "patchers" | "core" | "config" | "monomod" => {
+        "plugins" | "patchers" | "core" | "monomod" => {
             let mut root = std::path::PathBuf::from("BepInEx");
             root.push(&first);
+            root.push(mod_name);
             for part in &remainder {
                 root.push(part);
             }
-            return Some(root);
+            Some(root)
+        }
+        "config" => {
+            let mut root = std::path::PathBuf::from("BepInEx");
+            root.push("config");
+            for part in &remainder {
+                root.push(part);
+            }
+            Some(root)
         }
         "doorstop_libs" => {
             let mut root = std::path::PathBuf::from("doorstop_libs");
             for part in &remainder {
                 root.push(part);
             }
-            return Some(root);
+            Some(root)
         }
-        "doorstop_config.ini" | "libdoorstop.dylib" | "run_bepinex.sh" => {
-            return Some(std::path::PathBuf::from(&normalized[0]));
+        "doorstop_config.ini" | "libdoorstop.dylib" | "run_bepinex.sh" | "winhttp.dll" => {
+            Some(std::path::PathBuf::from(&normalized[0]))
         }
         _ => {
             let mut fallback = std::path::PathBuf::from("BepInEx");
@@ -5849,5 +5884,34 @@ mod tests {
         assert_eq!(decompressed.chunks.len(), 1);
         assert_eq!(decompressed.chunks[0].url, "http://example.com/chunk1.json");
         assert_eq!(decompressed.chunks[0].packages[0].name, "TestMod");
+    }
+
+    #[test]
+    fn test_normalize_regular_mod_entry() {
+        let mod_name = "Wolfo-WolfoQualityOfLife-5.1.11";
+
+        // 1. Fallback (no anchor): WolfoQoL_Client.dll -> BepInEx/plugins/<mod_name>/WolfoQoL_Client.dll
+        let res = normalize_regular_mod_entry(std::path::Path::new("WolfoQoL_Client.dll"), mod_name).unwrap();
+        assert_eq!(res, std::path::PathBuf::from("BepInEx/plugins/Wolfo-WolfoQualityOfLife-5.1.11/WolfoQoL_Client.dll"));
+
+        // 2. plugins anchor (subdir): plugins/WolfoQoL/AssetBundles/file -> BepInEx/plugins/<mod_name>/WolfoQoL/AssetBundles/file
+        let res = normalize_regular_mod_entry(std::path::Path::new("plugins/WolfoQoL/AssetBundles/file"), mod_name).unwrap();
+        assert_eq!(res, std::path::PathBuf::from("BepInEx/plugins/Wolfo-WolfoQualityOfLife-5.1.11/WolfoQoL/AssetBundles/file"));
+
+        // 3. BepInEx/plugins anchor (subdir): BepInEx/plugins/SomeFolder/SomeDll.dll -> BepInEx/plugins/<mod_name>/SomeFolder/SomeDll.dll
+        let res = normalize_regular_mod_entry(std::path::Path::new("BepInEx/plugins/SomeFolder/SomeDll.dll"), mod_name).unwrap();
+        assert_eq!(res, std::path::PathBuf::from("BepInEx/plugins/Wolfo-WolfoQualityOfLife-5.1.11/SomeFolder/SomeDll.dll"));
+
+        // 4. BepInEx/config anchor (none): BepInEx/config/SomeMod.cfg -> BepInEx/config/SomeMod.cfg (NO mod_name!)
+        let res = normalize_regular_mod_entry(std::path::Path::new("BepInEx/config/SomeMod.cfg"), mod_name).unwrap();
+        assert_eq!(res, std::path::PathBuf::from("BepInEx/config/SomeMod.cfg"));
+
+        // 5. config anchor (none): config/SomeMod.cfg -> BepInEx/config/SomeMod.cfg (NO mod_name!)
+        let res = normalize_regular_mod_entry(std::path::Path::new("config/SomeMod.cfg"), mod_name).unwrap();
+        assert_eq!(res, std::path::PathBuf::from("BepInEx/config/SomeMod.cfg"));
+
+        // 6. loader file anchor: doorstop_config.ini -> doorstop_config.ini directly at root
+        let res = normalize_regular_mod_entry(std::path::Path::new("doorstop_config.ini"), mod_name).unwrap();
+        assert_eq!(res, std::path::PathBuf::from("doorstop_config.ini"));
     }
 }

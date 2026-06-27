@@ -455,8 +455,7 @@ export function useGameSync({
             }
 
             const syncedProfile = useProfileStore.getState().profiles.find(p => p.id === activeProfileId);
-            const isCrossOverProfile = typeof gamePath === 'string' && gamePath.toLowerCase().includes('crossover');
-            if (syncedProfile?.platform !== 'mac' && isCrossOverProfile) {
+            if (syncedProfile?.platform !== 'mac' && gamePath) {
                 setShowCrossOverGuide(true);
             }
 
