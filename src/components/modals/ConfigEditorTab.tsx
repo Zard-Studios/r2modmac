@@ -307,15 +307,41 @@ function buildTree(
     files: ConfigFileInfo[],
     mods: Array<{ fullName: string; iconUrl?: string; displayName?: string }>,
     search: string,
+    filterTarget: 'both' | 'files' | 'settings',
+    fileTypeFilters: Set<string>,
+    fileSettingsCache: Record<string, string[]>
 ): TreeNode[] {
     const lowSearch = search.toLowerCase();
 
-    // Filter by search
-    const filtered = files.filter((f) =>
-        !lowSearch ||
-        f.name.toLowerCase().includes(lowSearch) ||
-        f.relative_path.toLowerCase().includes(lowSearch)
-    );
+    // 1. Filter by file type first
+    let filtered = files;
+    if (fileTypeFilters.size > 0) {
+        filtered = files.filter(f => {
+            const ext = f.name.split('.').pop()?.toLowerCase() ?? '';
+            if (fileTypeFilters.has('cfg') && ext === 'cfg') return true;
+            if (fileTypeFilters.has('json') && ext === 'json') return true;
+            if (fileTypeFilters.has('text') && ['txt', 'md', 'log'].includes(ext)) return true;
+            return false;
+        });
+    }
+
+    // 2. Filter by search query based on target
+    if (lowSearch) {
+        filtered = filtered.filter((f) => {
+            const matchesName = f.name.toLowerCase().includes(lowSearch) || f.relative_path.toLowerCase().includes(lowSearch);
+            
+            const keys = fileSettingsCache[f.relative_path] || [];
+            const matchesSettings = keys.some(k => k.includes(lowSearch));
+
+            if (filterTarget === 'files') {
+                return matchesName;
+            } else if (filterTarget === 'settings') {
+                return matchesSettings;
+            } else { // 'both'
+                return matchesName || matchesSettings;
+            }
+        });
+    }
 
     // Root children map: key → TreeNode
     const rootMap = new Map<string, TreeNode>();
@@ -971,7 +997,13 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
     const [parsedCfg, setParsedCfg] = useState<ParsedCfg | null>(null);
     const [fileLoading, setFileLoading] = useState(false);
     const [forceRawView, setForceRawView] = useState(false);
-    const [settingsSearch, setSettingsSearch] = useState('');
+    
+    // Filter controls
+    const [filterTarget, setFilterTarget] = useState<'both' | 'files' | 'settings'>('both');
+    const [fileTypeFilters, setFileTypeFilters] = useState<Set<string>>(new Set());
+    const [isFilterOpen, setIsFilterOpen] = useState(false);
+    const [fileSettingsCache, setFileSettingsCache] = useState<Record<string, string[]>>({});
+    const filterPopoverRef = useRef<HTMLDivElement>(null);
 
     const [isDirty, setIsDirty] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
@@ -1050,7 +1082,18 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
     // Collapsed sections state
     const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
 
-    // Load file list on mount
+    // Filter popover click-outside handler
+    useEffect(() => {
+        function handleClickOutside(event: MouseEvent) {
+            if (filterPopoverRef.current && !filterPopoverRef.current.contains(event.target as Node)) {
+                setIsFilterOpen(false);
+            }
+        }
+        document.addEventListener("mousedown", handleClickOutside);
+        return () => document.removeEventListener("mousedown", handleClickOutside);
+    }, []);
+
+    // Load file list and pre-parse settings keys on mount / profile change
     useEffect(() => {
         let cancelled = false;
         const loadFiles = async () => {
@@ -1059,6 +1102,23 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
                 const result = await window.ipcRenderer.listProfileConfigFiles(profileId, gameIdentifier ?? undefined, platform ?? undefined);
                 if (!cancelled) {
                     setFiles(result);
+                    
+                    // Asynchronously load and cache settings keys for each .cfg file for unified search
+                    const cache: Record<string, string[]> = {};
+                    for (const f of result) {
+                        if (f.name.toLowerCase().endsWith('.cfg')) {
+                            try {
+                                const raw = await window.ipcRenderer.readProfileConfigFile(profileId, f.relative_path, f.root ?? undefined);
+                                const parsed = parseCfg(raw);
+                                cache[f.relative_path] = parsed.sections.flatMap(s => s.entries.map(e => e.key.toLowerCase()));
+                            } catch (e) {
+                                console.error('Failed to pre-parse file ' + f.relative_path, e);
+                            }
+                        }
+                    }
+                    if (!cancelled) {
+                        setFileSettingsCache(cache);
+                    }
                 }
             } catch (e) {
                 console.error('Failed to list config files', e);
@@ -1068,7 +1128,7 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
         };
         void loadFiles();
         return () => { cancelled = true; };
-    }, [profileId]);
+    }, [profileId, gameIdentifier, platform]);
 
     // Auto-format JSON content helper: pretty-prints valid JSON for display (never marks file dirty)
     const tryPrettyPrintJson = useCallback((raw: string, fileName: string): string => {
@@ -1190,6 +1250,20 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
             await window.ipcRenderer.writeProfileConfigFile(profileId, selectedFile.relative_path, currentContent, selectedFile.root ?? undefined);
             setRawContent(currentContent);
             setLineCountState(countLines(currentContent));
+            
+            // Update settings search cache for this file if it's a config
+            if (selectedFile.name.toLowerCase().endsWith('.cfg')) {
+                try {
+                    const parsed = parseCfg(currentContent);
+                    setFileSettingsCache(prev => ({
+                        ...prev,
+                        [selectedFile.relative_path]: parsed.sections.flatMap(s => s.entries.map(e => e.key.toLowerCase()))
+                    }));
+                } catch (e) {
+                    console.error('Failed to update cache on save', e);
+                }
+            }
+
             setIsDirty(false);
             setSaveStatus('saved');
         } catch (e) {
@@ -1446,8 +1520,8 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
     }, [jsonErrors]);
 
     const folderTree = useMemo(
-        () => buildTree(files, mods, search),
-        [files, mods, search]
+        () => buildTree(files, mods, search, filterTarget, fileTypeFilters, fileSettingsCache),
+        [files, mods, search, filterTarget, fileTypeFilters, fileSettingsCache]
     );
 
     const toggleFolder = useCallback((key: string) => {
@@ -1489,13 +1563,26 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
         );
     }
 
+    const isAnyFilterActive = () => {
+        return filterTarget !== 'both' || fileTypeFilters.size > 0;
+    };
+
+    const toggleFileTypeFilter = (type: string) => {
+        setFileTypeFilters((prev) => {
+            const next = new Set(prev);
+            if (next.has(type)) next.delete(type);
+            else next.add(type);
+            return next;
+        });
+    };
+
     return (
         <div className="flex gap-0 h-[520px] min-h-0">
         {/* ── File Explorer Panel ──────────────────────────────────────────── */}
             <div className="w-60 flex-shrink-0 border-r border-gray-700/80 flex flex-col bg-[#111827]/60">
-                {/* Search */}
-                <div className="p-2 border-b border-gray-700/80 flex-shrink-0">
-                    <div className="relative">
+                {/* Search & Filter */}
+                <div className="p-2 border-b border-gray-700/80 flex-shrink-0 flex gap-1.5 items-center">
+                    <div className="relative flex-1">
                         <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-500 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                         </svg>
@@ -1504,9 +1591,92 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
                             type="text"
                             value={search}
                             onChange={(e) => setSearch(e.target.value)}
-                            placeholder="Search files…"
-                            className="w-full pl-8 pr-2 py-1.5 bg-gray-800/70 border border-gray-700/70 rounded-md text-xs text-white placeholder-gray-500 focus:outline-none focus:border-blue-500/70 focus:bg-gray-800"
+                            placeholder={filterTarget === 'files' ? "Search files…" : filterTarget === 'settings' ? "Search settings…" : "Search files & settings…"}
+                            className="w-full pl-8 pr-6 py-1.5 bg-gray-800/70 border border-gray-700/70 rounded-md text-[11px] text-white placeholder-gray-500 focus:outline-none focus:border-blue-500/70 focus:bg-gray-800"
                         />
+                        {search && (
+                            <button
+                                onClick={() => setSearch('')}
+                                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300"
+                            >
+                                <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                            </button>
+                        )}
+                    </div>
+                    {/* Filter Popover Button */}
+                    <div className="relative" ref={filterPopoverRef}>
+                        <button
+                            onClick={() => setIsFilterOpen(!isFilterOpen)}
+                            title="Filter Options"
+                            className={`flex items-center justify-center p-1.5 rounded-md border text-xs transition-colors flex-shrink-0 ${
+                                isFilterOpen || isAnyFilterActive()
+                                    ? 'bg-blue-600 border-blue-500 text-white shadow-sm'
+                                    : 'bg-gray-800 border-gray-700/70 text-gray-400 hover:text-white hover:bg-gray-700'
+                            }`}
+                        >
+                            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
+                            </svg>
+                        </button>
+                        
+                        {/* Popover Dropdown */}
+                        {isFilterOpen && (
+                            <div className="absolute top-full mt-1.5 left-0 w-44 bg-gray-800 border border-gray-700 rounded-lg shadow-xl z-50 p-2 text-xs text-gray-300 space-y-2">
+                                {/* Search Target */}
+                                <div>
+                                    <span className="block text-[9px] uppercase font-bold text-gray-500 mb-1 px-1 tracking-wider">Search Target</span>
+                                    <button
+                                        onClick={() => setFilterTarget('both')}
+                                        className={`w-full text-left px-2 py-1 rounded flex items-center justify-between hover:bg-gray-700/60 ${filterTarget === 'both' ? 'text-blue-400 font-semibold' : ''}`}
+                                    >
+                                        Files & Settings
+                                        {filterTarget === 'both' && <span className="text-[10px]">●</span>}
+                                    </button>
+                                    <button
+                                        onClick={() => setFilterTarget('files')}
+                                        className={`w-full text-left px-2 py-1 rounded flex items-center justify-between hover:bg-gray-700/60 ${filterTarget === 'files' ? 'text-blue-400 font-semibold' : ''}`}
+                                    >
+                                        Files Only
+                                        {filterTarget === 'files' && <span className="text-[10px]">●</span>}
+                                    </button>
+                                    <button
+                                        onClick={() => setFilterTarget('settings')}
+                                        className={`w-full text-left px-2 py-1 rounded flex items-center justify-between hover:bg-gray-700/60 ${filterTarget === 'settings' ? 'text-blue-400 font-semibold' : ''}`}
+                                    >
+                                        Settings Only
+                                        {filterTarget === 'settings' && <span className="text-[10px]">●</span>}
+                                    </button>
+                                </div>
+                                <div className="h-px bg-gray-700" />
+                                {/* File Type Filters */}
+                                <div>
+                                    <span className="block text-[9px] uppercase font-bold text-gray-500 mb-1 px-1 tracking-wider">File Type</span>
+                                    <button
+                                        onClick={() => toggleFileTypeFilter('cfg')}
+                                        className={`w-full text-left px-2 py-1 rounded flex items-center justify-between hover:bg-gray-700/60 ${fileTypeFilters.has('cfg') ? 'text-blue-400 font-semibold' : ''}`}
+                                    >
+                                        Only Configs (.cfg)
+                                        {fileTypeFilters.has('cfg') && <span className="text-[10px]">✔</span>}
+                                    </button>
+                                    <button
+                                        onClick={() => toggleFileTypeFilter('json')}
+                                        className={`w-full text-left px-2 py-1 rounded flex items-center justify-between hover:bg-gray-700/60 ${fileTypeFilters.has('json') ? 'text-blue-400 font-semibold' : ''}`}
+                                    >
+                                        Only JSON (.json)
+                                        {fileTypeFilters.has('json') && <span className="text-[10px]">✔</span>}
+                                    </button>
+                                    <button
+                                        onClick={() => toggleFileTypeFilter('text')}
+                                        className={`w-full text-left px-2 py-1 rounded flex items-center justify-between hover:bg-gray-700/60 ${fileTypeFilters.has('text') ? 'text-blue-400 font-semibold' : ''}`}
+                                    >
+                                        Only Texts (.txt, .md)
+                                        {fileTypeFilters.has('text') && <span className="text-[10px]">✔</span>}
+                                    </button>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </div>
 
@@ -1567,30 +1737,6 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
                                 <p className="text-[10px] text-gray-500 truncate">{selectedFile.relative_path}</p>
                             </div>
                             <div className="flex items-center gap-2 flex-shrink-0 ml-3">
-                                {parsedCfg && !forceRawView && (
-                                    <div className="relative mr-2 w-44">
-                                        <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-500 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                                        </svg>
-                                        <input
-                                            type="text"
-                                            value={settingsSearch}
-                                            onChange={(e) => setSettingsSearch(e.target.value)}
-                                            placeholder="Search settings..."
-                                            className="w-full pl-8 pr-6 py-1 bg-gray-800 border border-gray-700 rounded-md text-xs text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 focus:bg-gray-800"
-                                        />
-                                        {settingsSearch && (
-                                            <button
-                                                onClick={() => setSettingsSearch('')}
-                                                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300"
-                                            >
-                                                <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                                                </svg>
-                                            </button>
-                                        )}
-                                    </div>
-                                )}
                                 {saveStatus === 'saved' && (
                                     <span className="text-xs text-green-400 flex items-center gap-1">
                                         <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 20 20">
@@ -1786,7 +1932,8 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
                             ) : (parsedCfg && !forceRawView) ? (
                                 /* ── Structured .cfg editor ────────────────────── */
                                 (() => {
-                                    const query = settingsSearch.trim().toLowerCase();
+                                    const editorSearchQuery = (filterTarget === 'both' || filterTarget === 'settings') ? search : '';
+                                    const query = editorSearchQuery.trim().toLowerCase();
                                     const filteredSections = parsedCfg.sections.map((section, si) => {
                                         const matchingEntries = section.entries.map((entry, ei) => ({
                                             ...entry,
@@ -1805,7 +1952,7 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
                                         <div className="p-4 space-y-4">
                                             {filteredSections.length === 0 ? (
                                                 <p className="text-gray-500 text-sm text-center py-6">
-                                                    {settingsSearch ? 'No matching settings found.' : 'No settings in this file.'}
+                                                    {editorSearchQuery ? 'No matching settings found.' : 'No settings in this file.'}
                                                 </p>
                                             ) : (
                                                 filteredSections.map((section) => (
@@ -1842,7 +1989,7 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
                                                                     <EntryEditor
                                                                         key={entry.key}
                                                                         entry={entry}
-                                                                        searchQuery={settingsSearch}
+                                                                        searchQuery={editorSearchQuery}
                                                                         onChange={(v) => handleEntryChange(section.originalSectionIdx, entry.originalEntryIdx, v)}
                                                                     />
                                                                 ))}
