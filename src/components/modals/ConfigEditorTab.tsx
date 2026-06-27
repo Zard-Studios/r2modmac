@@ -1155,7 +1155,6 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
         setSaveStatus('idle');
         setCollapsedSections(new Set());
         setForceRawView(false);
-        setSettingsSearch('');
         historyRef.current = { undo: [], redo: [] };
         try {
             const raw = await window.ipcRenderer.readProfileConfigFile(profileId, file.relative_path, file.root ?? undefined);
@@ -1195,7 +1194,7 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
     }, [loadFile, isDirty]);
 
     // Update raw content when structured editor changes
-    const handleEntryChange = useCallback((sectionIdx: number, entryIdx: number, newValue: string) => {
+    const handleEntryChangeByKey = useCallback((sectionName: string, entryKey: string, newValue: string) => {
         // Save current raw content to undo stack before updating
         const currentContent = rawContent;
         const undoStack = historyRef.current.undo;
@@ -1207,11 +1206,11 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
         setParsedCfg((prev) => {
             if (!prev) return prev;
             const next: ParsedCfg = {
-                sections: prev.sections.map((s, si) =>
-                    si !== sectionIdx ? s : {
+                sections: prev.sections.map((s) =>
+                    s.name !== sectionName ? s : {
                         ...s,
-                        entries: s.entries.map((e, ei) =>
-                            ei !== entryIdx ? e : { ...e, value: newValue }
+                        entries: s.entries.map((e) =>
+                            e.key !== entryKey ? e : { ...e, value: newValue }
                         ),
                     }
                 ),
@@ -1518,6 +1517,22 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
     const errorLineNumbers = useMemo(() => {
         return new Set(jsonErrors.map((e) => e.line));
     }, [jsonErrors]);
+
+    const editorSearchQuery = (filterTarget === 'both' || filterTarget === 'settings') ? search : '';
+
+    const filteredSections = useMemo(() => {
+        if (!parsedCfg) return [];
+        const query = editorSearchQuery.trim().toLowerCase();
+        return parsedCfg.sections.map((section) => {
+            const matchingEntries = section.entries.filter(entry => 
+                entry.key.toLowerCase().includes(query)
+            );
+            return {
+                ...section,
+                entries: matchingEntries
+            };
+        }).filter(section => section.entries.length > 0);
+    }, [parsedCfg, editorSearchQuery]);
 
     const folderTree = useMemo(
         () => buildTree(files, mods, search, filterTarget, fileTypeFilters, fileSettingsCache),
@@ -1931,76 +1946,56 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
                                 </div>
                             ) : (parsedCfg && !forceRawView) ? (
                                 /* ── Structured .cfg editor ────────────────────── */
-                                (() => {
-                                    const editorSearchQuery = (filterTarget === 'both' || filterTarget === 'settings') ? search : '';
-                                    const query = editorSearchQuery.trim().toLowerCase();
-                                    const filteredSections = parsedCfg.sections.map((section, si) => {
-                                        const matchingEntries = section.entries.map((entry, ei) => ({
-                                            ...entry,
-                                            originalEntryIdx: ei
-                                        })).filter(entry => 
-                                            entry.key.toLowerCase().includes(query)
-                                        );
-                                        return {
-                                            ...section,
-                                            entries: matchingEntries,
-                                            originalSectionIdx: si
-                                        };
-                                    }).filter(section => section.entries.length > 0);
-
-                                    return (
-                                        <div className="p-4 space-y-4">
-                                            {filteredSections.length === 0 ? (
-                                                <p className="text-gray-500 text-sm text-center py-6">
-                                                    {editorSearchQuery ? 'No matching settings found.' : 'No settings in this file.'}
-                                                </p>
-                                            ) : (
-                                                filteredSections.map((section) => (
-                                                    <div key={section.name} className="rounded-xl border border-gray-700 overflow-hidden">
-                                                        {/* Section Header */}
-                                                        <button
-                                                            className="w-full flex items-center justify-between px-4 py-2.5 bg-gray-800 hover:bg-gray-750 transition-colors text-left"
-                                                            onClick={() => toggleSection(section.name)}
+                                <div className="p-4 space-y-4">
+                                    {filteredSections.length === 0 ? (
+                                        <p className="text-gray-500 text-sm text-center py-6">
+                                            {editorSearchQuery ? 'No matching settings found.' : 'No settings in this file.'}
+                                        </p>
+                                    ) : (
+                                        filteredSections.map((section) => (
+                                            <div key={section.name} className="rounded-xl border border-gray-700 overflow-hidden">
+                                                {/* Section Header */}
+                                                <button
+                                                    className="w-full flex items-center justify-between px-4 py-2.5 bg-gray-800 hover:bg-gray-750 transition-colors text-left"
+                                                    onClick={() => toggleSection(section.name)}
+                                                >
+                                                    <span className="text-sm font-bold text-gray-200">
+                                                        {section.name || "Global Settings"}
+                                                    </span>
+                                                    <span className="flex items-center gap-2">
+                                                        <span className="text-xs text-gray-500">
+                                                            {section.entries.length} {section.entries.length === 1 ? 'setting' : 'settings'}
+                                                        </span>
+                                                        <svg
+                                                            className={`h-4 w-4 text-gray-500 transition-transform ${
+                                                                collapsedSections.has(section.name) ? '-rotate-90' : ''
+                                                            }`}
+                                                            fill="none"
+                                                            stroke="currentColor"
+                                                            viewBox="0 0 24 24"
                                                         >
-                                                            <span className="text-sm font-bold text-gray-200">
-                                                                {section.name || "Global Settings"}
-                                                            </span>
-                                                            <span className="flex items-center gap-2">
-                                                                <span className="text-xs text-gray-500">
-                                                                    {section.entries.length} {section.entries.length === 1 ? 'setting' : 'settings'}
-                                                                </span>
-                                                                <svg
-                                                                    className={`h-4 w-4 text-gray-500 transition-transform ${
-                                                                        collapsedSections.has(section.name) ? '-rotate-90' : ''
-                                                                    }`}
-                                                                    fill="none"
-                                                                    stroke="currentColor"
-                                                                    viewBox="0 0 24 24"
-                                                                >
-                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                                                                </svg>
-                                                            </span>
-                                                        </button>
+                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                                        </svg>
+                                                    </span>
+                                                </button>
 
-                                                        {/* Section Entries */}
-                                                        {!collapsedSections.has(section.name) && (
-                                                            <div className="px-4 bg-gray-900">
-                                                                {section.entries.map((entry) => (
-                                                                    <EntryEditor
-                                                                        key={entry.key}
-                                                                        entry={entry}
-                                                                        searchQuery={editorSearchQuery}
-                                                                        onChange={(v) => handleEntryChange(section.originalSectionIdx, entry.originalEntryIdx, v)}
-                                                                    />
-                                                                ))}
-                                                            </div>
-                                                        )}
+                                                {/* Section Entries */}
+                                                {!collapsedSections.has(section.name) && (
+                                                    <div className="px-4 bg-gray-900">
+                                                        {section.entries.map((entry) => (
+                                                            <EntryEditor
+                                                                key={entry.key}
+                                                                entry={entry}
+                                                                searchQuery={editorSearchQuery}
+                                                                onChange={(v) => handleEntryChangeByKey(section.name, entry.key, v)}
+                                                            />
+                                                        ))}
                                                     </div>
-                                                ))
-                                            )}
-                                        </div>
-                                    );
-                                })()
+                                                )}
+                                            </div>
+                                        ))
+                                    )}
+                                </div>
                             ) : (
                                 /* ── Raw text editor ───────────────────────────── */
                                 <div className="h-full flex flex-col min-h-0 bg-gray-950 border border-gray-700 overflow-hidden">
