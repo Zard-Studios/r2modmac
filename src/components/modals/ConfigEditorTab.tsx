@@ -103,13 +103,24 @@ function parseCfg(raw: string): ParsedCfg {
     let currentSection: CfgSection | null = null;
     let sectionLines: string[] = [];
 
+    const flushSection = () => {
+        if (sectionLines.length > 0) {
+            const entries = parseConfigEntries(sectionLines);
+            if (entries.length > 0) {
+                if (!currentSection) {
+                    currentSection = { name: "", entries };
+                    sections.push(currentSection);
+                } else {
+                    currentSection.entries = entries;
+                }
+            }
+            sectionLines = [];
+        }
+    };
+
     for (const line of lines) {
         if (line.trim().startsWith('[') && line.trim().endsWith(']')) {
-            // Flush previous section entries
-            if (currentSection) {
-                currentSection.entries = parseConfigEntries(sectionLines);
-                sectionLines = [];
-            }
+            flushSection();
             const name = line.trim().slice(1, -1).trim();
             currentSection = { name, entries: [] };
             sections.push(currentSection);
@@ -117,10 +128,7 @@ function parseCfg(raw: string): ParsedCfg {
             sectionLines.push(line.trim());
         }
     }
-    // Flush last section
-    if (currentSection) {
-        currentSection.entries = parseConfigEntries(sectionLines);
-    }
+    flushSection();
 
     return { sections };
 }
@@ -1672,7 +1680,7 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
                                                     onClick={() => toggleSection(section.name)}
                                                 >
                                                     <span className="text-sm font-bold text-gray-200">
-                                                        {section.name}
+                                                        {section.name || "Global Settings"}
                                                     </span>
                                                     <span className="flex items-center gap-2">
                                                         <span className="text-xs text-gray-500">
