@@ -238,8 +238,12 @@ export function SettingsModal({ isOpen, onClose, selectedGame, activeProfile }: 
     const modalWidth = activeTab === 'config-editor' ? 'max-w-4xl w-full' : 'max-w-md w-full';
 
     return (
-        <div className={`fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 transition-opacity duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] ${isVisible ? 'opacity-100' : 'opacity-0'}`}>
+        <div
+            onClick={onClose}
+            className={`fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 transition-opacity duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] ${isVisible ? 'opacity-100' : 'opacity-0'}`}
+        >
             <div
+                onClick={(e) => e.stopPropagation()}
                 className={`bg-gray-900 border border-gray-700 rounded-xl shadow-2xl ${modalWidth} transform transition-all duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] ${isVisible ? 'scale-100 translate-y-0' : 'scale-95 translate-y-4'}`}
                 style={{ transitionProperty: 'max-width, width, transform, opacity' }}
             >
