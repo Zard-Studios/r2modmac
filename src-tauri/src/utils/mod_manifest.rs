@@ -375,14 +375,16 @@ fn best_effort_remove_generated_entries(
         return Ok(0);
     }
 
+    // NOTE: BepInEx/config (and top-level config/) is intentionally NOT scanned.
+    // Config files are user data: deleting them via fuzzy term-matching caused
+    // bundled/runtime config loss on sync (see GitHub issue #16). This mirrors
+    // BepInEx/r2modman behavior where configs survive mod uninstall.
     let known_roots = [
-        target_root.join("BepInEx").join("config"),
         target_root.join("BepInEx").join("cache"),
         target_root.join("BepInEx").join("plugins"),
         target_root.join("BepInEx").join("patchers"),
         target_root.join("BepInEx").join("monomod"),
         target_root.join("BepInEx").join("Translation"),
-        target_root.join("config"),
         target_root.join("cache"),
         target_root.join("plugins"),
         target_root.join("patchers"),

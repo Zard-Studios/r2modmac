@@ -223,11 +223,15 @@ pub(super) fn cleanup_stale_generated_mod_artifacts(
         .flat_map(|label| derive_mod_match_terms(label))
         .collect::<std::collections::HashSet<_>>();
 
+    // NOTE: BepInEx/config (and top-level config/) is intentionally NOT scanned.
+    // Config files (including those bundled by a mod under a config subfolder,
+    // and those generated at runtime) are user data and must never be deleted by
+    // this fuzzy best-effort cleanup — deleting them caused config loss on sync
+    // (see GitHub issue #16). This also matches BepInEx/r2modman behavior, where
+    // configs survive mod uninstall. Only cache/Translation are cleaned here.
     let known_roots = [
-        game_path.join("BepInEx").join("config"),
         game_path.join("BepInEx").join("cache"),
         game_path.join("BepInEx").join("Translation"),
-        game_path.join("config"),
         game_path.join("cache"),
         game_path.join("Translation"),
     ];
