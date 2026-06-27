@@ -20,6 +20,10 @@ pub(crate) fn launch_windows_direct_game_with_working_dir(
     let process_patterns = build_windows_process_match_patterns(&executable_path);
 
     if is_process_running_for_patterns(&process_patterns) {
+        eprintln!(
+            "[launch_windows_direct_game] Blocked: 'already running'. Patterns: {:?}",
+            process_patterns
+        );
         return Err("Game is already running.".to_string());
     }
 
@@ -35,6 +39,15 @@ pub(crate) fn launch_windows_direct_game_with_working_dir(
             if let Some(bundle_path) =
                 find_macos_wineskin_launcher_binary(Some(prefix_root_path), &executable_path)
             {
+                // For Wineskin/PortingKit bundles, Wine renames all processes to `wine64`.
+                // The wineserver of the specific bundle is the reliable sentinel that the
+                // bundle (and therefore the game) has started. We use it for the post-
+                // launch wait, but NOT for the pre-launch check (to avoid false positives
+                // when Steam is already running inside the same bundle).
+                let wait_patterns =
+                    build_windows_wineskin_bundle_patterns(&executable_path)
+                        .unwrap_or_else(|| process_patterns.clone());
+
                 match launch_macos_wineskin_program(
                     &bundle_path,
                     prefix_root_path,
@@ -44,8 +57,10 @@ pub(crate) fn launch_windows_direct_game_with_working_dir(
                     "launch_windows_direct_game",
                 ) {
                     Ok(()) => {
-                        if !wait_for_process_start_patterns(&process_patterns, 20_000) {
-                            return Err("Game did not start in time.".to_string());
+                        if !wait_for_process_start_patterns(&wait_patterns, 30_000) {
+                            eprintln!(
+                                "[launch_windows_direct_game] Wineskin bundle started but game process not observed in time. Continuing optimistically."
+                            );
                         }
                         return Ok(());
                     }
@@ -131,6 +146,10 @@ pub(crate) fn launch_windows_steam_game(
     let process_patterns = build_windows_process_match_patterns(&executable_path);
 
     if is_process_running_for_patterns(&process_patterns) {
+        eprintln!(
+            "[launch_windows_steam_game] Blocked: 'already running'. Patterns: {:?}",
+            process_patterns
+        );
         return Err("Game is already running.".to_string());
     }
 
@@ -167,9 +186,9 @@ pub(crate) fn launch_windows_steam_game(
                     "launch_windows_steam_game",
                 ) {
                     Ok(()) => {
-                        if !wait_for_process_start_patterns(&process_patterns, 60_000) {
+                        if !wait_for_process_start_patterns(&process_patterns, 120_000) {
                             eprintln!(
-                                "[launch_windows_steam_game] Sikarugir accepted the launch request for app {}, but the game process was not observed in time. Continuing optimistically.",
+                                "[launch_windows_steam_game] Wineskin accepted the launch request for app {}, but the game process was not observed in time. Continuing optimistically.",
                                 app_id
                             );
                         }
@@ -177,13 +196,14 @@ pub(crate) fn launch_windows_steam_game(
                     }
                     Err(error) => {
                         eprintln!(
-                            "[launch_windows_steam_game] Sikarugir/Wineskin launch failed ({}); falling back to direct Wine.",
+                            "[launch_windows_steam_game] Wineskin launch failed ({}); falling back to direct Wine.",
                             error
                         );
                     }
                 }
             }
         }
+
 
         let runner_path = find_host_compat_runner_binary(prefix_root.as_deref(), &steam_executable)
 			.ok_or_else(|| {

@@ -226,5 +226,16 @@ pub(super) fn find_matching_steam_root_for_game_path(
         }
     }
 
+    if let Some(embedded_library_root) = find_embedded_steam_library_root_for_game_path(&canonical_game) {
+        if embedded_library_root.join("steam.exe").exists() {
+            return Some(embedded_library_root);
+        }
+        if let Some(parent) = embedded_library_root.parent() {
+            if parent.join("steam.exe").exists() {
+                return Some(parent.to_path_buf());
+            }
+        }
+    }
+
     None
 }

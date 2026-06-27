@@ -67,7 +67,17 @@ pub(crate) fn is_process_running_for_patterns(patterns: &[String]) -> bool {
         let candidates = process_text_candidates(process);
         candidates
             .iter()
-            .any(|candidate| compiled_patterns.iter().any(|re| re.is_match(candidate)))
+            .any(|candidate| compiled_patterns.iter().any(|re| {
+                if re.is_match(candidate) {
+                    eprintln!(
+                        "[is_process_running_for_patterns] sysinfo MATCHED. PID: {}, Name: {}, Pattern: {:?}, Candidate: {:?}",
+                        process.pid(), process.name().to_string_lossy(), re.as_str(), candidate
+                    );
+                    true
+                } else {
+                    false
+                }
+            }))
     });
 
     if matched_by_sysinfo {
@@ -91,17 +101,22 @@ pub(crate) fn is_process_running_for_patterns(patterns: &[String]) -> bool {
     // Use pgrep -f with the plain (regex-unescaped) pattern as a last resort.
     #[cfg(target_os = "macos")]
     {
+        use std::process::Command;
         for pattern in patterns {
             let plain = pattern.replace(r"\/", "/").replace(r"\.", ".");
-            let matched = std::process::Command::new("/usr/bin/pgrep")
-                .args(["-f", &plain])
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .status()
-                .map(|s| s.success())
-                .unwrap_or(false);
-            if matched {
-                return true;
+            let status = Command::new("pgrep")
+                .arg("-f")
+                .arg(&plain)
+                .output();
+            if let Ok(output) = status {
+                if output.status.success() {
+                    let matched_text = String::from_utf8_lossy(&output.stdout);
+                    eprintln!(
+                        "[is_process_running_for_patterns] Pattern {:?} MATCHED. pgrep output:\n{}",
+                        pattern, matched_text
+                    );
+                    return true;
+                }
             }
         }
     }
