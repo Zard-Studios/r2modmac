@@ -944,6 +944,7 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
     // Parsed cfg (only when isCfgFile)
     const [parsedCfg, setParsedCfg] = useState<ParsedCfg | null>(null);
     const [fileLoading, setFileLoading] = useState(false);
+    const [forceRawView, setForceRawView] = useState(false);
 
     const [isDirty, setIsDirty] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
@@ -1066,6 +1067,7 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
         setIsDirty(false);
         setSaveStatus('idle');
         setCollapsedSections(new Set());
+        setForceRawView(false);
         historyRef.current = { undo: [], redo: [] };
         try {
             const raw = await window.ipcRenderer.readProfileConfigFile(profileId, file.relative_path, file.root ?? undefined);
@@ -1150,7 +1152,8 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
 
     const handleSave = useCallback(async () => {
         if (!selectedFile || !isDirty) return;
-        const currentContent = (!parsedCfg && textareaRef.current)
+        const isEditingRaw = !parsedCfg || forceRawView;
+        const currentContent = (isEditingRaw && textareaRef.current)
             ? (streamMode ? uncensorPath(textareaRef.current.value, rawContent) : textareaRef.current.value)
             : rawContent;
 
@@ -1169,7 +1172,7 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
             if (saveStatusTimerRef.current) clearTimeout(saveStatusTimerRef.current);
             saveStatusTimerRef.current = setTimeout(() => setSaveStatus('idle'), 3000);
         }
-    }, [selectedFile, isDirty, rawContent, parsedCfg, profileId, streamMode, username]);
+    }, [selectedFile, isDirty, rawContent, parsedCfg, profileId, streamMode, username, forceRawView]);
 
     // ── Global keyboard shortcuts (work for ALL file types, not just textarea) ──
     useEffect(() => {
@@ -1547,7 +1550,7 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
                                 {saveStatus === 'error' && (
                                     <span className="text-xs text-red-400">Save failed</span>
                                 )}
-                                {!isLargeFile && !parsedCfg && (
+                                {!isLargeFile && (!parsedCfg || forceRawView) && (
                                     <>
                                         <button
                                             onClick={triggerUndo}
@@ -1589,6 +1592,35 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
                                         )}
                                         <div className="h-4 w-px bg-gray-700 mx-1" />
                                     </>
+                                )}
+                                {parsedCfg && (
+                                    <button
+                                        onClick={() => {
+                                            if (!forceRawView) {
+                                                if (textareaRef.current) {
+                                                    textareaRef.current.value = rawContent;
+                                                }
+                                                setForceRawView(true);
+                                            } else {
+                                                if (textareaRef.current) {
+                                                    const val = textareaRef.current.value;
+                                                    setRawContent(val);
+                                                    setParsedCfg(parseCfg(val));
+                                                }
+                                                setForceRawView(false);
+                                            }
+                                        }}
+                                        title={forceRawView ? "Switch to Structured Editor" : "Switch to Raw Text Editor"}
+                                        className={`text-xs p-1.5 rounded-lg transition-colors flex items-center justify-center ${
+                                            forceRawView
+                                                ? 'bg-blue-650/40 text-blue-400 border border-blue-500/40'
+                                                : 'text-gray-400 hover:text-white hover:bg-gray-700'
+                                        }`}
+                                    >
+                                        <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                                        </svg>
+                                    </button>
                                 )}
                                 <button
                                     onClick={async () => {
@@ -1699,7 +1731,7 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
                                         </button>
                                     </div>
                                 </div>
-                            ) : parsedCfg ? (
+                            ) : (parsedCfg && !forceRawView) ? (
                                 /* ── Structured .cfg editor ────────────────────── */
                                 <div className="p-4 space-y-4">
                                     {parsedCfg.sections.length === 0 ? (
