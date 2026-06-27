@@ -402,6 +402,9 @@ interface EntryEditorProps {
 }
 
 function EntryEditor({ entry, onChange }: EntryEditorProps) {
+    const [showAllOptions, setShowAllOptions] = useState(false);
+    const [showAllMeta, setShowAllMeta] = useState(false);
+
     const descriptionLines = entry.comments.filter((c) => c.isDescription);
     const metaLines = entry.comments.filter((c) => !c.isDescription);
 
@@ -468,17 +471,49 @@ function EntryEditor({ entry, onChange }: EntryEditorProps) {
             </div>
 
             {/* Acceptable values hint */}
-            {entry.displayType === 'single-select' && (
-                <p className="text-[10px] text-gray-500 mt-1 pl-0">
-                    Options:{' '}
-                    {getSelectOptions(entry).join(', ')}
-                </p>
-            )}
-            {metaLines.length > 0 && entry.displayType === 'text' && (
-                <p className="text-[10px] text-gray-500 mt-0.5">
-                    {metaLines.map((c) => c.displayValue).join(' · ')}
-                </p>
-            )}
+            {entry.displayType === 'single-select' && (() => {
+                const options = getSelectOptions(entry);
+                const optionsText = options.join(', ');
+                if (optionsText.length <= 160) {
+                    return (
+                        <p className="text-[10px] text-gray-500 mt-1 pl-0">
+                            Options: {optionsText}
+                        </p>
+                    );
+                }
+                return (
+                    <p className="text-[10px] text-gray-500 mt-1 pl-0">
+                        Options: {showAllOptions ? optionsText : optionsText.substring(0, 150) + '...'}{' '}
+                        <button
+                            onClick={() => setShowAllOptions(!showAllOptions)}
+                            className="text-blue-400 hover:text-blue-300 font-semibold underline ml-1 cursor-pointer"
+                        >
+                            {showAllOptions ? 'Show less' : 'Show all'}
+                        </button>
+                    </p>
+                );
+            })()}
+            {metaLines.length > 0 && entry.displayType === 'text' && (() => {
+                const metaText = metaLines.map((c) => c.displayValue).join(' · ');
+                if (metaText.length <= 160) {
+                    return (
+                        <p className="text-[10px] text-gray-500 mt-0.5">
+                            {metaText}
+                        </p>
+                    );
+                }
+                return (
+                    <p className="text-[10px] text-gray-500 mt-0.5">
+                        {showAllMeta ? metaText : metaText.substring(0, 150) + '...'}{' '}
+                        <button
+                            onClick={() => setShowAllMeta(!showAllMeta)}
+                            className="text-blue-400 hover:text-blue-300 font-semibold underline ml-1 cursor-pointer"
+                        >
+                            {showAllMeta ? 'Show less' : 'Show all'}
+                        </button>
+                    </p>
+                );
+            })()}
         </div>
     );
 }
