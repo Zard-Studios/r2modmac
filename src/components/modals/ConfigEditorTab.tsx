@@ -1110,7 +1110,10 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
                             try {
                                 const raw = await window.ipcRenderer.readProfileConfigFile(profileId, f.relative_path, f.root ?? undefined);
                                 const parsed = parseCfg(raw);
-                                cache[f.relative_path] = parsed.sections.flatMap(s => s.entries.map(e => e.key.toLowerCase()));
+                                cache[f.relative_path] = [
+                                    ...parsed.sections.map(s => s.name.toLowerCase()),
+                                    ...parsed.sections.flatMap(s => s.entries.map(e => e.key.toLowerCase()))
+                                ];
                             } catch (e) {
                                 console.error('Failed to pre-parse file ' + f.relative_path, e);
                             }
@@ -1256,7 +1259,10 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
                     const parsed = parseCfg(currentContent);
                     setFileSettingsCache(prev => ({
                         ...prev,
-                        [selectedFile.relative_path]: parsed.sections.flatMap(s => s.entries.map(e => e.key.toLowerCase()))
+                        [selectedFile.relative_path]: [
+                            ...parsed.sections.map(s => s.name.toLowerCase()),
+                            ...parsed.sections.flatMap(s => s.entries.map(e => e.key.toLowerCase()))
+                        ]
                     }));
                 } catch (e) {
                     console.error('Failed to update cache on save', e);
@@ -1523,15 +1529,20 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
     const filteredSections = useMemo(() => {
         if (!parsedCfg) return [];
         const query = editorSearchQuery.trim().toLowerCase();
+        if (!query) return parsedCfg.sections;
+
         return parsedCfg.sections.map((section) => {
-            const matchingEntries = section.entries.filter(entry => 
-                entry.key.toLowerCase().includes(query)
-            );
+            const matchesSectionName = section.name.toLowerCase().includes(query);
+            const matchingEntries = matchesSectionName
+                ? section.entries
+                : section.entries.filter(entry => 
+                    entry.key.toLowerCase().includes(query)
+                );
             return {
                 ...section,
                 entries: matchingEntries
             };
-        }).filter(section => section.entries.length > 0);
+        }).filter(section => section.entries.length > 0 || section.name.toLowerCase().includes(query));
     }, [parsedCfg, editorSearchQuery]);
 
     const folderTree = useMemo(
@@ -1960,7 +1971,9 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
                                                     onClick={() => toggleSection(section.name)}
                                                 >
                                                     <span className="text-sm font-bold text-gray-200">
-                                                        {section.name || "Global Settings"}
+                                                        {editorSearchQuery && section.name
+                                                            ? highlightText(section.name, editorSearchQuery)
+                                                            : (section.name || "Global Settings")}
                                                     </span>
                                                     <span className="flex items-center gap-2">
                                                         <span className="text-xs text-gray-500">
