@@ -2985,15 +2985,72 @@ pub async fn install_mod(
         .redirect(reqwest::redirect::Policy::limited(10))
         .build()
         .map_err(|e| e.to_string())?;
-    let response = client
-        .get(&download_url)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-    let status = response.status();
-    if !status.is_success() {
-        return Err(format!("Download failed with status {}", status));
+    let response;
+    let mut attempts = 0;
+    let max_attempts = 5;
+    let mut delay = std::time::Duration::from_millis(1000);
+
+    loop {
+        attempts += 1;
+        match client.get(&download_url).send().await {
+            Ok(resp) => {
+                let status = resp.status();
+                if status.is_success() {
+                    response = Some(resp);
+                    break;
+                }
+
+                if (status.is_server_error()
+                    || status == reqwest::StatusCode::TOO_MANY_REQUESTS
+                    || status == reqwest::StatusCode::FORBIDDEN)
+                    && attempts < max_attempts
+                {
+                    let mut wait_duration = delay;
+                    if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+                        if let Some(retry_after) = resp.headers().get(reqwest::header::RETRY_AFTER) {
+                            if let Ok(retry_str) = retry_after.to_str() {
+                                if let Ok(seconds) = retry_str.parse::<u64>() {
+                                    wait_duration = std::time::Duration::from_secs(seconds);
+                                    eprintln!(
+                                        "[install_mod] Rate limited (429) by server. Waiting {}s before retrying download for mod {}.",
+                                        seconds, mod_name
+                                    );
+                                }
+                            }
+                        }
+                    }
+
+                    eprintln!(
+                        "[install_mod] Download failed with status {} for mod {}. Retrying attempt {}/{} in {:?}",
+                        status, mod_name, attempts, max_attempts, wait_duration
+                    );
+
+                    tokio::time::sleep(wait_duration).await;
+                    delay *= 2;
+                } else {
+                    return Err(format!(
+                        "Download failed with status {} after {} attempts",
+                        status, attempts
+                    ));
+                }
+            }
+            Err(e) if attempts < max_attempts => {
+                eprintln!(
+                    "[install_mod] Network error {} for mod {}. Retrying attempt {}/{} in {:?}",
+                    e, mod_name, attempts, max_attempts, delay
+                );
+                tokio::time::sleep(delay).await;
+                delay *= 2;
+            }
+            Err(e) => {
+                return Err(format!(
+                    "Download failed: {} after {} attempts",
+                    e, attempts
+                ));
+            }
+        }
     }
+    let response = response.unwrap();
 
     let total_bytes = response.content_length();
     // Use the streaming body directly via chunk() instead of bytes_stream() so we
