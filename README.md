@@ -2,8 +2,6 @@
 
 <p align="center">
   <img alt="1024x1024@1x" src="https://github.com/user-attachments/assets/0069e8c1-79be-4edc-a235-7a351e0d5a49" />
-  <br>
-  <strong>A modern and native mod manager for macOS — supports Thunderstore games and Outer Wilds mods</strong>
   <br><br>
   <a href="https://github.com/Zard-Studios/r2modmac/releases">
     <img src="https://img.shields.io/github/v/release/Zard-Studios/r2modmac" alt="GitHub release">
