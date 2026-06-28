@@ -1153,29 +1153,39 @@ pub async fn check_update(current_version: String) -> Result<UpdateInfo, String>
     };
 
     let allowed_extensions = match os {
-        "windows" => vec![".exe"],
+        "windows" => vec![".zip"],
         "macos" => vec![".dmg", ".tar.gz", ".zip"],
         _ => vec![".tar.gz", ".zip"],
     };
 
-    // Find matching DMG/archive: prioritize exact arch match, fallback to universal/x64
+    // For macOS, also require the name to contain "macos" to avoid accidentally
+    // matching Windows .zip files that also contain an arch pattern.
+    let os_filter = match os {
+        "macos" => "macos",
+        "windows" => "windows",
+        _ => "",
+    };
+
+    // Find matching asset: must match OS, arch and extension.
     let asset = release
         .assets
         .iter()
         .find(|a| {
             let name = a.name.to_lowercase();
             let matches_ext = allowed_extensions.iter().any(|ext| name.ends_with(ext));
-            matches_ext && name.contains(arch_pattern)
+            let matches_os = os_filter.is_empty() || name.contains(os_filter);
+            matches_ext && matches_os && name.contains(arch_pattern)
         })
         .or_else(|| {
-            // Fallback to universal (on macOS) or x64 (on Windows) if exact arch not found
+            // Fallback: x64 on Windows, aarch64 on macOS
             release.assets.iter().find(|a| {
                 let name = a.name.to_lowercase();
                 let matches_ext = allowed_extensions.iter().any(|ext| name.ends_with(ext));
+                let matches_os = os_filter.is_empty() || name.contains(os_filter);
                 if os == "windows" {
-                    matches_ext && name.contains("x64")
+                    matches_ext && matches_os && name.contains("x64")
                 } else {
-                    matches_ext && name.contains("universal")
+                    matches_ext && matches_os && name.contains("aarch64")
                 }
             })
         });
@@ -1240,17 +1250,73 @@ pub async fn install_update(app: AppHandle, download_url: String) -> Result<(), 
 
     #[cfg(target_os = "windows")]
     {
-        // 2. Spawn Windows Installer
-        eprintln!("[install_update] Spawning Windows installer: {:?}", file_path);
-        Command::new(&file_path)
-            .spawn()
-            .map_err(|e| format!("Failed to launch installer: {}", e))?;
+        if filename.ends_with(".zip") {
+            // Extract r2modmac.exe from the zip using PowerShell
+            let new_exe_path = temp_dir.join("r2modmac.exe");
 
-        // 3. Exit App to allow installer to proceed
-        eprintln!("[install_update] Exiting app to allow update...");
-        app.exit(0);
+            eprintln!("[install_update] Extracting zip {:?} to {:?}", file_path, temp_dir);
 
-        Ok(())
+            let extract_output = Command::new("powershell")
+                .args([
+                    "-NoProfile",
+                    "-Command",
+                    &format!(
+                        "Expand-Archive -LiteralPath '{}' -DestinationPath '{}' -Force",
+                        file_path.to_string_lossy(),
+                        temp_dir.to_string_lossy()
+                    ),
+                ])
+                .output()
+                .map_err(|e| format!("Failed to extract zip: {}", e))?;
+
+            if !extract_output.status.success() {
+                return Err(format!(
+                    "Zip extraction failed: {}",
+                    String::from_utf8_lossy(&extract_output.stderr)
+                ));
+            }
+
+            if !new_exe_path.exists() {
+                return Err(format!(
+                    "r2modmac.exe not found in extracted zip at {:?}",
+                    new_exe_path
+                ));
+            }
+
+            let current_exe = std::env::current_exe().map_err(|e| e.to_string())?;
+
+            // Write a batch script: wait for app to exit, replace binary, relaunch.
+            let bat_path = temp_dir.join("r2modmac_updater.bat");
+            let bat_content = format!(
+                "@echo off\r\n\
+                ping 127.0.0.1 -n 3 >nul\r\n\
+                move /y \"{new_exe}\" \"{cur_exe}\"\r\n\
+                start \"\" \"{cur_exe}\"\r\n\
+                del \"%~f0\"\r\n",
+                new_exe = new_exe_path.to_string_lossy(),
+                cur_exe = current_exe.to_string_lossy()
+            );
+
+            fs::write(&bat_path, bat_content).map_err(|e| e.to_string())?;
+
+            eprintln!("[install_update] Launching updater batch script: {:?}", bat_path);
+            Command::new("cmd")
+                .args(["/c", bat_path.to_str().unwrap_or("")])
+                .spawn()
+                .map_err(|e| format!("Failed to launch updater script: {}", e))?;
+
+            eprintln!("[install_update] Exiting app to allow update...");
+            app.exit(0);
+            Ok(())
+        } else {
+            // Legacy: run as a direct installer (.exe)
+            eprintln!("[install_update] Spawning Windows installer: {:?}", file_path);
+            Command::new(&file_path)
+                .spawn()
+                .map_err(|e| format!("Failed to launch installer: {}", e))?;
+            app.exit(0);
+            Ok(())
+        }
     }
 
     #[cfg(not(target_os = "windows"))]
