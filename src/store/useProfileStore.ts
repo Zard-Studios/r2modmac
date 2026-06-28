@@ -231,6 +231,8 @@ export const useProfileStore = create<ProfileState>((set) => ({
         const profile = state.profiles[profileIndex];
         const mod = profile.mods.find(m => m.uuid4 === modId);
 
+        const wasSynced = mod ? mod.synced_enabled !== undefined : false;
+
         if (mod) {
             try {
                 const modName = mod.fullName.split('-').slice(0, 2).join('-');
@@ -252,9 +254,14 @@ export const useProfileStore = create<ProfileState>((set) => ({
             const profile = { ...updatedProfiles[profileIndex] };
 
             profile.mods = profile.mods.filter(m => m.uuid4 !== modId);
-            // Removal cannot be represented by per-mod pending markers after deletion,
-            // so keep profile-level pending sync true.
-            profile.needs_sync = true;
+            
+            // Check if there are other mods in the profile that still need sync
+            const otherModsNeedSync = profile.mods.some(m => m.pending_sync);
+            
+            // Only set needs_sync to true if the deleted mod was previously synced, 
+            // or if other remaining mods in the profile need to be synced.
+            profile.needs_sync = wasSynced || otherModsNeedSync;
+
             updatedProfiles[profileIndex] = profile;
             debouncedSaveProfiles(updatedProfiles);
 
