@@ -113,7 +113,7 @@ jobs:
             --hide-extension "r2modmac.app" \
             --app-drop-link 600 185 \
             --icon "UNVERIFIED_APP_INSTRUCTIONS.txt" 400 350 \
-            "r2modmac_${{ matrix.settings.arch }}.dmg" \
+            "r2modmac_macos_${{ matrix.settings.arch }}.dmg" \
             "dmg_root"
 
       - name: Package Windows Binary
@@ -121,15 +121,15 @@ jobs:
         shell: bash
         run: |
           cd src-tauri/target/${{ matrix.settings.rust-target }}/release
-          7z a ../../../../r2modmac_${{ matrix.settings.arch }}.zip r2modmac.exe
+          7z a ../../../../r2modmac_windows_${{ matrix.settings.arch }}.zip r2modmac.exe
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: build-${{ matrix.settings.arch }}
           path: |
-            r2modmac_${{ matrix.settings.arch }}.dmg
-            r2modmac_${{ matrix.settings.arch }}.zip
+            r2modmac_macos_${{ matrix.settings.arch }}.dmg
+            r2modmac_windows_${{ matrix.settings.arch }}.zip
           if-no-files-found: ignore
           retention-days: 1
 
