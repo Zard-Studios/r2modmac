@@ -97,7 +97,7 @@ jobs:
 
       - name: Build Tauri app (Windows)
         if: matrix.settings.platform == 'windows-latest'
-        run: npm run tauri build -- --target ${{ matrix.settings.rust-target }} --bundles nsis
+        run: npm run tauri build -- --target ${{ matrix.settings.rust-target }} --no-bundle
 
       - name: Create Custom DMG
         if: matrix.settings.platform == 'macos-latest'
@@ -120,11 +120,12 @@ jobs:
             "r2modmac_${{ matrix.settings.arch }}.dmg" \
             "dmg_root"
 
-      - name: Copy Windows Installer
+      - name: Package Windows Binary
         if: matrix.settings.platform == 'windows-latest'
         shell: bash
         run: |
-          cp src-tauri/target/${{ matrix.settings.rust-target }}/release/bundle/nsis/*.exe r2modmac_${{ matrix.settings.arch }}_setup.exe
+          cd src-tauri/target/${{ matrix.settings.rust-target }}/release
+          7z a ../../../../r2modmac_${{ matrix.settings.arch }}.zip r2modmac.exe
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -132,7 +133,7 @@ jobs:
           name: build-${{ matrix.settings.arch }}
           path: |
             r2modmac_${{ matrix.settings.arch }}.dmg
-            r2modmac_${{ matrix.settings.arch }}_setup.exe
+            r2modmac_${{ matrix.settings.arch }}.zip
           if-no-files-found: ignore
           retention-days: 1
 
@@ -155,7 +156,7 @@ jobs:
         with:
           files: |
             release_files/*.dmg
-            release_files/*.exe
+            release_files/*.zip
           draft: false
           prerelease: false
           generate_release_notes: true
