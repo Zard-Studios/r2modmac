@@ -135,7 +135,13 @@ This project is released under the MIT License. You can use, modify, and distrib
 
 If you like the project, leave a star! ⭐
 
-[![Star History Chart](https://api.star-history.com/svg?repos=Zard-Studios/r2modmac&type=Date)](https://star-history.com/#Zard-Studios/r2modmac&Date)
+<a href="https://www.star-history.com/?type=date&repos=Zard-Studios%2Fr2modmac">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=Zard-Studios/r2modmac&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=Zard-Studios/r2modmac&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=Zard-Studios/r2modmac&type=date&legend=top-left" />
+ </picture>
+</a>
 
 ---
 
