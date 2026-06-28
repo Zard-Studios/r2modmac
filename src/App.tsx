@@ -214,6 +214,21 @@ const mergePlatformInfo = (existing: CommunityPlatformInfo, incoming: CommunityP
   };
 };
 
+const isValidPathForImport = (path: string): boolean => {
+  const lower = path.toLowerCase();
+  if (lower.endsWith('.zip') || lower.endsWith('.r2z')) {
+    return true;
+  }
+  const lastSegment = path.split(/[/\\]/).pop() || '';
+  const dotIndex = lastSegment.lastIndexOf('.');
+  if (dotIndex !== -1) {
+    const ext = lastSegment.slice(dotIndex).toLowerCase();
+    if (ext === '.zip' || ext === '.r2z') return true;
+    return false;
+  }
+  return true;
+};
+
 function App() {
 
   const [allPackages, setAllPackages] = useState<Package[]>([])
@@ -248,6 +263,7 @@ function App() {
   })
   const [isCancellingCustomModImport, setIsCancellingCustomModImport] = useState(false)
   const [isCustomModDragActive, setIsCustomModDragActive] = useState(false)
+  const [isCustomModDragValid, setIsCustomModDragValid] = useState(true)
   const [showSettings, setShowSettings] = useState(false)
   const [isLaunchingProfile, setIsLaunchingProfile] = useState(false)
   const [isStoppingProfile, setIsStoppingProfile] = useState(false)
@@ -1313,9 +1329,16 @@ function App() {
     let disposed = false;
 
     getCurrentWebview().onDragDropEvent((event) => {
+      if (!activeProfileId) {
+        return;
+      }
+
       const payload = event.payload;
       if (payload.type === 'enter') {
-        setIsCustomModDragActive(payload.paths.length > 0);
+        const hasPaths = payload.paths.length > 0;
+        const allValid = payload.paths.every(isValidPathForImport);
+        setIsCustomModDragActive(hasPaths);
+        setIsCustomModDragValid(allValid);
         return;
       }
       if (payload.type === 'over') {
@@ -1324,11 +1347,18 @@ function App() {
       }
       if (payload.type === 'leave') {
         setIsCustomModDragActive(false);
+        setIsCustomModDragValid(true);
         return;
       }
       if (payload.type === 'drop') {
         setIsCustomModDragActive(false);
+        const allValid = payload.paths.every(isValidPathForImport);
+        setIsCustomModDragValid(true);
         if (progressState.isOpen || isCancellingCustomModImport) return;
+        if (!allValid) {
+          void window.ipcRenderer.alert('Invalid Format', 'Only folders, .zip, or .r2z files can be imported.');
+          return;
+        }
         void importCustomModPaths(payload.paths);
       }
     }).then((cleanup) => {
@@ -1345,7 +1375,12 @@ function App() {
       disposed = true;
       unlisten?.();
     };
-  }, [importCustomModPaths, progressState.isOpen, isCancellingCustomModImport]);
+  }, [
+    importCustomModPaths,
+    progressState.isOpen,
+    isCancellingCustomModImport,
+    activeProfileId
+  ]);
 
   const handleInstallToGameRequest = async (
     isVanillaOverride?: boolean,
@@ -1953,15 +1988,33 @@ function App() {
 
       {isCustomModDragActive && (
         <div className="fixed inset-0 z-[55] bg-black/55 backdrop-blur-sm flex items-center justify-center pointer-events-none p-6">
-          <div className="w-full max-w-md rounded-xl border-2 border-dashed border-blue-400/70 bg-gray-900/90 px-6 py-8 text-center shadow-2xl">
-            <div className="mx-auto mb-4 h-12 w-12 rounded-xl bg-blue-500/15 border border-blue-400/30 flex items-center justify-center text-blue-300">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 11v6m3-3H9" />
-              </svg>
+          <div className={`w-full max-w-md rounded-xl border-2 border-dashed bg-gray-900/90 px-6 py-8 text-center shadow-2xl transition-colors duration-200 ${
+            isCustomModDragValid ? 'border-blue-400/70' : 'border-red-500/70'
+          }`}>
+            <div className={`mx-auto mb-4 h-12 w-12 rounded-xl border flex items-center justify-center transition-colors duration-200 ${
+              isCustomModDragValid
+                ? 'bg-blue-500/15 border-blue-400/30 text-blue-300'
+                : 'bg-red-500/15 border-red-500/30 text-red-400'
+            }`}>
+              {isCustomModDragValid ? (
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 11v6m3-3H9" />
+                </svg>
+              ) : (
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+              )}
             </div>
-            <div className="text-lg font-bold text-white">Drop Custom Mod</div>
-            <div className="mt-1 text-sm text-gray-400">Folder, .zip, or .r2z</div>
+            <div className={`text-lg font-bold transition-colors duration-200 ${isCustomModDragValid ? 'text-white' : 'text-red-400'}`}>
+              {isCustomModDragValid ? 'Drop Custom Mod' : 'Invalid File Type'}
+            </div>
+            <div className="mt-1 text-sm text-gray-400">
+              {isCustomModDragValid
+                ? 'Folder, .zip, or .r2z'
+                : 'Only folders, .zip, or .r2z files are allowed'}
+            </div>
           </div>
         </div>
       )}
