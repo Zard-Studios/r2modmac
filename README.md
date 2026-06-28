@@ -3,7 +3,7 @@
 <p align="center">
   <img alt="1024x1024@1x" src="https://github.com/user-attachments/assets/0069e8c1-79be-4edc-a235-7a351e0d5a49" />
   <br>
-  <strong>A modern and native mod manager for macOS, inspired by r2modman, redesigned from scratch</strong>
+  <strong>A modern and native mod manager for macOS — supports Thunderstore games and Outer Wilds mods</strong>
   <br><br>
   <a href="https://github.com/Zard-Studios/r2modmac/releases">
     <img src="https://img.shields.io/github/v/release/Zard-Studios/r2modmac" alt="GitHub release">
@@ -21,11 +21,12 @@
 
 ## Description
 
-r2modmac is a native mod manager for macOS that allows you to easily manage mods for Thunderstore supported games. Designed with a modern and intuitive interface, it offers a smooth experience to install, update, and organize your favorite mods.
+r2modmac is a native mod manager for macOS that allows you to easily manage mods for Thunderstore supported games and Outer Wilds (via OWML). Designed with a modern and intuitive interface, it offers a smooth experience to install, update, and organize your favorite mods.
 
 ## Features
 
 - **Multi-Game Support**: Manage mods for all games available on Thunderstore
+- **Outer Wilds Support**: Full support for Outer Wilds mods via OWML — browse, install and launch directly from the app
 - **Profile Management**: Create and manage multiple profiles for different mod setups
 - **Browse Mode**: Explore and discover mods without creating a profile first
 - **Import/Export**: Share your profiles with friends via codes or files
@@ -129,6 +130,7 @@ This project is released under the MIT License. You can use, modify, and distrib
 
 - [r2modman](https://github.com/ebkr/r2modmanPlus) - Inspiration for the project
 - [Thunderstore](https://thunderstore.io/) - API for mods and community
+- [OWML](https://github.com/ow-mods/owml) - Outer Wilds Mod Loader
 - [Tauri](https://tauri.app/) - Framework for desktop applications
 
 ## ⭐ Star History
