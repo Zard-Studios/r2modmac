@@ -147,6 +147,8 @@ If you like the project, leave a star! ⭐
 
 <div align="center">
 
+r2modmac is and will always remain open-source and completely tracker-free. I dedicate all my free time to it as a student and independent developer. If this tool has saved you hours of configuration and headaches, please consider supporting its development with a micro donation!
+
 **Made with ❤️ for the modding community**
 
 [Report Bug](https://github.com/Zard-Studios/r2modmac/issues) · [Request Feature](https://github.com/Zard-Studios/r2modmac/issues)
