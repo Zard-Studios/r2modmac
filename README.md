@@ -19,7 +19,7 @@
 
 ## Description
 
-r2modmac is a native mod manager for macOS that allows you to easily manage mods for Thunderstore supported games and Outer Wilds (via OWML). Designed with a modern and intuitive interface, it offers a smooth experience to install, update, and organize your favorite mods.
+r2modmac is a native mod manager for macOS/Windows that allows you to easily manage mods for Thunderstore supported games and Outer Wilds (via OWML). Designed with a modern and intuitive interface, it offers a smooth experience to install, update, and organize your favorite mods.
 
 ## Features
 
