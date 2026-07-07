@@ -135,11 +135,13 @@ This project is released under the MIT License. You can use, modify, and distrib
 
 If you like the project, leave a star! ⭐
 
-<a href="https://www.star-history.com/?type=date&repos=Zard-Studios%2Fr2modmac">
+## Star History
+
+<a href="https://www.star-history.com/?repos=Zard-Studios%2Fr2modmac&type=date&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=Zard-Studios/r2modmac&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=Zard-Studios/r2modmac&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=Zard-Studios/r2modmac&type=date&legend=top-left" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=Zard-Studios/r2modmac&type=date&theme=dark&legend=top-left&sealed_token=78-5pTyzZjU7vMuRd6DkxEVOh9kR0-xOfzGllsK16AwZoXNFcMAY6IVtPjCnUfHx65fcn1oZNDRxWl5N768XOkD4GlmoMSmujkDWs-THQ2j3-Yaxd1HXzT7iHIITUt66psIiGq7X2feFzE6nBMn4OzHXJWxO5_Wfm1VgB4C_XPEX8EiV9tgPECAhDIDB" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=Zard-Studios/r2modmac&type=date&legend=top-left&sealed_token=78-5pTyzZjU7vMuRd6DkxEVOh9kR0-xOfzGllsK16AwZoXNFcMAY6IVtPjCnUfHx65fcn1oZNDRxWl5N768XOkD4GlmoMSmujkDWs-THQ2j3-Yaxd1HXzT7iHIITUt66psIiGq7X2feFzE6nBMn4OzHXJWxO5_Wfm1VgB4C_XPEX8EiV9tgPECAhDIDB" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=Zard-Studios/r2modmac&type=date&legend=top-left&sealed_token=78-5pTyzZjU7vMuRd6DkxEVOh9kR0-xOfzGllsK16AwZoXNFcMAY6IVtPjCnUfHx65fcn1oZNDRxWl5N768XOkD4GlmoMSmujkDWs-THQ2j3-Yaxd1HXzT7iHIITUt66psIiGq7X2feFzE6nBMn4OzHXJWxO5_Wfm1VgB4C_XPEX8EiV9tgPECAhDIDB" />
  </picture>
 </a>
 
