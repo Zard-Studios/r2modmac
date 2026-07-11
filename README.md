@@ -3,15 +3,23 @@
 <p align="center">
   <img alt="1024x1024@1x" src="https://github.com/user-attachments/assets/0069e8c1-79be-4edc-a235-7a351e0d5a49" />
   <br><br>
+
   <a href="https://github.com/Zard-Studios/r2modmac/releases">
     <img src="https://img.shields.io/github/v/release/Zard-Studios/r2modmac" alt="GitHub release">
   </a>
+
+  <a href="https://github.com/Zard-Studios/r2modmac/releases">
+    <img src="https://img.shields.io/github/downloads/Zard-Studios/r2modmac/total?label=Downloads" alt="Total Downloads">
+  </a>
+
   <a href="https://opensource.org/licenses/MIT">
     <img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT">
   </a>
+
   <a href="https://ko-fi.com/zardstudios">
     <img src="https://img.shields.io/badge/Ko--fi-Support%20me-ff5f5f?logo=ko-fi&logoColor=white" alt="Ko-fi">
   </a>
+
   <a href="https://paypal.me/FedexPower">
     <img src="https://img.shields.io/badge/PayPal-Donate-00457C?logo=paypal&logoColor=white" alt="PayPal">
   </a>
