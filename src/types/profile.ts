@@ -41,6 +41,7 @@ export interface Profile {
     gameIdentifier: string;
     mods: InstalledMod[];
     needs_sync?: boolean;
+    apply_interrupted?: boolean;
     dateCreated: number;
     lastUsed: number;
     profileImageUrl?: string;

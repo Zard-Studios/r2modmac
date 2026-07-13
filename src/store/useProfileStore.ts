@@ -50,6 +50,14 @@ const getInstalledModKey = (mod: InstalledMod): string => {
     return getModKey(mod.fullName);
 };
 
+const ensureModIdentity = (mod: InstalledMod): InstalledMod => {
+    if (mod.uuid4?.trim()) return mod;
+    const identity = mod.source === 'local' && mod.localId
+        ? `local:${mod.localId}`
+        : `thunderstore:${mod.fullName.toLowerCase()}`;
+    return { ...mod, uuid4: identity };
+};
+
 const dedupeModsByKey = (mods: InstalledMod[]): InstalledMod[] => {
     const byKey = new Map<string, InstalledMod>();
     for (const mod of mods) {
@@ -73,7 +81,7 @@ const normalizeProfile = (profile: Profile): Profile => {
 
     return {
         ...profile,
-        mods: dedupeModsByKey(profile.mods || []),
+        mods: dedupeModsByKey((profile.mods || []).map(ensureModIdentity)),
         platform,
         distribution,
         launchMode,
@@ -182,15 +190,16 @@ export const useProfileStore = create<ProfileState>((set) => ({
             const updatedProfiles = [...state.profiles];
             const profile = { ...updatedProfiles[profileIndex] };
 
-            const normalizedMod: InstalledMod = {
+            const normalizedMod: InstalledMod = ensureModIdentity({
                 ...mod,
                 pending_sync: mod.pending_sync ?? false,
                 synced_enabled: mod.synced_enabled ?? (mod.pending_sync ? undefined : mod.enabled),
-            };
+            });
 
             const incomingKey = getInstalledModKey(normalizedMod);
             const matchingMods = profile.mods.filter((m) =>
-                m.uuid4 === normalizedMod.uuid4 || getInstalledModKey(m) === incomingKey
+                (!!m.uuid4 && !!normalizedMod.uuid4 && m.uuid4 === normalizedMod.uuid4)
+                || getInstalledModKey(m) === incomingKey
             );
             const existing = matchingMods[matchingMods.length - 1];
 
@@ -204,9 +213,10 @@ export const useProfileStore = create<ProfileState>((set) => ({
 
             const merged: InstalledMod = existing ? { ...existing, ...normalizedMod } : normalizedMod;
             profile.mods = [
-                ...profile.mods.filter((m) =>
-                    m.uuid4 !== normalizedMod.uuid4 && getInstalledModKey(m) !== incomingKey
-                ),
+                ...profile.mods.filter((m) => {
+                    const sameUuid = !!m.uuid4 && !!normalizedMod.uuid4 && m.uuid4 === normalizedMod.uuid4;
+                    return !sameUuid && getInstalledModKey(m) !== incomingKey;
+                }),
                 merged,
             ];
             profile.needs_sync = !!profile.needs_sync || profile.mods.some(m => m.pending_sync);

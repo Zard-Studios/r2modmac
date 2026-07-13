@@ -1,7 +1,9 @@
 import { listen } from '@tauri-apps/api/event';
 import type { Package } from '../types/thunderstore';
+import type { InstalledMod } from '../types/profile';
 import { useProfileStore } from '../store/useProfileStore';
 import type { ModDownloadProgressEvent, ProgressSetter } from '../types/progress';
+import { parsePackageReference } from '../utils/modVersioning';
 
 const MAX_PARALLEL_OPS = 10;
 
@@ -99,8 +101,14 @@ export function useGameSync({
         const community = activeProfile?.gameIdentifier || selectedCommunity;
         if (!activeProfile || !community) return;
         const silentSuccess = !!syncOptions?.silentSuccess;
+        const ensureNotStopped = async () => {
+            if (await window.ipcRenderer.modOperationsCancelled()) {
+                throw new Error('MOD_OPERATION_CANCELLED');
+            }
+        };
 
         try {
+            await window.ipcRenderer.beginModOperations();
             // Vanilla override — direct call, no BepInEx setup needed
             if (isVanillaOverride !== undefined) {
                 await persistProfilesNow();
@@ -114,6 +122,8 @@ export function useGameSync({
                 await window.ipcRenderer.alert('Game Path Required', 'Please set the game directory in Settings first.');
                 return;
             }
+            updateProfile(activeProfile.id, { needs_sync: true, apply_interrupted: true });
+            await persistProfilesNow();
 
             // ── Loader auto-install ───────────────────────────────────────────────
             const isBalatro = community === 'balatro';
@@ -129,7 +139,9 @@ export function useGameSync({
                     isOpen: true,
                     title: 'Checking Requirements',
                     progress: 0,
-                    currentTask: `Searching for ${isOuterWilds ? 'OWML' : isBalatro ? 'Lovely' : 'BepInExPack'}...`
+                    currentTask: `Searching for ${isOuterWilds ? 'OWML' : isBalatro ? 'Lovely' : 'BepInExPack'}...`,
+                    isCancelable: true,
+                    operation: 'mod-sync',
                 });
                 const res = await window.ipcRenderer.getPackages(community, 0, 20, requirementQuery, 'downloads');
                 const packagesList = res && typeof res === 'object' && 'items' in res ? res.items : (Array.isArray(res) ? res : []);
@@ -149,12 +161,31 @@ export function useGameSync({
                 }
                 setProgressState(prev => ({ ...prev, isOpen: false }));
             }
+            await ensureNotStopped();
 
             const refreshedProfile = await refreshLocalModsBeforeSync(activeProfile);
             await persistProfilesNow();
+            await ensureNotStopped();
 
             // ── Profile sync ──────────────────────────────────────────────────────
             const syncResult = await window.ipcRenderer.syncProfileToGame(refreshedProfile.id, community, legacyInstallMode);
+            const missingKeys = new Set(syncResult.to_install.map((key: string) => key.toLowerCase()));
+            const reconciledProfile = useProfileStore.getState().profiles.find(profile => profile.id === activeProfile.id) || refreshedProfile;
+            updateProfile(activeProfile.id, {
+                // Keep the apply resumable until final runtime setup succeeds.
+                needs_sync: true,
+                apply_interrupted: true,
+                mods: reconciledProfile.mods.map((mod: InstalledMod) => {
+                    const key = parsePackageReference(mod.fullName).packageName.toLowerCase();
+                    const stillMissing = mod.enabled && missingKeys.has(key);
+                    return {
+                        ...mod,
+                        pending_sync: stillMissing,
+                        synced_enabled: stillMissing ? mod.synced_enabled : mod.enabled,
+                    };
+                }),
+            });
+            await persistProfilesNow();
 
             const skippedVersionMismatch: string[] = [];
             const failedInstalls: string[] = [];
@@ -172,10 +203,13 @@ export function useGameSync({
                     downloadedBytes: undefined,
                     totalBytes: undefined,
                     activeDownloads: 0,
+                    isCancelable: true,
+                    operation: 'mod-sync',
                 });
 
                 let completed = 0;
                 const total = syncResult.to_install.length;
+                const successfullyInstalledKeys = new Set<string>();
                 const trackedModKeys = syncResult.to_install.map((modKey: string) => modKey.toLowerCase());
                 const activeDownloads = new Map<string, { downloaded: number; total?: number; speed: number; progress: number }>();
                 const updateProgress = (task: string) => {
@@ -247,6 +281,7 @@ export function useGameSync({
                 const processMod = async (modKey: string) => {
                     let status = 'Installed';
                     let trackedFullName: string | null = null;
+                    let installedSuccessfully = false;
                     try {
                         const profileForLookup = useProfileStore.getState().profiles.find((p) => p.id === activeProfile.id) || refreshedProfile;
                         const modInProfile = profileForLookup.mods.find((m: any) => {
@@ -262,6 +297,7 @@ export function useGameSync({
                             if (cacheResult.copied) {
                                 actuallyInstalled++;
                                 status = 'Copied from cache';
+                                installedSuccessfully = true;
                                 return;
                             }
                         }
@@ -285,6 +321,7 @@ export function useGameSync({
                             }
                             actuallyInstalled++;
                             status = 'Installed local mod';
+                            installedSuccessfully = true;
                             return;
                         }
 
@@ -351,10 +388,18 @@ export function useGameSync({
 
                             await installModAndDeps(pkg, version);
                             status = 'Installed';
+                            installedSuccessfully = true;
+                        } else {
+                            throw new Error(`Package metadata not found for pinned mod ${modInProfile.fullName}`);
                         }
+                    } else {
+                        throw new Error(`Pinned profile entry not found for ${modKey}`);
                     }
 
                     } catch (err: any) {
+                        if (String(err?.message || err).includes('MOD_OPERATION_CANCELLED')) {
+                            throw err;
+                        }
                         failedInstalls.push(`${modKey} (${String(err?.message || err || 'unknown error')})`);
                         status = 'Failed';
                     } finally {
@@ -363,18 +408,44 @@ export function useGameSync({
                             recomputeDownloadState();
                         }
                         completed++;
+                        if (installedSuccessfully) successfullyInstalledKeys.add(modKey.toLowerCase());
                         updateProgress(`${status} ${completed}/${total}: ${modKey}`);
                     }
                 };
 
+                const flushSuccessfullyInstalledMods = async () => {
+                    if (successfullyInstalledKeys.size === 0) return;
+                    const currentProfile = useProfileStore.getState().profiles.find((profile) => profile.id === activeProfile.id);
+                    if (!currentProfile) return;
+                    const completedKeys = new Set(successfullyInstalledKeys);
+                    successfullyInstalledKeys.clear();
+                    updateProfile(activeProfile.id, {
+                        needs_sync: true,
+                        apply_interrupted: true,
+                        mods: currentProfile.mods.map((mod) => {
+                            const parts = mod.fullName.split('-');
+                            const key = (parts.length >= 2 ? `${parts[0]}-${parts[1]}` : mod.fullName).toLowerCase();
+                            return completedKeys.has(key)
+                                ? { ...mod, pending_sync: false, synced_enabled: mod.enabled }
+                                : mod;
+                        }),
+                    });
+                    await persistProfilesNow();
+                };
+
                 try {
                     for (let i = 0; i < syncResult.to_install.length; i += concurrency) {
+                        await ensureNotStopped();
                         const batch = syncResult.to_install.slice(i, i + concurrency);
                         if (concurrency === 1) {
                             await processMod(batch[0]);
                         } else {
-                            await Promise.all(batch.map((modKey) => processMod(modKey)));
+                            const results = await Promise.allSettled(batch.map((modKey) => processMod(modKey)));
+                            await flushSuccessfullyInstalledMods();
+                            const rejected = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+                            if (rejected) throw rejected.reason;
                         }
+                        if (concurrency === 1) await flushSuccessfullyInstalledMods();
                     }
                 } finally {
                     unlistenDownloadProgress();
@@ -386,8 +457,21 @@ export function useGameSync({
                     downloadedBytes: undefined,
                     totalBytes: undefined,
                     activeDownloads: 0,
+                    isCancelable: false,
+                    operation: undefined,
                 }));
             }
+
+            if (skippedVersionMismatch.length > 0 || failedInstalls.length > 0) {
+                const problems = [...skippedVersionMismatch, ...failedInstalls];
+                const preview = problems.slice(0, 8).join('\n');
+                const more = problems.length > 8 ? `\n...and ${problems.length - 8} more` : '';
+                throw new Error(
+                    `Sync incomplete: ${problems.length} pinned mod(s) were not installed. ` +
+                    `The profile remains pending and the game was not finalized.\n\n${preview}${more}`
+                );
+            }
+            await ensureNotStopped();
 
             const latestProfile = useProfileStore.getState().profiles.find((p) => p.id === activeProfile.id) || activeProfile;
             const disabledMods = latestProfile.mods.filter((m) => !m.enabled).map((m) => m.fullName);
@@ -397,6 +481,8 @@ export function useGameSync({
                     isOpen: true,
                     title: 'Syncing to Game',
                     progress: 100,
+                    isCancelable: false,
+                    operation: undefined,
                     currentTask: community === 'balatro'
                         ? 'Finalizing Lovely runtime and Balatro Mods folder...'
                         : latestProfile.platform === 'mac'
@@ -413,6 +499,7 @@ export function useGameSync({
 
             updateProfile(latestProfile.id, {
                 needs_sync: false,
+                apply_interrupted: false,
                 mods: latestProfile.mods.map((m) => ({
                     ...m,
                     pending_sync: false,
@@ -462,7 +549,11 @@ export function useGameSync({
             } catch (e: any) {
             console.error('Sync to game failed:', e);
             setProgressState(prev => ({ ...prev, isOpen: false }));
-            alert('Error syncing: ' + e);
+            if (String(e?.message || e).includes('MOD_OPERATION_CANCELLED')) {
+                await window.ipcRenderer.beginModOperations();
+                return;
+            }
+            await window.ipcRenderer.alert('Sync Failed', String(e?.message || e || 'Unknown sync error'));
         }
     };
 

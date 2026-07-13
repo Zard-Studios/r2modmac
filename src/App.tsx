@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { Button } from './components/ui'
 import { Layout } from './components/Layout'
 import type { FilterOptions } from './components/FilterPopover'
@@ -26,6 +26,7 @@ import type { ProgressState } from './types/progress';
 import { useModActions } from './hooks/useModActions';
 import { useProfileActions } from './hooks/useProfileActions';
 import { useGameSync } from './hooks/useGameSync';
+import { findPinnedVersion, parsePackageReference } from './utils/modVersioning';
 
 const QUICK_MAC_HINTS = new Set([
   'btd6',
@@ -261,6 +262,7 @@ function App() {
     progress: 0,
     currentTask: ''
   })
+  const [isProgressMinimized, setIsProgressMinimized] = useState(false)
   const [isCancellingCustomModImport, setIsCancellingCustomModImport] = useState(false)
   const [isCustomModDragActive, setIsCustomModDragActive] = useState(false)
   const [isCustomModDragValid, setIsCustomModDragValid] = useState(true)
@@ -306,7 +308,7 @@ function App() {
   const [isBrowsingMode, setIsBrowsingMode] = useState(false)
   const isInitialLoadRunningRef = useRef(false)
   const packagesLoadRequestRef = useRef(0)
-  const autoApplyProfileRef = useRef<string | null>(null)
+  const profilePackageIndexRequestRef = useRef(0)
 
   const {
     profiles,
@@ -325,6 +327,9 @@ function App() {
 
   const [selectedCommunity, setSelectedCommunity] = useState<string | null>(null)
   const activeProfile = profiles.find((profile) => profile.id === activeProfileId) ?? null
+  const activeProfileModSignature = useMemo(() => activeProfile?.mods
+    .map(mod => `${mod.uuid4}:${mod.fullName}:${mod.versionNumber}:${mod.source ?? ''}`)
+    .join('|') ?? '', [activeProfile?.mods])
   const [activeProfileGamePath, setActiveProfileGamePath] = useState<string | null>(null)
   const [isCheckingActiveProfileGamePath, setIsCheckingActiveProfileGamePath] = useState(false)
   const [storageVolumeEventCount, setStorageVolumeEventCount] = useState(0)
@@ -817,6 +822,7 @@ function App() {
   }, []);
 
   const rebuildProfilePackageIndex = useCallback(async (communityId: string) => {
+    const requestId = ++profilePackageIndexRequestRef.current;
     const { profiles, activeProfileId } = useProfileStore.getState();
     const profile = profiles.find((p) => p.id === activeProfileId) ?? null;
     if (!profile || profile.mods.length === 0) {
@@ -824,9 +830,9 @@ function App() {
       return;
     }
 
-    const modNames = profile.mods
+    const modNames = Array.from(new Set(profile.mods
       .filter(m => m.source !== 'local')
-      .map(m => m.fullName.replace(/-\d+\.\d+\.\d+$/, ''));
+      .map(m => parsePackageReference(m.fullName).packageName)));
 
     if (modNames.length === 0) {
       setProfilePackageIndex({});
@@ -834,17 +840,39 @@ function App() {
     }
 
     try {
-      const result = await window.ipcRenderer.lookupPackagesByNames(communityId, modNames);
+      let result: Awaited<ReturnType<typeof window.ipcRenderer.lookupPackagesByNames>> | null = null;
+      let lastError: unknown;
+      for (let attempt = 0; attempt < 3 && !result; attempt++) {
+        try {
+          result = await window.ipcRenderer.lookupPackagesByNames(communityId, modNames);
+        } catch (error) {
+          lastError = error;
+          if (attempt === 0) {
+            // A freshly imported profile can render before the package cache is
+            // present in backend memory. Load it explicitly; an unchanged CDN
+            // index does not emit packages-loaded, so relying on that event can
+            // otherwise leave the update badge empty for the whole session.
+            await window.ipcRenderer.fetchPackages(communityId);
+          } else {
+            await new Promise(resolve => setTimeout(resolve, 250 * attempt));
+          }
+        }
+        if (requestId !== profilePackageIndexRequestRef.current) return;
+      }
+      if (!result) throw lastError || new Error('Package index lookup failed');
       const index: Record<string, Package> = {};
-      if (result?.found) {
+      if (result.found) {
         for (const pkg of result.found) {
-          index[pkg.full_name] = pkg;
+          index[pkg.full_name.toLowerCase()] = pkg;
         }
       }
-      setProfilePackageIndex(index);
+      const currentState = useProfileStore.getState();
+      if (requestId === profilePackageIndexRequestRef.current && currentState.activeProfileId === profile.id) {
+        setProfilePackageIndex(index);
+      }
     } catch (err) {
       console.error('Failed to build profile package index', err);
-      setProfilePackageIndex({});
+      if (requestId === profilePackageIndexRequestRef.current) setProfilePackageIndex({});
     }
   }, []);
 
@@ -907,7 +935,7 @@ function App() {
       }, 0);
       return () => clearTimeout(timer);
     }
-  }, [activeProfile?.id, selectedCommunity, activeProfile?.mods.length, rebuildProfilePackageIndex])
+  }, [activeProfile?.id, selectedCommunity, activeProfileModSignature, rebuildProfilePackageIndex])
 
 
 
@@ -954,11 +982,8 @@ function App() {
   } = useProfileActions({
     selectedCommunity,
     activeProfileId,
-    legacyInstallMode,
-    installInParallel,
     setProgressState,
-    onInstallMod: handleInstallMod,
-    autoApplyProfileRef,
+    onInstallMod: (pkg, profileId) => handleInstallMod(pkg, profileId, undefined, true),
   });
 
   // ── Game Sync (Apply to Game) ─────────────────────────────────────────────────
@@ -986,12 +1011,33 @@ function App() {
   };
 
   const handleCancelProgress = async () => {
-    if (!progressState.isOpen || !progressState.isCancelable || isCancellingCustomModImport) return;
+    if (!progressState.isOpen || !progressState.isCancelable) return;
+
+    if (progressState.operation === 'mod-sync') {
+      setProgressState(prev => ({
+        ...prev,
+        isOpen: false,
+        isCancelable: false,
+        downloadSpeedBps: undefined,
+        downloadedBytes: undefined,
+        totalBytes: undefined,
+        activeDownloads: 0,
+      }));
+      if (activeProfileId) {
+        updateProfile(activeProfileId, { needs_sync: true, apply_interrupted: true });
+      }
+      await window.ipcRenderer.cancelModOperations();
+      return;
+    }
+
+    if (isCancellingCustomModImport) return;
 
     customModImportCancelledRef.current = true;
     setIsCancellingCustomModImport(true);
     setProgressState(prev => ({
       ...prev,
+      isOpen: false,
+      isCancelable: false,
       currentTask: 'Cancelling custom mod import...'
     }));
 
@@ -1001,6 +1047,16 @@ function App() {
       console.error('Failed to cancel custom mod import', error);
     }
   };
+
+  const handleMinimizeProgress = () => {
+    if (progressState.isOpen) setIsProgressMinimized(true);
+  };
+
+  useEffect(() => {
+    if (progressState.isOpen) return;
+    const reset = window.setTimeout(() => setIsProgressMinimized(false), 0);
+    return () => window.clearTimeout(reset);
+  }, [progressState.isOpen]);
 
   const mergeProfileArchiveIntoActiveProfile = useCallback(async (
     archivePath: string,
@@ -1079,6 +1135,8 @@ function App() {
     const totalSteps = resolvedThunderstoreMods.length + localMods.length;
     let completedSteps = 0;
     let importedCount = 0;
+    const stagedThunderstoreMods: InstalledMod[] = [];
+    const resolutionFailures: string[] = [];
 
     const updateMergeProgress = (task: string) => {
       const progress = totalSteps === 0
@@ -1100,14 +1158,16 @@ function App() {
       updateMergeProgress(`Adding ${modName} (${completedSteps + 1}/${Math.max(totalSteps, 1)})...`);
 
       try {
-        const pkg = foundPackages.find((p) => p.full_name === modName);
+        const pkg = foundPackages.find((p) => p.full_name.toLowerCase() === modName.toLowerCase());
         if (!pkg) {
           throw new Error('Package not found after lookup');
         }
-        const version = pkg.versions.find((v) => v.version_number === mod.version) || pkg.versions[0];
-        if (!version) {
-          throw new Error('Package has no available versions');
-        }
+        if (!mod.version) throw new Error('Profile entry has no pinned version');
+        const exactPkg = pkg.versions.some((v) => v.version_number === mod.version)
+          ? pkg
+          : await window.ipcRenderer.fetchPackageByName(`${modName}-${mod.version}`, targetCommunity);
+        if (!exactPkg) throw new Error(`Pinned version ${mod.version} is unavailable`);
+        const version = findPinnedVersion(exactPkg, mod.version, modName);
 
         const installedMod: InstalledMod = {
           uuid4: version.uuid4,
@@ -1118,16 +1178,29 @@ function App() {
           pending_sync: true,
           synced_enabled: undefined,
         };
-        addMod(targetProfile.id, installedMod);
-        importedCount++;
+        stagedThunderstoreMods.push(installedMod);
       } catch (error) {
         console.error(`Failed to add profile mod ${modName}`, error);
-        failedMods.push(modName);
+        const reason = error instanceof Error ? error.message : String(error || 'unknown resolution error');
+        const failure = `${modName}: ${reason}`;
+        failedMods.push(failure);
+        resolutionFailures.push(failure);
       } finally {
         completedSteps++;
         updateMergeProgress(`Processed ${completedSteps}/${Math.max(totalSteps, 1)}...`);
       }
     }
+
+    if (resolutionFailures.length > 0) {
+      return {
+        handled: true,
+        profileName,
+        importedCount: 0,
+        failedMods,
+      };
+    }
+    for (const mod of stagedThunderstoreMods) addMod(targetProfile.id, mod);
+    importedCount += stagedThunderstoreMods.length;
 
     for (const mod of localMods) {
       if (customModImportCancelledRef.current) {
@@ -1165,7 +1238,8 @@ function App() {
         importedCount++;
       } catch (error) {
         console.error(`Failed to stage embedded custom mod ${modName}`, error);
-        failedMods.push(modName);
+        const reason = error instanceof Error ? error.message : String(error || 'custom payload error');
+        failedMods.push(`${modName}: ${reason}`);
       } finally {
         completedSteps++;
         updateMergeProgress(`Processed ${completedSteps}/${Math.max(totalSteps, 1)}...`);
@@ -1395,8 +1469,11 @@ function App() {
     setIsApplyingToGame(true);
 
     try {
-      if (options?.skipConfirm || !confirmBeforeApplyToGame || isVanillaOverride !== undefined) {
+      const runSync = async () => {
         await handleSyncToGame(isVanillaOverride, { silentSuccess: options?.silentSuccess });
+      };
+      if (options?.skipConfirm || !confirmBeforeApplyToGame || isVanillaOverride !== undefined) {
+        await runSync();
         return;
       }
 
@@ -1406,40 +1483,13 @@ function App() {
       );
       if (!confirmed) return;
 
-      await handleSyncToGame(undefined, { silentSuccess: options?.silentSuccess });
+      await runSync();
     } finally {
       clearSteamRestartingState();
       applyInFlightRef.current = false;
       setIsApplyingToGame(false);
     }
   };
-
-  useEffect(() => {
-    if (!activeProfileId || isBrowsingMode) {
-      autoApplyProfileRef.current = null;
-      return;
-    }
-
-    const selectedProfile = useProfileStore.getState().profiles.find((profile) => profile.id === activeProfileId);
-    if (!selectedProfile) {
-      return;
-    }
-
-    const profileNeedsSync = !!selectedProfile.needs_sync || selectedProfile.mods.some((mod) => mod.pending_sync);
-    if (!profileNeedsSync) {
-      return;
-    }
-
-    if (autoApplyProfileRef.current === activeProfileId) {
-      return;
-    }
-
-    autoApplyProfileRef.current = activeProfileId;
-    void handleInstallToGameRequest(
-      undefined,
-      { skipConfirm: true, silentSuccess: true }
-    );
-  }, [activeProfileId, isBrowsingMode]);
 
   const handleToggleProfileVanilla = async (profileId: string, newVanillaState: boolean) => {
     if (profileActionLockRef.current || applyInFlightRef.current) return;
@@ -1549,6 +1599,12 @@ function App() {
         return;
       }
 
+      if (progressState.isOpen && !isProgressMinimized) {
+        event.preventDefault();
+        setIsProgressMinimized(true);
+        return;
+      }
+
       if (selectedMod) {
         event.preventDefault();
         setSelectedMod(null);
@@ -1623,6 +1679,8 @@ function App() {
     showSettings,
     showUpdateModal,
     uninstallModalState.isOpen,
+    progressState.isOpen,
+    isProgressMinimized,
   ]);
 
 
@@ -1696,7 +1754,7 @@ function App() {
   } else {
     // STEP 3: MOD MANAGEMENT
     const currentCommunity = communities.find(c => c.identifier === selectedCommunity);
-    const profileNeedsSync = !!activeProfile?.needs_sync || !!activeProfile?.mods.some((mod) => mod.pending_sync);
+    const profileNeedsSync = !!activeProfile?.apply_interrupted || !!activeProfile?.needs_sync || !!activeProfile?.mods.some((mod) => mod.pending_sync);
     const markActiveProfileUsed = () => {
       if (!activeProfile) return;
       updateProfile(activeProfile.id, { lastUsed: Date.now() });
@@ -1709,13 +1767,19 @@ function App() {
         await window.ipcRenderer.alert('Mods Disabled', 'Enable the profile before launching the modded game.');
         return;
       }
+      if (profileNeedsSync) {
+        await window.ipcRenderer.alert(
+          activeProfile.apply_interrupted ? 'Resume Apply Required' : 'Apply Required',
+          activeProfile.apply_interrupted
+            ? 'This profile has an interrupted apply. Click “Resume Apply” before launching.'
+            : 'This profile has unapplied changes. Click “Apply to Game” before launching.'
+        );
+        return;
+      }
 
       try {
         profileActionLockRef.current = true;
         setIsLaunchingProfile(true);
-        if (profileNeedsSync) {
-          await handleInstallToGameRequest();
-        }
         await window.ipcRenderer.launchGameWithMods(activeProfile.gameIdentifier, activeProfile.id, activeProfile.platform);
         // UX: immediately reflect launch intent, then confirm with backend polling.
         beginLaunchGraceWindow();
@@ -2019,6 +2083,71 @@ function App() {
         </div>
       )}
 
+      {isProgressMinimized && progressState.isOpen && (
+        <button
+          type="button"
+          onClick={() => setIsProgressMinimized(false)}
+          className="fixed bottom-5 right-5 z-[58] w-72 overflow-hidden rounded-xl border border-gray-700 bg-gray-800/95 p-3 text-left shadow-2xl backdrop-blur-md transition hover:border-gray-600 hover:bg-gray-800"
+          aria-label="Show background download progress"
+          title="Show download progress"
+        >
+          <div className="flex items-center gap-3">
+            <div className="relative flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-blue-500/15 text-blue-300">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <defs>
+                  <mask id="background-download-glyph-mask" maskUnits="userSpaceOnUse" x="0" y="0" width="24" height="24">
+                    <g fill="none" stroke="white" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M12 3.5v11" />
+                      <path d="m7.75 10.75 4.25 4.25 4.25-4.25" />
+                      <path d="M5 19.5h14" />
+                    </g>
+                  </mask>
+                  <linearGradient id="background-download-sweep" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0" stopColor="#60a5fa" stopOpacity="0" />
+                    <stop offset="0.28" stopColor="#93c5fd" stopOpacity="0.55" />
+                    <stop offset="0.5" stopColor="#eff6ff" stopOpacity="0.95" />
+                    <stop offset="0.72" stopColor="#93c5fd" stopOpacity="0.55" />
+                    <stop offset="1" stopColor="#60a5fa" stopOpacity="0" />
+                  </linearGradient>
+                  <filter id="background-download-soft-glow" x="-30%" y="-30%" width="160%" height="160%">
+                    <feGaussianBlur stdDeviation="0.65" />
+                  </filter>
+                </defs>
+                <g fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round" opacity="0.42">
+                  <path d="M12 3.5v11" />
+                  <path d="m7.75 10.75 4.25 4.25 4.25-4.25" />
+                  <path d="M5 19.5h14" />
+                </g>
+                <g mask="url(#background-download-glyph-mask)">
+                  <rect
+                    className="download-glyph-sweep"
+                    x="0"
+                    y="-12"
+                    width="24"
+                    height="12"
+                    fill="url(#background-download-sweep)"
+                    filter="url(#background-download-soft-glow)"
+                  />
+                </g>
+              </svg>
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center justify-between gap-2">
+                <span className="truncate text-sm font-semibold text-white">Applying in background</span>
+                <span className="shrink-0 text-xs tabular-nums text-blue-300">{Math.round(progressState.progress)}%</span>
+              </div>
+              <div className="mt-0.5 truncate text-xs text-gray-400">{progressState.currentTask}</div>
+            </div>
+          </div>
+          <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-gray-700">
+            <div
+              className="h-full rounded-full bg-blue-500 transition-all duration-300"
+              style={{ width: `${Math.min(100, Math.max(0, progressState.progress))}%` }}
+            />
+          </div>
+        </button>
+      )}
+
 
 
       {/* Modals */}
@@ -2033,8 +2162,10 @@ function App() {
         handleUninstallWithDependencies={handleUninstallWithDependencies}
         isBrowsingMode={isBrowsingMode}
         progressState={progressState}
+        isProgressMinimized={isProgressMinimized}
         setProgressState={setProgressState}
         onCancelProgress={handleCancelProgress}
+        onMinimizeProgress={handleMinimizeProgress}
         isCancellingProgress={isCancellingCustomModImport}
         uninstallModalState={uninstallModalState}
         setUninstallModalState={setUninstallModalState}

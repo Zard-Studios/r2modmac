@@ -10,6 +10,7 @@ interface UpdateModalProps {
 }
 
 export const UpdateModal: React.FC<UpdateModalProps> = ({ updateInfo, onClose, onUpdate }) => {
+    const canInstall = !!updateInfo.download_url;
     const getHtml = () => {
         const raw = marked.parse(updateInfo.notes, { breaks: true, gfm: true }) as string;
         return { __html: DOMPurify.sanitize(raw) };
@@ -58,12 +59,14 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({ updateInfo, onClose, o
                     </button>
                     <button
                         onClick={onUpdate}
-                        className="px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg text-sm font-semibold transition-all flex items-center gap-1.5"
+                        disabled={!canInstall}
+                        title={canInstall ? 'Install update' : 'No compatible update asset is available for this system'}
+                        className="px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg text-sm font-semibold transition-all flex items-center gap-1.5 disabled:bg-gray-700 disabled:text-gray-400 disabled:cursor-not-allowed"
                     >
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                         </svg>
-                        Update
+                        {canInstall ? 'Update' : 'Unavailable for this system'}
                     </button>
                 </div>
             </div>

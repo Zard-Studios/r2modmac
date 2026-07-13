@@ -1,7 +1,8 @@
 import React, { useMemo, useState } from 'react';
 import type { Community, Package } from '../../types/thunderstore';
 import type { Profile, InstalledMod } from '../../types/profile';
-import { Button } from '../ui';
+import { Button, HoverMarquee } from '../ui';
+import { hasNewerVersion, latestVersionNumber, parsePackageReference } from '../../utils/modVersioning';
 
 const MAX_PARALLEL_TOGGLES = 10;
 
@@ -231,9 +232,9 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
     const latestVersionByPackage = useMemo(() => {
         const map = new Map<string, string>();
         for (const pkg of Object.values(packageIndex)) {
-            const latest = pkg.versions?.[0]?.version_number;
+            const latest = latestVersionNumber(pkg);
             if (latest) {
-                map.set(pkg.full_name, latest);
+                map.set(pkg.full_name.toLowerCase(), latest);
             }
         }
         return map;
@@ -242,10 +243,9 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
     const updatesInView = useMemo(() => {
         return displayedMods.reduce((count, mod) => {
             if (mod.source === 'local') return count;
-            const modNameWithoutVersion = mod.fullName.replace(/-\d+\.\d+\.\d+$/, '');
-            const latestVersion = latestVersionByPackage.get(modNameWithoutVersion);
-            const hasUpdate = !!(latestVersion && latestVersion !== mod.versionNumber);
-            return hasUpdate && mod.enabled ? count + 1 : count;
+            const packageName = parsePackageReference(mod.fullName).packageName.toLowerCase();
+            const latestVersion = latestVersionByPackage.get(packageName);
+            return hasNewerVersion(mod.versionNumber, latestVersion) ? count + 1 : count;
         }, 0);
     }, [displayedMods, latestVersionByPackage]);
 
@@ -308,11 +308,6 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
     const handleToggleSingleMod = async (mod: InstalledMod) => {
         if (!activeProfile) return;
         await onToggleMod(activeProfile.id, mod.uuid4);
-        if (!mod.enabled && legacyInstallMode) {
-            setTimeout(() => {
-                onInstallToGame();
-            }, 300);
-        }
     };
 
     const handleBulkDisableSelected = async () => {
@@ -328,7 +323,6 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                 ? selectedMods.filter((m) => !m.enabled)
                 : selectedMods;
 
-        const enablesAny = targets.some((m) => !m.enabled);
         if (targets.length === 0) return;
 
         const concurrency = installInParallel ? MAX_PARALLEL_TOGGLES : 1;
@@ -341,11 +335,6 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
             }
         }
 
-        if (legacyInstallMode && enablesAny) {
-            setTimeout(() => {
-                onInstallToGame();
-            }, 300);
-        }
     };
 
     const handleBulkDeleteSelected = async () => {
@@ -411,15 +400,15 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                         </div>
                     )}
                     <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
-                            <h2 className="font-bold text-white truncate text-lg">{activeProfile?.name}</h2>
+                        <div className="flex min-w-0 items-center gap-2">
+                            <HoverMarquee text={activeProfile?.name || ''} className="font-bold text-white text-lg" />
                             {activeProfile?.platform === 'mac' ? (
-                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 384 512" fill="currentColor" className="text-gray-400">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 384 512" fill="currentColor" className="h-3.5 w-3.5 shrink-0 text-gray-400">
                                     <title>MacOS Profile</title>
                                     <path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zm-56.6-164.2c27.3-32.4 24.8-61.9 24-72.5-24.1 1.4-52 16.4-67.9 34.9-17.5 19.8-27.8 44.3-25.6 71.9 26.1 2 49.9-11.4 69.5-34.3z" />
                                 </svg>
                             ) : (
-                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" className="text-gray-400">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" className="h-3.5 w-3.5 shrink-0 text-gray-400">
                                     <title>Windows Profile</title>
                                     <path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.9-1.801" />
                                 </svg>
@@ -545,10 +534,10 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                 </div>
 
                 {displayedMods.map(mod => {
-                    const modNameWithoutVersion = mod.fullName.replace(/-\d+\.\d+\.\d+$/, '');
-                    const pkg = mod.source === 'local' ? undefined : packageIndex[modNameWithoutVersion];
-                    const latestVersion = pkg?.versions[0].version_number;
-                    const hasUpdate = latestVersion && latestVersion !== mod.versionNumber;
+                    const packageName = parsePackageReference(mod.fullName).packageName.toLowerCase();
+                    const pkg = mod.source === 'local' ? undefined : packageIndex[packageName];
+                    const latestVersion = pkg ? latestVersionNumber(pkg) : undefined;
+                    const hasUpdate = hasNewerVersion(mod.versionNumber, latestVersion);
                     const isSelected = selectedModIdSet.has(mod.uuid4);
                     const displayName = mod.displayName || mod.fullName.split('-')[1] || mod.fullName;
 
@@ -607,7 +596,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                                             <span className="sr-only">Pending sync</span>
                                         </span>
                                     )}
-                                    {hasUpdate && mod.enabled && (
+                                    {hasUpdate && (
                                         <span
                                             className="inline-flex items-center text-amber-400"
                                             title={`Update available: v${latestVersion}. Open details to update.`}
@@ -711,14 +700,18 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                                     ? 'bg-gray-700 border-gray-600 cursor-wait opacity-70'
                                     : 'bg-blue-600 border-blue-500'
                             }`}
-                            title={activeProfile.is_vanilla ? 'Sync mods into the disabled BepInEx runtime' : 'Apply mods to game'}
+                            title={activeProfile.apply_interrupted
+                                ? 'Resume the interrupted profile apply'
+                                : activeProfile.is_vanilla
+                                    ? 'Sync mods into the disabled BepInEx runtime'
+                                    : 'Apply mods to game'}
                         >
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
                                 <path d="M8.75 2.75a.75.75 0 0 0-1.5 0v5.69L5.03 6.22a.75.75 0 0 0-1.06 1.06l3.5 3.5a.75.75 0 0 0 1.06 0l3.5-3.5a.75.75 0 0 0-1.06-1.06L8.75 8.44V2.75Z" />
                                 <path d="M3.5 9.75a.75.75 0 0 0-1.5 0v1.5A2.75 2.75 0 0 0 4.75 14h6.5A2.75 2.75 0 0 0 14 11.25v-1.5a.75.75 0 0 0-1.5 0v1.5c0 .69-.56 1.25-1.25 1.25h-6.5c-.69 0-1.25-.56-1.25-1.25v-1.5Z" />
                             </svg>
                             <span className="font-bold text-sm tracking-wide">
-                                Apply to Game
+                                {isApplying ? 'Applying...' : activeProfile.apply_interrupted ? 'Resume Apply' : 'Apply to Game'}
                             </span>
                         </button>
 

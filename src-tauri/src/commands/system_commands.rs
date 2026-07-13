@@ -1088,6 +1088,33 @@ pub async fn read_image(path: String) -> Result<Option<String>, String> {
     Ok(Some(format!("data:{};base64,{}", mime, base64_str)))
 }
 
+fn select_update_asset<'a>(
+    assets: &'a [GithubAsset],
+    os: &str,
+    arch: &str,
+) -> Option<&'a GithubAsset> {
+    let arch_pattern = match (os, arch) {
+        ("macos", "aarch64") => "aarch64",
+        ("macos", "x86_64") => "x86_64",
+        ("windows", "x86_64") => "x64",
+        ("windows", "x86") | ("windows", "i686") => "x86",
+        ("windows", "aarch64") => "arm64",
+        _ => return None,
+    };
+    let allowed_extensions: &[&str] = match os {
+        "windows" => &[".zip"],
+        "macos" => &[".dmg", ".tar.gz", ".zip"],
+        _ => return None,
+    };
+
+    assets.iter().find(|asset| {
+        let name = asset.name.to_lowercase();
+        allowed_extensions.iter().any(|ext| name.ends_with(ext))
+            && name.contains(os)
+            && name.contains(arch_pattern)
+    })
+}
+
 #[command]
 pub async fn check_update(current_version: String) -> Result<UpdateInfo, String> {
     let client = reqwest::Client::new();
@@ -1142,53 +1169,9 @@ pub async fn check_update(current_version: String) -> Result<UpdateInfo, String>
     let arch = std::env::consts::ARCH;
     eprintln!("[check_update] Detected OS: {}, architecture: {}", os, arch);
 
-    // Map architecture and OS to expected asset name patterns
-    let arch_pattern = match (os, arch) {
-        ("macos", "aarch64") => "aarch64",
-        ("macos", "x86_64") => "x86_64",
-        ("windows", "x86_64") => "x64",
-        ("windows", "x86") | ("windows", "i686") => "x86",
-        ("windows", "aarch64") => "arm64",
-        (_, _) => "universal", // Fallback to universal for unknown archs
-    };
-
-    let allowed_extensions = match os {
-        "windows" => vec![".zip"],
-        "macos" => vec![".dmg", ".tar.gz", ".zip"],
-        _ => vec![".tar.gz", ".zip"],
-    };
-
-    // For macOS, also require the name to contain "macos" to avoid accidentally
-    // matching Windows .zip files that also contain an arch pattern.
-    let os_filter = match os {
-        "macos" => "macos",
-        "windows" => "windows",
-        _ => "",
-    };
-
-    // Find matching asset: must match OS, arch and extension.
-    let asset = release
-        .assets
-        .iter()
-        .find(|a| {
-            let name = a.name.to_lowercase();
-            let matches_ext = allowed_extensions.iter().any(|ext| name.ends_with(ext));
-            let matches_os = os_filter.is_empty() || name.contains(os_filter);
-            matches_ext && matches_os && name.contains(arch_pattern)
-        })
-        .or_else(|| {
-            // Fallback: x64 on Windows, aarch64 on macOS
-            release.assets.iter().find(|a| {
-                let name = a.name.to_lowercase();
-                let matches_ext = allowed_extensions.iter().any(|ext| name.ends_with(ext));
-                let matches_os = os_filter.is_empty() || name.contains(os_filter);
-                if os == "windows" {
-                    matches_ext && matches_os && name.contains("x64")
-                } else {
-                    matches_ext && matches_os && name.contains("aarch64")
-                }
-            })
-        });
+    // Require an exact OS + architecture match. Installing a fallback built for
+    // another CPU architecture is more dangerous than reporting it unavailable.
+    let asset = select_update_asset(&release.assets, os, arch);
 
     eprintln!(
         "[check_update] Selected asset: {:?}",
@@ -1226,26 +1209,43 @@ pub async fn install_update(app: AppHandle, download_url: String) -> Result<(), 
     // Stream download to calculate progress
     use std::io::Write;
 
-    let response = reqwest::get(&download_url)
+    let response = reqwest::Client::builder()
+        .user_agent("r2modmac-updater")
+        .redirect(reqwest::redirect::Policy::limited(10))
+        .build()
+        .map_err(|e| e.to_string())?
+        .get(&download_url)
+        .send()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string())?
+        .error_for_status()
+        .map_err(|e| format!("Update download failed: {}", e))?;
     let total_size = response.content_length().unwrap_or(0);
 
     let mut file = fs::File::create(&file_path).map_err(|e| e.to_string())?;
     let mut downloaded: u64 = 0;
     let mut body = response;
 
-    while let Ok(Some(item)) = body.chunk().await {
-        let chunk = item;
-        file.write_all(&chunk).map_err(|e| e.to_string())?;
-
-        downloaded += chunk.len() as u64;
-
-        if total_size > 0 {
-            let percent = (downloaded as f64 / total_size as f64 * 100.0) as u8;
-            // Emit progress event
-            let _ = app.emit("update-progress", percent);
+    loop {
+        match body.chunk().await {
+            Ok(Some(chunk)) => {
+                file.write_all(&chunk).map_err(|e| e.to_string())?;
+                downloaded += chunk.len() as u64;
+                if total_size > 0 {
+                    let percent = (downloaded as f64 / total_size as f64 * 100.0) as u8;
+                    let _ = app.emit("update-progress", percent);
+                }
+            }
+            Ok(None) => break,
+            Err(error) => return Err(format!("Update download was interrupted: {}", error)),
         }
+    }
+    file.sync_all().map_err(|e| e.to_string())?;
+    if total_size > 0 && downloaded != total_size {
+        return Err(format!(
+            "Update download is incomplete: received {} of {} bytes",
+            downloaded, total_size
+        ));
     }
 
     #[cfg(target_os = "windows")]
@@ -1289,8 +1289,15 @@ pub async fn install_update(app: AppHandle, download_url: String) -> Result<(), 
             let bat_path = temp_dir.join("r2modmac_updater.bat");
             let bat_content = format!(
                 "@echo off\r\n\
-                ping 127.0.0.1 -n 3 >nul\r\n\
-                move /y \"{new_exe}\" \"{cur_exe}\"\r\n\
+                set /a attempts=0\r\n\
+                :replace\r\n\
+                timeout /t 1 /nobreak >nul\r\n\
+                move /y \"{new_exe}\" \"{cur_exe}\" >nul 2>&1\r\n\
+                if not exist \"{new_exe}\" goto replaced\r\n\
+                set /a attempts+=1\r\n\
+                if %attempts% LSS 30 goto replace\r\n\
+                exit /b 1\r\n\
+                :replaced\r\n\
                 start \"\" \"{cur_exe}\"\r\n\
                 del \"%~f0\"\r\n",
                 new_exe = new_exe_path.to_string_lossy(),
@@ -1392,13 +1399,17 @@ pub async fn install_update(app: AppHandle, download_url: String) -> Result<(), 
             String::new()
         };
 
-        // The script waits for PID, mounts/extracts, deletes OLD app, moves NEW app, launches NEW app, cleans up.
+        // The script stages and validates the new bundle before moving the old
+        // app aside. If replacement fails, the previous app is restored.
         let script = format!(
             r#"#!/bin/bash
+set -u
 PID={}
 APP_PATH="{}"
 UPDATE_DIR="{}"
 APP_SOURCE="{}"
+STAGED_APP="$UPDATE_DIR/r2modmac-staged.app"
+BACKUP_APP="${{APP_PATH}}.r2modmac-backup"
 
 echo "Waiting for PID $PID to exit..."
 while kill -0 $PID 2>/dev/null; do sleep 0.5; done
@@ -1411,15 +1422,47 @@ if [ ! -d "$APP_SOURCE" ]; then
     exit 1
 fi
 
-echo "Replacing app at $APP_PATH..."
-rm -rf "$APP_PATH"
-cp -R "$APP_SOURCE" "$APP_PATH"
+echo "Staging update..."
+rm -rf "$STAGED_APP"
+if ! cp -R "$APP_SOURCE" "$STAGED_APP"; then
+    echo "Error: Could not stage the new app"
+    {}
+    exit 1
+fi
+
+if [ ! -x "$STAGED_APP/Contents/MacOS/r2modmac" ]; then
+    echo "Error: Staged app bundle is incomplete"
+    rm -rf "$STAGED_APP"
+    {}
+    exit 1
+fi
 
 # Unmount if needed (DMG)
 {}
 
+echo "Replacing app at $APP_PATH..."
+rm -rf "$BACKUP_APP"
+if [ -d "$APP_PATH" ]; then
+    mv "$APP_PATH" "$BACKUP_APP" || exit 1
+fi
+
+if ! mv "$STAGED_APP" "$APP_PATH"; then
+    echo "Error: Could not install the staged app; restoring previous version"
+    rm -rf "$APP_PATH"
+    if [ -d "$BACKUP_APP" ]; then mv "$BACKUP_APP" "$APP_PATH"; fi
+    exit 1
+fi
+
 echo "Launching new app..."
-open "$APP_PATH"
+if ! open "$APP_PATH"; then
+    echo "Error: Could not launch updated app; restoring previous version"
+    rm -rf "$APP_PATH"
+    if [ -d "$BACKUP_APP" ]; then mv "$BACKUP_APP" "$APP_PATH"; fi
+    open "$APP_PATH" || true
+    exit 1
+fi
+
+rm -rf "$BACKUP_APP"
 
 echo "Cleaning up..."
 rm -rf "$UPDATE_DIR"
@@ -1429,6 +1472,8 @@ rm -rf "$UPDATE_DIR"
             temp_dir.to_string_lossy(),
             app_source,
             extract_command,
+            unmount_command,
+            unmount_command,
             unmount_command
         );
 
@@ -1473,6 +1518,32 @@ pub fn compare_versions(v1: &str, v2: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn release_asset(name: &str) -> GithubAsset {
+        GithubAsset {
+            name: name.to_string(),
+            browser_download_url: format!("https://example.invalid/{}", name),
+        }
+    }
+
+    #[test]
+    fn selects_only_exact_update_os_and_architecture() {
+        let assets = [
+            release_asset("r2modmac_macos_aarch64.dmg"),
+            release_asset("r2modmac_macos_x86_64.dmg"),
+            release_asset("r2modmac_windows_x64.zip"),
+            release_asset("r2modmac_windows_x86.zip"),
+            release_asset("r2modmac_windows_arm64.zip"),
+        ];
+
+        assert_eq!(select_update_asset(&assets, "macos", "aarch64").unwrap().name, assets[0].name);
+        assert_eq!(select_update_asset(&assets, "macos", "x86_64").unwrap().name, assets[1].name);
+        assert_eq!(select_update_asset(&assets, "windows", "x86_64").unwrap().name, assets[2].name);
+        assert_eq!(select_update_asset(&assets, "windows", "x86").unwrap().name, assets[3].name);
+        assert_eq!(select_update_asset(&assets, "windows", "aarch64").unwrap().name, assets[4].name);
+        assert!(select_update_asset(&assets[..1], "macos", "x86_64").is_none());
+        assert!(select_update_asset(&assets[..2], "windows", "x86_64").is_none());
+    }
 
     #[test]
     fn extracts_assets_cover_from_community_card() {

@@ -4,6 +4,9 @@ use crate::utils::file_ops::*;
 use crate::utils::mod_manifest::{
     backup_existing_mod_files, save_owned_mod_manifest, GAME_MANIFEST_SCOPE,
 };
+use crate::utils::persistent_download::{
+    download_persistent, DownloadProgress, DOWNLOAD_CANCELLED,
+};
 use base64::Engine;
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
@@ -13,7 +16,7 @@ use std::fs;
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::{command, AppHandle, Emitter};
 
 const APP_USER_AGENT: &str = concat!("r2modmac/", env!("CARGO_PKG_VERSION"));
@@ -36,6 +39,10 @@ static CUSTOM_MOD_RATE_LIMITER: OnceLock<Mutex<HashMap<String, VecDeque<SystemTi
     OnceLock::new();
 static CUSTOM_MOD_IMPORT_ACTIVE: AtomicBool = AtomicBool::new(false);
 static CUSTOM_MOD_IMPORT_CANCELLED: AtomicBool = AtomicBool::new(false);
+static MOD_OPERATIONS_CANCELLED: AtomicBool = AtomicBool::new(false);
+static MOD_INSTALL_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+static EXACT_PACKAGE_FETCH_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+static EXACT_PACKAGE_LAST_REQUEST: OnceLock<Mutex<Option<Instant>>> = OnceLock::new();
 
 // Shared HTTP client for all Thunderstore package fetching operations.
 // A single client reuses the connection pool and TLS session, avoiding the
@@ -52,6 +59,70 @@ fn thunderstore_client() -> &'static reqwest::Client {
             .build()
             .expect("Failed to build Thunderstore HTTP client")
     })
+}
+
+fn mod_install_lock() -> &'static tokio::sync::Mutex<()> {
+    MOD_INSTALL_LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
+
+#[command]
+pub fn begin_mod_operations() -> bool {
+    MOD_OPERATIONS_CANCELLED.store(false, Ordering::Release);
+    true
+}
+
+#[command]
+pub fn cancel_mod_operations() -> bool {
+    MOD_OPERATIONS_CANCELLED.store(true, Ordering::Release);
+    true
+}
+
+#[command]
+pub fn mod_operations_cancelled() -> bool {
+    MOD_OPERATIONS_CANCELLED.load(Ordering::Acquire)
+}
+
+fn ensure_mod_operations_not_cancelled() -> Result<(), String> {
+    if MOD_OPERATIONS_CANCELLED.load(Ordering::Acquire) {
+        Err(DOWNLOAD_CANCELLED.to_string())
+    } else {
+        Ok(())
+    }
+}
+
+async fn wait_for_mod_operations_cancelled() {
+    while !MOD_OPERATIONS_CANCELLED.load(Ordering::Acquire) {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+async fn sleep_unless_mod_operations_cancelled(duration: Duration) -> Result<(), String> {
+    tokio::select! {
+        _ = tokio::time::sleep(duration) => Ok(()),
+        _ = wait_for_mod_operations_cancelled() => Err(DOWNLOAD_CANCELLED.to_string()),
+    }
+}
+
+async fn throttle_exact_package_request() -> Result<(), String> {
+    const MIN_INTERVAL: Duration = Duration::from_millis(300);
+    let wait = {
+        let last_request = EXACT_PACKAGE_LAST_REQUEST.get_or_init(|| Mutex::new(None));
+        let guard = last_request
+            .lock()
+            .map_err(|_| "Exact package request limiter is unavailable".to_string())?;
+        guard
+            .as_ref()
+            .map(|last| MIN_INTERVAL.saturating_sub(last.elapsed()))
+            .unwrap_or_default()
+    };
+    if !wait.is_zero() {
+        sleep_unless_mod_operations_cancelled(wait).await?;
+    }
+    let last_request = EXACT_PACKAGE_LAST_REQUEST.get_or_init(|| Mutex::new(None));
+    *last_request
+        .lock()
+        .map_err(|_| "Exact package request limiter is unavailable".to_string())? = Some(Instant::now());
+    Ok(())
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -2142,6 +2213,9 @@ pub async fn install_local_mod(
     }
 
     let bytes = fs::read(&payload_path).map_err(|e| e.to_string())?;
+    ensure_mod_operations_not_cancelled()?;
+    let _install_guard = mod_install_lock().lock().await;
+    ensure_mod_operations_not_cancelled()?;
     install_mod_bytes(
         app,
         profile_id,
@@ -3008,141 +3082,50 @@ pub async fn install_mod(
     game_path: String,
     use_profile_cache: Option<bool>,
 ) -> Result<serde_json::Value, String> {
-    // Build a real HTTP client with a User-Agent. GitHub — which hosts every
-    // Outer Wilds mod release asset (ow-mod-db downloadUrls all point to
-    // github.com/.../releases/download/...) — responds 403 Forbidden to any
-    // request lacking a User-Agent header. A bare reqwest::Client::new() sends
-    // no UA, so installs intermittently failed with "Download failed with
-    // status 403" depending on GitHub's cache/rate-limit state. The same UA is
-    // already used by every other HTTP call in this module (APP_USER_AGENT).
     let client = reqwest::Client::builder()
         .user_agent(APP_USER_AGENT)
         .redirect(reqwest::redirect::Policy::limited(10))
         .build()
         .map_err(|e| e.to_string())?;
-    let response;
-    let mut attempts = 0;
-    let max_attempts = 5;
-    let mut delay = std::time::Duration::from_millis(1000);
-
-    loop {
-        attempts += 1;
-        match client.get(&download_url).send().await {
-            Ok(resp) => {
-                let status = resp.status();
-                if status.is_success() {
-                    response = Some(resp);
-                    break;
-                }
-
-                if (status.is_server_error()
-                    || status == reqwest::StatusCode::TOO_MANY_REQUESTS
-                    || status == reqwest::StatusCode::FORBIDDEN)
-                    && attempts < max_attempts
-                {
-                    let mut wait_duration = delay;
-                    if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-                        if let Some(retry_after) = resp.headers().get(reqwest::header::RETRY_AFTER) {
-                            if let Ok(retry_str) = retry_after.to_str() {
-                                if let Ok(seconds) = retry_str.parse::<u64>() {
-                                    wait_duration = std::time::Duration::from_secs(seconds);
-                                    eprintln!(
-                                        "[install_mod] Rate limited (429) by server. Waiting {}s before retrying download for mod {}.",
-                                        seconds, mod_name
-                                    );
-                                }
-                            }
-                        }
-                    }
-
-                    eprintln!(
-                        "[install_mod] Download failed with status {} for mod {}. Retrying attempt {}/{} in {:?}",
-                        status, mod_name, attempts, max_attempts, wait_duration
-                    );
-
-                    tokio::time::sleep(wait_duration).await;
-                    delay *= 2;
-                } else {
-                    return Err(format!(
-                        "Download failed with status {} after {} attempts",
-                        status, attempts
-                    ));
-                }
-            }
-            Err(e) if attempts < max_attempts => {
-                eprintln!(
-                    "[install_mod] Network error {} for mod {}. Retrying attempt {}/{} in {:?}",
-                    e, mod_name, attempts, max_attempts, delay
-                );
-                tokio::time::sleep(delay).await;
-                delay *= 2;
-            }
-            Err(e) => {
-                return Err(format!(
-                    "Download failed: {} after {} attempts",
-                    e, attempts
-                ));
-            }
-        }
-    }
-    let response = response.unwrap();
-
-    let total_bytes = response.content_length();
-    // Use the streaming body directly via chunk() instead of bytes_stream() so we
-    // don't need the `stream` feature (which pulls in h2 streaming machinery).
-    let mut body = response;
-    let mut bytes: Vec<u8> = Vec::new();
-    let mut downloaded: u64 = 0;
-    let download_started = std::time::Instant::now();
-    let mut last_emit = std::time::Instant::now();
-
-    while let Ok(Some(next_chunk)) = body.chunk().await {
-        let chunk = next_chunk;
-        downloaded += chunk.len() as u64;
-        bytes.extend_from_slice(&chunk);
-
-        let now = std::time::Instant::now();
-        if now.duration_since(last_emit).as_millis() >= 120 {
-            let elapsed = download_started.elapsed().as_secs_f64().max(0.001);
-            let speed_bps = downloaded as f64 / elapsed;
-            let progress_percent = total_bytes
+    let cache_dir = crate::utils::paths::app_cache_dir(&app).map_err(|e| e.to_string())?;
+    let progress_app = app.clone();
+    let progress_mod_name = mod_name.clone();
+    let completed_download = download_persistent(
+        &client,
+        &cache_dir,
+        &download_url,
+        &mod_name,
+        &MOD_OPERATIONS_CANCELLED,
+        move |progress: DownloadProgress| {
+            let progress_percent = progress
+                .total_bytes
+                .filter(|total| *total > 0)
                 .map(|total| {
-                    ((downloaded as f64 / total as f64) * 100.0)
+                    ((progress.downloaded_bytes as f64 / total as f64) * 100.0)
                         .round()
                         .clamp(0.0, 100.0) as u8
                 })
-                .unwrap_or(0);
-
-            let _ = app.emit(
+                .unwrap_or(if progress.done { 100 } else { 0 });
+            let _ = progress_app.emit(
                 "mod-download-progress",
                 serde_json::json!({
-                    "mod_name": mod_name.as_str(),
-                    "downloaded_bytes": downloaded,
-                    "total_bytes": total_bytes,
-                    "speed_bps": speed_bps,
+                    "mod_name": progress_mod_name.as_str(),
+                    "downloaded_bytes": progress.downloaded_bytes,
+                    "total_bytes": progress.total_bytes,
+                    "speed_bps": progress.speed_bps,
                     "progress_percent": progress_percent,
-                    "done": false
+                    "done": progress.done
                 }),
             );
-            last_emit = now;
-        }
-    }
+        },
+    )
+    .await?;
 
-    let elapsed = download_started.elapsed().as_secs_f64().max(0.001);
-    let final_speed_bps = downloaded as f64 / elapsed;
-    let _ = app.emit(
-        "mod-download-progress",
-        serde_json::json!({
-            "mod_name": mod_name.as_str(),
-            "downloaded_bytes": downloaded,
-            "total_bytes": total_bytes,
-            "speed_bps": final_speed_bps,
-            "progress_percent": 100,
-            "done": true
-        }),
-    );
-
-    install_mod_bytes(
+    ensure_mod_operations_not_cancelled()?;
+    let _install_guard = mod_install_lock().lock().await;
+    ensure_mod_operations_not_cancelled()?;
+    let bytes = fs::read(&completed_download.payload_path).map_err(|e| e.to_string())?;
+    let result = install_mod_bytes(
         app,
         profile_id,
         mod_name,
@@ -3150,7 +3133,46 @@ pub async fn install_mod(
         use_profile_cache,
         bytes,
     )
-    .await
+    .await;
+    if result.is_ok() {
+        completed_download.cleanup();
+    }
+    result
+}
+
+fn validate_downloaded_archive_version(bytes: &[u8], mod_name: &str) -> Result<(), String> {
+    let Some(expected_version) = extract_version_number_from_full_name(mod_name) else {
+        return Ok(());
+    };
+    let cursor = std::io::Cursor::new(bytes);
+    let mut archive = zip::ZipArchive::new(cursor).map_err(|error| error.to_string())?;
+    for index in 0..archive.len() {
+        let mut file = archive.by_index(index).map_err(|error| error.to_string())?;
+        let Some(path) = normalize_zip_entry_name(file.name()) else {
+            continue;
+        };
+        if !path.eq_ignore_ascii_case("manifest.json") {
+            continue;
+        }
+        if file.size() > CUSTOM_MOD_MAX_MANIFEST_BYTES {
+            return Err(format!("{} contains an oversized manifest.json", mod_name));
+        }
+        let mut content = String::new();
+        file.read_to_string(&mut content).map_err(|error| error.to_string())?;
+        let content = content.strip_prefix('\u{FEFF}').unwrap_or(&content);
+        let manifest: serde_json::Value =
+            serde_json::from_str(content).map_err(|error| format!("Invalid manifest.json in {}: {}", mod_name, error))?;
+        if let Some(actual_version) = manifest["version_number"].as_str() {
+            if actual_version != expected_version {
+                return Err(format!(
+                    "Downloaded archive version mismatch for {}: expected {}, archive contains {}",
+                    mod_name, expected_version, actual_version
+                ));
+            }
+        }
+        break;
+    }
+    Ok(())
 }
 
 async fn install_mod_bytes(
@@ -3177,6 +3199,7 @@ async fn install_mod_bytes(
     );
 
     let mut runtime_bytes = bytes;
+    validate_downloaded_archive_version(&runtime_bytes, &mod_name)?;
 
     if target_is_outerwilds {
         let cursor = std::io::Cursor::new(&runtime_bytes);
@@ -5015,7 +5038,11 @@ pub async fn fetch_packages(
 
             // Compare online chunk URLs with cached chunk URLs
             let cached_urls: Vec<String> = cache.chunks.iter().map(|c| c.url.clone()).collect();
-            if cached_urls == online_chunk_urls {
+            let cached_url_set: std::collections::HashSet<&str> =
+                cached_urls.iter().map(String::as_str).collect();
+            let online_url_set: std::collections::HashSet<&str> =
+                online_chunk_urls.iter().map(String::as_str).collect();
+            if cached_url_set == online_url_set {
                 eprintln!("[fetch_packages] Chunk disk cache is fully up-to-date for {}. No updates needed.", game_id_clone);
                 return;
             }
@@ -5023,12 +5050,18 @@ pub async fn fetch_packages(
             // Chunks differ! Keep chunks that are still online, and download only the new ones!
             eprintln!("[fetch_packages] Chunk URLs differ from cache. Updating changed chunks in background for {}...", game_id_clone);
             
-            let mut kept_chunks: Vec<ChunkCache> = cache.chunks.into_iter()
-                .filter(|c| online_chunk_urls.contains(&c.url))
+            let mut cached_chunks: std::collections::HashMap<String, ChunkCache> = cache
+                .chunks
+                .into_iter()
+                .map(|chunk| (chunk.url.clone(), chunk))
+                .collect();
+            let mut kept_chunks: Vec<ChunkCache> = online_chunk_urls
+                .iter()
+                .filter_map(|url| cached_chunks.remove(url))
                 .collect();
 
             let urls_to_download: Vec<String> = online_chunk_urls.iter()
-                .filter(|url| !cached_urls.contains(url))
+                .filter(|url| !cached_url_set.contains(url.as_str()))
                 .cloned()
                 .collect();
 
@@ -5476,15 +5509,31 @@ pub async fn lookup_packages_by_names(
     // Compile the version-strip regex once for the process lifetime.
     static VERSION_REGEX: OnceLock<regex::Regex> = OnceLock::new();
     let re = VERSION_REGEX.get_or_init(|| {
-        regex::Regex::new(r"^(.*)-(\d+\.\d+\.\d+)$").expect("invalid version regex")
+        regex::Regex::new(r"^(.*)-(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)$")
+            .expect("invalid version regex")
     });
 
     let packages_lock = state.packages.read().await;
 
     if let Some(packages) = packages_lock.get(&game_id) {
-        // Build a HashMap for O(1) lookups instead of O(n) linear search per name.
-        let index: std::collections::HashMap<&str, &crate::models::shared::Package> =
-            packages.iter().map(|p| (p.full_name.as_str(), p)).collect();
+        // Only index requested packages. Building a 50k-entry map whenever a
+        // profile opens caused avoidable RAM/CPU spikes for large communities.
+        let requested: std::collections::HashSet<String> = names
+            .iter()
+            .map(|name| {
+                re.captures(name)
+                    .and_then(|caps| caps.get(1))
+                    .map_or(name.as_str(), |value| value.as_str())
+                    .to_lowercase()
+            })
+            .collect();
+        let index: std::collections::HashMap<String, &crate::models::shared::Package> = packages
+            .iter()
+            .filter_map(|package| {
+                let key = package.full_name.to_lowercase();
+                requested.contains(&key).then_some((key, package))
+            })
+            .collect();
 
         let mut found = Vec::with_capacity(names.len());
         let mut unknown = Vec::new();
@@ -5499,7 +5548,7 @@ pub async fn lookup_packages_by_names(
                 name.clone()
             };
 
-            if let Some(pkg) = index.get(clean_name.as_str()) {
+            if let Some(pkg) = index.get(&clean_name.to_lowercase()) {
                 found.push((*pkg).clone());
             } else {
                 unknown.push(name);
@@ -5539,7 +5588,7 @@ pub async fn fetch_package_by_name(
     // name might be "Namespace-Name" or "Namespace-Name-Version"
 
     // 1. Strip version if present (Regex: ^(.*)-(\d+\.\d+\.\d+)$)
-    let re = regex::Regex::new(r"^(.*)-(\d+\.\d+\.\d+)$").unwrap();
+    let re = regex::Regex::new(r"^(.*)-(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)$").unwrap();
     let (clean_name, version_str) = if let Some(caps) = re.captures(&name) {
         (
             caps.get(1).map_or(name.clone(), |m| m.as_str().to_string()),
@@ -5608,12 +5657,8 @@ pub async fn fetch_package_by_name(
         }
     }
 
-    // 4. Fallback to network
-    let client = reqwest::Client::builder()
-        .user_agent(APP_USER_AGENT)
-        .build()
-        .map_err(|e| e.to_string())?;
-
+    // 4. Fallback to network. Exact-version imports can require many calls for
+    // large profiles, so serialize them and honor Thunderstore rate limiting.
     let url = if let Some(ref v) = version_str {
         format!(
             "https://thunderstore.io/api/experimental/package/{}/{}/{}/",
@@ -5631,7 +5676,75 @@ pub async fn fetch_package_by_name(
         url
     );
 
-    let response = client.get(&url).send().await.map_err(|e| e.to_string())?;
+    ensure_mod_operations_not_cancelled()?;
+    let _exact_fetch_guard = if version_str.is_some() {
+        let lock = EXACT_PACKAGE_FETCH_LOCK.get_or_init(|| tokio::sync::Mutex::new(()));
+        Some(tokio::select! {
+            guard = lock.lock() => guard,
+            _ = wait_for_mod_operations_cancelled() => return Err(DOWNLOAD_CANCELLED.to_string()),
+        })
+    } else {
+        None
+    };
+    let mut delay = Duration::from_millis(500);
+    let mut response = None;
+    let mut last_error = String::new();
+    for attempt in 1..=6 {
+        ensure_mod_operations_not_cancelled()?;
+        if version_str.is_some() {
+            throttle_exact_package_request().await?;
+        }
+        let request = thunderstore_client().get(&url).send();
+        let response_result = tokio::select! {
+            result = request => result,
+            _ = wait_for_mod_operations_cancelled() => return Err(DOWNLOAD_CANCELLED.to_string()),
+        };
+        match response_result {
+            Ok(candidate) => {
+                let status = candidate.status();
+                if status.is_success() || status == reqwest::StatusCode::NOT_FOUND {
+                    response = Some(candidate);
+                    break;
+                }
+                last_error = format!("Thunderstore returned {}", status);
+                if attempt < 6
+                    && (status == reqwest::StatusCode::TOO_MANY_REQUESTS
+                        || status.is_server_error())
+                {
+                    let wait = candidate
+                        .headers()
+                        .get(reqwest::header::RETRY_AFTER)
+                        .and_then(|value| value.to_str().ok())
+                        .and_then(|value| value.parse::<u64>().ok())
+                        .map(|seconds| Duration::from_secs(seconds.min(60)))
+                        .unwrap_or(delay);
+                    eprintln!(
+                        "[fetch_package_by_name] {} for {}; retrying {}/6 in {:?}",
+                        status, name, attempt + 1, wait
+                    );
+                    sleep_unless_mod_operations_cancelled(wait).await?;
+                    delay = (delay * 2).min(Duration::from_secs(8));
+                    continue;
+                }
+                response = Some(candidate);
+                break;
+            }
+            Err(error) => {
+                last_error = error.to_string();
+                if attempt < 6 {
+                    sleep_unless_mod_operations_cancelled(delay).await?;
+                    delay = (delay * 2).min(Duration::from_secs(8));
+                    continue;
+                }
+            }
+        }
+    }
+    let response = response.ok_or_else(|| {
+        format!(
+            "Failed to fetch pinned package {} after retries: {}",
+            name, last_error
+        )
+    })?;
 
     if response.status() == 404 {
         return Ok(None);
@@ -5659,7 +5772,35 @@ pub async fn fetch_package_by_name(
         let ver_downloads = val["downloads"].as_i64().unwrap_or(0);
         let ver_website = val["website_url"].as_str().unwrap_or("").to_string();
         let ver_full = val["full_name"].as_str().unwrap_or("").to_string();
-        let ver_uuid = val["uuid4"].as_str().unwrap_or("").to_string();
+        // The experimental exact-version endpoint omits uuid4 for historical
+        // releases. Use a deterministic identity so distinct pinned packages
+        // can never collapse into the same empty-id profile entry.
+        let ver_uuid = val["uuid4"]
+            .as_str()
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("thunderstore:{}", ver_full.to_lowercase()));
+
+        let requested_version = version_str.as_deref().unwrap_or_default();
+        let expected_full_name = format!("{}-{}", clean_name, requested_version);
+        if ver_num != requested_version {
+            return Err(format!(
+                "Thunderstore returned version {} while {} was requested for {}",
+                ver_num, requested_version, clean_name
+            ));
+        }
+        if !ver_full.eq_ignore_ascii_case(&expected_full_name) {
+            return Err(format!(
+                "Thunderstore returned package {} while {} was requested",
+                ver_full, expected_full_name
+            ));
+        }
+        if ver_download.is_empty() {
+            return Err(format!(
+                "Thunderstore returned no download URL for pinned package {}",
+                expected_full_name
+            ));
+        }
 
         let version_struct = crate::models::shared::PackageVersion {
             name: ver_name,
@@ -5769,6 +5910,28 @@ pub async fn fetch_package_by_name(
         }
     };
 
+    if version_str.is_some() {
+        if let Some(game_id) = game_id.as_ref() {
+            let mut packages_guard = state.packages.write().await;
+            if let Some(packages) = packages_guard.get_mut(game_id) {
+                if let Some(cached_package) = packages
+                    .iter_mut()
+                    .find(|candidate| candidate.full_name.eq_ignore_ascii_case(&pkg.full_name))
+                {
+                    for exact_version in &pkg.versions {
+                        if !cached_package.versions.iter().any(|candidate| {
+                            candidate.version_number == exact_version.version_number
+                        }) {
+                            cached_package.versions.push(exact_version.clone());
+                        }
+                    }
+                } else {
+                    packages.push(pkg.clone());
+                }
+            }
+        }
+    }
+
     Ok(Some(pkg))
 }
 
@@ -5796,6 +5959,30 @@ mod tests {
             .unwrap();
         archive.write_all(dll_bytes).unwrap();
         archive.finish().unwrap().into_inner()
+    }
+
+    fn make_manifest_zip(version: &str) -> Vec<u8> {
+        let cursor = Cursor::new(Vec::new());
+        let mut archive = zip::ZipWriter::new(cursor);
+        archive
+            .start_file("manifest.json", zip::write::FileOptions::default())
+            .unwrap();
+        write!(
+            archive,
+            "\u{FEFF}{{\"name\":\"Example\",\"version_number\":\"{}\"}}",
+            version
+        )
+        .unwrap();
+        archive.finish().unwrap().into_inner()
+    }
+
+    #[test]
+    fn downloaded_archive_version_must_match_pinned_name() {
+        let archive = make_manifest_zip("1.2.3");
+        assert!(validate_downloaded_archive_version(&archive, "Author-Example-1.2.3").is_ok());
+        let error = validate_downloaded_archive_version(&archive, "Author-Example-1.2.4")
+            .unwrap_err();
+        assert!(error.contains("version mismatch"));
     }
 
     #[test]

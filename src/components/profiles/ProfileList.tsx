@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Menu, MenuItem } from '@tauri-apps/api/menu';
 import type { Profile } from '../../types/profile';
 import type { CommunityPlatformInfo } from '../../types/thunderstore';
-import { Button } from '../ui';
+import { Button, HoverMarquee } from '../ui';
 import { PlatformPicker } from './PlatformPicker';
 import { revealInFileManagerLabel } from '../../utils/platformUtils';
 
@@ -393,8 +393,8 @@ export function ProfileList({
                                     </div>
                                 )}
 
-                                <div className="flex items-center gap-2 mb-2">
-                                    <h3 className="text-xl font-bold text-white truncate">{profile.name}</h3>
+                                <div className="flex min-w-0 items-center gap-2 mb-2">
+                                    <HoverMarquee text={profile.name} className="text-xl font-bold text-white" />
                                     {/* Platform badge */}
                                     {profile.platform === 'mac' ? (
                                         <span title="macOS profile" className="flex flex-col justify-center items-center flex-shrink-0 text-gray-400 w-4 h-4 pb-0.5">

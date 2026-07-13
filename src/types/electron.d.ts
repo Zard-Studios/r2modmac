@@ -28,6 +28,9 @@ export interface IElectronAPI {
     selectFile: (filters?: { name: string; extensions: string[] }[]) => Promise<string | null>;
     selectImportPath: () => Promise<string | null>;
     installMod: (profileId: string, downloadUrl: string, modName: string, gamePath: string, useProfileCache?: boolean) => Promise<{ success: boolean; uniqueName?: string; dependencies?: string[]; error?: string }>;
+    beginModOperations: () => Promise<boolean>;
+    cancelModOperations: () => Promise<boolean>;
+    modOperationsCancelled: () => Promise<boolean>;
     inspectCustomMod: (path: string) => Promise<any>;
     cancelCustomModImport: () => Promise<boolean>;
     importCustomMod: (

@@ -10,6 +10,7 @@ export interface ProgressState {
   totalBytes?: number;
   activeDownloads?: number;
   isCancelable?: boolean;
+  operation?: 'custom-import' | 'mod-sync';
 }
 
 export interface ModDownloadProgressEvent {

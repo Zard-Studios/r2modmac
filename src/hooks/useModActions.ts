@@ -1,6 +1,7 @@
 import type { Package, PackageVersion } from '../types/thunderstore';
 import type { InstalledMod } from '../types/profile';
 import { useProfileStore } from '../store/useProfileStore';
+import { findPinnedVersion, parsePackageReference } from '../utils/modVersioning';
 
 const MAX_PARALLEL_OPS = 10;
 
@@ -79,7 +80,9 @@ export function useModActions({
             if (maxConcurrency === 1) {
                 await batch[0]();
             } else {
-                await Promise.all(batch.map((task) => task()));
+                const results = await Promise.allSettled(batch.map((task) => task()));
+                const rejected = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+                if (rejected) throw rejected.reason;
             }
         }
     };
@@ -93,7 +96,21 @@ export function useModActions({
         progressCounter?: { installed: number; total: number },
         gamePath?: string
     ): Promise<void> => {
-        if (installedCache.has(version.full_name)) return;
+        const targetReference = parsePackageReference(version.full_name);
+        const targetVersion = targetReference.version || version.version_number;
+        const packageMarkerPrefix = `package:${targetReference.packageName.toLowerCase()}@`;
+        const packageMarker = `${packageMarkerPrefix}${targetVersion}`;
+        if (installedCache.has(packageMarker)) return;
+        const conflictingMarker = Array.from(installedCache).find(entry =>
+            entry.startsWith(packageMarkerPrefix) && entry !== packageMarker
+        );
+        if (conflictingMarker) {
+            throw new Error(
+                `Dependency conflict for ${targetReference.packageName}: ` +
+                `${conflictingMarker.slice(packageMarkerPrefix.length)} and ${targetVersion} are both required`
+            );
+        }
+        installedCache.add(packageMarker);
         installedCache.add(version.full_name);
 
         const profileIdToUse = targetProfileId || activeProfileId;
@@ -101,37 +118,46 @@ export function useModActions({
         if (!gamePath) throw new Error('Game path not provided');
 
         // 1. Collect deps to install
-        const depsToInstall: string[] = [];
+        const depsToInstall: ReturnType<typeof parsePackageReference>[] = [];
         for (const depString of version.dependencies) {
-            const parts = depString.split('-');
-            if (parts.length < 3) continue;
-            const depFullName = `${parts[0]}-${parts[1]}`;
+            const dependency = parsePackageReference(depString);
+            if (!dependency.version) throw new Error(`Dependency ${depString} has no pinned version`);
             const activeProfile = profiles.find(p => p.id === profileIdToUse);
-            if (activeProfile?.mods.some(m => m.fullName.startsWith(depFullName))) continue;
-            if (installedCache.has(depFullName)) continue;
-            depsToInstall.push(depFullName);
+            if (activeProfile?.mods.some(m => m.fullName.toLowerCase() === dependency.fullName.toLowerCase())) continue;
+            if (installedCache.has(`package:${dependency.packageName.toLowerCase()}@${dependency.version}`)) continue;
+            depsToInstall.push(dependency);
         }
 
         // 2. Batch-fetch missing deps
+        if (depsToInstall.length > 0 && !selectedCommunity) {
+            throw new Error('Cannot resolve pinned dependencies without a Thunderstore community');
+        }
         if (depsToInstall.length > 0 && selectedCommunity) {
             setProgressState(prev => ({ ...prev, currentTask: `Fetching ${depsToInstall.length} dependencies...` }));
             try {
-                const result = await window.ipcRenderer.lookupPackagesByNames(selectedCommunity, depsToInstall);
-                if (progressCounter) progressCounter.total += result.found.length;
-                const dependencyTasks = result.found
-                    .map((depPkg) => {
-                        const depVersion = depPkg.versions[0];
-                        if (!depVersion) return null;
-                        return () => installModWithDependencies(depPkg, depVersion, installedCache, profileIdToUse, progressCounter, gamePath);
-                    })
-                    .filter((task): task is () => Promise<void> => !!task);
+                const result = await window.ipcRenderer.lookupPackagesByNames(selectedCommunity, depsToInstall.map(dep => dep.fullName));
+                if (progressCounter) progressCounter.total += depsToInstall.length;
+                const dependencyTasks = depsToInstall.map(requirement => async () => {
+                    let depPkg = result.found.find(candidate =>
+                        candidate.full_name.toLowerCase() === requirement.packageName.toLowerCase()
+                    );
+                    let depVersion = depPkg?.versions.find(candidate => candidate.version_number === requirement.version);
+                    if (!depPkg || !depVersion) {
+                        const exactPackage = await window.ipcRenderer.fetchPackageByName(requirement.fullName, selectedCommunity);
+                        if (!exactPackage) throw new Error(`Pinned dependency unavailable: ${requirement.fullName}`);
+                        depPkg = exactPackage;
+                        depVersion = findPinnedVersion(depPkg, requirement.version!, requirement.packageName);
+                    }
+                    await installModWithDependencies(depPkg, depVersion, installedCache, profileIdToUse, progressCounter, gamePath);
+                });
 
                 const concurrency = installInParallel ? MAX_PARALLEL_OPS : 1;
                 if (dependencyTasks.length > 0) {
                     await runWithConcurrency(dependencyTasks, concurrency);
                 }
             } catch (err) {
-                console.error('[Dependencies] Failed to lookup:', err);
+                console.error('[Dependencies] Failed to resolve:', err);
+                throw err;
             }
         }
 
@@ -196,7 +222,8 @@ export function useModActions({
     const handleInstallMod = async (
         pkg: Package,
         targetProfileId?: string,
-        selectedVersion?: PackageVersion
+        selectedVersion?: PackageVersion,
+        metadataOnly = false
     ): Promise<void> => {
         const profileIdToUse = targetProfileId || activeProfileId;
         if (!profileIdToUse) { alert('Please select a profile first'); return; }
@@ -204,7 +231,7 @@ export function useModActions({
         const version = selectedVersion || pkg.versions[0];
         const targetProfile = profiles.find(p => p.id === profileIdToUse);
 
-        if (legacyInstallMode) {
+        if (legacyInstallMode && !metadataOnly) {
             const gamePath = await window.ipcRenderer.getGamePath(selectedCommunity || '', targetProfile?.platform);
             if (!gamePath) {
                 await window.ipcRenderer.alert('Game Path Required', 'Please configure the game directory in Settings before installing mods in Legacy mode.\n\nLegacy mode installs mods directly into the game folder. Go to Settings → Game Directory to set the path.');
@@ -242,26 +269,34 @@ export function useModActions({
                     pending_sync: true,
                 });
 
-                const depsToResolve: string[] = [];
+                const depsToResolve: ReturnType<typeof parsePackageReference>[] = [];
                 for (const depString of ver.dependencies) {
-                    const parts = depString.split('-');
-                    if (parts.length < 3) continue;
-                    const depFullName = `${parts[0]}-${parts[1]}`;
-                    if (profile?.mods.some(m => m.fullName.startsWith(depFullName))) continue;
-                    if (processed.has(depFullName)) continue;
-                    depsToResolve.push(depFullName);
+                    const dependency = parsePackageReference(depString);
+                    if (!dependency.version) throw new Error(`Dependency ${depString} has no pinned version`);
+                    if (profile?.mods.some(m => m.fullName.toLowerCase() === dependency.fullName.toLowerCase())) continue;
+                    if (processed.has(dependency.fullName)) continue;
+                    depsToResolve.push(dependency);
                 }
 
-                if (!selectedCommunity || depsToResolve.length === 0) return;
+                if (depsToResolve.length === 0) return;
+                if (!selectedCommunity) {
+                    throw new Error('Cannot resolve pinned dependencies without a Thunderstore community');
+                }
 
-                const result = await window.ipcRenderer.lookupPackagesByNames(selectedCommunity, depsToResolve);
-                const dependencyTasks = result.found
-                    .map((depPkg) => {
-                        const depVer = depPkg.versions[0];
-                        if (!depVer) return null;
-                        return () => collectModAndDeps(depPkg, depVer);
-                    })
-                    .filter((task): task is () => Promise<void> => !!task);
+                const result = await window.ipcRenderer.lookupPackagesByNames(selectedCommunity, depsToResolve.map(dep => dep.fullName));
+                const dependencyTasks = depsToResolve.map(requirement => async () => {
+                    let depPkg = result.found.find(candidate =>
+                        candidate.full_name.toLowerCase() === requirement.packageName.toLowerCase()
+                    );
+                    let depVer = depPkg?.versions.find(candidate => candidate.version_number === requirement.version);
+                    if (!depPkg || !depVer) {
+                        const exactPackage = await window.ipcRenderer.fetchPackageByName(requirement.fullName, selectedCommunity);
+                        if (!exactPackage) throw new Error(`Pinned dependency unavailable: ${requirement.fullName}`);
+                        depPkg = exactPackage;
+                        depVer = findPinnedVersion(depPkg, requirement.version!, requirement.packageName);
+                    }
+                    await collectModAndDeps(depPkg, depVer);
+                });
 
                 const concurrency = installInParallel ? MAX_PARALLEL_OPS : 1;
                 if (dependencyTasks.length > 0) {

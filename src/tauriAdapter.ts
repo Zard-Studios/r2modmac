@@ -20,6 +20,9 @@ export const tauriAPI: IElectronAPI = {
             return { success: false, error: String(e) };
         }
     },
+    beginModOperations: async () => invoke<boolean>('begin_mod_operations'),
+    cancelModOperations: async () => invoke<boolean>('cancel_mod_operations'),
+    modOperationsCancelled: async () => invoke<boolean>('mod_operations_cancelled'),
     inspectCustomMod: async (path) => invoke('inspect_custom_mod', { path }),
     cancelCustomModImport: async () => invoke('cancel_custom_mod_import'),
     importCustomMod: async (profileId, path, options) => invoke('import_custom_mod', {
@@ -196,4 +199,3 @@ export interface ConfigFileInfo {
     /** Absolute path to the root directory. Used by read/write commands. */
     root: string;
 }
-

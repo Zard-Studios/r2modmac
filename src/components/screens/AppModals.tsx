@@ -21,8 +21,10 @@ export interface AppModalsProps {
     handleUninstallWithDependencies: (pkg: Package, profileId: string) => void;
     isBrowsingMode: boolean;
     progressState: any;
+    isProgressMinimized?: boolean;
     setProgressState: (state: any) => void;
     onCancelProgress?: () => void | Promise<void>;
+    onMinimizeProgress?: () => void;
     isCancellingProgress?: boolean;
     uninstallModalState: any;
     setUninstallModalState: (state: any) => void;
@@ -57,7 +59,7 @@ export function AppModals({
     activeProfileId, profiles, selectedCommunity,
     handleInstallMod, handleUpdateMod, handleUninstallWithDependencies,
     isBrowsingMode,
-    progressState, setProgressState, onCancelProgress, isCancellingProgress,
+    progressState, isProgressMinimized = false, setProgressState, onCancelProgress, onMinimizeProgress, isCancellingProgress,
     uninstallModalState, setUninstallModalState, executeUninstall,
     showSettings, setShowSettings,
     showExportModal, setShowExportModal, handleExportCode, handleExportFile,
@@ -122,7 +124,7 @@ export function AppModals({
             )}
 
             <ProgressModal
-                isOpen={progressState.isOpen}
+                isOpen={progressState.isOpen && !isProgressMinimized}
                 title={progressState.title}
                 progress={progressState.progress}
                 currentTask={progressState.currentTask}
@@ -131,6 +133,7 @@ export function AppModals({
                 downloadSpeedBps={progressState.downloadSpeedBps}
                 activeDownloads={progressState.activeDownloads}
                 onCancel={progressState.isCancelable ? onCancelProgress : undefined}
+                onMinimize={onMinimizeProgress}
                 isCancelling={isCancellingProgress}
             />
 

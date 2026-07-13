@@ -6,7 +6,11 @@ use crate::models::shared::{
 };
 use crate::utils::file_ops::*;
 use std::fs;
-use tauri::{command, AppHandle, Manager, State};
+use std::io::Write;
+use std::sync::OnceLock;
+use tauri::{command, AppHandle, State};
+
+static PROFILE_SAVE_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
 
 fn is_bepinex_shell_script(name: &str) -> bool {
     let lower = name.to_lowercase();
@@ -16,13 +20,28 @@ fn is_bepinex_shell_script(name: &str) -> bool {
 #[command]
 pub fn get_profiles(app: AppHandle) -> Result<Vec<serde_json::Value>, String> {
     let profile_path = crate::utils::paths::app_data_dir(&app).unwrap().join("profiles.json");
+    let backup_path = profile_path.with_extension("json.bak");
     if !profile_path.exists() {
-        return Ok(vec![]);
+        if backup_path.exists() {
+            fs::copy(&backup_path, &profile_path).map_err(|e| e.to_string())?;
+        } else {
+            return Ok(vec![]);
+        }
     }
-    let data = fs::read_to_string(profile_path).map_err(|e| e.to_string())?;
-    let profiles: Vec<serde_json::Value> =
-        serde_json::from_str(&data).map_err(|e| e.to_string())?;
-    Ok(profiles)
+    let data = fs::read_to_string(&profile_path).map_err(|e| e.to_string())?;
+    match serde_json::from_str(&data) {
+        Ok(profiles) => Ok(profiles),
+        Err(primary_error) if backup_path.exists() => {
+            let backup = fs::read_to_string(&backup_path).map_err(|e| e.to_string())?;
+            serde_json::from_str(&backup).map_err(|backup_error| {
+                format!(
+                    "Profiles file and recovery backup are invalid: {}; {}",
+                    primary_error, backup_error
+                )
+            })
+        }
+        Err(error) => Err(error.to_string()),
+    }
 }
 
 #[command]
@@ -30,6 +49,8 @@ pub async fn save_profiles(
     app: AppHandle,
     profiles: Vec<serde_json::Value>,
 ) -> Result<bool, String> {
+    let save_lock = PROFILE_SAVE_LOCK.get_or_init(|| tokio::sync::Mutex::new(()));
+    let _save_guard = save_lock.lock().await;
     let profile_path = crate::utils::paths::app_data_dir(&app).unwrap().join("profiles.json");
 
     // Serialize first (fast operation)
@@ -41,7 +62,29 @@ pub async fn save_profiles(
         if let Some(parent) = profile_path.parent() {
             let _ = fs::create_dir_all(parent);
         }
-        fs::write(&profile_path, &data)
+        let temp_path = profile_path.with_extension("json.tmp");
+        let backup_path = profile_path.with_extension("json.bak");
+        let mut temp_file = fs::File::create(&temp_path)?;
+        temp_file.write_all(data.as_bytes())?;
+        temp_file.sync_all()?;
+        drop(temp_file);
+        #[cfg(target_os = "windows")]
+        if profile_path.exists() {
+            if backup_path.exists() {
+                fs::remove_file(&backup_path)?;
+            }
+            fs::rename(&profile_path, &backup_path)?;
+        }
+        let rename_result = fs::rename(&temp_path, &profile_path);
+        #[cfg(target_os = "windows")]
+        if rename_result.is_err() && backup_path.exists() && !profile_path.exists() {
+            let _ = fs::rename(&backup_path, &profile_path);
+        }
+        rename_result?;
+        if backup_path.exists() {
+            let _ = fs::remove_file(backup_path);
+        }
+        Ok::<(), std::io::Error>(())
     })
     .await
     .map_err(|e| format!("Task join error: {}", e))?
@@ -313,7 +356,7 @@ pub async fn clear_profile_cache(
         }
     }
 
-    if let Ok(cache_dir) = app.path().app_cache_dir() {
+    if let Ok(cache_dir) = crate::utils::paths::app_cache_dir(&app) {
         let chunks_dir = cache_dir.join("chunks");
         if chunks_dir.exists() {
             if let Ok(size) = calculate_dir_size(&chunks_dir) {
@@ -324,6 +367,14 @@ pub async fn clear_profile_cache(
             }
             let _ = fs::remove_dir_all(&chunks_dir);
             let _ = fs::create_dir_all(&chunks_dir);
+        }
+
+        let downloads_dir = cache_dir.join("mod-downloads");
+        if downloads_dir.exists() {
+            if let Ok(size) = calculate_dir_size(&downloads_dir) {
+                size_freed += size;
+            }
+            let _ = fs::remove_dir_all(&downloads_dir);
         }
 
         // Clean up gzipped package index caches
@@ -812,4 +863,3 @@ pub fn open_profile_config_file(
     open::that(&normalised).map_err(|e| e.to_string())?;
     Ok(())
 }
-

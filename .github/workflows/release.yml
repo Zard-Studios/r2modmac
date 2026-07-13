@@ -70,15 +70,28 @@ jobs:
             const fs = require('fs');
             const version = process.argv[1];
             
-            // Update package.json
+            // Update package.json + package-lock.json
             const pkg = JSON.parse(fs.readFileSync('package.json'));
             pkg.version = version;
-            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2));
+            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+            const lock = JSON.parse(fs.readFileSync('package-lock.json'));
+            lock.version = version;
+            if (lock.packages?.['']) lock.packages[''].version = version;
+            fs.writeFileSync('package-lock.json', JSON.stringify(lock, null, 2) + '\n');
             
             // Update tauri.conf.json
             const tauriConf = JSON.parse(fs.readFileSync('src-tauri/tauri.conf.json'));
             tauriConf.version = version;
-            fs.writeFileSync('src-tauri/tauri.conf.json', JSON.stringify(tauriConf, null, 2));
+            fs.writeFileSync('src-tauri/tauri.conf.json', JSON.stringify(tauriConf, null, 2) + '\n');
+
+            // Keep the Rust package version in sync as well. Cargo refreshes
+            // the root lock entry during the build.
+            const cargoPath = 'src-tauri/Cargo.toml';
+            const cargo = fs.readFileSync(cargoPath, 'utf8').replace(
+              /^(version\s*=\s*)\"[^\"]+\"/m,
+              '$1\"' + version + '\"'
+            );
+            fs.writeFileSync(cargoPath, cargo);
             
             console.log('Synchronized package.json and tauri.conf.json version to ' + version);
           " "$TAG_VERSION"
@@ -151,26 +164,24 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           body: |
-            # 0.7.5 Release
+            # ${{ github.ref_name }} Release
 
             ## News and improvements
-            - Added Outer Wilds modding support.
-            - Added game launch support via Sikarugir.
-            - Added support for PortingKit (Wineskin).
-            - Added mod configuration screen.
-            - Added custom mod support.
-            - Added "check updates" button.
-            - Added stream mode (censors username in folder paths).
-            - Added Windows support.
-            - Performance improvements.
-            - Improved the play button.
+            - Added persistent pause and resume support for modpack downloads and installations.
+            - Added background profile syncing with a compact, reopenable progress indicator.
+            - Added clearer download, installation, retry, and failure feedback.
+            - Improved profile and sidebar presentation for long profile names.
 
-            ## Fix
-            - Fixed bug causing immediate download when importing a profile (in new mode).
-            - Fixed ip-rating issues.
-            - Fixed missing .dll files when downloading mods.
-            - Fixed profile sync bug.
-            - Fixed custom mods drag-and-drop bug across all screens.
+            ## Fixes
+            - Fixed inaccurate update detection for large profiles and GitHub/Thunderstore rate-limit handling.
+            - Fixed pinned mod versions being replaced by the latest available release.
+            - Fixed missing or partially installed mods when importing and syncing large modpacks.
+            - Fixed invalid or empty package manifests causing silent installation failures.
+            - Fixed interrupted applies being restarted automatically when reopening a profile.
+            - Fixed completed mods being counted again after resuming an interrupted apply.
+            - Fixed progress panel layout shifts and disappearing transfer information.
+            - Fixed update asset selection across Apple Silicon, Intel Mac, and Windows architectures.
+            - Hardened application updates with complete-download validation, retry logic, and macOS rollback protection.
           files: |
             release_files/*.dmg
             release_files/*.zip
