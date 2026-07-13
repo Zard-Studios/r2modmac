@@ -89,11 +89,11 @@ jobs:
             const cargoPath = 'src-tauri/Cargo.toml';
             const cargo = fs.readFileSync(cargoPath, 'utf8').replace(
               /^(version\s*=\s*)\"[^\"]+\"/m,
-              '$1\"' + version + '\"'
+              (_match, prefix) => prefix + '\"' + version + '\"'
             );
             fs.writeFileSync(cargoPath, cargo);
             
-            console.log('Synchronized package.json and tauri.conf.json version to ' + version);
+            console.log('Synchronized npm, Tauri, and Cargo versions to ' + version);
           " "$TAG_VERSION"
 
       - name: Install create-dmg
