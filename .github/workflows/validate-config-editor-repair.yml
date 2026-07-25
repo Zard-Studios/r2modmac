@@ -70,10 +70,18 @@ jobs:
             npm run lint
           fi
 
+      - name: Remove unused vulnerable ZIP dependency
+        shell: bash
+        run: |
+          npm uninstall adm-zip @types/adm-zip
+          npm install --save 'dompurify@^3.4.12'
+          npm run build
+          npm run lint
+
       - name: Run Rust tests
         run: cargo test --manifest-path src-tauri/Cargo.toml
 
-      - name: Attempt non-breaking production dependency repair
+      - name: Apply non-breaking production dependency repairs
         shell: bash
         run: npm audit fix --omit=dev || true
 
@@ -132,4 +140,4 @@ jobs:
             --squash \
             --delete-branch \
             --subject 'fix: support nested config files safely' \
-            --body 'Fix nested Config Editor discovery, harden related filesystem and network access, and adopt TypeScript 7 after successful compatibility checks.'
+            --body 'Fix nested Config Editor discovery, harden related filesystem and network access, remove an unused vulnerable ZIP dependency, update DOMPurify, and adopt TypeScript 7 after successful compatibility checks.'
