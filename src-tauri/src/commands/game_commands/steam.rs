@@ -226,9 +226,7 @@ pub(super) fn find_matching_steam_root_for_game_path(
         }
     }
 
-    if let Some(embedded_library_root) =
-        find_embedded_steam_library_root_for_game_path(&canonical_game)
-    {
+    if let Some(embedded_library_root) = find_embedded_steam_library_root_for_game_path(&canonical_game) {
         if embedded_library_root.join("steam.exe").exists() {
             return Some(embedded_library_root);
         }

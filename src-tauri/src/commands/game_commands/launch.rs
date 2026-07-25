@@ -1,5 +1,5 @@
-use super::owml_patcher;
 use super::*;
+use super::owml_patcher;
 use tauri::command;
 
 #[command]
@@ -15,8 +15,7 @@ pub async fn launch_game_with_mods(
         .ok_or_else(|| "Game path not found".to_string())?;
     let game_path = std::path::PathBuf::from(&game_path_str);
 
-    let is_outerwilds =
-        is_outerwilds_identifier(&game_identifier) || is_outerwilds_game_path(&game_path);
+    let is_outerwilds = is_outerwilds_identifier(&game_identifier) || is_outerwilds_game_path(&game_path);
     if is_outerwilds {
         // 1. Restore OWML folder if it was disabled
         let owml_folder = game_path.join("OWML");
@@ -32,20 +31,14 @@ pub async fn launch_game_with_mods(
 
         // 2. Save a one-time vanilla backup so we always have a clean base to patch from.
         if let Err(e) = backup_outerwilds_vanilla_dll(&game_path) {
-            eprintln!(
-                "[launch_game_with_mods] Could not create vanilla backup (non-fatal): {}",
-                e
-            );
+            eprintln!("[launch_game_with_mods] Could not create vanilla backup (non-fatal): {}", e);
         }
 
         // 3. Restore vanilla DLL so the patcher always starts from a clean, unpatched state.
         //    This prevents double-patching corruption if the DLL is already patched from a
         //    previous modded launch.
         if let Err(e) = restore_outerwilds_vanilla(&game_path) {
-            eprintln!(
-                "[launch_game_with_mods] Could not restore vanilla DLL (non-fatal): {}",
-                e
-            );
+            eprintln!("[launch_game_with_mods] Could not restore vanilla DLL (non-fatal): {}", e);
         }
 
         // 4. Patch Assembly-CSharp.dll via our socket-free Wine patcher.
@@ -78,8 +71,7 @@ pub async fn launch_game_vanilla(
         .ok_or_else(|| "Game path not found".to_string())?;
     let game_path = std::path::PathBuf::from(&game_path_str);
 
-    let is_outerwilds =
-        is_outerwilds_identifier(&game_identifier) || is_outerwilds_game_path(&game_path);
+    let is_outerwilds = is_outerwilds_identifier(&game_identifier) || is_outerwilds_game_path(&game_path);
     if is_outerwilds {
         // Disable OWML by renaming the folder
         let owml_folder = game_path.join("OWML");
@@ -121,10 +113,7 @@ pub async fn is_game_running(
     };
     let game_path = std::path::PathBuf::from(&game_path_str);
 
-    if is_windows_profile
-        || is_outerwilds_identifier(&game_identifier)
-        || is_outerwilds_game_path(&game_path)
-    {
+    if is_windows_profile || is_outerwilds_identifier(&game_identifier) || is_outerwilds_game_path(&game_path) {
         return is_game_running_for_windows(&game_path);
     }
 
@@ -143,10 +132,7 @@ pub async fn stop_game(
         .ok_or_else(|| "Game path not found".to_string())?;
     let game_path = std::path::PathBuf::from(&game_path_str);
 
-    if is_windows_profile
-        || is_outerwilds_identifier(&game_identifier)
-        || is_outerwilds_game_path(&game_path)
-    {
+    if is_windows_profile || is_outerwilds_identifier(&game_identifier) || is_outerwilds_game_path(&game_path) {
         return stop_game_for_windows(&game_path);
     }
 

@@ -101,14 +101,9 @@ pub(crate) fn build_windows_wineskin_bundle_patterns(
 
     // Confirm this is a Wineskin/KegWorks-style bundle.
     let macos_dir = bundle_path.join("Contents").join("MacOS");
-    let is_wineskin = [
-        "Sikarugir",
-        "launcher",
-        "wineskinlauncher",
-        "WineskinLauncher",
-    ]
-    .iter()
-    .any(|name| macos_dir.join(name).exists());
+    let is_wineskin = ["Sikarugir", "launcher", "wineskinlauncher", "WineskinLauncher"]
+        .iter()
+        .any(|name| macos_dir.join(name).exists());
 
     if !is_wineskin {
         return None;
@@ -132,7 +127,10 @@ pub(crate) fn build_windows_wineskin_bundle_patterns(
 
     // Fallback: the bundle path itself appears in the wineserver cmdline on macOS
     // (e.g. ".../Steambuild 32 64bit DXVK.app/.../wineserver").
-    push_unique_pattern(&mut patterns, regex::escape(&bundle_path.to_string_lossy()));
+    push_unique_pattern(
+        &mut patterns,
+        regex::escape(&bundle_path.to_string_lossy()),
+    );
 
     if patterns.is_empty() {
         None
@@ -140,6 +138,7 @@ pub(crate) fn build_windows_wineskin_bundle_patterns(
         Some(patterns)
     }
 }
+
 
 #[cfg(windows)]
 pub(crate) fn unescape_regex_literal(text: &str) -> String {

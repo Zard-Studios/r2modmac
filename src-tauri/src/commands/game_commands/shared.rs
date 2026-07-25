@@ -431,22 +431,13 @@ pub(crate) fn backup_outerwilds_vanilla_dll(game_path: &std::path::Path) -> Resu
     } else if dll_path.exists() {
         &dll_path
     } else {
-        eprintln!(
-            "[OuterWilds] WARNING: Assembly-CSharp.dll not found, cannot create vanilla backup."
-        );
+        eprintln!("[OuterWilds] WARNING: Assembly-CSharp.dll not found, cannot create vanilla backup.");
         return Ok(());
     };
 
-    fs::copy(src, &vanilla_path).map_err(|e| {
-        format!(
-            "Failed to create vanilla DLL backup {:?}: {}",
-            vanilla_path, e
-        )
-    })?;
-    eprintln!(
-        "[OuterWilds] Created vanilla backup from {:?} -> {:?}",
-        src, vanilla_path
-    );
+    fs::copy(src, &vanilla_path)
+        .map_err(|e| format!("Failed to create vanilla DLL backup {:?}: {}", vanilla_path, e))?;
+    eprintln!("[OuterWilds] Created vanilla backup from {:?} -> {:?}", src, vanilla_path);
     Ok(())
 }
 
@@ -473,16 +464,9 @@ pub fn restore_outerwilds_vanilla(game_path: &std::path::Path) -> Result<(), Str
 
     match src {
         Some(src_path) => {
-            fs::copy(&src_path, &dll_path).map_err(|e| {
-                format!(
-                    "Failed to restore vanilla Assembly-CSharp.dll from {:?}: {}",
-                    src_path, e
-                )
-            })?;
-            eprintln!(
-                "[OuterWilds] Restored vanilla Assembly-CSharp.dll from {:?}",
-                src_path
-            );
+            fs::copy(&src_path, &dll_path)
+                .map_err(|e| format!("Failed to restore vanilla Assembly-CSharp.dll from {:?}: {}", src_path, e))?;
+            eprintln!("[OuterWilds] Restored vanilla Assembly-CSharp.dll from {:?}", src_path);
         }
         None => {
             eprintln!("[OuterWilds] WARNING: No vanilla DLL backup found (tried .vanilla, .bak). Cannot restore clean state.");
@@ -503,10 +487,7 @@ pub fn restore_outerwilds_modded(game_path: &std::path::Path) -> Result<(), Stri
 
 /// Restore the vanilla mscorlib.dll from mscorlib.dll.bak.
 /// If `delete_bak` is true, the backup file is deleted after successful restoration.
-pub fn restore_mscorlib_vanilla(
-    game_path: &std::path::Path,
-    delete_bak: bool,
-) -> Result<(), String> {
+pub fn restore_mscorlib_vanilla(game_path: &std::path::Path, delete_bak: bool) -> Result<(), String> {
     let managed_dir = game_path.join("OuterWilds_Data").join("Managed");
     if !managed_dir.exists() {
         return Ok(());
@@ -516,16 +497,9 @@ pub fn restore_mscorlib_vanilla(
     let bak_path = managed_dir.join("mscorlib.dll.bak");
 
     if bak_path.exists() {
-        fs::copy(&bak_path, &mscorlib_path).map_err(|e| {
-            format!(
-                "Failed to restore vanilla mscorlib.dll from {:?}: {}",
-                bak_path, e
-            )
-        })?;
-        eprintln!(
-            "[OuterWilds] Restored vanilla mscorlib.dll from {:?}",
-            bak_path
-        );
+        fs::copy(&bak_path, &mscorlib_path)
+            .map_err(|e| format!("Failed to restore vanilla mscorlib.dll from {:?}: {}", bak_path, e))?;
+        eprintln!("[OuterWilds] Restored vanilla mscorlib.dll from {:?}", bak_path);
         if delete_bak {
             let _ = fs::remove_file(&bak_path);
             eprintln!("[OuterWilds] Cleaned up mscorlib.dll.bak");
