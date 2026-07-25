@@ -1,0 +1,94 @@
+name: Validate config editor repair
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  validate-and-commit:
+    if: github.head_ref == 'agent/fix-config-editor-recursive-scan'
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repair branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/fix-config-editor-recursive-scan
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Apply repair
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          path = Path('.github/scripts/repair_config_editor.py')
+          text = path.read_text()
+          broken = 'tail_pattern = re.compile(r"#\\\\[command\\\\]\\\\npub fn read_profile_config_file\\\\([\\\\s\\\\S]*\\\\Z")'
+          fixed = 'tail_pattern = re.compile(r"#\\[command\\]\\npub fn read_profile_config_file\\([\\s\\S]*\\Z")'
+          if broken not in text:
+              raise RuntimeError('repair script pattern was not found')
+          path.write_text(text.replace(broken, fixed, 1))
+          PY
+          python3 .github/scripts/repair_config_editor.py
+          cargo fmt --manifest-path src-tauri/Cargo.toml --all
+
+      - name: Install current dependencies
+        run: npm ci
+
+      - name: Validate TypeScript 7 upgrade
+        id: typescript
+        shell: bash
+        run: |
+          cp package.json /tmp/r2modmac-package.json
+          cp package-lock.json /tmp/r2modmac-package-lock.json
+          if npm install --save-dev 'typescript@~7.0.2' 'typescript-eslint@^8.65.0' \
+            && npm run build \
+            && npm run lint; then
+            echo 'upgraded=true' >> "$GITHUB_OUTPUT"
+            npx tsc --version
+          else
+            echo 'TypeScript 7 is not compatible with the current project; restoring TypeScript 5.9.'
+            cp /tmp/r2modmac-package.json package.json
+            cp /tmp/r2modmac-package-lock.json package-lock.json
+            rm -rf node_modules
+            npm ci
+            npm run build
+            npm run lint
+            echo 'upgraded=false' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run Rust tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: Audit production npm dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Remove temporary repair automation
+        run: |
+          rm .github/workflows/repair-config-editor.yml
+          rm .github/workflows/validate-config-editor-repair.yml
+          rm .github/scripts/repair_config_editor.py
+
+      - name: Commit verified changes
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'fix: support nested config files safely'
+          git push origin HEAD:agent/fix-config-editor-recursive-scan
