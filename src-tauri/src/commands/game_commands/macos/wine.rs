@@ -87,9 +87,14 @@ pub(crate) fn find_macos_wineskin_launcher_binary(
     // Confirm there is a Sikarugir/Wineskin launcher binary inside Contents/MacOS/.
     // The file may be named "Sikarugir", "launcher", or "wineskinlauncher" (all symlink to the same binary).
     let macos_dir = bundle_path.join("Contents").join("MacOS");
-    let has_launcher = ["Sikarugir", "launcher", "wineskinlauncher", "WineskinLauncher"]
-        .iter()
-        .any(|name| macos_dir.join(name).exists());
+    let has_launcher = [
+        "Sikarugir",
+        "launcher",
+        "wineskinlauncher",
+        "WineskinLauncher",
+    ]
+    .iter()
+    .any(|name| macos_dir.join(name).exists());
     if !has_launcher {
         return None;
     }
@@ -175,12 +180,13 @@ pub(crate) fn launch_macos_wineskin_program(
     }
 
     // Map the native executable path to the Windows C:\ relative form expected by Info.plist.
-    let win_path = windows_rel_path_from_drive_c(prefix_root, executable_path).ok_or_else(|| {
-        format!(
-            "Could not map {:?} to a Windows path inside the Sikarugir prefix {:?}",
-            executable_path, prefix_root
-        )
-    })?;
+    let win_path =
+        windows_rel_path_from_drive_c(prefix_root, executable_path).ok_or_else(|| {
+            format!(
+                "Could not map {:?} to a Windows path inside the Sikarugir prefix {:?}",
+                executable_path, prefix_root
+            )
+        })?;
     let win_flags = args.join(" ");
 
     eprintln!(
@@ -191,13 +197,16 @@ pub(crate) fn launch_macos_wineskin_program(
     // Read original values so we can restore them after launch.
     let plistbuddy = std::path::Path::new("/usr/libexec/PlistBuddy");
     if !plistbuddy.exists() {
-        return Err("PlistBuddy not found at /usr/libexec/PlistBuddy (required for Sikarugir launch)".to_string());
+        return Err(
+            "PlistBuddy not found at /usr/libexec/PlistBuddy (required for Sikarugir launch)"
+                .to_string(),
+        );
     }
 
     let read_key = |key: &str| -> String {
         std::process::Command::new(plistbuddy)
             .arg("-c")
-            .arg(format!("Print '{}'" , key))
+            .arg(format!("Print '{}'", key))
             .arg(&info_plist)
             .output()
             .ok()
@@ -253,12 +262,18 @@ pub(crate) fn launch_macos_wineskin_program(
         std::thread::sleep(std::time::Duration::from_secs(5));
         let _ = std::process::Command::new("/usr/libexec/PlistBuddy")
             .arg("-c")
-            .arg(format!("Set 'Program Name and Path' '{}'", orig_program_clone.replace('\'', "\\'")))
+            .arg(format!(
+                "Set 'Program Name and Path' '{}'",
+                orig_program_clone.replace('\'', "\\'")
+            ))
             .arg(&info_plist_clone)
             .status();
         let _ = std::process::Command::new("/usr/libexec/PlistBuddy")
             .arg("-c")
-            .arg(format!("Set 'Program Flags' '{}'", orig_flags_clone.replace('\'', "\\'")))
+            .arg(format!(
+                "Set 'Program Flags' '{}'",
+                orig_flags_clone.replace('\'', "\\'")
+            ))
             .arg(&info_plist_clone)
             .status();
     });
@@ -431,7 +446,10 @@ mod tests {
         let win_path = windows_rel_path_from_drive_c(&prefix, &steam_exe);
         // Sikarugir Info.plist format: "/Program Files (x86)/Steam/steam.exe" (forward slashes,
         // leading slash, no "C:" prefix)
-        assert_eq!(win_path.as_deref(), Some("/Program Files (x86)/Steam/steam.exe"));
+        assert_eq!(
+            win_path.as_deref(),
+            Some("/Program Files (x86)/Steam/steam.exe")
+        );
 
         let _ = fs::remove_dir_all(root);
     }

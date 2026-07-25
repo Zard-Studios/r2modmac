@@ -11,7 +11,9 @@ pub async fn sync_profile_to_game(
     let use_cache = use_legacy_cache.unwrap_or(false);
 
     // 1. Read profile mods and platform from profiles.json
-    let profiles_path = crate::utils::paths::app_data_dir(&app).unwrap().join("profiles.json");
+    let profiles_path = crate::utils::paths::app_data_dir(&app)
+        .unwrap()
+        .join("profiles.json");
     let profiles_data = fs::read_to_string(&profiles_path).map_err(|e| e.to_string())?;
     let profiles: Vec<serde_json::Value> =
         serde_json::from_str(&profiles_data).map_err(|e| e.to_string())?;
@@ -75,8 +77,8 @@ pub async fn sync_profile_to_game(
         use_cache
     );
 
-    let is_outerwilds_profile = is_outerwilds_identifier(&game_identifier)
-        || is_outerwilds_game_path(game_path);
+    let is_outerwilds_profile =
+        is_outerwilds_identifier(&game_identifier) || is_outerwilds_game_path(game_path);
 
     // Get list of mod names from profile (format: "Author-ModName-Version")
     // We keep the full name for matching
@@ -269,7 +271,6 @@ pub async fn sync_profile_to_game(
 
                 let desired_version = desired_version_by_key.get(*pm_key);
 
-
                 let has_exact_version = game_mod_folders.iter().any(|(_, gm_key, game_version)| {
                     if gm_key != *pm_key {
                         return false;
@@ -353,12 +354,16 @@ pub async fn sync_profile_to_game(
             config["owmlPath"] = serde_json::json!(&owml_wine_path);
             if let Some(obj) = config.as_object_mut() {
                 obj.entry("forceExe").or_insert(serde_json::json!(false));
-                obj.entry("disableVersionPopup").or_insert(serde_json::json!(true));
+                obj.entry("disableVersionPopup")
+                    .or_insert(serde_json::json!(true));
             }
 
             if let Ok(serialized) = serde_json::to_string_pretty(&config) {
                 let _ = fs::write(&config_path, serialized);
-                eprintln!("[sync_profile_to_game] Wrote OWML.Config.json (socketPort=0) at {:?}", config_path);
+                eprintln!(
+                    "[sync_profile_to_game] Wrote OWML.Config.json (socketPort=0) at {:?}",
+                    config_path
+                );
             }
         }
 
@@ -381,12 +386,16 @@ pub async fn sync_profile_to_game(
             config["incrementalGC"] = serde_json::json!(true);
             if let Some(obj) = config.as_object_mut() {
                 obj.entry("forceExe").or_insert(serde_json::json!(false));
-                obj.entry("disableVersionPopup").or_insert(serde_json::json!(true));
+                obj.entry("disableVersionPopup")
+                    .or_insert(serde_json::json!(true));
             }
 
             if let Ok(serialized) = serde_json::to_string_pretty(&config) {
                 let _ = fs::write(&config_path, serialized);
-                eprintln!("[sync_profile_to_game] Wrote Managed/OWML.Config.json at {:?}", config_path);
+                eprintln!(
+                    "[sync_profile_to_game] Wrote Managed/OWML.Config.json at {:?}",
+                    config_path
+                );
             }
         }
 
@@ -394,9 +403,11 @@ pub async fn sync_profile_to_game(
         if owml_mods_dir.exists() {
             if let Some(mods_arr) = profile["mods"].as_array() {
                 for m in mods_arr {
-                    if let (Some(full_name), Some(is_enabled)) = (m["fullName"].as_str(), m["enabled"].as_bool()) {
+                    if let (Some(full_name), Some(is_enabled)) =
+                        (m["fullName"].as_str(), m["enabled"].as_bool())
+                    {
                         let mod_key = extract_mod_key(full_name);
-                        
+
                         // Find installed folder for this mod_key
                         let mut found_folder = None;
                         if let Ok(entries) = fs::read_dir(&owml_mods_dir) {
@@ -415,7 +426,7 @@ pub async fn sync_profile_to_game(
 
                         if let Some(folder) = found_folder {
                             let mod_config_path = owml_mods_dir.join(&folder).join("config.json");
-                            
+
                             let mut config: serde_json::Value = if mod_config_path.exists() {
                                 fs::read_to_string(&mod_config_path)
                                     .ok()
@@ -423,7 +434,8 @@ pub async fn sync_profile_to_game(
                                     .unwrap_or_else(|| serde_json::json!({}))
                             } else {
                                 // Fallback: try default-config.json first if config.json doesn't exist
-                                let def_config_path = owml_mods_dir.join(&folder).join("default-config.json");
+                                let def_config_path =
+                                    owml_mods_dir.join(&folder).join("default-config.json");
                                 if def_config_path.exists() {
                                     fs::read_to_string(&def_config_path)
                                         .ok()
@@ -438,7 +450,10 @@ pub async fn sync_profile_to_game(
 
                             if let Ok(serialized) = serde_json::to_string_pretty(&config) {
                                 let _ = fs::write(&mod_config_path, serialized);
-                                eprintln!("[sync_profile_to_game] Set Outer Wilds mod {} enabled={}", folder, is_enabled);
+                                eprintln!(
+                                    "[sync_profile_to_game] Set Outer Wilds mod {} enabled={}",
+                                    folder, is_enabled
+                                );
                             }
                         }
                     }
@@ -675,7 +690,8 @@ pub async fn sync_profile_to_game(
         if !desired_key_set.contains(gm_key) {
             // Check if this folder is owned by any manifest we want to keep
             let folder_prefix_1 = format!("bepinex/plugins/{}/", folder_name.to_lowercase());
-            let folder_prefix_2 = format!("bepinex_disabled/plugins/{}/", folder_name.to_lowercase());
+            let folder_prefix_2 =
+                format!("bepinex_disabled/plugins/{}/", folder_name.to_lowercase());
             let folder_exact_1 = format!("bepinex/plugins/{}", folder_name.to_lowercase());
             let folder_exact_2 = format!("bepinex_disabled/plugins/{}", folder_name.to_lowercase());
             let is_owned_by_kept_manifest = manifests_to_keep.iter().any(|entry| {
@@ -862,8 +878,6 @@ fn manifest_files_exist(target_root: &std::path::Path, files: &[String]) -> bool
     }
     true
 }
-
-
 
 fn convert_to_owml_unix_path(path: &std::path::Path) -> String {
     if cfg!(windows) {

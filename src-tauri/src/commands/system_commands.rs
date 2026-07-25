@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::fs;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
+use std::time::Duration;
 use tauri::{command, AppHandle, Emitter, Manager, State};
 
 #[command]
@@ -50,7 +51,6 @@ pub async fn fetch_communities() -> Result<Vec<serde_json::Value>, String> {
     );
     Ok(all_results)
 }
-
 
 #[command]
 pub async fn fetch_community_images() -> Result<std::collections::HashMap<String, String>, String> {
@@ -167,15 +167,57 @@ fn extract_community_images_from_html(html: &str) -> Result<HashMap<String, Stri
     Ok(images)
 }
 
+const MAX_TEXT_CONTENT_BYTES: usize = 5 * 1024 * 1024;
+
+fn validate_text_content_url(raw_url: &str) -> Result<reqwest::Url, String> {
+    let url = reqwest::Url::parse(raw_url).map_err(|_| "Invalid URL".to_string())?;
+    if url.scheme() != "https"
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.port_or_known_default() != Some(443)
+    {
+        return Err("Only standard HTTPS URLs are allowed".to_string());
+    }
+
+    match url.host_str().map(|host| host.to_ascii_lowercase()) {
+        Some(host)
+            if matches!(
+                host.as_str(),
+                "api.github.com" | "thunderstore.io" | "www.thunderstore.io"
+            ) =>
+        {
+            Ok(url)
+        }
+        _ => Err("URL host is not allowed".to_string()),
+    }
+}
+
 #[command]
 pub async fn fetch_text_content(url: String) -> Result<String, String> {
+    let url = validate_text_content_url(&url)?;
     let client = reqwest::Client::builder()
         .user_agent("r2modmac")
+        .timeout(Duration::from_secs(20))
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|e| e.to_string())?;
-    let resp = client.get(&url).send().await.map_err(|e| e.to_string())?;
-    let text = resp.text().await.map_err(|e| e.to_string())?;
-    Ok(text)
+    let response = client.get(url).send().await.map_err(|e| e.to_string())?;
+    if !response.status().is_success() {
+        return Err(format!("Remote server returned HTTP {}", response.status()));
+    }
+    if response
+        .content_length()
+        .is_some_and(|length| length > MAX_TEXT_CONTENT_BYTES as u64)
+    {
+        return Err("Remote text content is too large".to_string());
+    }
+
+    let bytes = response.bytes().await.map_err(|e| e.to_string())?;
+    if bytes.len() > MAX_TEXT_CONTENT_BYTES {
+        return Err("Remote text content is too large".to_string());
+    }
+    String::from_utf8(bytes.to_vec())
+        .map_err(|_| "Remote response is not valid UTF-8 text".to_string())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1254,7 +1296,10 @@ pub async fn install_update(app: AppHandle, download_url: String) -> Result<(), 
             // Extract r2modmac.exe from the zip using PowerShell
             let new_exe_path = temp_dir.join("r2modmac.exe");
 
-            eprintln!("[install_update] Extracting zip {:?} to {:?}", file_path, temp_dir);
+            eprintln!(
+                "[install_update] Extracting zip {:?} to {:?}",
+                file_path, temp_dir
+            );
 
             let extract_output = Command::new("powershell")
                 .args([
@@ -1306,7 +1351,10 @@ pub async fn install_update(app: AppHandle, download_url: String) -> Result<(), 
 
             fs::write(&bat_path, bat_content).map_err(|e| e.to_string())?;
 
-            eprintln!("[install_update] Launching updater batch script: {:?}", bat_path);
+            eprintln!(
+                "[install_update] Launching updater batch script: {:?}",
+                bat_path
+            );
             Command::new("cmd")
                 .args(["/c", bat_path.to_str().unwrap_or("")])
                 .spawn()
@@ -1317,7 +1365,10 @@ pub async fn install_update(app: AppHandle, download_url: String) -> Result<(), 
             Ok(())
         } else {
             // Legacy: run as a direct installer (.exe)
-            eprintln!("[install_update] Spawning Windows installer: {:?}", file_path);
+            eprintln!(
+                "[install_update] Spawning Windows installer: {:?}",
+                file_path
+            );
             Command::new(&file_path)
                 .spawn()
                 .map_err(|e| format!("Failed to launch installer: {}", e))?;
@@ -1345,39 +1396,38 @@ pub async fn install_update(app: AppHandle, download_url: String) -> Result<(), 
         }
 
         // Determine extraction/mount commands based on file type
-        let (extract_command, app_source) =
-            if filename.ends_with(".tar.gz") {
-                (
-                    format!(
-                        "tar -xzf '{}' -C '{}'",
-                        file_path.to_string_lossy(),
-                        temp_dir.to_string_lossy()
-                    ),
-                    format!("{}/r2modmac.app", temp_dir.to_string_lossy()),
-                )
-            } else if filename.ends_with(".zip") {
-                (
-                    format!(
-                        "unzip -o '{}' -d '{}'",
-                        file_path.to_string_lossy(),
-                        temp_dir.to_string_lossy()
-                    ),
-                    format!("{}/r2modmac.app", temp_dir.to_string_lossy()),
-                )
-            } else if filename.ends_with(".dmg") {
-                // DMG: mount readonly to private folder, copy app, unmount
-                // "Extracting with style": hdiutil attach ...
-                let mount_point = format!("{}/dmg_mount", temp_dir.to_string_lossy());
-                (
+        let (extract_command, app_source) = if filename.ends_with(".tar.gz") {
+            (
+                format!(
+                    "tar -xzf '{}' -C '{}'",
+                    file_path.to_string_lossy(),
+                    temp_dir.to_string_lossy()
+                ),
+                format!("{}/r2modmac.app", temp_dir.to_string_lossy()),
+            )
+        } else if filename.ends_with(".zip") {
+            (
+                format!(
+                    "unzip -o '{}' -d '{}'",
+                    file_path.to_string_lossy(),
+                    temp_dir.to_string_lossy()
+                ),
+                format!("{}/r2modmac.app", temp_dir.to_string_lossy()),
+            )
+        } else if filename.ends_with(".dmg") {
+            // DMG: mount readonly to private folder, copy app, unmount
+            // "Extracting with style": hdiutil attach ...
+            let mount_point = format!("{}/dmg_mount", temp_dir.to_string_lossy());
+            (
                     format!(
                     "mkdir -p '{}' && hdiutil attach '{}' -mountpoint '{}' -nobrowse -quiet -readonly",
                     mount_point, file_path.to_string_lossy(), mount_point
                 ),
                     format!("{}/r2modmac.app", mount_point),
                 )
-            } else {
-                return Err("Unknown update format".to_string());
-            };
+        } else {
+            return Err("Unknown update format".to_string());
+        };
 
         let is_dmg = filename.ends_with(".dmg");
         let mount_point = format!("{}/dmg_mount", temp_dir.to_string_lossy());
@@ -1536,11 +1586,34 @@ mod tests {
             release_asset("r2modmac_windows_arm64.zip"),
         ];
 
-        assert_eq!(select_update_asset(&assets, "macos", "aarch64").unwrap().name, assets[0].name);
-        assert_eq!(select_update_asset(&assets, "macos", "x86_64").unwrap().name, assets[1].name);
-        assert_eq!(select_update_asset(&assets, "windows", "x86_64").unwrap().name, assets[2].name);
-        assert_eq!(select_update_asset(&assets, "windows", "x86").unwrap().name, assets[3].name);
-        assert_eq!(select_update_asset(&assets, "windows", "aarch64").unwrap().name, assets[4].name);
+        assert_eq!(
+            select_update_asset(&assets, "macos", "aarch64")
+                .unwrap()
+                .name,
+            assets[0].name
+        );
+        assert_eq!(
+            select_update_asset(&assets, "macos", "x86_64")
+                .unwrap()
+                .name,
+            assets[1].name
+        );
+        assert_eq!(
+            select_update_asset(&assets, "windows", "x86_64")
+                .unwrap()
+                .name,
+            assets[2].name
+        );
+        assert_eq!(
+            select_update_asset(&assets, "windows", "x86").unwrap().name,
+            assets[3].name
+        );
+        assert_eq!(
+            select_update_asset(&assets, "windows", "aarch64")
+                .unwrap()
+                .name,
+            assets[4].name
+        );
         assert!(select_update_asset(&assets[..1], "macos", "x86_64").is_none());
         assert!(select_update_asset(&assets[..2], "windows", "x86_64").is_none());
     }
@@ -1610,6 +1683,28 @@ mod tests {
             images.get("sample").map(String::as_str),
             Some("https://gcdn.thunderstore.io/live/community/sample/sample-cover-360x480.webp")
         );
+    }
+
+    #[test]
+    fn validates_remote_text_content_urls() {
+        assert!(validate_text_content_url(
+            "https://api.github.com/repos/Zard-Studios/r2modmac/readme"
+        )
+        .is_ok());
+        assert!(validate_text_content_url(
+            "https://thunderstore.io/api/cyberstorm/package/owner/mod/v/1.0.0/readme/"
+        )
+        .is_ok());
+
+        for blocked in [
+            "http://api.github.com/repos/example/example",
+            "https://127.0.0.1/private",
+            "https://localhost/private",
+            "https://api.github.com.evil.example/private",
+            "https://api.github.com:444/private",
+        ] {
+            assert!(validate_text_content_url(blocked).is_err(), "{}", blocked);
+        }
     }
 
     #[test]

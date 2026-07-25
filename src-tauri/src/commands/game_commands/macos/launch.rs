@@ -1,5 +1,5 @@
-use super::super::*;
 use super::super::owml_patcher;
+use super::super::*;
 
 pub(crate) async fn launch_game_with_mods_for_macos(
     app: &AppHandle,
@@ -11,22 +11,23 @@ pub(crate) async fn launch_game_with_mods_for_macos(
     let launch_mode = get_profile_launch_mode(app, profile_id);
     let use_direct_launch = profile_prefers_direct_launch(&launch_mode);
 
-    let runtime_game_path =
-        if is_balatro_identifier(game_identifier) || is_balatro_game_path(game_path)
-            || is_outerwilds_identifier(game_identifier) || is_outerwilds_game_path(game_path)
-        {
-            game_path.to_path_buf()
-        } else {
-            let resolved = resolve_macos_runtime_root(game_path);
-            if resolved != game_path {
-                eprintln!(
-                    "[launch_game_with_mods] Resolved macOS runtime root {} -> {}",
-                    game_path.display(),
-                    resolved.display()
-                );
-            }
-            resolved
-        };
+    let runtime_game_path = if is_balatro_identifier(game_identifier)
+        || is_balatro_game_path(game_path)
+        || is_outerwilds_identifier(game_identifier)
+        || is_outerwilds_game_path(game_path)
+    {
+        game_path.to_path_buf()
+    } else {
+        let resolved = resolve_macos_runtime_root(game_path);
+        if resolved != game_path {
+            eprintln!(
+                "[launch_game_with_mods] Resolved macOS runtime root {} -> {}",
+                game_path.display(),
+                resolved.display()
+            );
+        }
+        resolved
+    };
     let executable_path = find_macos_executable_path(&runtime_game_path);
 
     // Outer Wilds: run socket-free patcher then launch OuterWilds.exe directly via Wine/CrossOver
@@ -48,7 +49,10 @@ pub(crate) async fn launch_game_with_mods_for_macos(
         // Run socket-free patcher — no sockets, no crashing
         eprintln!("[launch_game_with_mods] Running OWMLPatcher.exe via Wine");
         if let Err(e) = owml_patcher::run_owml_patcher(game_path) {
-            eprintln!("[launch_game_with_mods] OWMLPatcher failed (non-fatal, continuing): {}", e);
+            eprintln!(
+                "[launch_game_with_mods] OWMLPatcher failed (non-fatal, continuing): {}",
+                e
+            );
         }
 
         // Launch OuterWilds.exe directly — mods injected via patched Assembly-CSharp.dll
@@ -160,24 +164,26 @@ pub(crate) async fn launch_game_vanilla_for_macos(
     let launch_mode = get_profile_launch_mode(app, profile_id);
     let use_direct_launch = profile_prefers_direct_launch(&launch_mode);
 
-    let runtime_game_path =
-        if is_balatro_identifier(game_identifier) || is_balatro_game_path(&game_path)
-            || is_outerwilds_identifier(game_identifier) || is_outerwilds_game_path(&game_path)
-        {
-            game_path.clone()
-        } else {
-            let resolved = resolve_macos_runtime_root(&game_path);
-            if resolved != game_path {
-                eprintln!(
-                    "[launch_game_vanilla] Resolved macOS runtime root {} -> {}",
-                    game_path.display(),
-                    resolved.display()
-                );
-            }
-            resolved
-        };
+    let runtime_game_path = if is_balatro_identifier(game_identifier)
+        || is_balatro_game_path(&game_path)
+        || is_outerwilds_identifier(game_identifier)
+        || is_outerwilds_game_path(&game_path)
+    {
+        game_path.clone()
+    } else {
+        let resolved = resolve_macos_runtime_root(&game_path);
+        if resolved != game_path {
+            eprintln!(
+                "[launch_game_vanilla] Resolved macOS runtime root {} -> {}",
+                game_path.display(),
+                resolved.display()
+            );
+        }
+        resolved
+    };
 
-    let is_outerwilds = is_outerwilds_identifier(game_identifier) || is_outerwilds_game_path(&game_path);
+    let is_outerwilds =
+        is_outerwilds_identifier(game_identifier) || is_outerwilds_game_path(&game_path);
     if is_outerwilds {
         // Disable OWML by renaming folder
         let owml_folder = game_path.join("OWML");
