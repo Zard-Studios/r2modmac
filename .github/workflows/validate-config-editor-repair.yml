@@ -52,7 +52,6 @@ jobs:
         run: npm ci
 
       - name: Validate TypeScript 7 upgrade
-        id: typescript
         shell: bash
         run: |
           cp package.json /tmp/r2modmac-package.json
@@ -60,7 +59,6 @@ jobs:
           if npm install --save-dev 'typescript@~7.0.2' 'typescript-eslint@^8.65.0' \
             && npm run build \
             && npm run lint; then
-            echo 'upgraded=true' >> "$GITHUB_OUTPUT"
             npx tsc --version
           else
             echo 'TypeScript 7 is not compatible with the current project; restoring TypeScript 5.9.'
@@ -70,25 +68,49 @@ jobs:
             npm ci
             npm run build
             npm run lint
-            echo 'upgraded=false' >> "$GITHUB_OUTPUT"
           fi
 
       - name: Run Rust tests
         run: cargo test --manifest-path src-tauri/Cargo.toml
 
-      - name: Repair and audit production npm dependencies
+      - name: Attempt non-breaking production dependency repair
+        shell: bash
+        run: npm audit fix --omit=dev || true
+
+      - name: Capture production audit report
+        shell: bash
+        run: npm audit --omit=dev --json > audit-report.json || true
+
+      - name: Upload production audit report
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-audit-report
+          path: audit-report.json
+          retention-days: 1
+
+      - name: Enforce production audit
         shell: bash
         run: |
-          npm audit fix --omit=dev
+          node <<'NODE'
+          const fs = require('fs');
+          const report = JSON.parse(fs.readFileSync('audit-report.json', 'utf8'));
+          const vulnerabilities = report.vulnerabilities ?? {};
+          for (const [name, info] of Object.entries(vulnerabilities)) {
+            console.error(`${name}: ${info.severity}; range=${info.range}; fix=${JSON.stringify(info.fixAvailable)}`);
+          }
+          const counts = report.metadata?.vulnerabilities ?? {};
+          console.error(`audit-counts=${JSON.stringify(counts)}`);
+          if ((counts.high ?? 0) > 0 || (counts.critical ?? 0) > 0) process.exit(1);
+          NODE
           npm run build
           npm run lint
-          npm audit --omit=dev --audit-level=high
 
       - name: Remove temporary repair automation
         run: |
           rm .github/workflows/repair-config-editor.yml
           rm .github/workflows/validate-config-editor-repair.yml
           rm .github/scripts/repair_config_editor.py
+          rm audit-report.json
 
       - name: Commit verified changes
         shell: bash
