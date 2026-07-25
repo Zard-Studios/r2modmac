@@ -3,6 +3,39 @@ import type { IElectronAPI } from './types/electron';
 import type { Profile } from './types/profile';
 import type { Community, Package, CommunityPlatformInfo } from './types/thunderstore';
 
+const PACKAGE_FETCH_DEDUP_WINDOW_MS = 1_000;
+const packageFetchesInFlight = new Map<string, Promise<number>>();
+const recentPackageFetches = new Map<string, { result: number; completedAt: number }>();
+
+function fetchPackagesDeduped(gameId: string): Promise<number> {
+    const key = gameId.trim().toLowerCase();
+    const inFlight = packageFetchesInFlight.get(key);
+    if (inFlight) return inFlight;
+
+    const recent = recentPackageFetches.get(key);
+    if (recent && Date.now() - recent.completedAt < PACKAGE_FETCH_DEDUP_WINDOW_MS) {
+        return Promise.resolve(recent.result);
+    }
+
+    let request: Promise<number>;
+    request = invoke<number>('fetch_packages', { gameId })
+        .then((result) => {
+            recentPackageFetches.set(key, {
+                result,
+                completedAt: Date.now(),
+            });
+            return result;
+        })
+        .finally(() => {
+            if (packageFetchesInFlight.get(key) === request) {
+                packageFetchesInFlight.delete(key);
+            }
+        });
+
+    packageFetchesInFlight.set(key, request);
+    return request;
+}
+
 export const tauriAPI: IElectronAPI = {
     getProfiles: () => invoke<Profile[]>('get_profiles'),
     saveProfiles: (profiles) => invoke('save_profiles', { profiles }),
@@ -64,9 +97,7 @@ export const tauriAPI: IElectronAPI = {
     fetchCommunityImages: () => invoke<Record<string, string>>('fetch_community_images'),
     resolveCommunityPlatforms: (games: { identifier: string; name: string }[]) =>
         invoke<Record<string, CommunityPlatformInfo>>('resolve_community_platforms', { games }),
-    async fetchPackages(gameId: string) {
-        return await invoke('fetch_packages', { gameId });
-    },
+    fetchPackages: (gameId: string) => fetchPackagesDeduped(gameId),
     async getAvailableCategories(gameId: string): Promise<string[]> {
         return await invoke('get_available_categories', { gameId });
     },
