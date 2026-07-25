@@ -1,12 +1,13 @@
 use crate::commands::game_commands::{ensure_macos_steam_launch_options, get_game_path};
-use crate::commands::game_commands::{restore_outerwilds_vanilla, restore_mscorlib_vanilla};
+use crate::commands::game_commands::{restore_mscorlib_vanilla, restore_outerwilds_vanilla};
 use crate::models::shared::{
-    get_balatro_mods_dir, is_balatro_game_path, is_balatro_identifier,
-    is_outerwilds_identifier, is_outerwilds_game_path, AppState,
+    get_balatro_mods_dir, is_balatro_game_path, is_balatro_identifier, is_outerwilds_game_path,
+    is_outerwilds_identifier, AppState,
 };
 use crate::utils::file_ops::*;
 use std::fs;
 use std::io::Write;
+use std::path::{Component, Path, PathBuf};
 use std::sync::OnceLock;
 use tauri::{command, AppHandle, State};
 
@@ -19,7 +20,9 @@ fn is_bepinex_shell_script(name: &str) -> bool {
 
 #[command]
 pub fn get_profiles(app: AppHandle) -> Result<Vec<serde_json::Value>, String> {
-    let profile_path = crate::utils::paths::app_data_dir(&app).unwrap().join("profiles.json");
+    let profile_path = crate::utils::paths::app_data_dir(&app)
+        .unwrap()
+        .join("profiles.json");
     let backup_path = profile_path.with_extension("json.bak");
     if !profile_path.exists() {
         if backup_path.exists() {
@@ -51,7 +54,9 @@ pub async fn save_profiles(
 ) -> Result<bool, String> {
     let save_lock = PROFILE_SAVE_LOCK.get_or_init(|| tokio::sync::Mutex::new(()));
     let _save_guard = save_lock.lock().await;
-    let profile_path = crate::utils::paths::app_data_dir(&app).unwrap().join("profiles.json");
+    let profile_path = crate::utils::paths::app_data_dir(&app)
+        .unwrap()
+        .join("profiles.json");
 
     // Serialize first (fast operation)
     let data = serde_json::to_string_pretty(&profiles).map_err(|e| e.to_string())?;
@@ -109,7 +114,8 @@ pub async fn delete_profile_folder(
     if let Some(game_id) = game_identifier {
         let is_mac_profile = platform.as_deref() == Some("mac");
         let is_balatro_game = is_balatro_identifier(&game_id);
-        if let Ok(Some(game_path_str)) = get_game_path(app.clone(), game_id.clone(), platform.clone()).await
+        if let Ok(Some(game_path_str)) =
+            get_game_path(app.clone(), game_id.clone(), platform.clone()).await
         {
             let game_path = std::path::Path::new(&game_path_str);
             let mut removed_runtime_artifact = false;
@@ -140,20 +146,26 @@ pub async fn delete_profile_folder(
             }
 
             // --- Outer Wilds (OWML) cleanup: restore full vanilla state ---
-            let is_outerwilds = is_outerwilds_identifier(&game_id)
-                || is_outerwilds_game_path(game_path);
+            let is_outerwilds =
+                is_outerwilds_identifier(&game_id) || is_outerwilds_game_path(game_path);
             if is_outerwilds {
                 // 1. Restore vanilla Assembly-CSharp.dll BEFORE removing OWML,
                 //    so the backup lookup still works if it was inside the game root.
                 if let Err(e) = restore_outerwilds_vanilla(game_path) {
-                    eprintln!("[delete_profile] Could not restore vanilla DLL (non-fatal): {}", e);
+                    eprintln!(
+                        "[delete_profile] Could not restore vanilla DLL (non-fatal): {}",
+                        e
+                    );
                 } else {
                     eprintln!("[delete_profile] Restored vanilla Assembly-CSharp.dll");
                 }
 
                 // 1a. Restore vanilla mscorlib.dll and delete its backup.
                 if let Err(e) = restore_mscorlib_vanilla(game_path, true) {
-                    eprintln!("[delete_profile] Could not restore vanilla mscorlib.dll (non-fatal): {}", e);
+                    eprintln!(
+                        "[delete_profile] Could not restore vanilla mscorlib.dll (non-fatal): {}",
+                        e
+                    );
                 } else {
                     eprintln!("[delete_profile] Restored vanilla mscorlib.dll");
                 }
@@ -162,7 +174,10 @@ pub async fn delete_profile_folder(
                 let boot_config_path = game_path.join("OuterWilds_Data").join("boot.config");
                 if boot_config_path.exists() {
                     if let Ok(content) = fs::read_to_string(&boot_config_path) {
-                        let updated = content.replace("gc-max-time-slice=3", "").replace("\r\n\r\n", "\r\n").replace("\n\n", "\n");
+                        let updated = content
+                            .replace("gc-max-time-slice=3", "")
+                            .replace("\r\n\r\n", "\r\n")
+                            .replace("\n\n", "\n");
                         let _ = fs::write(&boot_config_path, updated);
                         eprintln!("[delete_profile] Restored boot.config");
                     }
@@ -191,7 +206,6 @@ pub async fn delete_profile_folder(
                     eprintln!("[delete_profile] Removed OWMLPatcher.exe");
                 }
             }
-
 
             if is_mac_profile {
                 let _ = ensure_macos_steam_launch_options(&app, game_path, false, true);
@@ -385,7 +399,10 @@ pub async fn clear_profile_cache(
                     if let Ok(meta) = entry.metadata() {
                         size_freed += meta.len();
                     }
-                    eprintln!("[clear_profile_cache] Removing package cache file: {}", name);
+                    eprintln!(
+                        "[clear_profile_cache] Removing package cache file: {}",
+                        name
+                    );
                     let _ = fs::remove_file(entry.path());
                 }
             }
@@ -414,7 +431,9 @@ pub async fn toggle_profile_vanilla_mode(
     app: AppHandle,
     profile_id: String,
 ) -> Result<bool, String> {
-    let profile_path = crate::utils::paths::app_data_dir(&app).unwrap().join("profiles.json");
+    let profile_path = crate::utils::paths::app_data_dir(&app)
+        .unwrap()
+        .join("profiles.json");
     if !profile_path.exists() {
         return Err("No profiles found".to_string());
     }
@@ -489,14 +508,24 @@ fn collect_config_files(
     for entry in entries.filter_map(|e| e.ok()) {
         let path = entry.path();
         let name = entry.file_name().to_string_lossy().to_string();
+        let file_type = match entry.file_type() {
+            Ok(file_type) => file_type,
+            Err(_) => continue,
+        };
 
-        if path.is_dir() {
+        // Never follow symlinks: a mod-controlled link could escape the
+        // scanned root or create a recursive directory cycle.
+        if file_type.is_symlink() {
+            continue;
+        }
+
+        if file_type.is_dir() {
             // Skip known binary/state directories.
             if SKIP_DIRS.iter().any(|s| name.eq_ignore_ascii_case(s)) {
                 continue;
             }
             collect_config_files(&path, profile_root, out);
-        } else if path.is_file() {
+        } else if file_type.is_file() {
             // Skip manifest.json / README / icon files / mods.yml.
             let lower = name.to_lowercase();
             if lower == "manifest.json"
@@ -548,7 +577,11 @@ fn collect_config_files_flat(
     };
     for entry in entries.filter_map(|e| e.ok()) {
         let path = entry.path();
-        if !path.is_file() {
+        let file_type = match entry.file_type() {
+            Ok(file_type) => file_type,
+            Err(_) => continue,
+        };
+        if file_type.is_symlink() || !file_type.is_file() {
             continue;
         }
         let name = entry.file_name().to_string_lossy().to_string();
@@ -576,6 +609,157 @@ fn collect_config_files_flat(
             }
         }
     }
+}
+
+fn profile_config_root(app: &AppHandle, profile_id: &str) -> Result<PathBuf, String> {
+    Ok(crate::utils::paths::app_data_dir(app)
+        .map_err(|e| e.to_string())?
+        .join("profiles")
+        .join(profile_id))
+}
+
+fn configured_game_roots(app: &AppHandle) -> Result<Vec<PathBuf>, String> {
+    let settings_path = crate::utils::paths::app_data_dir(app)
+        .map_err(|e| e.to_string())?
+        .join("settings.json");
+    if !settings_path.exists() {
+        return Ok(Vec::new());
+    }
+
+    let raw = fs::read_to_string(&settings_path)
+        .map_err(|e| format!("Failed to read settings: {}", e))?;
+    let settings: serde_json::Value =
+        serde_json::from_str(&raw).map_err(|e| format!("Failed to parse settings: {}", e))?;
+    let Some(paths) = settings
+        .get("game_paths")
+        .and_then(|value| value.as_object())
+    else {
+        return Ok(Vec::new());
+    };
+
+    let mut roots = Vec::new();
+    for value in paths.values().filter_map(|value| value.as_str()) {
+        if let Ok(root) = PathBuf::from(value).canonicalize() {
+            if !roots.contains(&root) {
+                roots.push(root);
+            }
+        }
+    }
+    Ok(roots)
+}
+
+fn resolve_config_root(
+    app: &AppHandle,
+    profile_id: &str,
+    requested_root: Option<String>,
+) -> Result<PathBuf, String> {
+    let profile_root = profile_config_root(app, profile_id)?;
+    let requested = requested_root
+        .map(PathBuf::from)
+        .unwrap_or_else(|| profile_root.clone());
+    let canonical_requested = requested
+        .canonicalize()
+        .map_err(|e| format!("Cannot resolve config root: {}", e))?;
+
+    if let Ok(canonical_profile) = profile_root.canonicalize() {
+        if canonical_requested == canonical_profile {
+            return Ok(canonical_requested);
+        }
+    }
+
+    if configured_game_roots(app)?
+        .iter()
+        .any(|root| root == &canonical_requested)
+    {
+        return Ok(canonical_requested);
+    }
+
+    Err("Unauthorized config root".to_string())
+}
+
+fn validate_relative_config_path(
+    relative_path: &str,
+    allow_empty: bool,
+) -> Result<PathBuf, String> {
+    if relative_path.trim().is_empty() {
+        return if allow_empty {
+            Ok(PathBuf::new())
+        } else {
+            Err("Config path cannot be empty".to_string())
+        };
+    }
+
+    let path = Path::new(relative_path);
+    if path.is_absolute() {
+        return Err("Absolute config paths are not allowed".to_string());
+    }
+
+    let mut clean = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Normal(part) => clean.push(part),
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                return Err("Path traversal detected".to_string());
+            }
+        }
+    }
+
+    if clean.as_os_str().is_empty() && !allow_empty {
+        return Err("Config path cannot be empty".to_string());
+    }
+    Ok(clean)
+}
+
+fn is_supported_config_file(path: &Path) -> bool {
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if matches!(
+        name.as_str(),
+        "manifest.json" | "mods.yml" | "readme.md" | "readme.txt"
+    ) {
+        return false;
+    }
+
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .map(|extension| {
+            let extension = extension.to_ascii_lowercase();
+            CONFIG_EXTENSIONS.contains(&extension.as_str())
+        })
+        .unwrap_or(false)
+}
+
+fn resolve_existing_config_target(
+    app: &AppHandle,
+    profile_id: &str,
+    relative_path: &str,
+    root: Option<String>,
+    allow_directory: bool,
+) -> Result<PathBuf, String> {
+    let base_dir = resolve_config_root(app, profile_id, root)?;
+    let relative = validate_relative_config_path(relative_path, allow_directory)?;
+    let target = base_dir.join(relative);
+    let canonical_target = target
+        .canonicalize()
+        .map_err(|e| format!("Cannot resolve config path: {}", e))?;
+
+    if !canonical_target.starts_with(&base_dir) {
+        return Err("Path traversal detected".to_string());
+    }
+
+    if allow_directory {
+        if !canonical_target.is_file() && !canonical_target.is_dir() {
+            return Err("Config path does not exist".to_string());
+        }
+    } else if !canonical_target.is_file() || !is_supported_config_file(&canonical_target) {
+        return Err("Unsupported config file".to_string());
+    }
+
+    Ok(canonical_target)
 }
 
 #[command]
@@ -609,10 +793,7 @@ pub fn list_profile_config_files(
             if let Ok(raw) = fs::read_to_string(&settings_path) {
                 if let Ok(settings) = serde_json::from_str::<serde_json::Value>(&raw) {
                     // Try  "<id>::<platform>"  then bare  "<id>"
-                    let keys = [
-                        format!("{}::{}", game_id, plat),
-                        game_id.clone(),
-                    ];
+                    let keys = [format!("{}::{}", game_id, plat), game_id.clone()];
                     let mut game_path_str: Option<String> = None;
                     if let Some(paths) = settings.get("game_paths").and_then(|v| v.as_object()) {
                         for key in &keys {
@@ -629,9 +810,7 @@ pub fn list_profile_config_files(
                             // The OWML folder may be at OWML (modded mode) or OWML_DISABLED
                             // (vanilla mode, where mods stay on disk but the runtime is hidden).
                             // Resolve whichever actually exists so configs are always listed.
-                            if let Some(owml_dir) =
-                                crate::models::shared::get_owml_dir(game_path)
-                            {
+                            if let Some(owml_dir) = crate::models::shared::get_owml_dir(game_path) {
                                 // 1. Flat scan OWML root for global configs
                                 collect_config_files_flat(&owml_dir, game_path, &mut files);
                                 // 2. Recursive scan OWML/Mods for mod configs
@@ -641,10 +820,11 @@ pub fn list_profile_config_files(
                                 }
                             }
                         } else {
-                            // BepInEx/config  — flat scan
+                            // BepInEx/config — recursive because some mods group
+                            // their generated config files in nested folders.
                             let bep_config = game_path.join("BepInEx").join("config");
                             if bep_config.is_dir() {
-                                collect_config_files_flat(&bep_config, game_path, &mut files);
+                                collect_config_files(&bep_config, game_path, &mut files);
                             }
                             // BepInEx/plugins — recursive, but only config-extension files
                             let bep_plugins = game_path.join("BepInEx").join("plugins");
@@ -682,32 +862,9 @@ pub fn read_profile_config_file(
     relative_path: String,
     root: Option<String>,
 ) -> Result<String, String> {
-    // If a root override is provided (e.g. game folder), use that instead of
-    // the profile directory.
-    let base_dir = if let Some(r) = root {
-        std::path::PathBuf::from(r)
-    } else {
-        crate::utils::paths::app_data_dir(&app)
-            .map_err(|e| e.to_string())?
-            .join("profiles")
-            .join(&profile_id)
-    };
+    let target = resolve_existing_config_target(&app, &profile_id, &relative_path, root, false)?;
+    let content = fs::read_to_string(&target).map_err(|e| format!("Failed to read file: {}", e))?;
 
-    // Prevent path traversal attacks.
-    let target = base_dir.join(&relative_path);
-    let canonical_target =
-        target.canonicalize().map_err(|e| format!("Cannot resolve path: {}", e))?;
-    let canonical_root = base_dir
-        .canonicalize()
-        .map_err(|e| format!("Cannot resolve root dir: {}", e))?;
-
-    if !canonical_target.starts_with(&canonical_root) {
-        return Err("Path traversal detected".to_string());
-    }
-
-    let content = fs::read_to_string(&canonical_target)
-        .map_err(|e| format!("Failed to read file: {}", e))?;
-    
     // Strip UTF-8 BOM (Byte Order Mark) if present.
     let stripped = content.strip_prefix('\u{FEFF}').unwrap_or(&content);
     Ok(stripped.to_string())
@@ -721,42 +878,8 @@ pub fn write_profile_config_file(
     content: String,
     root: Option<String>,
 ) -> Result<bool, String> {
-    let base_dir = if let Some(r) = root {
-        std::path::PathBuf::from(r)
-    } else {
-        crate::utils::paths::app_data_dir(&app)
-            .map_err(|e| e.to_string())?
-            .join("profiles")
-            .join(&profile_id)
-    };
-
-    // Build target path and validate it stays inside the base directory.
-    let target = base_dir.join(&relative_path);
-
-    // Normalise without canonicalize (file may not exist yet for new files).
-    let normalised = target
-        .components()
-        .fold(std::path::PathBuf::new(), |mut acc, c| {
-            match c {
-                std::path::Component::ParentDir => {
-                    acc.pop();
-                }
-                other => acc.push(other),
-            }
-            acc
-        });
-
-    if !normalised.starts_with(&base_dir) {
-        return Err("Path traversal detected".to_string());
-    }
-
-    // Ensure parent directories exist.
-    if let Some(parent) = normalised.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| format!("Failed to create directories: {}", e))?;
-    }
-
-    fs::write(&normalised, content).map_err(|e| format!("Failed to write file: {}", e))?;
+    let target = resolve_existing_config_target(&app, &profile_id, &relative_path, root, false)?;
+    fs::write(&target, content).map_err(|e| format!("Failed to write file: {}", e))?;
     Ok(true)
 }
 
@@ -767,41 +890,13 @@ pub fn reveal_profile_config_file(
     relative_path: String,
     root: Option<String>,
 ) -> Result<(), String> {
-    let base_dir = if let Some(r) = root {
-        std::path::PathBuf::from(r)
-    } else {
-        crate::utils::paths::app_data_dir(&app)
-            .map_err(|e| e.to_string())?
-            .join("profiles")
-            .join(&profile_id)
-    };
-
-    let target = base_dir.join(&relative_path);
-    let normalised = target
-        .components()
-        .fold(std::path::PathBuf::new(), |mut acc, c| {
-            match c {
-                std::path::Component::ParentDir => {
-                    acc.pop();
-                }
-                other => acc.push(other),
-            }
-            acc
-        });
-
-    if !normalised.starts_with(&base_dir) {
-        return Err("Path traversal detected".to_string());
-    }
-
-    if !normalised.exists() {
-        return Err("File does not exist".to_string());
-    }
+    let target = resolve_existing_config_target(&app, &profile_id, &relative_path, root, true)?;
 
     #[cfg(target_os = "macos")]
     {
         std::process::Command::new("open")
             .arg("-R")
-            .arg(&normalised)
+            .arg(&target)
             .spawn()
             .map_err(|e| e.to_string())?;
     }
@@ -809,13 +904,15 @@ pub fn reveal_profile_config_file(
     {
         std::process::Command::new("explorer")
             .arg("/select,")
-            .arg(&normalised)
+            .arg(&target)
             .spawn()
             .map_err(|e| e.to_string())?;
     }
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
-        if let Some(parent) = normalised.parent() {
+        if target.is_dir() {
+            open::that(&target).map_err(|e| e.to_string())?;
+        } else if let Some(parent) = target.parent() {
             open::that(parent).map_err(|e| e.to_string())?;
         }
     }
@@ -830,36 +927,76 @@ pub fn open_profile_config_file(
     relative_path: String,
     root: Option<String>,
 ) -> Result<(), String> {
-    let base_dir = if let Some(r) = root {
-        std::path::PathBuf::from(r)
-    } else {
-        crate::utils::paths::app_data_dir(&app)
-            .map_err(|e| e.to_string())?
-            .join("profiles")
-            .join(&profile_id)
-    };
-
-    let target = base_dir.join(&relative_path);
-    let normalised = target
-        .components()
-        .fold(std::path::PathBuf::new(), |mut acc, c| {
-            match c {
-                std::path::Component::ParentDir => {
-                    acc.pop();
-                }
-                other => acc.push(other),
-            }
-            acc
-        });
-
-    if !normalised.starts_with(&base_dir) {
-        return Err("Path traversal detected".to_string());
-    }
-
-    if !normalised.exists() {
-        return Err("File does not exist".to_string());
-    }
-
-    open::that(&normalised).map_err(|e| e.to_string())?;
+    let target = resolve_existing_config_target(&app, &profile_id, &relative_path, root, false)?;
+    open::that(&target).map_err(|e| e.to_string())?;
     Ok(())
+}
+
+#[cfg(test)]
+mod config_editor_tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temporary_directory(label: &str) -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "r2modmac-{}-{}-{}",
+            label,
+            std::process::id(),
+            nonce
+        ))
+    }
+
+    #[test]
+    fn validates_relative_config_paths() {
+        assert_eq!(
+            validate_relative_config_path("BepInEx/config/Author/mod.cfg", false).unwrap(),
+            PathBuf::from("BepInEx/config/Author/mod.cfg")
+        );
+        assert!(validate_relative_config_path("../secret.cfg", false).is_err());
+        assert!(validate_relative_config_path("", false).is_err());
+        assert!(validate_relative_config_path("", true).is_ok());
+    }
+
+    #[test]
+    fn recursive_scanner_finds_nested_config_files() {
+        let root = temporary_directory("nested-configs");
+        let nested = root.join("BepInEx/config/Author/Mod");
+        fs::create_dir_all(&nested).unwrap();
+        fs::write(nested.join("settings.cfg"), "enabled = true").unwrap();
+        fs::write(nested.join("plugin.dll"), b"not a config").unwrap();
+
+        let mut files = Vec::new();
+        collect_config_files(&root.join("BepInEx/config"), &root, &mut files);
+
+        assert_eq!(files.len(), 1);
+        assert_eq!(
+            files[0].relative_path,
+            "BepInEx/config/Author/Mod/settings.cfg"
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn recursive_scanner_does_not_follow_directory_symlinks() {
+        use std::os::unix::fs::symlink;
+
+        let root = temporary_directory("symlink-root");
+        let outside = temporary_directory("symlink-outside");
+        fs::create_dir_all(root.join("BepInEx/config")).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(outside.join("outside.cfg"), "value = 1").unwrap();
+        symlink(&outside, root.join("BepInEx/config/linked")).unwrap();
+
+        let mut files = Vec::new();
+        collect_config_files(&root.join("BepInEx/config"), &root, &mut files);
+
+        assert!(files.is_empty());
+        let _ = fs::remove_dir_all(root);
+        let _ = fs::remove_dir_all(outside);
+    }
 }

@@ -52,7 +52,9 @@ pub async fn install_to_game(
         override_val
     } else {
         // Fallback: Read from profiles.json
-        let profiles_path = crate::utils::paths::app_data_dir(&app).unwrap().join("profiles.json");
+        let profiles_path = crate::utils::paths::app_data_dir(&app)
+            .unwrap()
+            .join("profiles.json");
         let mut vanilla = false;
         if profiles_path.exists() {
             if let Ok(data) = fs::read_to_string(&profiles_path) {
@@ -92,8 +94,8 @@ pub async fn install_to_game(
 
     let is_balatro_profile = is_mac_profile
         && (is_balatro_identifier(&game_identifier) || is_balatro_game_path(game_path));
-    let is_outerwilds_profile = is_outerwilds_identifier(&game_identifier)
-        || is_outerwilds_game_path(game_path);
+    let is_outerwilds_profile =
+        is_outerwilds_identifier(&game_identifier) || is_outerwilds_game_path(game_path);
     let runtime_game_path_buf = if is_mac_profile && !is_balatro_profile && !is_outerwilds_profile {
         let resolved = resolve_macos_runtime_root(game_path);
         if resolved != game_path {
@@ -141,7 +143,9 @@ pub async fn install_to_game(
         }
         // Outer Wilds uses OWML; no BepInEx operations needed here.
         // install_mod_bytes handles all OWML-specific installation.
-        eprintln!("[install_to_game] Outer Wilds profile - skipping BepInEx install, OWML manages mods.");
+        eprintln!(
+            "[install_to_game] Outer Wilds profile - skipping BepInEx install, OWML manages mods."
+        );
         return Ok(());
     }
 

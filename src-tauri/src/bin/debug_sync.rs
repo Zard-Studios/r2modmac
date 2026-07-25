@@ -1,6 +1,6 @@
+use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
-use serde_json::Value;
 
 #[derive(serde::Deserialize, Debug, Clone)]
 struct SimpleManifest {
@@ -102,7 +102,9 @@ fn derive_mod_match_terms(value: &str) -> Vec<String> {
         }
     }
 
-    let parts_stem = stem.split(|c: char| !c.is_ascii_alphanumeric()).collect::<Vec<_>>();
+    let parts_stem = stem
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .collect::<Vec<_>>();
     if parts_stem.len() >= 2 {
         terms.push(normalize_mod_match_value(&format!(
             "{}{}",
@@ -117,11 +119,7 @@ fn derive_mod_match_terms(value: &str) -> Vec<String> {
     terms
 }
 
-fn entry_name_matches_mod_payload(
-    entry_name: &str,
-    folder_name: &str,
-    mod_key: &str,
-) -> bool {
+fn entry_name_matches_mod_payload(entry_name: &str, folder_name: &str, mod_key: &str) -> bool {
     let entry_norm = normalize_mod_match_value(entry_name);
     if entry_norm.is_empty() {
         return false;
@@ -203,23 +201,33 @@ fn main() {
 
         // Find path
         let cache_key = format!("{}::{}", game_id, platform);
-        let game_path_str = game_paths.get(&cache_key)
+        let game_path_str = game_paths
+            .get(&cache_key)
             .or_else(|| game_paths.get(game_id))
             .and_then(|v| v.as_str());
 
         let Some(game_path_str) = game_path_str else {
-            println!("Profile '{}' ({}) has no game path configured.", name, game_id);
+            println!(
+                "Profile '{}' ({}) has no game path configured.",
+                name, game_id
+            );
             continue;
         };
 
         let game_path = Path::new(game_path_str);
         if !game_path.exists() {
-            println!("Profile '{}' ({}) game path does not exist: {}", name, game_id, game_path_str);
+            println!(
+                "Profile '{}' ({}) game path does not exist: {}",
+                name, game_id, game_path_str
+            );
             continue;
         }
 
         println!("\n====================================");
-        println!("PROFILE: '{}' (Game: {}, Platform: {}, Vanilla: {})", name, game_id, platform, is_vanilla);
+        println!(
+            "PROFILE: '{}' (Game: {}, Platform: {}, Vanilla: {})",
+            name, game_id, platform, is_vanilla
+        );
         println!("Game path: {}", game_path_str);
 
         let game_plugins = if game_path.join("BepInEx_DISABLED").is_dir() {
@@ -273,7 +281,12 @@ fn main() {
         }
 
         let profile_id = profile["id"].as_str().unwrap_or("");
-        let manifests_dir = app_data.join("profiles").join(profile_id).join(".r2modmac").join("manifests").join("game");
+        let manifests_dir = app_data
+            .join("profiles")
+            .join(profile_id)
+            .join(".r2modmac")
+            .join("manifests")
+            .join("game");
         let mut manifests_to_keep = Vec::new();
         if manifests_dir.is_dir() {
             if let Ok(entries) = fs::read_dir(manifests_dir) {
@@ -301,9 +314,11 @@ fn main() {
             if !desired_key_set.contains(gm_key) {
                 // Check if this folder is owned by any manifest we want to keep
                 let folder_prefix_1 = format!("bepinex/plugins/{}/", folder_name.to_lowercase());
-                let folder_prefix_2 = format!("bepinex_disabled/plugins/{}/", folder_name.to_lowercase());
+                let folder_prefix_2 =
+                    format!("bepinex_disabled/plugins/{}/", folder_name.to_lowercase());
                 let folder_exact_1 = format!("bepinex/plugins/{}", folder_name.to_lowercase());
-                let folder_exact_2 = format!("bepinex_disabled/plugins/{}", folder_name.to_lowercase());
+                let folder_exact_2 =
+                    format!("bepinex_disabled/plugins/{}", folder_name.to_lowercase());
                 let is_owned_by_kept_manifest = manifests_to_keep.iter().any(|manifest| {
                     manifest.files.iter().any(|file| {
                         let file_lower = file.to_lowercase();
@@ -359,24 +374,25 @@ fn main() {
                 let desired_version = desired_version_by_key.get(*pm_key);
 
                 let has_exact_version = manifests_to_keep.iter().any(|manifest| {
-                    manifest.mod_key == **pm_key
-                        && manifest_files_exist(game_path, &manifest.files)
-                }) || game_mod_folders.iter().any(|(folder_name, gm_key)| {
-                    if gm_key != *pm_key {
-                        return false;
-                    }
-
-                    if let Some(dv) = desired_version {
-                        let game_version = extract_version_suffix(folder_name)
-                            .or_else(|| read_manifest_version(&game_plugins.join(folder_name)));
-                        if let Some(gv) = game_version {
-                            return gv == *dv;
+                    manifest.mod_key == **pm_key && manifest_files_exist(game_path, &manifest.files)
+                }) || game_mod_folders.iter().any(
+                    |(folder_name, gm_key)| {
+                        if gm_key != *pm_key {
+                            return false;
                         }
-                        return folder_name.to_lowercase() == desired_full;
-                    }
 
-                    true
-                });
+                        if let Some(dv) = desired_version {
+                            let game_version = extract_version_suffix(folder_name)
+                                .or_else(|| read_manifest_version(&game_plugins.join(folder_name)));
+                            if let Some(gv) = game_version {
+                                return gv == *dv;
+                            }
+                            return folder_name.to_lowercase() == desired_full;
+                        }
+
+                        true
+                    },
+                );
 
                 !has_exact_version
             })

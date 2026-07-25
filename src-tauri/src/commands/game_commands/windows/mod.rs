@@ -27,7 +27,8 @@ pub(crate) fn launch_windows_direct_game_with_working_dir(
         return Err("Game is already running.".to_string());
     }
 
-    let executable_dir = working_dir.unwrap_or_else(|| executable_path.parent().unwrap_or(game_path));
+    let executable_dir =
+        working_dir.unwrap_or_else(|| executable_path.parent().unwrap_or(game_path));
 
     #[cfg(unix)]
     {
@@ -44,9 +45,8 @@ pub(crate) fn launch_windows_direct_game_with_working_dir(
                 // bundle (and therefore the game) has started. We use it for the post-
                 // launch wait, but NOT for the pre-launch check (to avoid false positives
                 // when Steam is already running inside the same bundle).
-                let wait_patterns =
-                    build_windows_wineskin_bundle_patterns(&executable_path)
-                        .unwrap_or_else(|| process_patterns.clone());
+                let wait_patterns = build_windows_wineskin_bundle_patterns(&executable_path)
+                    .unwrap_or_else(|| process_patterns.clone());
 
                 match launch_macos_wineskin_program(
                     &bundle_path,
@@ -203,7 +203,6 @@ pub(crate) fn launch_windows_steam_game(
                 }
             }
         }
-
 
         let runner_path = find_host_compat_runner_binary(prefix_root.as_deref(), &steam_executable)
 			.ok_or_else(|| {

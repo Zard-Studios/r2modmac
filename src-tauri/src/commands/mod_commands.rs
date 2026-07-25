@@ -121,7 +121,8 @@ async fn throttle_exact_package_request() -> Result<(), String> {
     let last_request = EXACT_PACKAGE_LAST_REQUEST.get_or_init(|| Mutex::new(None));
     *last_request
         .lock()
-        .map_err(|_| "Exact package request limiter is unavailable".to_string())? = Some(Instant::now());
+        .map_err(|_| "Exact package request limiter is unavailable".to_string())? =
+        Some(Instant::now());
     Ok(())
 }
 
@@ -1507,7 +1508,9 @@ fn normalize_regular_mod_entry(
 }
 
 fn get_profile_game_identifier(app: &AppHandle, profile_id: &str) -> Option<String> {
-    let profiles_path = crate::utils::paths::app_data_dir(app).ok()?.join("profiles.json");
+    let profiles_path = crate::utils::paths::app_data_dir(app)
+        .ok()?
+        .join("profiles.json");
     let profiles_data = fs::read_to_string(profiles_path).ok()?;
     let profiles: Vec<serde_json::Value> = serde_json::from_str(&profiles_data).ok()?;
     profiles
@@ -3158,10 +3161,11 @@ fn validate_downloaded_archive_version(bytes: &[u8], mod_name: &str) -> Result<(
             return Err(format!("{} contains an oversized manifest.json", mod_name));
         }
         let mut content = String::new();
-        file.read_to_string(&mut content).map_err(|error| error.to_string())?;
+        file.read_to_string(&mut content)
+            .map_err(|error| error.to_string())?;
         let content = content.strip_prefix('\u{FEFF}').unwrap_or(&content);
-        let manifest: serde_json::Value =
-            serde_json::from_str(content).map_err(|error| format!("Invalid manifest.json in {}: {}", mod_name, error))?;
+        let manifest: serde_json::Value = serde_json::from_str(content)
+            .map_err(|error| format!("Invalid manifest.json in {}: {}", mod_name, error))?;
         if let Some(actual_version) = manifest["version_number"].as_str() {
             if actual_version != expected_version {
                 return Err(format!(
@@ -3187,11 +3191,14 @@ async fn install_mod_bytes(
     let game_dir = std::path::Path::new(&game_path);
     let target_is_macos = is_macos_game_dir(game_dir);
     let game_identifier = get_profile_game_identifier(&app, &profile_id).unwrap_or_default();
-    let target_is_balatro = crate::models::shared::is_balatro_identifier(&game_identifier) || is_balatro_game_path(game_dir);
+    let target_is_balatro = crate::models::shared::is_balatro_identifier(&game_identifier)
+        || is_balatro_game_path(game_dir);
     let target_is_outerwilds = crate::models::shared::is_outerwilds_identifier(&game_identifier)
         || crate::models::shared::is_outerwilds_game_path(game_dir);
-    let install_into_disabled_runtime =
-        target_is_macos && !target_is_balatro && !target_is_outerwilds && profile_is_vanilla(&app, &profile_id);
+    let install_into_disabled_runtime = target_is_macos
+        && !target_is_balatro
+        && !target_is_outerwilds
+        && profile_is_vanilla(&app, &profile_id);
 
     eprintln!(
         "[install_mod] Installing {} directly to game: {:?}",
@@ -3207,7 +3214,9 @@ async fn install_mod_bytes(
 
         // Detect if this is the OWML loader itself (contains OWML.Launcher.exe at root or in a subdirectory)
         let is_owml_loader = (0..archive.len()).any(|i| {
-            archive.by_index_raw(i).ok()
+            archive
+                .by_index_raw(i)
+                .ok()
                 .and_then(|f| normalize_zip_entry_name(f.name()))
                 .map(|name| {
                     let lower = name.to_lowercase();
@@ -3220,8 +3229,8 @@ async fn install_mod_bytes(
         // (vanilla mode). Installing a mod while in vanilla mode must land inside
         // the existing OWML_DISABLED/Mods, not spawn a stray OWML folder. For a
         // fresh install (neither exists), default to the canonical OWML.
-        let owml_root = crate::models::shared::get_owml_dir(game_dir)
-            .unwrap_or_else(|| game_dir.join("OWML"));
+        let owml_root =
+            crate::models::shared::get_owml_dir(game_dir).unwrap_or_else(|| game_dir.join("OWML"));
 
         if is_owml_loader {
             // Extract OWML loader to <game_path>/OWML/
@@ -3260,7 +3269,11 @@ async fn install_mod_bytes(
                     if let Some(ref n) = normalized {
                         // Find manifest.json at any nesting level
                         let segments: Vec<&str> = n.split('/').collect();
-                        if segments.last().map(|s| s.eq_ignore_ascii_case("manifest.json")).unwrap_or(false) {
+                        if segments
+                            .last()
+                            .map(|s| s.eq_ignore_ascii_case("manifest.json"))
+                            .unwrap_or(false)
+                        {
                             let mut content = String::new();
                             use std::io::Read;
                             if file.read_to_string(&mut content).is_ok() {
@@ -3276,12 +3289,12 @@ async fn install_mod_bytes(
                                         }
                                     }
                                     // Derive the prefix path of manifest.json
-                                    let mut prefix = segments[0..segments.len()-1].join("/");
+                                    let mut prefix = segments[0..segments.len() - 1].join("/");
                                     if !prefix.is_empty() {
                                         prefix.push('/');
                                     }
                                     prefix_path = Some(prefix);
-                                    
+
                                     if found_un.is_some() {
                                         break;
                                     }
@@ -3297,7 +3310,11 @@ async fn install_mod_bytes(
         let mod_folder_name = unique_name.unwrap_or_else(|| {
             // Fallback: derive folder name from mod_name (Author-ModName-Version -> ModName)
             let parts: Vec<&str> = mod_name.split('-').collect();
-            if parts.len() >= 2 { parts[1].to_string() } else { mod_name.clone() }
+            if parts.len() >= 2 {
+                parts[1].to_string()
+            } else {
+                mod_name.clone()
+            }
         });
 
         let mod_dir = owml_root.join("Mods").join(&mod_folder_name);
@@ -3312,15 +3329,15 @@ async fn install_mod_bytes(
             let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
             let name = file.name().to_string();
             let normalized = normalize_zip_entry_name(&name).unwrap_or(name);
-            
+
             if normalized.starts_with(&manifest_prefix) {
                 let relative_path_str = &normalized[manifest_prefix.len()..];
                 if relative_path_str.is_empty() {
                     continue;
                 }
-                
+
                 let outpath = mod_dir.join(relative_path_str);
-                
+
                 if zip_entry_is_dir(file.name()) {
                     fs::create_dir_all(&outpath).map_err(|e| e.to_string())?;
                 } else {
@@ -3343,22 +3360,22 @@ async fn install_mod_bytes(
                 let _ = fs::remove_dir_all(&profile_mod_dir);
             }
             fs::create_dir_all(&profile_mod_dir).map_err(|e| e.to_string())?;
-            
+
             let cursor = std::io::Cursor::new(&runtime_bytes);
             let mut cache_archive = zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
             for i in 0..cache_archive.len() {
                 let mut file = cache_archive.by_index(i).map_err(|e| e.to_string())?;
                 let name = file.name().to_string();
                 let normalized = normalize_zip_entry_name(&name).unwrap_or(name);
-                
+
                 if normalized.starts_with(&manifest_prefix) {
                     let relative_path_str = &normalized[manifest_prefix.len()..];
                     if relative_path_str.is_empty() {
                         continue;
                     }
-                    
+
                     let outpath = profile_mod_dir.join(relative_path_str);
-                    
+
                     if zip_entry_is_dir(file.name()) {
                         fs::create_dir_all(&outpath).map_err(|e| e.to_string())?;
                     } else {
@@ -3372,7 +3389,10 @@ async fn install_mod_bytes(
             }
         }
 
-        eprintln!("[install_mod] Installed OWML mod '{}' to {:?}", mod_folder_name, mod_dir);
+        eprintln!(
+            "[install_mod] Installed OWML mod '{}' to {:?}",
+            mod_folder_name, mod_dir
+        );
         return Ok(serde_json::json!({
             "success": true,
             "uniqueName": mod_folder_name,
@@ -3782,7 +3802,8 @@ pub async fn open_mod_folder(
 
         if let Some(target) = target_dir {
             if target.exists() {
-                open::that(&target).map_err(|e| format!("Failed to open OWML mod folder: {}", e))?;
+                open::that(&target)
+                    .map_err(|e| format!("Failed to open OWML mod folder: {}", e))?;
                 return Ok(());
             }
         }
@@ -4288,13 +4309,19 @@ fn load_packages_from_disk(app: &AppHandle, game_id: &str) -> Option<GamePackage
     let cache_dir = match crate::utils::paths::app_cache_dir(app) {
         Ok(dir) => dir,
         Err(e) => {
-            eprintln!("[load_packages_from_disk] Failed to resolve cache dir: {}", e);
+            eprintln!(
+                "[load_packages_from_disk] Failed to resolve cache dir: {}",
+                e
+            );
             return None;
         }
     };
     let cache_file = cache_dir.join(format!("{}_packages_v2.json.gz", game_id));
     if !cache_file.exists() {
-        eprintln!("[load_packages_from_disk] Cache file does not exist: {:?}", cache_file);
+        eprintln!(
+            "[load_packages_from_disk] Cache file does not exist: {:?}",
+            cache_file
+        );
         return None;
     }
     let file = match std::fs::File::open(&cache_file) {
@@ -4307,29 +4334,46 @@ fn load_packages_from_disk(app: &AppHandle, game_id: &str) -> Option<GamePackage
     let mut gz = flate2::read::GzDecoder::new(file);
     let mut data = Vec::new();
     if let Err(e) = gz.read_to_end(&mut data) {
-        eprintln!("[load_packages_from_disk] Failed to decompress cache file: {}", e);
+        eprintln!(
+            "[load_packages_from_disk] Failed to decompress cache file: {}",
+            e
+        );
         return None;
     }
     match serde_json::from_slice(&data) {
         Ok(cache) => Some(cache),
         Err(e) => {
-            eprintln!("[load_packages_from_disk] Failed to deserialize cache: {}", e);
+            eprintln!(
+                "[load_packages_from_disk] Failed to deserialize cache: {}",
+                e
+            );
             return None;
         }
     }
 }
 
-fn save_packages_to_disk(app: &AppHandle, game_id: &str, cache: &GamePackagesCache) -> Result<(), String> {
+fn save_packages_to_disk(
+    app: &AppHandle,
+    game_id: &str,
+    cache: &GamePackagesCache,
+) -> Result<(), String> {
     use std::io::Write;
     let cache_dir = crate::utils::paths::app_cache_dir(app)
         .map_err(|e| format!("Failed to get cache dir: {}", e))?;
-    std::fs::create_dir_all(&cache_dir).map_err(|e| format!("Failed to create cache dir: {}", e))?;
+    std::fs::create_dir_all(&cache_dir)
+        .map_err(|e| format!("Failed to create cache dir: {}", e))?;
     let cache_file = cache_dir.join(format!("{}_packages_v2.json.gz", game_id));
-    let file = std::fs::File::create(cache_file).map_err(|e| format!("Failed to create cache file: {}", e))?;
+    let file = std::fs::File::create(cache_file)
+        .map_err(|e| format!("Failed to create cache file: {}", e))?;
     let mut encoder = flate2::write::GzEncoder::new(file, flate2::Compression::default());
-    let serialized = serde_json::to_vec(cache).map_err(|e| format!("Failed to serialize cache: {}", e))?;
-    encoder.write_all(&serialized).map_err(|e| format!("Failed to compress cache: {}", e))?;
-    encoder.finish().map_err(|e| format!("Failed to finalize gzip: {}", e))?;
+    let serialized =
+        serde_json::to_vec(cache).map_err(|e| format!("Failed to serialize cache: {}", e))?;
+    encoder
+        .write_all(&serialized)
+        .map_err(|e| format!("Failed to compress cache: {}", e))?;
+    encoder
+        .finish()
+        .map_err(|e| format!("Failed to finalize gzip: {}", e))?;
     Ok(())
 }
 
@@ -4426,8 +4470,7 @@ async fn load_chunk(
             match String::from_utf8(bytes.to_vec()) {
                 Ok(out) => out,
                 Err(e) => {
-                    last_error =
-                        Some(format!("Attempt {} invalid utf-8 chunk: {}", attempt, e));
+                    last_error = Some(format!("Attempt {} invalid utf-8 chunk: {}", attempt, e));
                     tokio::time::sleep(Duration::from_millis(250 * attempt as u64)).await;
                     continue;
                 }
@@ -4511,7 +4554,10 @@ pub async fn fetch_packages(
             let packages_lock = state.packages.read().await;
             if let Some(packages) = packages_lock.get(&game_id) {
                 if !packages.is_empty() {
-                    eprintln!("[fetch_packages/ow] Serving {} packages from memory (instant)", packages.len());
+                    eprintln!(
+                        "[fetch_packages/ow] Serving {} packages from memory (instant)",
+                        packages.len()
+                    );
                     return Ok(packages.len());
                 }
             }
@@ -4568,7 +4614,10 @@ pub async fn fetch_packages(
                     }
                 };
                 if !resp.status().is_success() {
-                    eprintln!("[fetch_packages/ow] Background fetch status failed: {}", resp.status());
+                    eprintln!(
+                        "[fetch_packages/ow] Background fetch status failed: {}",
+                        resp.status()
+                    );
                     return;
                 }
                 let db: serde_json::Value = match resp.json().await {
@@ -4580,11 +4629,14 @@ pub async fn fetch_packages(
                 };
 
                 let releases = db["releases"].as_array().cloned().unwrap_or_default();
-                let mut packages: Vec<crate::models::shared::Package> = Vec::with_capacity(releases.len());
+                let mut packages: Vec<crate::models::shared::Package> =
+                    Vec::with_capacity(releases.len());
 
                 for entry in &releases {
                     let unique_name = entry["uniqueName"].as_str().unwrap_or("");
-                    if unique_name.is_empty() { continue; }
+                    if unique_name.is_empty() {
+                        continue;
+                    }
 
                     let (owner, mod_name) = if let Some(dot) = unique_name.find('.') {
                         (&unique_name[..dot], &unique_name[dot + 1..])
@@ -4594,26 +4646,42 @@ pub async fn fetch_packages(
 
                     let name = entry["name"].as_str().unwrap_or(mod_name).to_string();
                     let description = entry["description"].as_str().unwrap_or("").to_string();
-                    let version = entry["version"].as_str().unwrap_or("0.0.0")
-                        .trim_start_matches('v').to_string();
+                    let version = entry["version"]
+                        .as_str()
+                        .unwrap_or("0.0.0")
+                        .trim_start_matches('v')
+                        .to_string();
                     let download_url = entry["downloadUrl"].as_str().unwrap_or("").to_string();
                     let download_count = entry["downloadCount"].as_i64().unwrap_or(0);
                     let repo = entry["repo"].as_str().unwrap_or("").to_string();
-                    let latest_release_date = entry["latestReleaseDate"].as_str().unwrap_or("").to_string();
-                    let first_release_date = entry["firstReleaseDate"].as_str().unwrap_or("").to_string();
+                    let latest_release_date = entry["latestReleaseDate"]
+                        .as_str()
+                        .unwrap_or("")
+                        .to_string();
+                    let first_release_date =
+                        entry["firstReleaseDate"].as_str().unwrap_or("").to_string();
                     let is_required = entry["required"].as_bool().unwrap_or(false);
 
-                    let icon_url = entry["thumbnail"]["main"].as_str()
+                    let icon_url = entry["thumbnail"]["main"]
+                        .as_str()
                         .map(|thumb| format!("{}{}", OW_THUMBNAIL_BASE, thumb))
                         .unwrap_or_default();
 
-                    let categories: Vec<String> = entry["tags"].as_array()
-                        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+                    let categories: Vec<String> = entry["tags"]
+                        .as_array()
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                                .collect()
+                        })
                         .unwrap_or_default();
 
                     let full_name = format!("{}-{}", owner, mod_name);
                     let package_url = if repo.is_empty() {
-                        format!("https://outerwildsmods.com/mods/{}/", entry["slug"].as_str().unwrap_or(""))
+                        format!(
+                            "https://outerwildsmods.com/mods/{}/",
+                            entry["slug"].as_str().unwrap_or("")
+                        )
                     } else {
                         repo.clone()
                     };
@@ -4642,11 +4710,13 @@ pub async fn fetch_packages(
                     if let Some(prerelease) = entry.get("prerelease") {
                         if let Some(pre_version) = prerelease["version"].as_str() {
                             let pre_version_clean = pre_version.trim_start_matches('v').to_string();
-                            let pre_download_url = prerelease["downloadUrl"].as_str().unwrap_or("").to_string();
+                            let pre_download_url =
+                                prerelease["downloadUrl"].as_str().unwrap_or("").to_string();
                             let pre_date = prerelease["date"].as_str().unwrap_or("").to_string();
-                            
+
                             if !pre_version_clean.is_empty() && !pre_download_url.is_empty() {
-                                let cached_pre_size = size_cache.get(&pre_download_url).copied().unwrap_or(0);
+                                let cached_pre_size =
+                                    size_cache.get(&pre_download_url).copied().unwrap_or(0);
                                 versions_list.push(crate::models::shared::PackageVersion {
                                     name: mod_name.to_string(),
                                     description: format!("(Prerelease) {}", description.clone()),
@@ -4684,15 +4754,20 @@ pub async fn fetch_packages(
                 }
 
                 // Resolve file sizes for background-fetched packages in parallel ONLY if we don't have them
-                let urls: Vec<(usize, usize, String)> = packages.iter().enumerate()
+                let urls: Vec<(usize, usize, String)> = packages
+                    .iter()
+                    .enumerate()
                     .flat_map(|(pkg_idx, p)| {
-                        p.versions.iter().enumerate().filter_map(move |(ver_idx, v)| {
-                            if v.download_url.is_empty() || v.file_size > 0 {
-                                None
-                            } else {
-                                Some((pkg_idx, ver_idx, v.download_url.clone()))
-                            }
-                        })
+                        p.versions
+                            .iter()
+                            .enumerate()
+                            .filter_map(move |(ver_idx, v)| {
+                                if v.download_url.is_empty() || v.file_size > 0 {
+                                    None
+                                } else {
+                                    Some((pkg_idx, ver_idx, v.download_url.clone()))
+                                }
+                            })
                     })
                     .collect();
 
@@ -4703,10 +4778,17 @@ pub async fn fetch_packages(
                         .map(|(pkg_idx, ver_idx, url)| {
                             let c = head_client.clone();
                             async move {
-                                let size = c.head(&url).send().await.ok()
-                                    .and_then(|r| r.headers().get("content-length")
-                                        .and_then(|v| v.to_str().ok())
-                                        .and_then(|s| s.parse::<u64>().ok()))
+                                let size = c
+                                    .head(&url)
+                                    .send()
+                                    .await
+                                    .ok()
+                                    .and_then(|r| {
+                                        r.headers()
+                                            .get("content-length")
+                                            .and_then(|v| v.to_str().ok())
+                                            .and_then(|s| s.parse::<u64>().ok())
+                                    })
                                     .unwrap_or(0);
                                 (pkg_idx, ver_idx, size)
                             }
@@ -4714,7 +4796,9 @@ pub async fn fetch_packages(
                         .buffer_unordered(parallelism);
 
                     while let Some((pkg_idx, ver_idx, size)) = stream.next().await {
-                        if size == 0 { continue; }
+                        if size == 0 {
+                            continue;
+                        }
                         if let Some(pkg) = packages.get_mut(pkg_idx) {
                             if let Some(ver) = pkg.versions.get_mut(ver_idx) {
                                 ver.file_size = size;
@@ -4752,9 +4836,16 @@ pub async fn fetch_packages(
         const OW_THUMBNAIL_BASE: &str = "https://ow-mods.github.io/ow-mod-db/thumbnails/";
 
         eprintln!("[fetch_packages/ow] Fetching ow-mod-db from {}", OW_DB_URL);
-        let resp = client.get(OW_DB_URL).send().await.map_err(|e| e.to_string())?;
+        let resp = client
+            .get(OW_DB_URL)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
         if !resp.status().is_success() {
-            return Err(format!("[fetch_packages/ow] ow-mod-db fetch failed: {}", resp.status()));
+            return Err(format!(
+                "[fetch_packages/ow] ow-mod-db fetch failed: {}",
+                resp.status()
+            ));
         }
         let db: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
 
@@ -4763,7 +4854,9 @@ pub async fn fetch_packages(
 
         for entry in &releases {
             let unique_name = entry["uniqueName"].as_str().unwrap_or("");
-            if unique_name.is_empty() { continue; }
+            if unique_name.is_empty() {
+                continue;
+            }
 
             // Split "Namespace.ModName" → owner="Namespace", name="ModName"
             let (owner, mod_name) = if let Some(dot) = unique_name.find('.') {
@@ -4774,26 +4867,41 @@ pub async fn fetch_packages(
 
             let name = entry["name"].as_str().unwrap_or(mod_name).to_string();
             let description = entry["description"].as_str().unwrap_or("").to_string();
-            let version = entry["version"].as_str().unwrap_or("0.0.0")
-                .trim_start_matches('v').to_string();
+            let version = entry["version"]
+                .as_str()
+                .unwrap_or("0.0.0")
+                .trim_start_matches('v')
+                .to_string();
             let download_url = entry["downloadUrl"].as_str().unwrap_or("").to_string();
             let download_count = entry["downloadCount"].as_i64().unwrap_or(0);
             let repo = entry["repo"].as_str().unwrap_or("").to_string();
-            let latest_release_date = entry["latestReleaseDate"].as_str().unwrap_or("").to_string();
+            let latest_release_date = entry["latestReleaseDate"]
+                .as_str()
+                .unwrap_or("")
+                .to_string();
             let first_release_date = entry["firstReleaseDate"].as_str().unwrap_or("").to_string();
             let is_required = entry["required"].as_bool().unwrap_or(false);
 
-            let icon_url = entry["thumbnail"]["main"].as_str()
+            let icon_url = entry["thumbnail"]["main"]
+                .as_str()
                 .map(|thumb| format!("{}{}", OW_THUMBNAIL_BASE, thumb))
                 .unwrap_or_default();
 
-            let categories: Vec<String> = entry["tags"].as_array()
-                .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+            let categories: Vec<String> = entry["tags"]
+                .as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                        .collect()
+                })
                 .unwrap_or_default();
 
             let full_name = format!("{}-{}", owner, mod_name);
             let package_url = if repo.is_empty() {
-                format!("https://outerwildsmods.com/mods/{}/", entry["slug"].as_str().unwrap_or(""))
+                format!(
+                    "https://outerwildsmods.com/mods/{}/",
+                    entry["slug"].as_str().unwrap_or("")
+                )
             } else {
                 repo.clone()
             };
@@ -4820,9 +4928,10 @@ pub async fn fetch_packages(
             if let Some(prerelease) = entry.get("prerelease") {
                 if let Some(pre_version) = prerelease["version"].as_str() {
                     let pre_version_clean = pre_version.trim_start_matches('v').to_string();
-                    let pre_download_url = prerelease["downloadUrl"].as_str().unwrap_or("").to_string();
+                    let pre_download_url =
+                        prerelease["downloadUrl"].as_str().unwrap_or("").to_string();
                     let pre_date = prerelease["date"].as_str().unwrap_or("").to_string();
-                    
+
                     if !pre_version_clean.is_empty() && !pre_download_url.is_empty() {
                         versions_list.push(crate::models::shared::PackageVersion {
                             name: mod_name.to_string(),
@@ -4888,15 +4997,19 @@ pub async fn fetch_packages(
                 let urls: Vec<(usize, usize, String)> = {
                     let lock = packages_arc.read().await;
                     if let Some(pkgs) = lock.get(&game_id_clone) {
-                        pkgs.iter().enumerate()
+                        pkgs.iter()
+                            .enumerate()
                             .flat_map(|(pkg_idx, p)| {
-                                p.versions.iter().enumerate().filter_map(move |(ver_idx, v)| {
-                                    if v.download_url.is_empty() || v.file_size > 0 {
-                                        None
-                                    } else {
-                                        Some((pkg_idx, ver_idx, v.download_url.clone()))
-                                    }
-                                })
+                                p.versions
+                                    .iter()
+                                    .enumerate()
+                                    .filter_map(move |(ver_idx, v)| {
+                                        if v.download_url.is_empty() || v.file_size > 0 {
+                                            None
+                                        } else {
+                                            Some((pkg_idx, ver_idx, v.download_url.clone()))
+                                        }
+                                    })
                             })
                             .collect()
                     } else {
@@ -4911,10 +5024,17 @@ pub async fn fetch_packages(
                         .map(|(pkg_idx, ver_idx, url)| {
                             let c = head_client.clone();
                             async move {
-                                let size = c.head(&url).send().await.ok()
-                                    .and_then(|r| r.headers().get("content-length")
-                                        .and_then(|v| v.to_str().ok())
-                                        .and_then(|s| s.parse::<u64>().ok()))
+                                let size = c
+                                    .head(&url)
+                                    .send()
+                                    .await
+                                    .ok()
+                                    .and_then(|r| {
+                                        r.headers()
+                                            .get("content-length")
+                                            .and_then(|v| v.to_str().ok())
+                                            .and_then(|s| s.parse::<u64>().ok())
+                                    })
                                     .unwrap_or(0);
                                 (pkg_idx, ver_idx, size)
                             }
@@ -4922,7 +5042,9 @@ pub async fn fetch_packages(
                         .buffer_unordered(parallelism);
 
                     while let Some((pkg_idx, ver_idx, size)) = stream.next().await {
-                        if size == 0 { continue; }
+                        if size == 0 {
+                            continue;
+                        }
                         let mut lock = packages_arc.write().await;
                         if let Some(pkgs) = lock.get_mut(&game_id_clone) {
                             if let Some(pkg) = pkgs.get_mut(pkg_idx) {
@@ -5002,7 +5124,7 @@ pub async fn fetch_packages(
                 "https://thunderstore.io/c/{}/api/v1/package-listing-index/",
                 game_id_clone
             );
-            
+
             let resp = match client.get(&index_url).send().await {
                 Ok(r) => r,
                 Err(e) => {
@@ -5011,7 +5133,10 @@ pub async fn fetch_packages(
                 }
             };
             if !resp.status().is_success() {
-                eprintln!("[fetch_packages] Background index check status failed: {}", resp.status());
+                eprintln!(
+                    "[fetch_packages] Background index check status failed: {}",
+                    resp.status()
+                );
                 return;
             }
             let bytes = match resp.bytes().await {
@@ -5049,7 +5174,7 @@ pub async fn fetch_packages(
 
             // Chunks differ! Keep chunks that are still online, and download only the new ones!
             eprintln!("[fetch_packages] Chunk URLs differ from cache. Updating changed chunks in background for {}...", game_id_clone);
-            
+
             let mut cached_chunks: std::collections::HashMap<String, ChunkCache> = cache
                 .chunks
                 .into_iter()
@@ -5060,7 +5185,8 @@ pub async fn fetch_packages(
                 .filter_map(|url| cached_chunks.remove(url))
                 .collect();
 
-            let urls_to_download: Vec<String> = online_chunk_urls.iter()
+            let urls_to_download: Vec<String> = online_chunk_urls
+                .iter()
                 .filter(|url| !cached_url_set.contains(url.as_str()))
                 .cloned()
                 .collect();
@@ -5099,7 +5225,10 @@ pub async fn fetch_packages(
             }
             final_packages.shrink_to_fit();
             let count = final_packages.len();
-            eprintln!("[fetch_packages] Background update complete. Loaded {} packages for {}", count, game_id_clone);
+            eprintln!(
+                "[fetch_packages] Background update complete. Loaded {} packages for {}",
+                count, game_id_clone
+            );
 
             // Update in-memory state
             {
@@ -5256,7 +5385,10 @@ pub async fn fetch_packages(
             // Save cache
             let final_count = {
                 let packages_lock = packages_arc.read().await;
-                packages_lock.get(&game_id_clone).map(|p| p.len()).unwrap_or(0)
+                packages_lock
+                    .get(&game_id_clone)
+                    .map(|p| p.len())
+                    .unwrap_or(0)
             };
 
             eprintln!(
@@ -5575,10 +5707,15 @@ pub async fn fetch_package_by_name(
     if game_id.as_deref() == Some("outerwilds") {
         let is_empty = {
             let packages_guard = state.packages.read().await;
-            packages_guard.get("outerwilds").map(|p| p.is_empty()).unwrap_or(true)
+            packages_guard
+                .get("outerwilds")
+                .map(|p| p.is_empty())
+                .unwrap_or(true)
         };
         if is_empty {
-            eprintln!("[fetch_package_by_name] Outer Wilds packages not loaded in cache. Loading now...");
+            eprintln!(
+                "[fetch_package_by_name] Outer Wilds packages not loaded in cache. Loading now..."
+            );
             use tauri::Manager;
             let app_state = app.state::<AppState>();
             let _ = fetch_packages(app.clone(), app_state, "outerwilds".to_string()).await;
@@ -5671,10 +5808,7 @@ pub async fn fetch_package_by_name(
         )
     };
 
-    eprintln!(
-        "[fetch_package_by_name] Cache miss. Fetching from: {}",
-        url
-    );
+    eprintln!("[fetch_package_by_name] Cache miss. Fetching from: {}", url);
 
     ensure_mod_operations_not_cancelled()?;
     let _exact_fetch_guard = if version_str.is_some() {
@@ -5720,7 +5854,10 @@ pub async fn fetch_package_by_name(
                         .unwrap_or(delay);
                     eprintln!(
                         "[fetch_package_by_name] {} for {}; retrying {}/6 in {:?}",
-                        status, name, attempt + 1, wait
+                        status,
+                        name,
+                        attempt + 1,
+                        wait
                     );
                     sleep_unless_mod_operations_cancelled(wait).await?;
                     delay = (delay * 2).min(Duration::from_secs(8));
@@ -5822,7 +5959,10 @@ pub async fn fetch_package_by_name(
             name: package_name.to_string(),
             full_name: clean_name.to_string(),
             owner: namespace.to_string(),
-            package_url: format!("https://thunderstore.io/package/{}/{}/", namespace, package_name),
+            package_url: format!(
+                "https://thunderstore.io/package/{}/{}/",
+                namespace, package_name
+            ),
             date_created: "".to_string(),
             date_updated: "".to_string(),
             uuid4: "".to_string(),
@@ -5836,17 +5976,26 @@ pub async fn fetch_package_by_name(
     } else {
         // Response is the top-level package metadata with a "latest" version object
         let latest_val = &val["latest"];
-        let ver_name = latest_val["name"].as_str().unwrap_or(package_name).to_string();
+        let ver_name = latest_val["name"]
+            .as_str()
+            .unwrap_or(package_name)
+            .to_string();
         let ver_desc = latest_val["description"].as_str().unwrap_or("").to_string();
         let ver_icon = latest_val["icon"].as_str().unwrap_or("").to_string();
-        let ver_num = latest_val["version_number"].as_str().unwrap_or("").to_string();
+        let ver_num = latest_val["version_number"]
+            .as_str()
+            .unwrap_or("")
+            .to_string();
         let ver_deps = latest_val["dependencies"]
             .as_array()
             .unwrap_or(&vec![])
             .iter()
             .filter_map(|v| v.as_str().map(|s| s.to_string()))
             .collect::<Vec<_>>();
-        let ver_download = latest_val["download_url"].as_str().unwrap_or("").to_string();
+        let ver_download = latest_val["download_url"]
+            .as_str()
+            .unwrap_or("")
+            .to_string();
         let ver_downloads = latest_val["downloads"].as_i64().unwrap_or(0);
         let ver_website = latest_val["website_url"].as_str().unwrap_or("").to_string();
         let ver_full = latest_val["full_name"].as_str().unwrap_or("").to_string();
@@ -5864,7 +6013,10 @@ pub async fn fetch_package_by_name(
             file_size: latest_val["file_size"].as_u64().unwrap_or(0),
             uuid4: ver_uuid,
             full_name: ver_full,
-            date_created: latest_val["date_created"].as_str().unwrap_or("").to_string(),
+            date_created: latest_val["date_created"]
+                .as_str()
+                .unwrap_or("")
+                .to_string(),
             is_active: latest_val["is_active"].as_bool().unwrap_or(true),
         };
 
@@ -5980,8 +6132,8 @@ mod tests {
     fn downloaded_archive_version_must_match_pinned_name() {
         let archive = make_manifest_zip("1.2.3");
         assert!(validate_downloaded_archive_version(&archive, "Author-Example-1.2.3").is_ok());
-        let error = validate_downloaded_archive_version(&archive, "Author-Example-1.2.4")
-            .unwrap_err();
+        let error =
+            validate_downloaded_archive_version(&archive, "Author-Example-1.2.4").unwrap_err();
         assert!(error.contains("version mismatch"));
     }
 
@@ -6078,27 +6230,59 @@ mod tests {
         let mod_name = "Wolfo-WolfoQualityOfLife-5.1.11";
 
         // 1. Fallback (no anchor): WolfoQoL_Client.dll -> BepInEx/plugins/<mod_name>/WolfoQoL_Client.dll
-        let res = normalize_regular_mod_entry(std::path::Path::new("WolfoQoL_Client.dll"), mod_name).unwrap();
-        assert_eq!(res, std::path::PathBuf::from("BepInEx/plugins/Wolfo-WolfoQualityOfLife-5.1.11/WolfoQoL_Client.dll"));
+        let res =
+            normalize_regular_mod_entry(std::path::Path::new("WolfoQoL_Client.dll"), mod_name)
+                .unwrap();
+        assert_eq!(
+            res,
+            std::path::PathBuf::from(
+                "BepInEx/plugins/Wolfo-WolfoQualityOfLife-5.1.11/WolfoQoL_Client.dll"
+            )
+        );
 
         // 2. plugins anchor (subdir): plugins/WolfoQoL/AssetBundles/file -> BepInEx/plugins/<mod_name>/WolfoQoL/AssetBundles/file
-        let res = normalize_regular_mod_entry(std::path::Path::new("plugins/WolfoQoL/AssetBundles/file"), mod_name).unwrap();
-        assert_eq!(res, std::path::PathBuf::from("BepInEx/plugins/Wolfo-WolfoQualityOfLife-5.1.11/WolfoQoL/AssetBundles/file"));
+        let res = normalize_regular_mod_entry(
+            std::path::Path::new("plugins/WolfoQoL/AssetBundles/file"),
+            mod_name,
+        )
+        .unwrap();
+        assert_eq!(
+            res,
+            std::path::PathBuf::from(
+                "BepInEx/plugins/Wolfo-WolfoQualityOfLife-5.1.11/WolfoQoL/AssetBundles/file"
+            )
+        );
 
         // 3. BepInEx/plugins anchor (subdir): BepInEx/plugins/SomeFolder/SomeDll.dll -> BepInEx/plugins/<mod_name>/SomeFolder/SomeDll.dll
-        let res = normalize_regular_mod_entry(std::path::Path::new("BepInEx/plugins/SomeFolder/SomeDll.dll"), mod_name).unwrap();
-        assert_eq!(res, std::path::PathBuf::from("BepInEx/plugins/Wolfo-WolfoQualityOfLife-5.1.11/SomeFolder/SomeDll.dll"));
+        let res = normalize_regular_mod_entry(
+            std::path::Path::new("BepInEx/plugins/SomeFolder/SomeDll.dll"),
+            mod_name,
+        )
+        .unwrap();
+        assert_eq!(
+            res,
+            std::path::PathBuf::from(
+                "BepInEx/plugins/Wolfo-WolfoQualityOfLife-5.1.11/SomeFolder/SomeDll.dll"
+            )
+        );
 
         // 4. BepInEx/config anchor (none): BepInEx/config/SomeMod.cfg -> BepInEx/config/SomeMod.cfg (NO mod_name!)
-        let res = normalize_regular_mod_entry(std::path::Path::new("BepInEx/config/SomeMod.cfg"), mod_name).unwrap();
+        let res = normalize_regular_mod_entry(
+            std::path::Path::new("BepInEx/config/SomeMod.cfg"),
+            mod_name,
+        )
+        .unwrap();
         assert_eq!(res, std::path::PathBuf::from("BepInEx/config/SomeMod.cfg"));
 
         // 5. config anchor (none): config/SomeMod.cfg -> BepInEx/config/SomeMod.cfg (NO mod_name!)
-        let res = normalize_regular_mod_entry(std::path::Path::new("config/SomeMod.cfg"), mod_name).unwrap();
+        let res = normalize_regular_mod_entry(std::path::Path::new("config/SomeMod.cfg"), mod_name)
+            .unwrap();
         assert_eq!(res, std::path::PathBuf::from("BepInEx/config/SomeMod.cfg"));
 
         // 6. loader file anchor: doorstop_config.ini -> doorstop_config.ini directly at root
-        let res = normalize_regular_mod_entry(std::path::Path::new("doorstop_config.ini"), mod_name).unwrap();
+        let res =
+            normalize_regular_mod_entry(std::path::Path::new("doorstop_config.ini"), mod_name)
+                .unwrap();
         assert_eq!(res, std::path::PathBuf::from("doorstop_config.ini"));
     }
 }
