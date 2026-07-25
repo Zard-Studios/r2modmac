@@ -83,7 +83,9 @@ jobs:
 
       - name: Apply non-breaking production dependency repairs
         shell: bash
-        run: npm audit fix --omit=dev || true
+        run: |
+          npm audit fix --omit=dev || true
+          npm install --include=dev
 
       - name: Capture production audit report
         shell: bash
