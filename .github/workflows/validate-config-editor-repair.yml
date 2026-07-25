@@ -33,6 +33,17 @@ jobs:
       - name: Apply repair
         shell: bash
         run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          path = Path('.github/scripts/repair_config_editor.py')
+          text = path.read_text()
+          old = 'profile, replacements = tail_pattern.subn(new_tail, profile, count=1)'
+          new = 'profile, replacements = tail_pattern.subn(lambda _match: new_tail, profile, count=1)'
+          if text.count(old) != 1:
+              raise RuntimeError('literal replacement call was not found exactly once')
+          path.write_text(text.replace(old, new, 1))
+          PY
           python3 .github/scripts/repair_config_editor.py
           cargo fmt --manifest-path src-tauri/Cargo.toml --all
 
