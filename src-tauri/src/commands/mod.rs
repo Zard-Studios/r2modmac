@@ -1,5 +1,8 @@
 pub mod export_import;
 pub mod game_commands;
+#[path = "mod_commands.rs"]
+pub mod legacy_mod_commands;
+#[path = "secure_mod_commands.rs"]
 pub mod mod_commands;
 pub mod profile_commands;
 pub mod settings_commands;
