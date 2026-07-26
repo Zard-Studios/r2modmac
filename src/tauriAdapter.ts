@@ -12,14 +12,22 @@ function fetchPackagesDeduped(gameId: string): Promise<number> {
     const inFlight = packageFetchesInFlight.get(key);
     if (inFlight) return inFlight;
 
+    const now = Date.now();
+    for (const [cachedKey, cached] of recentPackageFetches) {
+        if (now - cached.completedAt >= PACKAGE_FETCH_DEDUP_WINDOW_MS) {
+            recentPackageFetches.delete(cachedKey);
+        }
+    }
+
     const recent = recentPackageFetches.get(key);
-    if (recent && Date.now() - recent.completedAt < PACKAGE_FETCH_DEDUP_WINDOW_MS) {
+    if (recent) {
         return Promise.resolve(recent.result);
     }
 
     let request: Promise<number>;
     request = invoke<number>('fetch_packages', { gameId })
         .then((result) => {
+            recentPackageFetches.clear();
             recentPackageFetches.set(key, {
                 result,
                 completedAt: Date.now(),
