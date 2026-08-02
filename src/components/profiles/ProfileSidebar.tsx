@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { startTransition, useMemo, useState } from 'react';
 import type { Community, Package } from '../../types/thunderstore';
 import type { Profile, InstalledMod } from '../../types/profile';
 import type { RuntimeHealth } from '../../types/electron';
@@ -67,6 +67,7 @@ interface ProfileSidebarProps {
     communityImage: string | undefined;
     packageIndex: Record<string, Package>;
     legacyInstallMode: boolean;
+    showDeprecatedWarnings: boolean;
     installInParallel: boolean;
     onSelectProfile: (profileId: string) => void;
     onToggleMod: (profileId: string, modUuid: string) => Promise<void> | void;
@@ -102,6 +103,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
     communityImage,
     packageIndex,
     legacyInstallMode,
+    showDeprecatedWarnings,
     installInParallel,
     onSelectProfile,
     onToggleMod,
@@ -136,6 +138,11 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
     const [selectedModIds, setSelectedModIds] = useState<string[]>([]);
     const [selectionAnchorId, setSelectionAnchorId] = useState<string | null>(null);
     const [modView, setModView] = useState<'all' | 'updates'>('all');
+
+    const changeModView = (nextView: 'all' | 'updates') => {
+        if (nextView === modView) return;
+        startTransition(() => setModView(nextView));
+    };
 
     const handleEditClick = () => {
         if (activeProfile) {
@@ -554,51 +561,72 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
 
             {/* Mod List */}
             <div className={`flex-1 overflow-y-auto p-2 space-y-1 scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-transparent ${activeProfile?.is_vanilla ? 'grayscale opacity-75' : ''}`}>
-                <div className="flex items-center gap-1.5 px-2 py-2 text-xs font-bold">
-                    <div className="flex min-w-0 flex-1 rounded-lg border border-gray-700 bg-gray-800 p-0.5">
+                <div className="px-2 py-2 text-xs font-bold">
+                    <div role="tablist" aria-label="Profile mod view" className="relative flex w-full overflow-hidden rounded-lg border border-gray-700 bg-gray-800 p-0.5">
+                        <div
+                            aria-hidden="true"
+                            className={`profile-mod-segment-indicator absolute bottom-0.5 left-0.5 top-0.5 w-[calc(50%-2px)] rounded-md transition-[transform,background-color,box-shadow] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] ${modView === 'updates'
+                                ? 'translate-x-full bg-amber-500/20 shadow-[0_1px_8px_rgba(245,158,11,0.08)]'
+                                : 'translate-x-0 bg-gray-600 shadow-sm'
+                                }`}
+                        />
                         <button
                             type="button"
-                            onClick={() => setModView('all')}
-                            aria-pressed={modView === 'all'}
-                            className={`flex-1 rounded-md px-2 py-1.5 transition-colors ${modView === 'all' ? 'bg-gray-600 text-white' : 'text-gray-400 hover:text-gray-200'}`}
+                            role="tab"
+                            aria-controls="profile-mod-view-panel"
+                            onClick={() => changeModView('all')}
+                            aria-selected={modView === 'all'}
+                            className={`relative z-10 flex-1 rounded-md px-2 py-1.5 transition-colors duration-200 ${modView === 'all' ? 'text-white' : 'text-gray-400 hover:text-gray-200'}`}
                         >
-                            All {activeProfile?.mods.length ?? 0}
+                            <span className="inline-flex items-center justify-center gap-1.5">
+                                All {activeProfile?.mods.length ?? 0}
+                                {pendingSyncCount > 0 ? (
+                                    <span
+                                        title={`${pendingSyncCount} pending sync change${pendingSyncCount === 1 ? '' : 's'}`}
+                                        className="h-1.5 w-1.5 rounded-full bg-sky-300 shadow-[0_0_5px_rgba(125,211,252,0.55)]"
+                                    />
+                                ) : null}
+                            </span>
                         </button>
                         <button
                             type="button"
-                            onClick={() => setModView('updates')}
-                            aria-pressed={modView === 'updates'}
-                            className={`flex-1 rounded-md px-2 py-1.5 transition-colors ${modView === 'updates' ? 'bg-amber-500/20 text-amber-300' : 'text-gray-400 hover:text-amber-300'}`}
+                            role="tab"
+                            aria-controls="profile-mod-view-panel"
+                            onClick={() => changeModView('updates')}
+                            aria-selected={modView === 'updates'}
+                            className={`relative z-10 flex-1 rounded-md px-2 py-1.5 transition-colors duration-200 ${modView === 'updates' ? 'text-amber-300' : 'text-gray-400 hover:text-amber-300'}`}
                         >
                             Updates {profileUpdates.length}
                         </button>
                     </div>
-                    {modView === 'updates' && profileUpdates.length > 0 ? (
-                        <button
-                            type="button"
-                            onClick={() => onUpdateAll(profileUpdates)}
-                            className="flex-shrink-0 rounded-lg border border-blue-500 bg-blue-600 px-2.5 py-2 text-[11px] font-bold text-white"
-                        >
-                            Update all ({profileUpdates.length})
-                        </button>
-                    ) : null}
-                    {modView === 'all' ? (
-                        <div className="flex items-center gap-1">
-                        {pendingSyncCount > 0 && (
-                            <span
-                                title='Pending sync changes. Click "Apply to Game" to sync modified profile mods.'
-                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] bg-sky-500/10 text-sky-300 border border-sky-500/25"
-                            >
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.9} d="M20 11a8.1 8.1 0 0 0-15.5-2m-.5-4v4h4" />
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.9} d="M4 13a8.1 8.1 0 0 0 15.5 2m.5 4v-4h-4" />
-                                </svg>
-                                <span>{pendingSyncCount}</span>
-                            </span>
-                        )}
-                        </div>
-                    ) : null}
                 </div>
+
+                <div
+                    key={modView}
+                    id="profile-mod-view-panel"
+                    role="tabpanel"
+                    className={`space-y-1 ${modView === 'updates' ? 'profile-mod-view-enter-forward' : 'profile-mod-view-enter-backward'}`}
+                >
+                {modView === 'updates' && profileUpdates.length > 0 ? (
+                    <button
+                        type="button"
+                        onClick={() => onUpdateAll(profileUpdates)}
+                        className="group/update-all mx-2 mb-2 flex w-[calc(100%-16px)] items-center gap-3 rounded-xl border border-blue-500/25 bg-blue-500/10 px-3 py-2.5 text-left transition-[background-color,border-color,transform] duration-200 hover:border-blue-500/45 hover:bg-blue-500/15 active:scale-[0.985]"
+                    >
+                        <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-blue-500/15 text-blue-300">
+                            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v6h6M20 20v-6h-6M5.6 15a7 7 0 0011.9 2M18.4 9A7 7 0 006.5 7" />
+                            </svg>
+                        </span>
+                        <span className="min-w-0 flex-1">
+                            <span className="block text-xs font-bold text-blue-100">Update all {profileUpdates.length} mods</span>
+                            <span className="block truncate text-[10px] font-medium text-blue-300/65">Review versions before updating</span>
+                        </span>
+                        <svg className="h-4 w-4 flex-shrink-0 text-blue-300/70 transition-transform duration-200 group-hover/update-all:translate-x-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="m9 18 6-6-6-6" />
+                        </svg>
+                    </button>
+                ) : null}
 
                 {displayedMods.map(mod => {
                     const packageName = parsePackageReference(mod.fullName).packageName.toLowerCase();
@@ -612,7 +640,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                     return (
                         <div
                             key={mod.uuid4}
-                            className={`flex items-center gap-3 p-2 rounded-lg group cursor-pointer transition-all border relative pr-16 overflow-hidden ${isSelected
+                            className={`flex items-center gap-3 p-2 rounded-lg group cursor-pointer transition-all border relative overflow-hidden ${modView === 'updates' ? 'pr-24' : 'pr-16'} ${isSelected
                                 ? 'bg-blue-500/12 border-blue-500/35'
                                 : 'border-transparent hover:border-gray-700 hover:bg-gray-800'
                                 } ${!mod.enabled ? 'opacity-50' : ''}`}
@@ -628,10 +656,21 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                                     </div>
                                 )}
                                 {!mod.enabled && (
-                                    <div className="absolute inset-0 flex items-center justify-center bg-black/50">
+                                    <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/50">
                                         <span className="text-xs font-bold text-white">OFF</span>
                                     </div>
                                 )}
+                                {showDeprecatedWarnings && pkg?.is_deprecated ? (
+                                    <span
+                                        className="absolute right-0 top-0 z-20 flex h-5 w-5 items-center justify-center rounded-bl-lg bg-red-950/85 text-red-300 shadow-[-1px_1px_5px_rgba(0,0,0,0.35)] backdrop-blur-sm"
+                                        title="Deprecated mod"
+                                        aria-label="Deprecated mod"
+                                    >
+                                        <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                                            <path fillRule="evenodd" d="M8.26 3.1c.76-1.36 2.72-1.36 3.48 0l6.52 11.6c.75 1.33-.21 2.98-1.74 2.98H3.48c-1.53 0-2.49-1.65-1.74-2.98L8.26 3.1ZM10 7.75a.75.75 0 0 1 .75.75v3a.75.75 0 0 1-1.5 0v-3a.75.75 0 0 1 .75-.75Zm0 7.25a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z" clipRule="evenodd" />
+                                        </svg>
+                                    </span>
+                                ) : null}
                             </div>
 
                             <div className="min-w-0 flex-1">
@@ -644,14 +683,9 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                                             Custom
                                         </span>
                                     )}
-                                    {pkg?.is_deprecated && (
-                                        <span className="text-[10px] px-1.5 py-0.5 rounded-full border border-red-500/40 bg-red-500/10 text-red-300">
-                                            Deprecated
-                                        </span>
-                                    )}
                                 </div>
-                                <div className="text-xs text-gray-500 flex items-center gap-2">
-                                    <span>
+                                <div className="flex min-w-0 items-center gap-2 overflow-hidden text-xs text-gray-500">
+                                    <span className="truncate">
                                         v{mod.versionNumber}
                                         {modView === 'updates' && update ? (
                                             <span className="text-amber-300"> → v{update.version.version_number}</span>
@@ -659,7 +693,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                                     </span>
                                     {!legacyInstallMode && mod.pending_sync && (
                                         <span
-                                            className="inline-flex items-center text-sky-300"
+                                            className="inline-flex flex-shrink-0 items-center text-sky-300"
                                             title='Pending sync. Click "Apply to Game" to apply profile changes.'
                                         >
                                             <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -671,7 +705,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                                     )}
                                     {hasUpdate && (
                                         <span
-                                            className="inline-flex items-center text-amber-400"
+                                            className="inline-flex flex-shrink-0 items-center text-amber-400"
                                             title={`Update available: v${latestVersion}. Open details to update.`}
                                         >
                                             <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
@@ -763,6 +797,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                         </p>
                     </div>
                 )}
+                </div>
             </div>
 
             {/* Footer Actions */}

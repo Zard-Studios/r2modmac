@@ -307,6 +307,7 @@ function App() {
   const [confirmBeforeApplyToGame, setConfirmBeforeApplyToGame] = useState(false)
   const [writeDebugLogsToGame, setWriteDebugLogsToGame] = useState(false)
   const [defaultModViewMode, setDefaultModViewMode] = useState<'grid' | 'list'>('grid')
+  const [showDeprecatedWarnings, setShowDeprecatedWarnings] = useState(true)
   const [isBrowsingMode, setIsBrowsingMode] = useState(false)
   const isInitialLoadRunningRef = useRef(false)
   const packagesLoadRequestRef = useRef(0)
@@ -708,6 +709,7 @@ function App() {
       const storedViewMode = s.default_mod_view_mode === 'list' ? 'list' : 'grid';
       setDefaultModViewMode(storedViewMode);
       setViewMode(storedViewMode);
+      setShowDeprecatedWarnings(s.show_deprecated_warnings ?? true);
       setHideCrossOverGuide(!!s.hide_crossover_guide);
       setStreamMode(!!s.stream_mode);
     });
@@ -1744,6 +1746,7 @@ function App() {
     setWriteDebugLogsToGame(newSettings.write_debug_logs_to_game);
     setDefaultModViewMode(newSettings.default_mod_view_mode);
     setViewMode(newSettings.default_mod_view_mode);
+    setShowDeprecatedWarnings(newSettings.show_deprecated_warnings);
     setStreamMode(newSettings.stream_mode);
 
     const currentSettings = await window.ipcRenderer.getSettings();
@@ -1755,6 +1758,7 @@ function App() {
       confirm_before_apply_to_game: newSettings.confirm_before_apply_to_game,
       write_debug_logs_to_game: newSettings.write_debug_logs_to_game,
       default_mod_view_mode: newSettings.default_mod_view_mode,
+      show_deprecated_warnings: newSettings.show_deprecated_warnings,
       stream_mode: newSettings.stream_mode,
     });
   };
@@ -2067,6 +2071,7 @@ function App() {
         communityImage={currentCommunity ? communityImages[currentCommunity.identifier] : undefined}
         packageIndex={profilePackageIndex}
         legacyInstallMode={legacyInstallMode}
+        showDeprecatedWarnings={showDeprecatedWarnings}
         installInParallel={installInParallel}
         onSelectProfile={handleSelectProfile}
         onToggleMod={(profileId, modUuid) => toggleMod(profileId, modUuid, legacyInstallMode)}
@@ -2400,6 +2405,7 @@ function App() {
           confirm_before_apply_to_game: confirmBeforeApplyToGame,
           write_debug_logs_to_game: writeDebugLogsToGame,
           default_mod_view_mode: defaultModViewMode,
+          show_deprecated_warnings: showDeprecatedWarnings,
           stream_mode: streamMode,
         }}
         onSavePreferences={handleSavePreferences}

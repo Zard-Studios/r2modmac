@@ -109,11 +109,50 @@ body {
   will-change: transform, opacity;
 }
 
+@keyframes profile-mod-view-enter-forward {
+  from {
+    opacity: 0;
+    transform: translate3d(10px, 0, 0) scale(0.995);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes profile-mod-view-enter-backward {
+  from {
+    opacity: 0;
+    transform: translate3d(-10px, 0, 0) scale(0.995);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+.profile-mod-view-enter-forward {
+  animation: profile-mod-view-enter-forward 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.profile-mod-view-enter-backward {
+  animation: profile-mod-view-enter-backward 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .download-glyph-sweep {
     animation: none;
     transform: translate3d(0, 24px, 0);
     opacity: 0.85;
+  }
+
+  .profile-mod-view-enter-forward,
+  .profile-mod-view-enter-backward {
+    animation: none;
+  }
+
+  .profile-mod-segment-indicator {
+    transition: none;
   }
 }
 

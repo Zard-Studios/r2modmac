@@ -15,6 +15,7 @@ export interface AppSettings {
     confirm_before_apply_to_game?: boolean;
     write_debug_logs_to_game?: boolean;
     default_mod_view_mode?: 'grid' | 'list';
+    show_deprecated_warnings?: boolean;
     hide_crossover_guide?: boolean;
     hide_macos_guide?: boolean;
     stream_mode?: boolean;

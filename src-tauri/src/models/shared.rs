@@ -152,6 +152,8 @@ pub struct Settings {
     pub write_debug_logs_to_game: bool,
     #[serde(default = "default_mod_view_mode")]
     pub default_mod_view_mode: String,
+    #[serde(default = "default_true")]
+    pub show_deprecated_warnings: bool,
     #[serde(default)]
     pub hide_crossover_guide: bool,
     #[serde(default)]
@@ -177,6 +179,7 @@ impl Settings {
             confirm_before_apply_to_game: false,
             write_debug_logs_to_game: false,
             default_mod_view_mode: default_mod_view_mode(),
+            show_deprecated_warnings: true,
             hide_crossover_guide: false,
             hide_macos_guide: false,
             thunderstore_chunk_cache_migrated: false,

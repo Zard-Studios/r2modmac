@@ -8,6 +8,7 @@ export interface PreferencesSettings {
     confirm_before_apply_to_game: boolean;
     write_debug_logs_to_game: boolean;
     default_mod_view_mode: 'grid' | 'list';
+    show_deprecated_warnings: boolean;
     stream_mode: boolean;
 }
 
@@ -21,13 +22,15 @@ interface PreferencesModalProps {
     onCheckForUpdates: () => Promise<void>;
 }
 
-function Toggle({ value, onChange }: { value: boolean; onChange: (next: boolean) => void }) {
+function Toggle({ value, onChange, label }: { value: boolean; onChange: (next: boolean) => void; label?: string }) {
     return (
         <button
+            type="button"
             onClick={() => onChange(!value)}
             className={`relative w-11 h-6 rounded-full transition-colors duration-200 ease-in-out flex-shrink-0 focus:outline-none focus:ring-2 focus:ring-blue-500/50 ${value ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'
                 }`}
             aria-pressed={value}
+            aria-label={label}
         >
             <span
                 className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow-[0_2px_5px_rgba(0,0,0,0.2)] transition-transform duration-200 ease-[cubic-bezier(0.4,0,0.2,1)] ${value ? 'translate-x-5' : 'translate-x-0'
@@ -133,6 +136,7 @@ export default function PreferencesModal({
     const [confirmBeforeApply, setConfirmBeforeApply] = useState(settings.confirm_before_apply_to_game);
     const [writeDebugLogsToGame, setWriteDebugLogsToGame] = useState(settings.write_debug_logs_to_game);
     const [defaultModViewMode, setDefaultModViewMode] = useState<'grid' | 'list'>(settings.default_mod_view_mode);
+    const [showDeprecatedWarnings, setShowDeprecatedWarnings] = useState(settings.show_deprecated_warnings);
     const [streamMode, setStreamMode] = useState(settings.stream_mode);
     const [restoringWarnings, setRestoringWarnings] = useState(false);
     const [checkingUpdates, setCheckingUpdates] = useState(false);
@@ -154,6 +158,7 @@ export default function PreferencesModal({
             setConfirmBeforeApply(settings.confirm_before_apply_to_game);
             setWriteDebugLogsToGame(settings.write_debug_logs_to_game);
             setDefaultModViewMode(settings.default_mod_view_mode);
+            setShowDeprecatedWarnings(settings.show_deprecated_warnings);
             setStreamMode(settings.stream_mode);
         } else {
             setIsVisible(false);
@@ -179,6 +184,7 @@ export default function PreferencesModal({
             confirm_before_apply_to_game: confirmBeforeApply,
             write_debug_logs_to_game: writeDebugLogsToGame,
             default_mod_view_mode: defaultModViewMode,
+            show_deprecated_warnings: showDeprecatedWarnings,
             stream_mode: streamMode,
         });
         onClose();
@@ -356,7 +362,17 @@ export default function PreferencesModal({
                     <div className="space-y-3">
                         <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-widest px-1">Guides & Alerts</h3>
 
-                        <div className="bg-gray-800 border border-gray-700 rounded-2xl overflow-hidden">
+                        <div className="divide-y divide-gray-700/50 overflow-hidden rounded-2xl border border-gray-700 bg-gray-800">
+                            <div className="flex items-center justify-between gap-4 p-4 transition-colors hover:bg-gray-750">
+                                <div className="flex items-center gap-4">
+                                    <RowIcon kind="warning" />
+                                    <div>
+                                        <p className="text-[15px] font-medium text-white">Deprecated mod warnings</p>
+                                        <p className="mt-0.5 text-[13px] leading-snug text-gray-400">Show a red warning on deprecated mod icons.</p>
+                                    </div>
+                                </div>
+                                <Toggle value={showDeprecatedWarnings} onChange={setShowDeprecatedWarnings} label="Show deprecated mod warnings" />
+                            </div>
                             <div className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-colors hover:bg-gray-750">
                                 <div className="flex items-center gap-4">
                                     <RowIcon kind="warning" />
