@@ -120,6 +120,7 @@ export function AppModals({
                     }
                     isBrowsing={isBrowsingMode || selectedIsLocal}
                     legacyInstallMode={legacyInstallMode}
+                    showDeprecatedWarning={preferences.show_deprecated_warnings}
                 />
             )}
 

@@ -31,6 +31,7 @@ interface ModDetailModalProps {
     installedMods?: InstalledMod[];
     isBrowsing?: boolean;
     legacyInstallMode?: boolean;
+    showDeprecatedWarning?: boolean;
 }
 
 type Tab = 'description' | 'changelog' | 'dependencies';
@@ -47,7 +48,8 @@ export function ModDetailModal({
     gameId,
     installedMods = [],
     isBrowsing,
-    legacyInstallMode = false
+    legacyInstallMode = false,
+    showDeprecatedWarning = true,
 }: ModDetailModalProps) {
     const installedLabel = legacyInstallMode ? 'Installed' : 'Added';
     const installActionLabel = legacyInstallMode ? 'Install' : 'Add';
@@ -348,8 +350,18 @@ export function ModDetailModal({
                         {/* Title & Info */}
                         <div className="flex-1 min-w-0 flex flex-col justify-between h-24">
                             <div className="flex justify-between items-start">
-                                <div>
-                                    <h2 className="text-2xl font-bold text-white leading-tight">{mod.name}</h2>
+                                <div className="min-w-0">
+                                    <div className="flex min-w-0 items-center gap-2.5">
+                                        <h2 className="truncate text-2xl font-bold leading-tight text-white">{mod.name}</h2>
+                                        {showDeprecatedWarning && pkg.is_deprecated ? (
+                                            <span className="inline-flex flex-shrink-0 items-center gap-1 rounded-full border border-red-500/35 bg-red-950/55 px-2 py-0.5 text-[11px] font-semibold text-red-300">
+                                                <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                                                    <path fillRule="evenodd" d="M8.26 3.1c.76-1.36 2.72-1.36 3.48 0l6.52 11.6c.75 1.33-.21 2.98-1.74 2.98H3.48c-1.53 0-2.49-1.65-1.74-2.98L8.26 3.1ZM10 7.75a.75.75 0 0 1 .75.75v3a.75.75 0 0 1-1.5 0v-3a.75.75 0 0 1 .75-.75Zm0 7.25a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z" clipRule="evenodd" />
+                                                </svg>
+                                                Deprecated
+                                            </span>
+                                        ) : null}
+                                    </div>
                                     <p className="text-sm text-gray-400 mt-0.5">
                                         {isLocalMod ? 'Custom local mod' : `by ${mod.full_name.split('-')[0]}`}
                                     </p>
