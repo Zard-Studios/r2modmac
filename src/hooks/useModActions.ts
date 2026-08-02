@@ -58,6 +58,12 @@ interface UseModActionsProps {
     setUninstallModalState: UninstallModalSetter;
 }
 
+export interface ProfileModUpdate {
+    mod: InstalledMod;
+    pkg: Package;
+    version: PackageVersion;
+}
+
 export function useModActions({
     activeProfileId,
     selectedCommunity,
@@ -453,6 +459,88 @@ export function useModActions({
         }
     };
 
+    const stageProfileUpdates = async (
+        updates: ProfileModUpdate[],
+        targetProfileId?: string,
+    ): Promise<number> => {
+        const profileIdToUse = targetProfileId || activeProfileId;
+        if (!profileIdToUse) { alert('Please select a profile first'); return 0; }
+        if (updates.length === 0) return 0;
+
+        const profile = useProfileStore.getState().profiles.find(candidate => candidate.id === profileIdToUse);
+        if (!profile) throw new Error('Profile not found');
+        const community = profile.gameIdentifier || selectedCommunity;
+        if (!community) throw new Error('Cannot resolve updates without a Thunderstore community');
+        const currentByKey = new Map(profile.mods.map(mod => [getPackageKey(mod.fullName).toLowerCase(), mod]));
+        const planned = new Map<string, InstalledMod>();
+        const processedVersions = new Map<string, string>();
+
+        const collect = async (version: PackageVersion, isRoot: boolean) => {
+            const key = getPackageKey(version.full_name).toLowerCase();
+            const current = currentByKey.get(key);
+            if (!isRoot && current && compareVersions(current.versionNumber, version.version_number) >= 0) return;
+            const processed = processedVersions.get(key);
+            if (processed && compareVersions(processed, version.version_number) >= 0) return;
+            processedVersions.set(key, version.version_number);
+            planned.set(key, {
+                ...current,
+                uuid4: version.uuid4,
+                fullName: version.full_name,
+                versionNumber: version.version_number,
+                iconUrl: version.icon,
+                enabled: current?.enabled ?? true,
+                pending_sync: true,
+                synced_enabled: current?.synced_enabled ?? current?.enabled,
+            });
+
+            const parsedRequirements = version.dependencies.map(parsePackageReference);
+            const invalidRequirement = parsedRequirements.find(requirement => !requirement.version);
+            if (invalidRequirement) {
+                throw new Error(`Dependency ${invalidRequirement.fullName} has no pinned version`);
+            }
+            const requirements = parsedRequirements
+                .filter(requirement => {
+                    const installed = currentByKey.get(requirement.packageName.toLowerCase());
+                    if (installed && compareVersions(installed.versionNumber, requirement.version!) >= 0) return false;
+                    const queued = processedVersions.get(requirement.packageName.toLowerCase());
+                    return !queued || compareVersions(queued, requirement.version!) < 0;
+                });
+            if (requirements.length === 0) return;
+
+            const lookup = await window.ipcRenderer.lookupPackagesByNames(
+                community,
+                requirements.map(requirement => requirement.fullName)
+            );
+            const tasks = requirements.map(requirement => async () => {
+                let dependencyPackage = lookup.found.find((candidate: Package) =>
+                    candidate.full_name.toLowerCase() === requirement.packageName.toLowerCase()
+                );
+                let dependencyVersion = dependencyPackage?.versions.find((candidate: PackageVersion) =>
+                    candidate.version_number === requirement.version
+                );
+                if (!dependencyPackage || !dependencyVersion) {
+                    dependencyPackage = await window.ipcRenderer.fetchPackageByName(requirement.fullName, community) || undefined;
+                    if (!dependencyPackage) throw new Error(`Pinned dependency unavailable: ${requirement.fullName}`);
+                    dependencyVersion = findPinnedVersion(dependencyPackage, requirement.version!, requirement.packageName);
+                }
+                await collect(dependencyVersion, false);
+            });
+            await runWithConcurrency(tasks, installInParallel ? MAX_PARALLEL_OPS : 1);
+        };
+
+        await runWithConcurrency(
+            updates.map(update => () => collect(update.version, true)),
+            installInParallel ? MAX_PARALLEL_OPS : 1
+        );
+
+        const plannedKeys = new Set(planned.keys());
+        const nextMods = profile.mods
+            .filter(mod => !plannedKeys.has(getPackageKey(mod.fullName).toLowerCase()))
+            .concat(Array.from(planned.values()));
+        updateProfile(profileIdToUse, { mods: nextMods, needs_sync: true });
+        return updates.length;
+    };
+
     // ── Update mod ───────────────────────────────────────────────────────────────
     const handleUpdateMod = async (
         pkg: Package,
@@ -461,75 +549,13 @@ export function useModActions({
     ): Promise<void> => {
         const profileIdToUse = targetProfileId || activeProfileId;
         if (!profileIdToUse) { alert('Please select a profile first'); return; }
-        const targetVersion = selectedVersion || pkg.versions[0];
-        const targetProfile = profiles.find(p => p.id === profileIdToUse);
-
-        if (legacyInstallMode) {
-            setProgressState({
-                isOpen: true,
-                title: `Updating ${pkg.name}`,
-                progress: 0,
-                currentTask: 'Removing old version...',
-            });
-            try {
-                const profile = profiles.find(p => p.id === profileIdToUse);
-                const oldMods = profile?.mods.filter(m => m.fullName.startsWith(pkg.full_name)) || [];
-                if (oldMods.length > 0) {
-                    setProgressState(prev => ({
-                        ...prev,
-                        progress: 20,
-                        currentTask: 'Uninstalling old version...',
-                    }));
-                    for (const oldMod of oldMods) {
-                        await removeMod(profileIdToUse, oldMod.uuid4);
-                    }
-                }
-                setProgressState(prev => ({
-                    ...prev,
-                    progress: 40,
-                    currentTask: `Installing v${targetVersion.version_number}...`,
-                }));
-
-                const gamePath = await window.ipcRenderer.getGamePath(selectedCommunity || '', targetProfile?.platform);
-                if (!gamePath) {
-                    throw new Error('Game directory not configured. Open Settings → Game Directory to set the path before updating mods in Legacy mode.');
-                }
-                await installModWithDependencies(pkg, targetVersion, new Set(), profileIdToUse, undefined, gamePath);
-
-                setProgressState(prev => ({
-                    ...prev,
-                    progress: 100,
-                    currentTask: 'Update complete!',
-                }));
-                setTimeout(() => setProgressState(prev => ({ ...prev, isOpen: false })), 500);
-            } catch (err: any) {
-                setProgressState(prev => ({ ...prev, isOpen: false }));
-                alert(`Failed to update mod: ${err.message}`);
-            }
-            return;
-        }
-
-        // New mode update: metadata-only change, no progress modal
-        try {
-            const profile = profiles.find(p => p.id === profileIdToUse);
-            const oldMods = profile?.mods.filter(m => m.fullName.startsWith(pkg.full_name)) || [];
-            const wasEnabled = oldMods.some(m => m.enabled) || oldMods.length === 0;
-            for (const oldMod of oldMods) {
-                await removeMod(profileIdToUse, oldMod.uuid4);
-            }
-
-            addMod(profileIdToUse, {
-                uuid4: targetVersion.uuid4,
-                fullName: targetVersion.full_name,
-                versionNumber: targetVersion.version_number,
-                iconUrl: targetVersion.icon,
-                enabled: wasEnabled,
-                pending_sync: true,
-            });
-            updateProfile(profileIdToUse, { needs_sync: true });
-        } catch (err: any) {
-            alert(`Failed to update mod: ${err.message}`);
-        }
+        const profile = useProfileStore.getState().profiles.find(candidate => candidate.id === profileIdToUse);
+        const mod = profile?.mods.find(candidate => getPackageKey(candidate.fullName).toLowerCase() === pkg.full_name.toLowerCase());
+        if (!mod) throw new Error(`${pkg.name} is not installed in this profile`);
+        const targetVersion = selectedVersion || pkg.versions.reduce((latest, candidate) =>
+            compareVersions(candidate.version_number, latest.version_number) > 0 ? candidate : latest
+        );
+        await stageProfileUpdates([{ mod, pkg, version: targetVersion }], profileIdToUse);
     };
 
     return {
@@ -538,5 +564,6 @@ export function useModActions({
         handleUninstallWithDependencies,
         executeUninstall,
         handleUpdateMod,
+        stageProfileUpdates,
     };
 }

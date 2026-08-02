@@ -106,6 +106,7 @@ export function useGameSync({
                 throw new Error('MOD_OPERATION_CANCELLED');
             }
         };
+        let applyTransactionStarted = false;
 
         try {
             await window.ipcRenderer.beginModOperations();
@@ -168,7 +169,7 @@ export function useGameSync({
             await ensureNotStopped();
 
             // ── Profile sync ──────────────────────────────────────────────────────
-            const syncResult = await window.ipcRenderer.syncProfileToGame(refreshedProfile.id, community, legacyInstallMode);
+            const syncResult = await window.ipcRenderer.syncProfileToGame(refreshedProfile.id, community, legacyInstallMode, false);
             const missingKeys = new Set(syncResult.to_install.map((key: string) => key.toLowerCase()));
             const reconciledProfile = useProfileStore.getState().profiles.find(profile => profile.id === activeProfile.id) || refreshedProfile;
             updateProfile(activeProfile.id, {
@@ -190,7 +191,11 @@ export function useGameSync({
             const skippedVersionMismatch: string[] = [];
             const failedInstalls: string[] = [];
             let actuallyInstalled = 0;
-            const hasSyncWork = syncResult.removed > 0 || syncResult.to_install.length > 0 || (syncResult.cached ?? 0) > 0;
+            const hasSyncWork = (syncResult.pending_removals ?? 0) > 0 || syncResult.to_install.length > 0;
+            if (hasSyncWork) {
+                await window.ipcRenderer.beginProfileApplyTransaction(activeProfile.id, community);
+                applyTransactionStarted = true;
+            }
 
             if (syncResult.to_install.length > 0) {
                 const concurrency = installInParallel ? MAX_PARALLEL_OPS : 1;
@@ -473,6 +478,16 @@ export function useGameSync({
             }
             await ensureNotStopped();
 
+            // Cleanup is deliberately deferred until every requested payload is
+            // present. A failed download therefore leaves the previous working
+            // version untouched and the profile resumable.
+            const finalizeResult = await window.ipcRenderer.syncProfileToGame(
+                refreshedProfile.id,
+                community,
+                legacyInstallMode,
+                true
+            );
+
             const latestProfile = useProfileStore.getState().profiles.find((p) => p.id === activeProfile.id) || activeProfile;
             const disabledMods = latestProfile.mods.filter((m) => !m.enabled).map((m) => m.fullName);
 
@@ -493,6 +508,15 @@ export function useGameSync({
 
             await window.ipcRenderer.installToGame(community, latestProfile.id, disabledMods);
 
+            if (applyTransactionStarted) {
+                try {
+                    await window.ipcRenderer.commitProfileApplyTransaction(activeProfile.id);
+                } catch (cleanupError) {
+                    console.warn('Failed to remove completed Apply snapshot', cleanupError);
+                }
+                applyTransactionStarted = false;
+            }
+
             if (hasSyncWork) {
                 setProgressState(prev => ({ ...prev, isOpen: false }));
             }
@@ -508,7 +532,9 @@ export function useGameSync({
             });
 
             // ── Success message ────────────────────────────────────────────────────
-            const { removed, to_install: toInstall, cached = 0 } = syncResult;
+            const removed = finalizeResult.removed ?? 0;
+            const toInstall = syncResult.to_install;
+            const cached = finalizeResult.cached ?? 0;
             let message: string;
             if (removed === 0 && toInstall.length === 0 && cached === 0) {
                 message = 'Profile already synced! No changes needed.';
@@ -549,6 +575,13 @@ export function useGameSync({
             } catch (e: any) {
             console.error('Sync to game failed:', e);
             setProgressState(prev => ({ ...prev, isOpen: false }));
+            if (applyTransactionStarted) {
+                try {
+                    await window.ipcRenderer.rollbackProfileApplyTransaction(activeProfile.id, community);
+                } catch (rollbackError) {
+                    console.error('Failed to roll back interrupted Apply', rollbackError);
+                }
+            }
             if (String(e?.message || e).includes('MOD_OPERATION_CANCELLED')) {
                 await window.ipcRenderer.beginModOperations();
                 return;

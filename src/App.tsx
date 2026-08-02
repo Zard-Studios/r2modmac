@@ -17,16 +17,18 @@ import { listen } from '@tauri-apps/api/event';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { flushSync } from 'react-dom';
 import { AppModals } from './components/screens/AppModals';
-import type { AppSettings, UpdateInfo } from './types/electron';
+import { UpdateAllModal } from './components/modals/UpdateAllModal';
+import type { AppSettings, RuntimeHealth, UpdateInfo } from './types/electron';
 import type { InstalledMod } from './types/profile';
 import { MAC_IMAGE_CACHE_KEY, MAC_PLATFORM_CACHE_KEY } from './constants/cacheKeys';
 import type { PreferencesSettings } from './components/modals/PreferencesModal';
 import type { ProgressState } from './types/progress';
 
 import { useModActions } from './hooks/useModActions';
+import type { ProfileModUpdate } from './hooks/useModActions';
 import { useProfileActions } from './hooks/useProfileActions';
 import { useGameSync } from './hooks/useGameSync';
-import { findPinnedVersion, parsePackageReference } from './utils/modVersioning';
+import { compareVersions, findPinnedVersion, parsePackageReference } from './utils/modVersioning';
 
 const QUICK_MAC_HINTS = new Set([
   'btd6',
@@ -332,6 +334,10 @@ function App() {
     .join('|') ?? '', [activeProfile?.mods])
   const [activeProfileGamePath, setActiveProfileGamePath] = useState<string | null>(null)
   const [isCheckingActiveProfileGamePath, setIsCheckingActiveProfileGamePath] = useState(false)
+  const [runtimeHealth, setRuntimeHealth] = useState<RuntimeHealth | null>(null)
+  const [isRepairingRuntime, setIsRepairingRuntime] = useState(false)
+  const [pendingProfileUpdates, setPendingProfileUpdates] = useState<ProfileModUpdate[]>([])
+  const [isUpdatingProfile, setIsUpdatingProfile] = useState(false)
   const [storageVolumeEventCount, setStorageVolumeEventCount] = useState(0)
 
   async function checkForUpdates() {
@@ -963,6 +969,7 @@ function App() {
     handleUninstallWithDependencies,
     executeUninstall,
     handleUpdateMod,
+    stageProfileUpdates,
   } = useModActions({
     activeProfileId,
     selectedCommunity,
@@ -996,6 +1003,183 @@ function App() {
     setShowCrossOverGuide,
     installModWithDependencies,
   });
+
+  const refreshRuntimeHealth = useCallback(async (): Promise<RuntimeHealth | null> => {
+    const profile = useProfileStore.getState().profiles.find(candidate => candidate.id === activeProfileId);
+    if (!profile) {
+      setRuntimeHealth(null);
+      return null;
+    }
+    try {
+      const result = await window.ipcRenderer.checkProfileRuntimeHealth(
+        profile.id,
+        profile.gameIdentifier,
+        profile.platform
+      );
+      setRuntimeHealth(result);
+      return result;
+    } catch (error) {
+      console.error('Failed to check profile runtime health', error);
+      setRuntimeHealth(null);
+      return null;
+    }
+  }, [activeProfileId]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => { void refreshRuntimeHealth(); }, 0);
+    return () => window.clearTimeout(timer);
+  }, [activeProfileGamePath, refreshRuntimeHealth]);
+
+  const repairProfileRuntime = useCallback(async (): Promise<boolean> => {
+    const profile = useProfileStore.getState().profiles.find(candidate => candidate.id === activeProfileId);
+    if (!profile || isRepairingRuntime) return false;
+    const community = profile.gameIdentifier || selectedCommunity;
+    if (!community) return false;
+
+    const health = runtimeHealth || await refreshRuntimeHealth();
+    if (health?.status === 'healthy') return true;
+    if (!health || !health.repairable) {
+      if (health?.status === 'unconfigured') setShowSettings(true);
+      return false;
+    }
+
+    setIsRepairingRuntime(true);
+    setProgressState({
+      isOpen: true,
+      title: 'Repairing Runtime',
+      progress: 5,
+      currentTask: 'Resolving the required loader...',
+    });
+    let repairTransactionStarted = false;
+
+    try {
+      const gamePath = await window.ipcRenderer.getGamePath(community, profile.platform);
+      if (!gamePath) throw new Error('The game directory is not configured.');
+      await window.ipcRenderer.beginProfileApplyTransaction(profile.id, community);
+      repairTransactionStarted = true;
+
+      const matchesRuntime = (pkg: Package) => {
+        const name = `${pkg.full_name} ${pkg.name}`.toLowerCase();
+        if (health.runtime === 'owml') return pkg.name.toLowerCase() === 'owml' || name.includes('-owml');
+        if (health.runtime === 'lovely') return name.includes('thunderstore-lovely') || pkg.name.toLowerCase() === 'lovely';
+        return name.includes('bepinexpack');
+      };
+      const registeredLoader = profile.mods.find(mod => {
+        const name = mod.fullName.toLowerCase();
+        if (health.runtime === 'owml') return name.includes('owml');
+        if (health.runtime === 'lovely') return name.includes('-lovely-');
+        return name.includes('bepinexpack');
+      });
+
+      let loaderPackage = registeredLoader
+        ? await window.ipcRenderer.fetchPackageByName(
+            parsePackageReference(registeredLoader.fullName).packageName,
+            community
+          )
+        : null;
+      if (!loaderPackage || !matchesRuntime(loaderPackage)) {
+        const query = health.runtime === 'owml' ? 'OWML' : health.runtime === 'lovely' ? 'lovely' : 'BepInExPack';
+        const result = await window.ipcRenderer.getPackages(community, 0, 30, query, 'downloads');
+        loaderPackage = result.items.find(matchesRuntime) || null;
+      }
+      if (!loaderPackage || loaderPackage.versions.length === 0) {
+        throw new Error(`No compatible ${health.runtime} loader was found for this community.`);
+      }
+
+      const newestVersion = loaderPackage.versions.reduce((newest, candidate) =>
+        compareVersions(candidate.version_number, newest.version_number) > 0 ? candidate : newest
+      );
+      const enabledByPackage = new Map(profile.mods.map(mod => [
+        parsePackageReference(mod.fullName).packageName.toLowerCase(),
+        mod.enabled,
+      ]));
+
+      setProgressState(previous => ({
+        ...previous,
+        progress: 25,
+        currentTask: `Reinstalling ${loaderPackage.name} v${newestVersion.version_number}...`,
+      }));
+      await installModWithDependencies(loaderPackage, newestVersion, new Set(), profile.id, undefined, gamePath);
+
+      const repairedProfile = useProfileStore.getState().profiles.find(candidate => candidate.id === profile.id);
+      if (repairedProfile) {
+        updateProfile(profile.id, {
+          mods: repairedProfile.mods.map(mod => {
+            const priorEnabled = enabledByPackage.get(parsePackageReference(mod.fullName).packageName.toLowerCase());
+            return priorEnabled === undefined ? mod : { ...mod, enabled: priorEnabled };
+          }),
+        });
+      }
+
+      const checked = await refreshRuntimeHealth();
+      if (checked?.status !== 'healthy') {
+        throw new Error(
+          `The loader was reinstalled, but the runtime is still ${checked?.status || 'unavailable'}` +
+          (checked?.missingComponents.length ? ` (${checked.missingComponents.join(', ')}).` : '.')
+        );
+      }
+      await window.ipcRenderer.commitProfileApplyTransaction(profile.id);
+      repairTransactionStarted = false;
+      setProgressState(previous => ({ ...previous, progress: 100, currentTask: 'Runtime repaired.' }));
+      window.setTimeout(() => setProgressState(previous => ({ ...previous, isOpen: false })), 500);
+      return true;
+    } catch (error: any) {
+      setProgressState(previous => ({ ...previous, isOpen: false }));
+      if (repairTransactionStarted) {
+        try {
+          await window.ipcRenderer.rollbackProfileApplyTransaction(profile.id, community);
+        } catch (rollbackError) {
+          console.error('Failed to roll back runtime repair', rollbackError);
+        }
+      }
+      updateProfile(profile.id, {
+        mods: profile.mods,
+        needs_sync: profile.needs_sync,
+        apply_interrupted: profile.apply_interrupted,
+      });
+      await refreshRuntimeHealth();
+      await window.ipcRenderer.alert(
+        'Runtime Repair Failed',
+        String(error?.message || error || 'The runtime could not be repaired.')
+      );
+      return false;
+    } finally {
+      setIsRepairingRuntime(false);
+    }
+  }, [activeProfileId, installModWithDependencies, isRepairingRuntime, refreshRuntimeHealth, runtimeHealth, selectedCommunity, setProgressState, updateProfile]);
+
+  const handleProfileModUpdate = useCallback(async (
+    pkg: Package,
+    targetProfileId?: string,
+    version?: PackageVersion,
+  ) => {
+    try {
+      await handleUpdateMod(pkg, targetProfileId, version);
+      if (legacyInstallMode) {
+        await handleSyncToGame(undefined, { silentSuccess: true });
+        await refreshRuntimeHealth();
+      }
+    } catch (error: any) {
+      await window.ipcRenderer.alert('Update Failed', String(error?.message || error || 'The update could not be prepared.'));
+    }
+  }, [handleSyncToGame, handleUpdateMod, legacyInstallMode, refreshRuntimeHealth]);
+
+  const confirmProfileUpdates = useCallback(async () => {
+    if (!activeProfileId || pendingProfileUpdates.length === 0 || isUpdatingProfile) return;
+    setIsUpdatingProfile(true);
+    try {
+      await stageProfileUpdates(pendingProfileUpdates, activeProfileId);
+      setPendingProfileUpdates([]);
+      if (legacyInstallMode) {
+        await handleSyncToGame(undefined, { silentSuccess: true });
+        await refreshRuntimeHealth();
+      }
+    } catch (error: any) {
+      await window.ipcRenderer.alert('Update Failed', String(error?.message || error || 'The update plan could not be prepared.'));
+    } finally {
+      setIsUpdatingProfile(false);
+    }
+  }, [activeProfileId, handleSyncToGame, isUpdatingProfile, legacyInstallMode, pendingProfileUpdates, refreshRuntimeHealth, stageProfileUpdates]);
 
   const handleInstallRequest = async (
     pkg: Package,
@@ -1469,6 +1653,17 @@ function App() {
     setIsApplyingToGame(true);
 
     try {
+      if (isVanillaOverride === undefined) {
+        const health = await refreshRuntimeHealth();
+        if (health && (health.status === 'missing' || health.status === 'incomplete')) {
+          const confirmedRepair = await window.ipcRenderer.confirm(
+            'Repair Runtime Before Apply?',
+            `${health.runtime === 'bepinex' ? 'BepInEx' : health.runtime === 'owml' ? 'OWML' : 'Lovely'} is ${health.status}. ` +
+            'The working files will be repaired before the profile is synchronized.'
+          );
+          if (!confirmedRepair || !await repairProfileRuntime()) return;
+        }
+      }
       const runSync = async () => {
         await handleSyncToGame(isVanillaOverride, { silentSuccess: options?.silentSuccess });
       };
@@ -1485,6 +1680,7 @@ function App() {
 
       await runSync();
     } finally {
+      await refreshRuntimeHealth();
       clearSteamRestartingState();
       applyInFlightRef.current = false;
       setIsApplyingToGame(false);
@@ -1949,6 +2145,11 @@ function App() {
         onOpenSettings={() => setShowSettings(true)}
         onUpdateProfile={updateProfile}
         onToggleVanilla={handleToggleProfileVanilla}
+        onUpdateMod={handleProfileModUpdate}
+        onUpdateAll={setPendingProfileUpdates}
+        runtimeHealth={runtimeHealth}
+        isRepairingRuntime={isRepairingRuntime}
+        onRepairRuntime={async () => { await repairProfileRuntime(); }}
       />
     );
 
@@ -2151,6 +2352,13 @@ function App() {
 
 
       {/* Modals */}
+      <UpdateAllModal
+        isOpen={pendingProfileUpdates.length > 0}
+        updates={pendingProfileUpdates}
+        isUpdating={isUpdatingProfile}
+        onClose={() => setPendingProfileUpdates([])}
+        onConfirm={() => { void confirmProfileUpdates(); }}
+      />
       <AppModals
         selectedMod={selectedMod}
         setSelectedMod={setSelectedMod}
@@ -2158,7 +2366,7 @@ function App() {
         profiles={profiles}
         selectedCommunity={selectedCommunity}
         handleInstallMod={handleInstallRequest}
-        handleUpdateMod={handleUpdateMod}
+        handleUpdateMod={handleProfileModUpdate}
         handleUninstallWithDependencies={handleUninstallWithDependencies}
         isBrowsingMode={isBrowsingMode}
         progressState={progressState}

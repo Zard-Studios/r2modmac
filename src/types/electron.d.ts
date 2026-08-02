@@ -20,6 +20,21 @@ export interface AppSettings {
     stream_mode?: boolean;
 }
 
+export interface RuntimeHealth {
+    runtime: 'bepinex' | 'owml' | 'lovely';
+    status: 'healthy' | 'missing' | 'incomplete' | 'unconfigured' | 'unsupported';
+    missingComponents: string[];
+    repairable: boolean;
+}
+
+export interface ProfileSyncResult {
+    removed: number;
+    to_install: string[];
+    already_installed: number;
+    cached: number;
+    pending_removals: number;
+}
+
 export interface IElectronAPI {
     getProfiles: () => Promise<Profile[]>;
     saveProfiles: (profiles: Profile[]) => Promise<boolean>;
@@ -95,7 +110,11 @@ export interface IElectronAPI {
     checkUpdate: (currentVersion: string) => Promise<UpdateInfo>;
     installUpdate: (downloadUrl: string) => Promise<void>;
     lookupPackagesByNames: (gameId: string, names: string[]) => Promise<any>;
-    syncProfileToGame: (profileId: string, gameIdentifier: string, useLegacyCache?: boolean) => Promise<{ removed: number; to_install: string[]; already_installed: number; cached: number }>;
+    syncProfileToGame: (profileId: string, gameIdentifier: string, useLegacyCache?: boolean, finalize?: boolean) => Promise<ProfileSyncResult>;
+    checkProfileRuntimeHealth: (profileId: string, gameIdentifier: string, platform?: 'windows' | 'mac') => Promise<RuntimeHealth>;
+    beginProfileApplyTransaction: (profileId: string, gameIdentifier: string) => Promise<boolean>;
+    rollbackProfileApplyTransaction: (profileId: string, gameIdentifier: string) => Promise<boolean>;
+    commitProfileApplyTransaction: (profileId: string) => Promise<boolean>;
     copyModFromCache: (profileId: string, modName: string, gamePath: string) => Promise<{ success: boolean; copied: boolean }>;
     clearProfileCache: () => Promise<{ cleared: number; chunks_cleared?: number; bytes_freed: number }>;
     openProfileFolder: (profileId: string) => Promise<void>;

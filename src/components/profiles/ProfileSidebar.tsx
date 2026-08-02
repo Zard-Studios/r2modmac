@@ -1,8 +1,10 @@
 import React, { useMemo, useState } from 'react';
 import type { Community, Package } from '../../types/thunderstore';
 import type { Profile, InstalledMod } from '../../types/profile';
+import type { RuntimeHealth } from '../../types/electron';
+import type { ProfileModUpdate } from '../../hooks/useModActions';
 import { Button, HoverMarquee } from '../ui';
-import { hasNewerVersion, latestVersionNumber, parsePackageReference } from '../../utils/modVersioning';
+import { compareVersions, hasNewerVersion, latestVersionNumber, parsePackageReference } from '../../utils/modVersioning';
 
 const MAX_PARALLEL_TOGGLES = 10;
 
@@ -87,6 +89,11 @@ interface ProfileSidebarProps {
     onOpenSettings: () => void;
     onUpdateProfile: (profileId: string, updates: Partial<Profile>) => void;
     onToggleVanilla: (profileId: string, newVanillaState: boolean) => Promise<void> | void;
+    onUpdateMod: (pkg: Package, profileId?: string, version?: Package['versions'][number]) => Promise<void> | void;
+    onUpdateAll: (updates: ProfileModUpdate[]) => void;
+    runtimeHealth?: RuntimeHealth | null;
+    isRepairingRuntime?: boolean;
+    onRepairRuntime: () => Promise<void> | void;
 }
 
 export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
@@ -117,12 +124,18 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
     onOpenSettings,
     onUpdateProfile,
     onToggleVanilla,
+    onUpdateMod,
+    onUpdateAll,
+    runtimeHealth,
+    isRepairingRuntime = false,
+    onRepairRuntime,
 }) => {
     const [searchQuery, setSearchQuery] = useState('');
     const [isEditing, setIsEditing] = useState(false);
     const [editName, setEditName] = useState('');
     const [selectedModIds, setSelectedModIds] = useState<string[]>([]);
     const [selectionAnchorId, setSelectionAnchorId] = useState<string | null>(null);
+    const [modView, setModView] = useState<'all' | 'updates'>('all');
 
     const handleEditClick = () => {
         if (activeProfile) {
@@ -163,9 +176,41 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
         }
     };
 
-    const displayedMods = activeProfile?.mods.filter(mod =>
+    const latestVersionByPackage = useMemo(() => {
+        const map = new Map<string, string>();
+        for (const pkg of Object.values(packageIndex)) {
+            const latest = latestVersionNumber(pkg);
+            if (latest) map.set(pkg.full_name.toLowerCase(), latest);
+        }
+        return map;
+    }, [packageIndex]);
+
+    const profileUpdates = useMemo<ProfileModUpdate[]>(() => {
+        if (!activeProfile) return [];
+        return activeProfile.mods.flatMap(mod => {
+            if (mod.source === 'local') return [];
+            const packageName = parsePackageReference(mod.fullName).packageName.toLowerCase();
+            const pkg = packageIndex[packageName];
+            const latest = pkg ? latestVersionByPackage.get(packageName) : undefined;
+            if (!pkg || !hasNewerVersion(mod.versionNumber, latest)) return [];
+            const version = pkg.versions.find(candidate => candidate.version_number === latest)
+                || pkg.versions.reduce((newest, candidate) =>
+                    compareVersions(candidate.version_number, newest.version_number) > 0 ? candidate : newest
+                );
+            return [{ mod, pkg, version }];
+        });
+    }, [activeProfile, latestVersionByPackage, packageIndex]);
+    const updateIds = useMemo(() => new Set(profileUpdates.map(update => update.mod.uuid4)), [profileUpdates]);
+    const updatesById = useMemo(
+        () => new Map(profileUpdates.map(update => [update.mod.uuid4, update])),
+        [profileUpdates]
+    );
+    const searchedMods = activeProfile?.mods.filter(mod =>
         `${mod.fullName} ${mod.displayName || ''} ${mod.author || ''}`.toLowerCase().includes(searchQuery.toLowerCase())
     ) || [];
+    const displayedMods = modView === 'updates'
+        ? searchedMods.filter(mod => updateIds.has(mod.uuid4))
+        : searchedMods;
     const visibleModIds = useMemo(() => new Set(displayedMods.map((m) => m.uuid4)), [displayedMods]);
     const effectiveSelectedModIds = useMemo(
         () => selectedModIds.filter((id) => visibleModIds.has(id)),
@@ -228,26 +273,6 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
             )}
         </button>
     );
-
-    const latestVersionByPackage = useMemo(() => {
-        const map = new Map<string, string>();
-        for (const pkg of Object.values(packageIndex)) {
-            const latest = latestVersionNumber(pkg);
-            if (latest) {
-                map.set(pkg.full_name.toLowerCase(), latest);
-            }
-        }
-        return map;
-    }, [packageIndex]);
-
-    const updatesInView = useMemo(() => {
-        return displayedMods.reduce((count, mod) => {
-            if (mod.source === 'local') return count;
-            const packageName = parsePackageReference(mod.fullName).packageName.toLowerCase();
-            const latestVersion = latestVersionByPackage.get(packageName);
-            return hasNewerVersion(mod.versionNumber, latestVersion) ? count + 1 : count;
-        }, 0);
-    }, [displayedMods, latestVersionByPackage]);
 
     const pendingSyncCount = useMemo(() => {
         if (legacyInstallMode || !activeProfile) return 0;
@@ -501,11 +526,64 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                 </div>
             </div>
 
+            {runtimeHealth && ['missing', 'incomplete', 'unconfigured'].includes(runtimeHealth.status) && (
+                <div className="mx-4 mb-2 flex items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2.5">
+                    <svg className="h-4 w-4 flex-shrink-0 text-amber-400" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                        <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l6.518 11.597c.75 1.334-.213 2.98-1.742 2.98H3.48c-1.53 0-2.493-1.646-1.743-2.98L8.257 3.1zM11 14a1 1 0 10-2 0 1 1 0 002 0zm-1-6a1 1 0 00-1 1v3a1 1 0 102 0V9a1 1 0 00-1-1z" clipRule="evenodd" />
+                    </svg>
+                    <div className="min-w-0 flex-1">
+                        <div className="truncate text-xs font-medium text-amber-200">
+                            {runtimeHealth.status === 'unconfigured'
+                                ? 'Game path not configured'
+                                : `${runtimeHealth.runtime === 'bepinex' ? 'BepInEx' : runtimeHealth.runtime === 'owml' ? 'OWML' : 'Lovely'} runtime ${runtimeHealth.status}`}
+                        </div>
+                        {runtimeHealth.missingComponents.length > 0 ? (
+                            <div className="truncate text-[10px] text-amber-300/70">Missing: {runtimeHealth.missingComponents.join(', ')}</div>
+                        ) : null}
+                    </div>
+                    <button
+                        type="button"
+                        onClick={runtimeHealth.status === 'unconfigured' ? onOpenSettings : () => { void onRepairRuntime(); }}
+                        disabled={isRepairingRuntime || (runtimeHealth.status !== 'unconfigured' && !runtimeHealth.repairable)}
+                        className="flex-shrink-0 rounded-lg border border-amber-500/35 bg-amber-500/15 px-2.5 py-1.5 text-xs font-medium text-amber-200 disabled:opacity-50"
+                    >
+                        {runtimeHealth.status === 'unconfigured' ? 'Settings' : isRepairingRuntime ? 'Repairing…' : 'Repair'}
+                    </button>
+                </div>
+            )}
+
             {/* Mod List */}
             <div className={`flex-1 overflow-y-auto p-2 space-y-1 scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-transparent ${activeProfile?.is_vanilla ? 'grayscale opacity-75' : ''}`}>
-                <div className="px-2 py-2 text-xs font-bold text-gray-500 uppercase tracking-wider flex justify-between items-center">
-                    <div className="flex items-center gap-2">
-                        <span>Profile Mods</span>
+                <div className="flex items-center gap-1.5 px-2 py-2 text-xs font-bold">
+                    <div className="flex min-w-0 flex-1 rounded-lg border border-gray-700 bg-gray-800 p-0.5">
+                        <button
+                            type="button"
+                            onClick={() => setModView('all')}
+                            aria-pressed={modView === 'all'}
+                            className={`flex-1 rounded-md px-2 py-1.5 transition-colors ${modView === 'all' ? 'bg-gray-600 text-white' : 'text-gray-400 hover:text-gray-200'}`}
+                        >
+                            All {activeProfile?.mods.length ?? 0}
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setModView('updates')}
+                            aria-pressed={modView === 'updates'}
+                            className={`flex-1 rounded-md px-2 py-1.5 transition-colors ${modView === 'updates' ? 'bg-amber-500/20 text-amber-300' : 'text-gray-400 hover:text-amber-300'}`}
+                        >
+                            Updates {profileUpdates.length}
+                        </button>
+                    </div>
+                    {modView === 'updates' && profileUpdates.length > 0 ? (
+                        <button
+                            type="button"
+                            onClick={() => onUpdateAll(profileUpdates)}
+                            className="flex-shrink-0 rounded-lg border border-blue-500 bg-blue-600 px-2.5 py-2 text-[11px] font-bold text-white"
+                        >
+                            Update all ({profileUpdates.length})
+                        </button>
+                    ) : null}
+                    {modView === 'all' ? (
+                        <div className="flex items-center gap-1">
                         {pendingSyncCount > 0 && (
                             <span
                                 title='Pending sync changes. Click "Apply to Game" to sync modified profile mods.'
@@ -518,19 +596,8 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                                 <span>{pendingSyncCount}</span>
                             </span>
                         )}
-                        {updatesInView > 0 && (
-                            <span
-                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] bg-amber-500/10 text-amber-400 border border-amber-500/20"
-                                title={`${updatesInView} mod${updatesInView === 1 ? '' : 's'} have updates available`}
-                            >
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
-                                    <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l6.518 11.597c.75 1.334-.213 2.98-1.742 2.98H3.48c-1.53 0-2.493-1.646-1.743-2.98L8.257 3.1zM11 14a1 1 0 10-2 0 1 1 0 002 0zm-1-6a1 1 0 00-1 1v3a1 1 0 102 0V9a1 1 0 00-1-1z" clipRule="evenodd" />
-                                </svg>
-                                <span>{updatesInView}</span>
-                            </span>
-                        )}
-                    </div>
-                    <span className="bg-gray-800 text-gray-400 px-2 py-0.5 rounded-full text-[10px]">{displayedMods.length}</span>
+                        </div>
+                    ) : null}
                 </div>
 
                 {displayedMods.map(mod => {
@@ -538,6 +605,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                     const pkg = mod.source === 'local' ? undefined : packageIndex[packageName];
                     const latestVersion = pkg ? latestVersionNumber(pkg) : undefined;
                     const hasUpdate = hasNewerVersion(mod.versionNumber, latestVersion);
+                    const update = updatesById.get(mod.uuid4);
                     const isSelected = selectedModIdSet.has(mod.uuid4);
                     const displayName = mod.displayName || mod.fullName.split('-')[1] || mod.fullName;
 
@@ -583,7 +651,12 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                                     )}
                                 </div>
                                 <div className="text-xs text-gray-500 flex items-center gap-2">
-                                    <span>v{mod.versionNumber}</span>
+                                    <span>
+                                        v{mod.versionNumber}
+                                        {modView === 'updates' && update ? (
+                                            <span className="text-amber-300"> → v{update.version.version_number}</span>
+                                        ) : null}
+                                    </span>
                                     {!legacyInstallMode && mod.pending_sync && (
                                         <span
                                             className="inline-flex items-center text-sky-300"
@@ -610,6 +683,18 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                                 </div>
                             </div>
 
+                            {modView === 'updates' && update ? (
+                                <button
+                                    type="button"
+                                    onClick={(event) => {
+                                        event.stopPropagation();
+                                        void onUpdateMod(update.pkg, activeProfile?.id, update.version);
+                                    }}
+                                    className="absolute right-2 top-1/2 z-20 -translate-y-1/2 rounded-lg border border-amber-500/40 bg-amber-500/15 px-2.5 py-1.5 text-xs font-bold text-amber-200 transition-colors hover:bg-amber-500/25"
+                                >
+                                    Update
+                                </button>
+                            ) : (
                             <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center opacity-0 group-hover:opacity-100 transition-opacity gap-1 bg-gray-800/90 rounded-lg p-1 shadow-sm backdrop-blur-sm z-20">
                                 <button
                                     onClick={(e) => {
@@ -651,6 +736,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                                     </svg>
                                 </button>
                             </div>
+                            )}
                         </div>
                     );
                 })}
@@ -661,6 +747,20 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                         </svg>
                         <p className="text-gray-500 text-sm font-medium">No mods in profile</p>
                         <p className="text-gray-600 text-xs mt-1">Search for mods to get started</p>
+                    </div>
+                )}
+                {activeProfile && activeProfile.mods.length > 0 && displayedMods.length === 0 && (
+                    <div className="flex flex-col items-center px-4 py-12 text-center">
+                        <p className="text-sm font-medium text-gray-400">
+                            {modView === 'updates' && profileUpdates.length === 0
+                                ? 'All mods are up to date'
+                                : 'No matching mods'}
+                        </p>
+                        <p className="mt-1 text-xs text-gray-600">
+                            {modView === 'updates' && profileUpdates.length === 0
+                                ? 'Updates will appear here when available.'
+                                : 'Try a different search.'}
+                        </p>
                     </div>
                 )}
             </div>

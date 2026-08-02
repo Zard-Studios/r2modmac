@@ -27,10 +27,12 @@ const MACOS_LAUNCH_OBSERVE_TIMEOUT_MS: u64 = 60_000;
 static LOGGED_GAME_PATH_OVERRIDES: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 
 pub(crate) mod install;
+pub(crate) mod apply_transaction;
 pub(crate) mod launch;
 mod linux;
 mod macos;
 pub(crate) mod paths;
+pub(crate) mod runtime_health;
 mod process;
 mod shared;
 mod steam;
@@ -56,10 +58,15 @@ pub(super) use self::windows::*;
 pub(super) use self::windows_support::*;
 
 pub use self::install::install_to_game;
+pub use self::apply_transaction::{
+    begin_profile_apply_transaction, commit_profile_apply_transaction,
+    rollback_profile_apply_transaction,
+};
 pub use self::launch::{is_game_running, launch_game_vanilla, launch_game_with_mods, stop_game};
 pub(crate) use self::macos::ensure_macos_steam_launch_options;
 pub use self::paths::{
     find_game_executable, get_game_path, get_game_source, open_game_folder, set_game_path,
 };
+pub use self::runtime_health::check_profile_runtime_health;
 pub use self::sync::sync_profile_to_game;
 pub use self::shared::{restore_outerwilds_vanilla, restore_mscorlib_vanilla};

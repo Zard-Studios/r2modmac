@@ -1,4 +1,14 @@
 use super::*;
+
+fn ensure_finalize_ready(finalize: bool, missing_payloads: usize) -> Result<(), String> {
+    if finalize && missing_payloads > 0 {
+        return Err(format!(
+            "Cannot finalize profile while {} mod(s) are still missing",
+            missing_payloads
+        ));
+    }
+    Ok(())
+}
 use tauri::command;
 
 #[command]
@@ -7,11 +17,15 @@ pub async fn sync_profile_to_game(
     profile_id: String,
     game_identifier: String,
     use_legacy_cache: Option<bool>,
+    finalize: Option<bool>,
 ) -> Result<serde_json::Value, String> {
     let use_cache = use_legacy_cache.unwrap_or(false);
+    let finalize = finalize.unwrap_or(false);
 
     // 1. Read profile mods and platform from profiles.json
-    let profiles_path = crate::utils::paths::app_data_dir(&app).unwrap().join("profiles.json");
+    let profiles_path = crate::utils::paths::app_data_dir(&app)
+        .unwrap()
+        .join("profiles.json");
     let profiles_data = fs::read_to_string(&profiles_path).map_err(|e| e.to_string())?;
     let profiles: Vec<serde_json::Value> =
         serde_json::from_str(&profiles_data).map_err(|e| e.to_string())?;
@@ -68,15 +82,16 @@ pub async fn sync_profile_to_game(
     let profile_plugins = profile_dir.join("BepInEx").join("plugins");
 
     eprintln!(
-        "[sync_profile_to_game] Syncing profile {} to game {:?} (runtime root {:?}, legacy_cache: {})",
+        "[sync_profile_to_game] Syncing profile {} to game {:?} (runtime root {:?}, legacy_cache: {}, finalize: {})",
         profile_id,
         game_path,
         runtime_game_path,
-        use_cache
+        use_cache,
+        finalize
     );
 
-    let is_outerwilds_profile = is_outerwilds_identifier(&game_identifier)
-        || is_outerwilds_game_path(game_path);
+    let is_outerwilds_profile =
+        is_outerwilds_identifier(&game_identifier) || is_outerwilds_game_path(game_path);
 
     // Get list of mod names from profile (format: "Author-ModName-Version")
     // We keep the full name for matching
@@ -269,7 +284,6 @@ pub async fn sync_profile_to_game(
 
                 let desired_version = desired_version_by_key.get(*pm_key);
 
-
                 let has_exact_version = game_mod_folders.iter().any(|(_, gm_key, game_version)| {
                     if gm_key != *pm_key {
                         return false;
@@ -289,19 +303,23 @@ pub async fn sync_profile_to_game(
             .collect();
         to_install.sort();
 
-        // Remove mods not in profile
+        ensure_finalize_ready(finalize, to_install.len())?;
+
+        // Remove mods only after every desired payload has been installed.
         let mut removed = 0;
-        for folder_name in &to_remove {
-            let folder_path = owml_mods_dir.join(folder_name);
-            if folder_path.exists() {
-                let _ = fs::remove_dir_all(&folder_path);
-                removed += 1;
+        if finalize {
+            for folder_name in &to_remove {
+                let folder_path = owml_mods_dir.join(folder_name);
+                if folder_path.exists() {
+                    let _ = fs::remove_dir_all(&folder_path);
+                    removed += 1;
+                }
             }
         }
 
         // Cache: copy installed mods to profile cache
         let mut cached = 0;
-        if use_cache && owml_mods_dir.exists() {
+        if finalize && use_cache && owml_mods_dir.exists() {
             if !profile_owml_cache.exists() {
                 let _ = fs::create_dir_all(&profile_owml_cache);
             }
@@ -353,12 +371,16 @@ pub async fn sync_profile_to_game(
             config["owmlPath"] = serde_json::json!(&owml_wine_path);
             if let Some(obj) = config.as_object_mut() {
                 obj.entry("forceExe").or_insert(serde_json::json!(false));
-                obj.entry("disableVersionPopup").or_insert(serde_json::json!(true));
+                obj.entry("disableVersionPopup")
+                    .or_insert(serde_json::json!(true));
             }
 
             if let Ok(serialized) = serde_json::to_string_pretty(&config) {
                 let _ = fs::write(&config_path, serialized);
-                eprintln!("[sync_profile_to_game] Wrote OWML.Config.json (socketPort=0) at {:?}", config_path);
+                eprintln!(
+                    "[sync_profile_to_game] Wrote OWML.Config.json (socketPort=0) at {:?}",
+                    config_path
+                );
             }
         }
 
@@ -381,12 +403,16 @@ pub async fn sync_profile_to_game(
             config["incrementalGC"] = serde_json::json!(true);
             if let Some(obj) = config.as_object_mut() {
                 obj.entry("forceExe").or_insert(serde_json::json!(false));
-                obj.entry("disableVersionPopup").or_insert(serde_json::json!(true));
+                obj.entry("disableVersionPopup")
+                    .or_insert(serde_json::json!(true));
             }
 
             if let Ok(serialized) = serde_json::to_string_pretty(&config) {
                 let _ = fs::write(&config_path, serialized);
-                eprintln!("[sync_profile_to_game] Wrote Managed/OWML.Config.json at {:?}", config_path);
+                eprintln!(
+                    "[sync_profile_to_game] Wrote Managed/OWML.Config.json at {:?}",
+                    config_path
+                );
             }
         }
 
@@ -394,9 +420,11 @@ pub async fn sync_profile_to_game(
         if owml_mods_dir.exists() {
             if let Some(mods_arr) = profile["mods"].as_array() {
                 for m in mods_arr {
-                    if let (Some(full_name), Some(is_enabled)) = (m["fullName"].as_str(), m["enabled"].as_bool()) {
+                    if let (Some(full_name), Some(is_enabled)) =
+                        (m["fullName"].as_str(), m["enabled"].as_bool())
+                    {
                         let mod_key = extract_mod_key(full_name);
-                        
+
                         // Find installed folder for this mod_key
                         let mut found_folder = None;
                         if let Ok(entries) = fs::read_dir(&owml_mods_dir) {
@@ -415,7 +443,7 @@ pub async fn sync_profile_to_game(
 
                         if let Some(folder) = found_folder {
                             let mod_config_path = owml_mods_dir.join(&folder).join("config.json");
-                            
+
                             let mut config: serde_json::Value = if mod_config_path.exists() {
                                 fs::read_to_string(&mod_config_path)
                                     .ok()
@@ -423,7 +451,8 @@ pub async fn sync_profile_to_game(
                                     .unwrap_or_else(|| serde_json::json!({}))
                             } else {
                                 // Fallback: try default-config.json first if config.json doesn't exist
-                                let def_config_path = owml_mods_dir.join(&folder).join("default-config.json");
+                                let def_config_path =
+                                    owml_mods_dir.join(&folder).join("default-config.json");
                                 if def_config_path.exists() {
                                     fs::read_to_string(&def_config_path)
                                         .ok()
@@ -438,7 +467,10 @@ pub async fn sync_profile_to_game(
 
                             if let Ok(serialized) = serde_json::to_string_pretty(&config) {
                                 let _ = fs::write(&mod_config_path, serialized);
-                                eprintln!("[sync_profile_to_game] Set Outer Wilds mod {} enabled={}", folder, is_enabled);
+                                eprintln!(
+                                    "[sync_profile_to_game] Set Outer Wilds mod {} enabled={}",
+                                    folder, is_enabled
+                                );
                             }
                         }
                     }
@@ -469,7 +501,8 @@ pub async fn sync_profile_to_game(
             "removed": removed,
             "to_install": to_install,
             "already_installed": game_mod_folders.len(),
-            "cached": cached
+            "cached": cached,
+            "pending_removals": if finalize { 0 } else { to_remove.len() }
         }));
     }
 
@@ -568,17 +601,21 @@ pub async fn sync_profile_to_game(
             .collect();
         to_install.sort();
 
+        ensure_finalize_ready(finalize, to_install.len())?;
+
         let mut removed = 0;
-        for folder_name in &to_remove {
-            let folder_path = mods_root.join(folder_name);
-            if folder_path.exists() {
-                let _ = fs::remove_dir_all(&folder_path);
-                removed += 1;
+        if finalize {
+            for folder_name in &to_remove {
+                let folder_path = mods_root.join(folder_name);
+                if folder_path.exists() {
+                    let _ = fs::remove_dir_all(&folder_path);
+                    removed += 1;
+                }
             }
         }
 
         let mut cached = 0;
-        if use_cache && mods_root.exists() {
+        if finalize && use_cache && mods_root.exists() {
             if !profile_mods_cache.exists() {
                 let _ = fs::create_dir_all(&profile_mods_cache);
             }
@@ -602,7 +639,8 @@ pub async fn sync_profile_to_game(
             "removed": removed,
             "to_install": to_install,
             "already_installed": game_mod_folders.len(),
-            "cached": cached
+            "cached": cached,
+            "pending_removals": if finalize { 0 } else { to_remove.len() }
         }));
     }
 
@@ -622,17 +660,6 @@ pub async fn sync_profile_to_game(
         .iter()
         .map(|entry| entry.manifest.mod_key.clone())
         .collect::<std::collections::HashSet<_>>();
-    let removed_by_manifest =
-        cleanup_owned_mod_manifests(runtime_game_path, &manifests_to_remove, &manifests_to_keep)?;
-    let stale_generated_removed =
-        cleanup_stale_generated_mod_artifacts(runtime_game_path, &profile_mod_full_names)?;
-    if removed_by_manifest > 0 || stale_generated_removed > 0 {
-        eprintln!(
-            "[sync_profile_to_game] Cleaned {} tracked manifests and {} stale generated artifacts",
-            removed_by_manifest, stale_generated_removed
-        );
-    }
-
     // 3. Scan game plugins folder for currently installed mods
     // Store both the folder name AND the derived key
     let mut game_mod_folders: Vec<(String, String)> = vec![]; // (folder_name, author-modname key)
@@ -675,7 +702,8 @@ pub async fn sync_profile_to_game(
         if !desired_key_set.contains(gm_key) {
             // Check if this folder is owned by any manifest we want to keep
             let folder_prefix_1 = format!("bepinex/plugins/{}/", folder_name.to_lowercase());
-            let folder_prefix_2 = format!("bepinex_disabled/plugins/{}/", folder_name.to_lowercase());
+            let folder_prefix_2 =
+                format!("bepinex_disabled/plugins/{}/", folder_name.to_lowercase());
             let folder_exact_1 = format!("bepinex/plugins/{}", folder_name.to_lowercase());
             let folder_exact_2 = format!("bepinex_disabled/plugins/{}", folder_name.to_lowercase());
             let is_owned_by_kept_manifest = manifests_to_keep.iter().any(|entry| {
@@ -788,14 +816,31 @@ pub async fn sync_profile_to_game(
     );
 
     // 5. Remove mods not in profile (we have the exact folder names from the tuple)
-    let mut removed = removed_manifest_keys.len();
-    for folder_name in &to_remove {
-        let folder_path = game_plugins.join(folder_name);
-        if folder_path.exists() {
-            eprintln!("[sync_profile_to_game] Removing: {}", folder_name);
-            if remove_plugin_entry(&folder_path).is_ok() {
-                if !removed_manifest_keys.contains(&extract_mod_key(folder_name)) {
-                    removed += 1;
+    ensure_finalize_ready(finalize, to_install.len())?;
+    let mut removed = 0;
+    if finalize {
+        let removed_by_manifest = cleanup_owned_mod_manifests(
+            runtime_game_path,
+            &manifests_to_remove,
+            &manifests_to_keep,
+        )?;
+        let stale_generated_removed =
+            cleanup_stale_generated_mod_artifacts(runtime_game_path, &profile_mod_full_names)?;
+        removed += removed_by_manifest + stale_generated_removed;
+        if removed_by_manifest > 0 || stale_generated_removed > 0 {
+            eprintln!(
+                "[sync_profile_to_game] Cleaned {} tracked manifests and {} stale generated artifacts",
+                removed_by_manifest, stale_generated_removed
+            );
+        }
+        for folder_name in &to_remove {
+            let folder_path = game_plugins.join(folder_name);
+            if folder_path.exists() {
+                eprintln!("[sync_profile_to_game] Removing: {}", folder_name);
+                if remove_plugin_entry(&folder_path).is_ok() {
+                    if !removed_manifest_keys.contains(&extract_mod_key(folder_name)) {
+                        removed += 1;
+                    }
                 }
             }
         }
@@ -803,7 +848,7 @@ pub async fn sync_profile_to_game(
 
     // 6. If legacy cache enabled, copy mods from game to profile cache (reverse sync)
     let mut cached = 0;
-    if use_cache && game_plugins.exists() {
+    if finalize && use_cache && game_plugins.exists() {
         // Create profile plugins dir if needed
         if !profile_plugins.exists() {
             let _ = fs::create_dir_all(&profile_plugins);
@@ -846,8 +891,25 @@ pub async fn sync_profile_to_game(
         "removed": removed,
         "to_install": to_install_names,
         "already_installed": already_installed,
-        "cached": cached
+        "cached": cached,
+        "pending_removals": if finalize { 0 } else { to_remove.len() + manifests_to_remove.len() }
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ensure_finalize_ready;
+
+    #[test]
+    fn analysis_phase_allows_missing_payloads() {
+        assert!(ensure_finalize_ready(false, 3).is_ok());
+    }
+
+    #[test]
+    fn cleanup_phase_requires_every_payload() {
+        assert!(ensure_finalize_ready(true, 0).is_ok());
+        assert!(ensure_finalize_ready(true, 1).is_err());
+    }
 }
 
 fn manifest_files_exist(target_root: &std::path::Path, files: &[String]) -> bool {
@@ -862,8 +924,6 @@ fn manifest_files_exist(target_root: &std::path::Path, files: &[String]) -> bool
     }
     true
 }
-
-
 
 fn convert_to_owml_unix_path(path: &std::path::Path) -> String {
     if cfg!(windows) {

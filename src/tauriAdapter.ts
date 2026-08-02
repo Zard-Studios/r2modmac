@@ -24,8 +24,7 @@ function fetchPackagesDeduped(gameId: string): Promise<number> {
         return Promise.resolve(recent.result);
     }
 
-    let request: Promise<number>;
-    request = invoke<number>('fetch_packages', { gameId })
+    const request = invoke<number>('fetch_packages', { gameId })
         .then((result) => {
             recentPackageFetches.clear();
             recentPackageFetches.set(key, {
@@ -188,9 +187,17 @@ export const tauriAPI: IElectronAPI = {
     installUpdate: async (downloadUrl: string) => {
         return await invoke('install_update', { downloadUrl });
     },
-    syncProfileToGame: async (profileId: string, gameIdentifier: string, useLegacyCache?: boolean) => {
-        return await invoke<{ removed: number; to_install: string[]; already_installed: number; cached: number }>('sync_profile_to_game', { profileId, gameIdentifier, useLegacyCache: useLegacyCache ?? false });
+    syncProfileToGame: async (profileId: string, gameIdentifier: string, useLegacyCache?: boolean, finalize?: boolean) => {
+        return await invoke('sync_profile_to_game', { profileId, gameIdentifier, useLegacyCache: useLegacyCache ?? false, finalize: finalize ?? false });
     },
+    checkProfileRuntimeHealth: async (profileId, gameIdentifier, platform?) =>
+        invoke('check_profile_runtime_health', { profileId, gameIdentifier, platform }),
+    beginProfileApplyTransaction: async (profileId, gameIdentifier) =>
+        invoke<boolean>('begin_profile_apply_transaction', { profileId, gameIdentifier }),
+    rollbackProfileApplyTransaction: async (profileId, gameIdentifier) =>
+        invoke<boolean>('rollback_profile_apply_transaction', { profileId, gameIdentifier }),
+    commitProfileApplyTransaction: async (profileId) =>
+        invoke<boolean>('commit_profile_apply_transaction', { profileId }),
     copyModFromCache: async (profileId: string, modName: string, gamePath: string) => {
         return await invoke<{ success: boolean; copied: boolean }>('copy_mod_from_cache', { profileId, modName, gamePath });
     },
