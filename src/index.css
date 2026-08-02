@@ -206,3 +206,8 @@ body {
     display: none;
   }
 }
+/* Mod-card footer is a single line; low-priority file size disappears first. */
+.mod-card { container-type: inline-size; }
+@container (max-width: 350px) {
+  .mod-card .mod-card-file-size { display: none; }
+}

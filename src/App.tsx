@@ -29,6 +29,7 @@ import type { ProfileModUpdate } from './hooks/useModActions';
 import { useProfileActions } from './hooks/useProfileActions';
 import { useGameSync } from './hooks/useGameSync';
 import { compareVersions, findPinnedVersion, parsePackageReference } from './utils/modVersioning';
+import { getProfileModKey, migratePendingSyncBaselines, restoreInstalledMod } from './utils/profileSync';
 
 const QUICK_MAC_HINTS = new Set([
   'btd6',
@@ -312,6 +313,8 @@ function App() {
   const isInitialLoadRunningRef = useRef(false)
   const packagesLoadRequestRef = useRef(0)
   const profilePackageIndexRequestRef = useRef(0)
+  const syncInspectionRequestRef = useRef<string | null>(null)
+  const installToGameRequestRef = useRef<((isVanillaOverride?: boolean) => Promise<void>) | null>(null)
 
   const {
     profiles,
@@ -323,7 +326,8 @@ function App() {
     updateProfile,
     addMod,
     removeMod,
-    toggleMod
+    toggleMod,
+    revertPendingMods,
   } = useProfileStore()
   // App State Store
   const { communities, communityImages, communityPlatforms, streamMode, setCommunities, setCommunityImages, setCommunityPlatforms, setStreamMode, setUsername } = useAppStore();
@@ -1032,6 +1036,31 @@ function App() {
     return () => window.clearTimeout(timer);
   }, [activeProfileGamePath, refreshRuntimeHealth]);
 
+  useEffect(() => {
+    if (!activeProfile || activeProfile.apply_interrupted) return;
+    const needsInspection = activeProfile.mods.some(mod => mod.pending_sync && mod.sync_baseline === undefined)
+      || (!!activeProfile.needs_sync
+        && !activeProfile.mods.some(mod => mod.pending_sync)
+        && (activeProfile.pending_removals?.length ?? 0) === 0);
+    if (!needsInspection) return;
+    const requestKey = `${activeProfile.id}:${activeProfile.mods.length}:${activeProfile.mods.filter(mod => mod.pending_sync).length}`;
+    if (syncInspectionRequestRef.current === requestKey) return;
+    syncInspectionRequestRef.current = requestKey;
+    void window.ipcRenderer.inspectProfileSyncState(
+      activeProfile.id,
+      activeProfile.gameIdentifier,
+      activeProfile.platform,
+    ).then(inspection => {
+      if (inspection.status !== 'ready') return;
+      const latest = useProfileStore.getState().profiles.find(profile => profile.id === activeProfile.id);
+      if (!latest) return;
+      updateProfile(latest.id, migratePendingSyncBaselines(latest, inspection));
+    }).catch(error => {
+      console.error('Failed to inspect synchronized profile state', error);
+      syncInspectionRequestRef.current = null;
+    });
+  }, [activeProfile, updateProfile]);
+
   const repairProfileRuntime = useCallback(async (): Promise<boolean> => {
     const profile = useProfileStore.getState().profiles.find(candidate => candidate.id === activeProfileId);
     if (!profile || isRepairingRuntime) return false;
@@ -1182,6 +1211,101 @@ function App() {
       setIsUpdatingProfile(false);
     }
   }, [activeProfileId, handleSyncToGame, isUpdatingProfile, legacyInstallMode, pendingProfileUpdates, refreshRuntimeHealth, stageProfileUpdates]);
+
+  const handleRevertPending = useCallback((ids: string[]) => {
+    if (!activeProfileId) return;
+    revertPendingMods(activeProfileId, ids);
+  }, [activeProfileId, revertPendingMods]);
+
+  const handleSyncPending = useCallback(async (ids: string[]) => {
+    const original = useProfileStore.getState().profiles.find(profile => profile.id === activeProfileId);
+    if (!original || ids.length === 0) return;
+    const allIds = [
+      ...original.mods.filter(mod => mod.pending_sync).map(mod => mod.uuid4),
+      ...(original.pending_removals || []).map(removal => removal.id),
+    ];
+    if (ids.length === allIds.length && allIds.every(id => ids.includes(id))) {
+      await installToGameRequestRef.current?.();
+      return;
+    }
+
+    const health = await refreshRuntimeHealth();
+    if (health && (health.status === 'missing' || health.status === 'incomplete')) {
+      const confirmedRepair = await window.ipcRenderer.confirm(
+        'Repair Runtime Before Sync?',
+        `${health.runtime === 'bepinex' ? 'BepInEx' : health.runtime === 'owml' ? 'OWML' : 'Lovely'} is ${health.status}. Repair it before synchronizing this selection?`
+      );
+      if (!confirmedRepair || !await repairProfileRuntime()) return;
+    }
+
+    const selected = new Set(ids);
+    const pendingByKey = new Map(original.mods
+      .filter(mod => mod.pending_sync)
+      .map(mod => [getProfileModKey(mod.fullName), mod]));
+    const dependencyQueue = original.mods.filter(mod => selected.has(mod.uuid4));
+    while (dependencyQueue.length > 0) {
+      const mod = dependencyQueue.shift()!;
+      const pkg = profilePackageIndex[getProfileModKey(mod.fullName)];
+      const version = pkg?.versions.find(candidate => candidate.version_number === mod.versionNumber);
+      for (const dependency of version?.dependencies || []) {
+        const dependencyMod = pendingByKey.get(getProfileModKey(dependency));
+        if (dependencyMod && !selected.has(dependencyMod.uuid4)) {
+          selected.add(dependencyMod.uuid4);
+          dependencyQueue.push(dependencyMod);
+        }
+      }
+    }
+    const effectiveMods: InstalledMod[] = [];
+    for (const mod of original.mods) {
+      if (!mod.pending_sync || selected.has(mod.uuid4)) {
+        effectiveMods.push(mod);
+      } else if (mod.sync_baseline) {
+        effectiveMods.push(restoreInstalledMod(mod.sync_baseline));
+      } else if (mod.sync_baseline === undefined) {
+        await window.ipcRenderer.alert('Cannot Sync Selection', `${mod.displayName || mod.fullName} has no verified synchronized baseline yet.`);
+        return;
+      }
+    }
+    for (const removal of original.pending_removals || []) {
+      if (!selected.has(removal.id)) effectiveMods.push(restoreInstalledMod(removal.mod));
+    }
+    const restoreState = {
+      mods: original.mods,
+      pending_removals: original.pending_removals || [],
+      needs_sync: true,
+    };
+    updateProfile(original.id, {
+      mods: effectiveMods,
+      pending_removals: [],
+      selective_sync_restore: restoreState,
+      needs_sync: true,
+    });
+    await window.ipcRenderer.saveProfiles(useProfileStore.getState().profiles);
+    const succeeded = await handleSyncToGame(undefined, { silentSuccess: true });
+    if (!succeeded) {
+      updateProfile(original.id, { ...restoreState, selective_sync_restore: undefined, apply_interrupted: true });
+      return;
+    }
+
+    const selectedRemovalKeys = new Set((original.pending_removals || [])
+      .filter(removal => selected.has(removal.id))
+      .map(removal => getProfileModKey(removal.mod.fullName)));
+    const mods = original.mods
+      .filter(mod => !selectedRemovalKeys.has(getProfileModKey(mod.fullName)))
+      .map(mod => selected.has(mod.uuid4)
+        ? { ...mod, pending_sync: false, synced_enabled: mod.enabled, pending_sync_kind: undefined, sync_baseline: undefined }
+        : mod);
+    const pendingRemovals = (original.pending_removals || []).filter(removal => !selected.has(removal.id));
+    updateProfile(original.id, {
+      mods,
+      pending_removals: pendingRemovals,
+      selective_sync_restore: undefined,
+      apply_interrupted: false,
+      needs_sync: mods.some(mod => mod.pending_sync) || pendingRemovals.length > 0,
+    });
+    await window.ipcRenderer.saveProfiles(useProfileStore.getState().profiles);
+    await refreshRuntimeHealth();
+  }, [activeProfileId, handleSyncToGame, profilePackageIndex, refreshRuntimeHealth, repairProfileRuntime, updateProfile]);
 
   const handleInstallRequest = async (
     pkg: Package,
@@ -1688,6 +1812,14 @@ function App() {
       setIsApplyingToGame(false);
     }
   };
+  useEffect(() => {
+    installToGameRequestRef.current = handleInstallToGameRequest;
+    return () => {
+      if (installToGameRequestRef.current === handleInstallToGameRequest) {
+        installToGameRequestRef.current = null;
+      }
+    };
+  }, [handleInstallToGameRequest]);
 
   const handleToggleProfileVanilla = async (profileId: string, newVanillaState: boolean) => {
     if (profileActionLockRef.current || applyInFlightRef.current) return;
@@ -2120,7 +2252,7 @@ function App() {
             `Uninstall ${mod.displayName || mod.fullName}?`
           );
           if (!confirmed) return;
-          await removeMod(activeProfile.id, mod.uuid4);
+          await removeMod(activeProfile.id, mod.uuid4, !legacyInstallMode);
         }}
         onResolvePackage={async (mod) => {
           if (mod.source === 'local') return null;
@@ -2152,6 +2284,8 @@ function App() {
         onToggleVanilla={handleToggleProfileVanilla}
         onUpdateMod={handleProfileModUpdate}
         onUpdateAll={setPendingProfileUpdates}
+        onSyncPending={handleSyncPending}
+        onRevertPending={handleRevertPending}
         runtimeHealth={runtimeHealth}
         isRepairingRuntime={isRepairingRuntime}
         onRepairRuntime={async () => { await repairProfileRuntime(); }}

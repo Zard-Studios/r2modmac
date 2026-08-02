@@ -6,6 +6,7 @@ import type {
     ProfileLaunchMode,
     ProfilePlatform
 } from '../types/profile';
+import { getProfileModKey, inferPendingSyncKind, restoreInstalledMod, snapshotInstalledMod } from '../utils/profileSync';
 
 // Debounced save to prevent rapid-fire file writes causing race conditions
 let saveTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -82,6 +83,7 @@ const normalizeProfile = (profile: Profile): Profile => {
     return {
         ...profile,
         mods: dedupeModsByKey((profile.mods || []).map(ensureModIdentity)),
+        pending_removals: profile.pending_removals || [],
         platform,
         distribution,
         launchMode,
@@ -106,8 +108,10 @@ interface ProfileState {
     updateProfile: (profileId: string, updates: Partial<Profile>) => void;
     setProfiles: (profiles: Profile[]) => void;
     addMod: (profileId: string, mod: InstalledMod) => void;
-    removeMod: (profileId: string, modId: string) => Promise<void>;
+    removeMod: (profileId: string, modId: string, stageOnly?: boolean) => Promise<void>;
     toggleMod: (profileId: string, modId: string, syncFiles?: boolean) => Promise<void>;
+    revertPendingMods: (profileId: string, modIds: string[]) => void;
+    revertAllPending: (profileId: string) => void;
     loadProfiles: () => Promise<void>;
 }
 
@@ -212,6 +216,14 @@ export const useProfileStore = create<ProfileState>((set) => ({
             }
 
             const merged: InstalledMod = existing ? { ...existing, ...normalizedMod } : normalizedMod;
+            if (merged.pending_sync) {
+                merged.sync_baseline = existing?.pending_sync
+                    ? existing.sync_baseline
+                    : existing
+                        ? snapshotInstalledMod(existing)
+                        : null;
+                merged.pending_sync_kind = inferPendingSyncKind(merged, merged.sync_baseline);
+            }
             profile.mods = [
                 ...profile.mods.filter((m) => {
                     const sameUuid = !!m.uuid4 && !!normalizedMod.uuid4 && m.uuid4 === normalizedMod.uuid4;
@@ -232,7 +244,7 @@ export const useProfileStore = create<ProfileState>((set) => ({
         }
     },
 
-    removeMod: async (profileId, modId) => {
+    removeMod: async (profileId, modId, stageOnly = true) => {
         // First get the mod info and delete files, THEN update state
         const state = useProfileStore.getState();
         const profileIndex = state.profiles.findIndex(p => p.id === profileId);
@@ -241,7 +253,45 @@ export const useProfileStore = create<ProfileState>((set) => ({
         const profile = state.profiles[profileIndex];
         const mod = profile.mods.find(m => m.uuid4 === modId);
 
-        const wasSynced = mod ? mod.synced_enabled !== undefined : false;
+        const wasSynced = mod ? mod.synced_enabled !== undefined || mod.sync_baseline !== null : false;
+
+        // Default mode stages a reversible removal. Legacy callers remove files
+        // immediately and therefore never have pending_sync metadata.
+        if (stageOnly && mod?.pending_sync && mod.sync_baseline === null) {
+            set((currentState) => {
+                const updatedProfiles = currentState.profiles.map(candidate => candidate.id === profileId
+                    ? {
+                        ...candidate,
+                        mods: candidate.mods.filter(item => item.uuid4 !== modId),
+                        needs_sync: candidate.mods.some(item => item.uuid4 !== modId && item.pending_sync)
+                            || (candidate.pending_removals?.length ?? 0) > 0,
+                    }
+                    : candidate);
+                debouncedSaveProfiles(updatedProfiles);
+                return { profiles: updatedProfiles };
+            });
+            return;
+        }
+
+        if (stageOnly && mod && wasSynced) {
+            const baseline = mod.sync_baseline || snapshotInstalledMod(mod);
+            set((currentState) => {
+                const updatedProfiles = currentState.profiles.map(candidate => candidate.id === profileId
+                    ? {
+                        ...candidate,
+                        mods: candidate.mods.filter(item => item.uuid4 !== modId),
+                        pending_removals: [
+                            ...(candidate.pending_removals || []).filter(removal => getProfileModKey(removal.mod.fullName) !== getProfileModKey(baseline.fullName)),
+                            { id: `remove:${getProfileModKey(baseline.fullName)}`, mod: baseline },
+                        ],
+                        needs_sync: true,
+                    }
+                    : candidate);
+                debouncedSaveProfiles(updatedProfiles);
+                return { profiles: updatedProfiles };
+            });
+            return;
+        }
 
         if (mod) {
             try {
@@ -321,6 +371,17 @@ export const useProfileStore = create<ProfileState>((set) => ({
                             enabled: newEnabled,
                             pending_sync: pendingSync,
                             synced_enabled: syncFiles ? newEnabled : m.synced_enabled,
+                            sync_baseline: syncFiles
+                                ? undefined
+                                : pendingSync
+                                    ? (m.pending_sync ? m.sync_baseline : snapshotInstalledMod(m))
+                                    : undefined,
+                            pending_sync_kind: syncFiles || !pendingSync
+                                ? undefined
+                                : inferPendingSyncKind(
+                                    { ...m, enabled: newEnabled },
+                                    m.pending_sync ? m.sync_baseline : snapshotInstalledMod(m)
+                                ),
                         };
                     }
                     return m;
@@ -337,9 +398,64 @@ export const useProfileStore = create<ProfileState>((set) => ({
         }
     },
 
+    revertPendingMods: (profileId, modIds) => {
+        const ids = new Set(modIds);
+        set((state) => {
+            const updatedProfiles = state.profiles.map(profile => {
+                if (profile.id !== profileId) return profile;
+                const restoredMods: InstalledMod[] = [];
+                for (const mod of profile.mods) {
+                    if (!ids.has(mod.uuid4) || !mod.pending_sync) {
+                        restoredMods.push(mod);
+                    } else if (mod.sync_baseline) {
+                        restoredMods.push(restoreInstalledMod(mod.sync_baseline));
+                    }
+                }
+                const selectedRemovalKeys = new Set(
+                    (profile.pending_removals || [])
+                        .filter(removal => ids.has(removal.id))
+                        .map(removal => getProfileModKey(removal.mod.fullName))
+                );
+                const restoredRemovalMods = (profile.pending_removals || [])
+                    .filter(removal => ids.has(removal.id))
+                    .map(removal => restoreInstalledMod(removal.mod));
+                const byKey = new Map<string, InstalledMod>();
+                for (const mod of [...restoredMods, ...restoredRemovalMods]) byKey.set(getProfileModKey(mod.fullName), mod);
+                const pendingRemovals = (profile.pending_removals || []).filter(removal => !selectedRemovalKeys.has(getProfileModKey(removal.mod.fullName)));
+                const mods = Array.from(byKey.values());
+                return {
+                    ...profile,
+                    mods,
+                    pending_removals: pendingRemovals,
+                    needs_sync: mods.some(mod => mod.pending_sync) || pendingRemovals.length > 0 || !!profile.apply_interrupted,
+                };
+            });
+            debouncedSaveProfiles(updatedProfiles);
+            return { profiles: updatedProfiles };
+        });
+    },
+
+    revertAllPending: (profileId) => {
+        const profile = useProfileStore.getState().profiles.find(candidate => candidate.id === profileId);
+        if (!profile) return;
+        const ids = [
+            ...profile.mods.filter(mod => mod.pending_sync).map(mod => mod.uuid4),
+            ...(profile.pending_removals || []).map(removal => removal.id),
+        ];
+        useProfileStore.getState().revertPendingMods(profileId, ids);
+    },
+
     loadProfiles: async () => {
         const rawProfiles = await window.ipcRenderer.getProfiles();
-        const profiles = rawProfiles.map((profile) => {
+        const profiles = rawProfiles.map((storedProfile) => {
+            const profile = storedProfile.selective_sync_restore ? {
+                ...storedProfile,
+                mods: storedProfile.selective_sync_restore.mods,
+                pending_removals: storedProfile.selective_sync_restore.pending_removals,
+                needs_sync: true,
+                apply_interrupted: true,
+                selective_sync_restore: undefined,
+            } : storedProfile;
             const normalizedMods = (profile.mods || []).map((mod) => {
                 const pendingSync = !!mod.pending_sync;
                 return {
@@ -352,7 +468,9 @@ export const useProfileStore = create<ProfileState>((set) => ({
             return {
                 ...profile,
                 mods,
-                needs_sync: !!profile.needs_sync || mods.some((m: InstalledMod) => m.pending_sync),
+                needs_sync: !!profile.needs_sync
+                    || mods.some((m: InstalledMod) => m.pending_sync)
+                    || (profile.pending_removals?.length ?? 0) > 0,
             } as Profile;
         });
         set({ profiles: profiles.map((profile) => normalizeProfile(profile)) });

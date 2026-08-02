@@ -96,10 +96,10 @@ export function useGameSync({
     const handleSyncToGame = async (
         isVanillaOverride?: boolean,
         syncOptions?: SyncToGameOptions
-    ) => {
+    ): Promise<boolean> => {
         const activeProfile = useProfileStore.getState().profiles.find(p => p.id === activeProfileId);
         const community = activeProfile?.gameIdentifier || selectedCommunity;
-        if (!activeProfile || !community) return;
+        if (!activeProfile || !community) return false;
         const silentSuccess = !!syncOptions?.silentSuccess;
         const ensureNotStopped = async () => {
             if (await window.ipcRenderer.modOperationsCancelled()) {
@@ -115,13 +115,13 @@ export function useGameSync({
                 await persistProfilesNow();
                 const disabledMods = activeProfile.mods.filter(m => !m.enabled).map(m => m.fullName);
                 await window.ipcRenderer.installToGame(community, activeProfile.id, disabledMods, isVanillaOverride);
-                return;
+                return true;
             }
 
             const gamePath = await window.ipcRenderer.getGamePath(community, activeProfile.platform);
             if (!gamePath) {
                 await window.ipcRenderer.alert('Game Path Required', 'Please set the game directory in Settings first.');
-                return;
+                return false;
             }
             updateProfile(activeProfile.id, { needs_sync: true, apply_interrupted: true });
             await persistProfilesNow();
@@ -524,10 +524,13 @@ export function useGameSync({
             updateProfile(latestProfile.id, {
                 needs_sync: false,
                 apply_interrupted: false,
+                pending_removals: [],
                 mods: latestProfile.mods.map((m) => ({
                     ...m,
                     pending_sync: false,
                     synced_enabled: m.enabled,
+                    pending_sync_kind: undefined,
+                    sync_baseline: undefined,
                 })),
             });
 
@@ -572,6 +575,8 @@ export function useGameSync({
                 setShowCrossOverGuide(true);
             }
 
+            return true;
+
             } catch (e: any) {
             console.error('Sync to game failed:', e);
             setProgressState(prev => ({ ...prev, isOpen: false }));
@@ -584,9 +589,10 @@ export function useGameSync({
             }
             if (String(e?.message || e).includes('MOD_OPERATION_CANCELLED')) {
                 await window.ipcRenderer.beginModOperations();
-                return;
+                return false;
             }
             await window.ipcRenderer.alert('Sync Failed', String(e?.message || e || 'Unknown sync error'));
+            return false;
         }
     };
 

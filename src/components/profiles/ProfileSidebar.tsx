@@ -1,10 +1,11 @@
-import React, { useDeferredValue, useMemo, useState } from 'react';
+import React, { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import type { Community, Package } from '../../types/thunderstore';
 import type { Profile, InstalledMod } from '../../types/profile';
 import type { RuntimeHealth } from '../../types/electron';
 import type { ProfileModUpdate } from '../../hooks/useModActions';
 import { Button, HoverMarquee } from '../ui';
 import { compareVersions, hasNewerVersion, latestVersionNumber, parsePackageReference } from '../../utils/modVersioning';
+import { restoreInstalledMod } from '../../utils/profileSync';
 
 const MAX_PARALLEL_TOGGLES = 10;
 
@@ -92,6 +93,8 @@ interface ProfileSidebarProps {
     onToggleVanilla: (profileId: string, newVanillaState: boolean) => Promise<void> | void;
     onUpdateMod: (pkg: Package, profileId?: string, version?: Package['versions'][number]) => Promise<void> | void;
     onUpdateAll: (updates: ProfileModUpdate[]) => void;
+    onSyncPending: (ids: string[]) => Promise<void> | void;
+    onRevertPending: (ids: string[]) => Promise<void> | void;
     runtimeHealth?: RuntimeHealth | null;
     isRepairingRuntime?: boolean;
     onRepairRuntime: () => Promise<void> | void;
@@ -128,6 +131,8 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
     onToggleVanilla,
     onUpdateMod,
     onUpdateAll,
+    onSyncPending,
+    onRevertPending,
     runtimeHealth,
     isRepairingRuntime = false,
     onRepairRuntime,
@@ -137,10 +142,13 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
     const [editName, setEditName] = useState('');
     const [selectedModIds, setSelectedModIds] = useState<string[]>([]);
     const [selectionAnchorId, setSelectionAnchorId] = useState<string | null>(null);
-    const [modView, setModView] = useState<'all' | 'updates'>('all');
+    const [modView, setModView] = useState<'all' | 'updates' | 'sync'>('all');
+    const [syncSelectedIds, setSyncSelectedIds] = useState<string[]>([]);
+    const [syncConfirmation, setSyncConfirmation] = useState<{ kind: 'sync' | 'revert'; ids: string[] } | null>(null);
+    const previousPendingCountRef = useRef<number | null>(null);
     const renderedModView = useDeferredValue(modView);
 
-    const changeModView = (nextView: 'all' | 'updates') => {
+    const changeModView = (nextView: 'all' | 'updates' | 'sync') => {
         if (nextView === modView) return;
         setModView(nextView);
     };
@@ -196,7 +204,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
     const profileUpdates = useMemo<ProfileModUpdate[]>(() => {
         if (!activeProfile) return [];
         return activeProfile.mods.flatMap(mod => {
-            if (mod.source === 'local') return [];
+            if (mod.source === 'local' || mod.pending_sync) return [];
             const packageName = parsePackageReference(mod.fullName).packageName.toLowerCase();
             const pkg = packageIndex[packageName];
             const latest = pkg ? latestVersionByPackage.get(packageName) : undefined;
@@ -213,12 +221,75 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
         () => new Map(profileUpdates.map(update => [update.mod.uuid4, update])),
         [profileUpdates]
     );
+    const pendingEntries = useMemo(() => {
+        if (!activeProfile || legacyInstallMode) return [];
+        return [
+            ...activeProfile.mods.filter(mod => mod.pending_sync).map(mod => ({
+                id: mod.uuid4,
+                mod,
+                kind: mod.pending_sync_kind || 'add',
+                revertable: mod.sync_baseline !== undefined,
+            })),
+            ...(activeProfile.pending_removals || []).map(removal => ({
+                id: removal.id,
+                mod: restoreInstalledMod(removal.mod),
+                kind: 'remove' as const,
+                revertable: true,
+            })),
+        ];
+    }, [activeProfile, legacyInstallMode]);
+    const pendingSyncCount = pendingEntries.length;
+    const confirmedSyncEntries = useMemo(() => {
+        if (!syncConfirmation) return [];
+        const ids = new Set(syncConfirmation.ids);
+        if (syncConfirmation.kind === 'sync') {
+            const byKey = new Map(pendingEntries.map(entry => [parsePackageReference(entry.mod.fullName).packageName.toLowerCase(), entry]));
+            const queue = pendingEntries.filter(entry => ids.has(entry.id));
+            while (queue.length > 0) {
+                const entry = queue.shift()!;
+                const pkg = packageIndex[parsePackageReference(entry.mod.fullName).packageName.toLowerCase()];
+                const version = pkg?.versions.find(candidate => candidate.version_number === entry.mod.versionNumber);
+                for (const dependency of version?.dependencies || []) {
+                    const dep = byKey.get(parsePackageReference(dependency).packageName.toLowerCase());
+                    if (dep && !ids.has(dep.id)) { ids.add(dep.id); queue.push(dep); }
+                }
+            }
+        }
+        return pendingEntries.filter(entry => ids.has(entry.id)).map(entry => ({ ...entry, automatic: !syncConfirmation.ids.includes(entry.id) }));
+    }, [packageIndex, pendingEntries, syncConfirmation]);
+    const availableTabs = useMemo(() => [
+        'all' as const,
+        ...(profileUpdates.length > 0 ? ['updates' as const] : []),
+        ...(pendingSyncCount > 0 ? ['sync' as const] : []),
+    ], [pendingSyncCount, profileUpdates.length]);
+    useEffect(() => {
+        if (availableTabs.includes(modView)) return;
+        const frame = window.requestAnimationFrame(() => setModView(pendingSyncCount > 0 ? 'sync' : 'all'));
+        return () => window.cancelAnimationFrame(frame);
+    }, [availableTabs, modView, pendingSyncCount]);
+    useEffect(() => {
+        const previous = previousPendingCountRef.current;
+        if (previous !== null && pendingSyncCount > previous) {
+            const frame = window.requestAnimationFrame(() => setModView('sync'));
+            previousPendingCountRef.current = pendingSyncCount;
+            return () => window.cancelAnimationFrame(frame);
+        }
+        previousPendingCountRef.current = pendingSyncCount;
+    }, [pendingSyncCount]);
+    useEffect(() => {
+        if (!syncConfirmation) return;
+        const onKeyDown = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') setSyncConfirmation(null);
+        };
+        window.addEventListener('keydown', onKeyDown);
+        return () => window.removeEventListener('keydown', onKeyDown);
+    }, [syncConfirmation]);
     const searchedMods = activeProfile?.mods.filter(mod =>
         `${mod.fullName} ${mod.displayName || ''} ${mod.author || ''}`.toLowerCase().includes(searchQuery.toLowerCase())
     ) || [];
     const displayedMods = renderedModView === 'updates'
         ? searchedMods.filter(mod => updateIds.has(mod.uuid4))
-        : searchedMods;
+        : renderedModView === 'sync' ? [] : searchedMods;
     const visibleModIds = useMemo(() => new Set(displayedMods.map((m) => m.uuid4)), [displayedMods]);
     const effectiveSelectedModIds = useMemo(
         () => selectedModIds.filter((id) => visibleModIds.has(id)),
@@ -281,13 +352,6 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
             )}
         </button>
     );
-
-    const pendingSyncCount = useMemo(() => {
-        if (legacyInstallMode || !activeProfile) return 0;
-        const markedMods = activeProfile.mods.filter((m) => m.pending_sync).length;
-        if (markedMods > 0) return markedMods;
-        return activeProfile.needs_sync ? 1 : 0;
-    }, [activeProfile, legacyInstallMode]);
 
     const resolveAndOpenModDetails = async (mod: InstalledMod, pkg?: Package) => {
         if (mod.source === 'local') {
@@ -409,6 +473,35 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
 
     return (
         <div className="profile-sidebar-surface h-full w-full min-w-0 flex flex-col bg-gray-900 border-r border-gray-800">
+            {syncConfirmation ? (
+                <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/65 p-6 backdrop-blur-sm"
+                    onMouseDown={event => { if (event.target === event.currentTarget) setSyncConfirmation(null); }}>
+                    <div role="dialog" aria-modal="true" aria-labelledby="sync-confirmation-title" className="flex max-h-[78vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-gray-700 bg-gray-800 shadow-2xl">
+                        <div className="border-b border-gray-700 px-5 py-4">
+                            <h2 id="sync-confirmation-title" className="text-lg font-bold text-white">{syncConfirmation.kind === 'sync' ? 'Sync' : 'Revert'} {confirmedSyncEntries.length} changes?</h2>
+                            <p className="mt-1 text-xs text-gray-400">{syncConfirmation.kind === 'sync' ? 'Required dependencies are included automatically.' : 'Game files stay untouched until the next Sync.'}</p>
+                        </div>
+                        <div className="min-h-0 flex-1 overflow-y-auto p-3">
+                            {confirmedSyncEntries.map(entry => (
+                                <div key={entry.id} className="flex items-center gap-3 rounded-xl px-2 py-2">
+                                    <div className="h-9 w-9 shrink-0 overflow-hidden rounded-lg bg-gray-900">{entry.mod.iconUrl ? <img src={entry.mod.iconUrl} alt="" className="h-full w-full object-cover" /> : null}</div>
+                                    <span className="min-w-0 flex-1"><span className="block truncate text-sm text-gray-100">{entry.mod.displayName || entry.mod.fullName}</span><span className="block text-xs capitalize text-sky-300">{entry.kind}{entry.automatic ? ' · required dependency' : ''}</span></span>
+                                </div>
+                            ))}
+                        </div>
+                        <div className="grid grid-cols-2 gap-3 border-t border-gray-700 p-4">
+                            <button type="button" onClick={() => setSyncConfirmation(null)} className="rounded-xl border border-gray-600 bg-gray-700 px-4 py-2.5 text-sm font-semibold text-gray-100">Cancel</button>
+                            <button type="button" onClick={async () => {
+                                const confirmation = syncConfirmation;
+                                setSyncConfirmation(null);
+                                if (confirmation.kind === 'sync') await onSyncPending(confirmedSyncEntries.map(entry => entry.id));
+                                else await onRevertPending(confirmation.ids);
+                                setSyncSelectedIds([]);
+                            }} className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white">{syncConfirmation.kind === 'sync' ? 'Sync' : 'Revert'}</button>
+                        </div>
+                    </div>
+                </div>
+            ) : null}
             {/* Header */}
             <div className="profile-sidebar-motion-item [--sidebar-motion-order:0] px-5 py-[19px] border-b border-gray-800">
                 <div className="flex items-center gap-3">
@@ -566,39 +659,22 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                     <div role="tablist" aria-label="Profile mod view" className="relative flex w-full overflow-hidden rounded-lg border border-gray-700 bg-gray-800 p-0.5">
                         <div
                             aria-hidden="true"
-                            className={`profile-mod-segment-indicator absolute bottom-0.5 left-0.5 top-0.5 w-[calc(50%-2px)] rounded-md transition-[transform,background-color,box-shadow] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] ${modView === 'updates'
-                                ? 'translate-x-full bg-amber-500/20 shadow-[0_1px_8px_rgba(245,158,11,0.08)]'
-                                : 'translate-x-0 bg-gray-600 shadow-sm'
-                                }`}
+                            className={`profile-mod-segment-indicator absolute bottom-0.5 left-0.5 top-0.5 rounded-md transition-[transform,width,background-color,box-shadow] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] ${modView === 'updates'
+                                ? 'bg-amber-500/20' : modView === 'sync' ? 'bg-sky-500/20' : 'bg-gray-600 shadow-sm'}`}
+                            style={{
+                                width: `calc(${100 / availableTabs.length}% - 2px)`,
+                                transform: `translateX(${availableTabs.indexOf(modView) * 100}%)`,
+                            }}
                         />
-                        <button
-                            type="button"
-                            role="tab"
-                            aria-controls="profile-mod-view-panel"
-                            onClick={() => changeModView('all')}
-                            aria-selected={modView === 'all'}
-                            className={`relative z-10 flex-1 rounded-md px-2 py-1.5 transition-colors duration-200 ${modView === 'all' ? 'text-white' : 'text-gray-400 hover:text-gray-200'}`}
-                        >
-                            <span className="inline-flex items-center justify-center gap-1.5">
-                                All {activeProfile?.mods.length ?? 0}
-                                {pendingSyncCount > 0 ? (
-                                    <span
-                                        title={`${pendingSyncCount} pending sync change${pendingSyncCount === 1 ? '' : 's'}`}
-                                        className="h-1.5 w-1.5 rounded-full bg-sky-300 shadow-[0_0_5px_rgba(125,211,252,0.55)]"
-                                    />
-                                ) : null}
-                            </span>
-                        </button>
-                        <button
-                            type="button"
-                            role="tab"
-                            aria-controls="profile-mod-view-panel"
-                            onClick={() => changeModView('updates')}
-                            aria-selected={modView === 'updates'}
-                            className={`relative z-10 flex-1 rounded-md px-2 py-1.5 transition-colors duration-200 ${modView === 'updates' ? 'text-amber-300' : 'text-gray-400 hover:text-amber-300'}`}
-                        >
-                            Updates {profileUpdates.length}
-                        </button>
+                        {availableTabs.map(tab => (
+                            <button key={tab} type="button" role="tab" aria-controls="profile-mod-view-panel"
+                                onClick={() => changeModView(tab)} aria-selected={modView === tab}
+                                className={`relative z-10 min-w-0 flex-1 whitespace-nowrap rounded-md px-1 py-1.5 transition-colors duration-200 ${modView === tab
+                                    ? tab === 'updates' ? 'text-amber-300' : tab === 'sync' ? 'text-sky-300' : 'text-white'
+                                    : 'text-gray-400 hover:text-gray-200'}`}>
+                                {tab === 'all' ? `All ${activeProfile?.mods.length ?? 0}` : tab === 'updates' ? `Updates ${profileUpdates.length}` : `Sync ${pendingSyncCount}`}
+                            </button>
+                        ))}
                     </div>
                 </div>
 
@@ -608,6 +684,59 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                     aria-busy={renderedModView !== modView}
                     className="space-y-1"
                 >
+                {renderedModView === 'sync' ? (
+                    <div className="space-y-2 px-2 pb-2">
+                        {activeProfile?.apply_interrupted ? (
+                            <button type="button" onClick={() => onInstallToGame()}
+                                className="w-full rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-left text-xs text-amber-200">
+                                <span className="block font-bold">Apply was interrupted</span>
+                                <span className="text-[10px] text-amber-300/70">Resume Apply before reverting changes.</span>
+                            </button>
+                        ) : null}
+                        <div className="flex items-center gap-2 rounded-xl border border-sky-500/20 bg-sky-500/8 p-2">
+                            <span className="min-w-0 flex-1 px-1 text-xs font-semibold text-sky-100">
+                                {syncSelectedIds.length ? `${syncSelectedIds.length} selected` : `${pendingSyncCount} pending changes`}
+                            </span>
+                            <button type="button" disabled={!!activeProfile?.apply_interrupted || (syncSelectedIds.length
+                                ? pendingEntries.filter(entry => syncSelectedIds.includes(entry.id)).some(entry => !entry.revertable)
+                                : pendingEntries.some(entry => !entry.revertable))}
+                                onClick={() => {
+                                    const ids = syncSelectedIds.length ? syncSelectedIds : pendingEntries.map(entry => entry.id);
+                                    setSyncConfirmation({ kind: 'revert', ids });
+                                }}
+                                className="rounded-lg border border-gray-600 px-2.5 py-1.5 text-[11px] font-semibold text-gray-200 disabled:opacity-40">Revert{syncSelectedIds.length ? '' : ' all'}</button>
+                            <button type="button" disabled={!!activeProfile?.apply_interrupted} onClick={() => {
+                                const ids = syncSelectedIds.length ? syncSelectedIds : pendingEntries.map(entry => entry.id);
+                                setSyncConfirmation({ kind: 'sync', ids });
+                            }} className="rounded-lg bg-blue-600 px-2.5 py-1.5 text-[11px] font-bold text-white disabled:opacity-40">Sync{syncSelectedIds.length ? '' : ' all'}</button>
+                        </div>
+                        {pendingEntries.map(entry => {
+                            const baseline = entry.mod.sync_baseline;
+                            const packageName = parsePackageReference(entry.mod.fullName).packageName.toLowerCase();
+                            const pkg = packageIndex[packageName];
+                            const selected = syncSelectedIds.includes(entry.id);
+                            return (
+                                <div key={entry.id} className={`flex items-center gap-3 rounded-lg border p-2 ${selected ? 'border-sky-500/40 bg-sky-500/10' : 'border-transparent hover:bg-gray-800'}`}>
+                                    <button type="button" aria-label={`${selected ? 'Deselect' : 'Select'} ${entry.mod.displayName || entry.mod.fullName}`}
+                                        onClick={() => setSyncSelectedIds(current => current.includes(entry.id) ? current.filter(id => id !== entry.id) : [...current, entry.id])}
+                                        className={`h-5 w-5 shrink-0 rounded-full border ${selected ? 'border-sky-400 bg-sky-500 shadow-[inset_0_0_0_4px_#0f172a]' : 'border-gray-600'}`} />
+                                    <button type="button" onClick={() => { void resolveAndOpenModDetails(entry.mod, pkg); }} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+                                        <div className="h-10 w-10 shrink-0 overflow-hidden rounded-lg border border-gray-700 bg-gray-800">
+                                            {entry.mod.iconUrl ? <img src={entry.mod.iconUrl} alt="" className="h-full w-full object-cover" /> : null}
+                                        </div>
+                                        <span className="min-w-0 flex-1">
+                                            <span className="block truncate text-sm font-medium text-gray-100">{entry.mod.displayName || entry.mod.fullName.split('-')[1] || entry.mod.fullName}</span>
+                                            <span className="block truncate text-xs text-sky-300">
+                                                {entry.kind[0].toUpperCase() + entry.kind.slice(1)}{entry.kind === 'update' && baseline ? ` ${baseline.versionNumber} → ${entry.mod.versionNumber}` : ''}
+                                            </span>
+                                            {!entry.revertable ? <span className="block truncate text-[10px] text-amber-400">Previous state could not be verified</span> : null}
+                                        </span>
+                                    </button>
+                                </div>
+                            );
+                        })}
+                    </div>
+                ) : null}
                 {renderedModView === 'updates' && profileUpdates.length > 0 ? (
                     <button
                         type="button"
@@ -629,7 +758,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                     </button>
                 ) : null}
 
-                {displayedMods.map(mod => {
+                {renderedModView !== 'sync' && displayedMods.map(mod => {
                     const packageName = parsePackageReference(mod.fullName).packageName.toLowerCase();
                     const pkg = mod.source === 'local' ? undefined : packageIndex[packageName];
                     const latestVersion = pkg ? latestVersionNumber(pkg) : undefined;
@@ -790,7 +919,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                         <p className="text-gray-600 text-xs mt-1">Search for mods to get started</p>
                     </div>
                 )}
-                {activeProfile && activeProfile.mods.length > 0 && displayedMods.length === 0 && (
+                {renderedModView !== 'sync' && activeProfile && activeProfile.mods.length > 0 && displayedMods.length === 0 && (
                     <div className="flex flex-col items-center px-4 py-12 text-center">
                         <p className="text-sm font-medium text-gray-400">
                             {renderedModView === 'updates' && profileUpdates.length === 0

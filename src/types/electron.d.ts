@@ -1,6 +1,7 @@
 import type { InstalledMod, Profile } from './profile';
 import type { Community, Package, CommunityPlatformInfo } from './thunderstore';
 import type { ConfigFileInfo } from '../tauriAdapter';
+import type { ProfileSyncInspection } from '../utils/profileSync';
 
 
 export interface AppSettings {
@@ -113,6 +114,7 @@ export interface IElectronAPI {
     lookupPackagesByNames: (gameId: string, names: string[]) => Promise<any>;
     syncProfileToGame: (profileId: string, gameIdentifier: string, useLegacyCache?: boolean, finalize?: boolean) => Promise<ProfileSyncResult>;
     checkProfileRuntimeHealth: (profileId: string, gameIdentifier: string, platform?: 'windows' | 'mac') => Promise<RuntimeHealth>;
+    inspectProfileSyncState: (profileId: string, gameIdentifier: string, platform?: 'windows' | 'mac') => Promise<ProfileSyncInspection>;
     beginProfileApplyTransaction: (profileId: string, gameIdentifier: string) => Promise<boolean>;
     rollbackProfileApplyTransaction: (profileId: string, gameIdentifier: string) => Promise<boolean>;
     commitProfileApplyTransaction: (profileId: string) => Promise<boolean>;

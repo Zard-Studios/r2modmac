@@ -2,6 +2,7 @@ import type { Package, PackageVersion } from '../types/thunderstore';
 import type { InstalledMod } from '../types/profile';
 import { useProfileStore } from '../store/useProfileStore';
 import { compareVersions, findPinnedVersion, parsePackageReference } from '../utils/modVersioning';
+import { inferPendingSyncKind, snapshotInstalledMod } from '../utils/profileSync';
 
 const MAX_PARALLEL_OPS = 10;
 
@@ -62,6 +63,12 @@ export interface ProfileModUpdate {
     mod: InstalledMod;
     pkg: Package;
     version: PackageVersion;
+}
+
+export interface StageProfileUpdatesResult {
+    requested: string[];
+    staged: string[];
+    unresolved: Array<{ packageKey: string; reason: string }>;
 }
 
 export function useModActions({
@@ -407,7 +414,7 @@ export function useModActions({
                 setProgressState({ isOpen: true, title: `Uninstalling ${pkg.name}`, progress: 0, currentTask: 'Removing mod...' });
                 try {
                     const installed = profile.mods.find(m => m.fullName.startsWith(pkg.full_name));
-                    if (installed) await removeMod(profileIdToUse, installed.uuid4);
+                    if (installed) await removeMod(profileIdToUse, installed.uuid4, !legacyInstallMode);
                     setProgressState(prev => ({ ...prev, progress: 100, currentTask: 'Done!' }));
                     setTimeout(() => setProgressState(prev => ({ ...prev, isOpen: false })), 500);
                 } catch (err: any) {
@@ -440,7 +447,7 @@ export function useModActions({
 
         try {
             const installed = profile.mods.find(m => m.fullName.startsWith(pkg.full_name));
-            if (installed) await removeMod(profileId, installed.uuid4);
+            if (installed) await removeMod(profileId, installed.uuid4, !legacyInstallMode);
             setProgressState(prev => ({ ...prev, progress: 30 }));
 
             const total = depsToRemove.length;
@@ -448,7 +455,7 @@ export function useModActions({
                 const depMod = profile.mods.find(m => m.fullName.startsWith(depsToRemove[i]));
                 if (depMod) {
                     setProgressState(prev => ({ ...prev, progress: 30 + Math.round((i / total) * 60), currentTask: `Removing ${depsToRemove[i]}... (${i + 1}/${total})` }));
-                    await removeMod(profileId, depMod.uuid4);
+                    await removeMod(profileId, depMod.uuid4, !legacyInstallMode);
                 }
             }
             setProgressState(prev => ({ ...prev, progress: 100, currentTask: 'Done!' }));
@@ -462,10 +469,10 @@ export function useModActions({
     const stageProfileUpdates = async (
         updates: ProfileModUpdate[],
         targetProfileId?: string,
-    ): Promise<number> => {
+    ): Promise<StageProfileUpdatesResult> => {
         const profileIdToUse = targetProfileId || activeProfileId;
-        if (!profileIdToUse) { alert('Please select a profile first'); return 0; }
-        if (updates.length === 0) return 0;
+        if (!profileIdToUse) throw new Error('Please select a profile first');
+        if (updates.length === 0) return { requested: [], staged: [], unresolved: [] };
 
         const profile = useProfileStore.getState().profiles.find(candidate => candidate.id === profileIdToUse);
         if (!profile) throw new Error('Profile not found');
@@ -491,6 +498,11 @@ export function useModActions({
                 enabled: current?.enabled ?? true,
                 pending_sync: true,
                 synced_enabled: current?.synced_enabled ?? current?.enabled,
+                sync_baseline: current?.pending_sync
+                    ? current.sync_baseline
+                    : current
+                        ? snapshotInstalledMod(current)
+                        : null,
             });
 
             const parsedRequirements = version.dependencies.map(parsePackageReference);
@@ -533,12 +545,32 @@ export function useModActions({
             installInParallel ? MAX_PARALLEL_OPS : 1
         );
 
+        const unresolved = updates.filter(update => {
+            const key = getPackageKey(update.version.full_name).toLowerCase();
+            return planned.get(key)?.versionNumber !== update.version.version_number;
+        });
+        if (unresolved.length > 0) {
+            throw new Error(`Update plan is incomplete: ${unresolved.map(update => update.pkg.name).join(', ')}`);
+        }
+
+        const stagedMods = Array.from(planned.values()).map(mod => ({
+            ...mod,
+            pending_sync_kind: inferPendingSyncKind(mod, mod.sync_baseline),
+        }));
+        if (new Set(stagedMods.map(mod => getPackageKey(mod.fullName).toLowerCase())).size !== stagedMods.length) {
+            throw new Error('Update plan contains duplicate packages');
+        }
+
         const plannedKeys = new Set(planned.keys());
         const nextMods = profile.mods
             .filter(mod => !plannedKeys.has(getPackageKey(mod.fullName).toLowerCase()))
-            .concat(Array.from(planned.values()));
+            .concat(stagedMods);
         updateProfile(profileIdToUse, { mods: nextMods, needs_sync: true });
-        return updates.length;
+        return {
+            requested: updates.map(update => getPackageKey(update.version.full_name)),
+            staged: stagedMods.map(mod => getPackageKey(mod.fullName)),
+            unresolved: [],
+        };
     };
 
     // ── Update mod ───────────────────────────────────────────────────────────────

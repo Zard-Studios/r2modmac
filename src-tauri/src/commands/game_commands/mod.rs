@@ -37,6 +37,7 @@ mod process;
 mod shared;
 mod steam;
 pub(crate) mod sync;
+pub(crate) mod sync_state;
 pub(crate) mod owml_patcher;
 mod windows;
 mod windows_support;
@@ -69,4 +70,5 @@ pub use self::paths::{
 };
 pub use self::runtime_health::check_profile_runtime_health;
 pub use self::sync::sync_profile_to_game;
+pub use self::sync_state::inspect_profile_sync_state;
 pub use self::shared::{restore_outerwilds_vanilla, restore_mscorlib_vanilla};

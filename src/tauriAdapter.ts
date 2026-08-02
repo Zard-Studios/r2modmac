@@ -192,6 +192,8 @@ export const tauriAPI: IElectronAPI = {
     },
     checkProfileRuntimeHealth: async (profileId, gameIdentifier, platform?) =>
         invoke('check_profile_runtime_health', { profileId, gameIdentifier, platform }),
+    inspectProfileSyncState: async (profileId, gameIdentifier, platform?) =>
+        invoke('inspect_profile_sync_state', { profileId, gameIdentifier, platform }),
     beginProfileApplyTransaction: async (profileId, gameIdentifier) =>
         invoke<boolean>('begin_profile_apply_transaction', { profileId, gameIdentifier }),
     rollbackProfileApplyTransaction: async (profileId, gameIdentifier) =>

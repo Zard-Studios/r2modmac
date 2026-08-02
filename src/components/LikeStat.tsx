@@ -27,6 +27,7 @@ interface LikeStatProps {
     className?: string;
     iconClassName?: string;
     title?: string;
+    compact?: boolean;
 }
 
 export function LikeStat({
@@ -34,13 +35,14 @@ export function LikeStat({
     className = '',
     iconClassName = 'w-3.5 h-3.5',
     title = 'Likes',
+    compact = false,
 }: LikeStatProps) {
     const safeCount = typeof count === 'number' && Number.isFinite(count) ? count : 0;
 
     return (
-        <span className={`inline-flex items-center ${className}`} title={title}>
+        <span className={`inline-flex items-center ${className}`} title={compact ? `${safeCount.toLocaleString()} ${title.toLowerCase()}` : title} aria-label={`${safeCount.toLocaleString()} ${title.toLowerCase()}`}>
             <HeartIcon className={iconClassName} />
-            <span>{safeCount.toLocaleString()}</span>
+            <span>{compact ? new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }).format(safeCount) : safeCount.toLocaleString()}</span>
         </span>
     );
 }

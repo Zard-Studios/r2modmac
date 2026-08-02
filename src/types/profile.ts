@@ -2,6 +2,7 @@ export type ProfilePlatform = 'windows' | 'mac';
 export type ProfileDistribution = 'steam' | 'manual';
 export type ProfileLaunchMode = 'auto' | 'steam' | 'direct';
 export type InstalledModSource = 'thunderstore' | 'local';
+export type PendingSyncKind = 'add' | 'update' | 'enable' | 'disable';
 
 export interface CustomModSecurityReport {
     riskLevel: 'low' | 'medium' | 'high';
@@ -33,6 +34,22 @@ export interface InstalledMod {
     securityReport?: CustomModSecurityReport;
     pending_sync?: boolean;
     synced_enabled?: boolean;
+    pending_sync_kind?: PendingSyncKind;
+    sync_baseline?: InstalledModSnapshot | null;
+}
+
+export type InstalledModSnapshot = Omit<InstalledMod,
+    'pending_sync' | 'synced_enabled' | 'pending_sync_kind' | 'sync_baseline'>;
+
+export interface PendingModRemoval {
+    id: string;
+    mod: InstalledModSnapshot;
+}
+
+export interface SelectiveSyncRestore {
+    mods: InstalledMod[];
+    pending_removals: PendingModRemoval[];
+    needs_sync: boolean;
 }
 
 export interface Profile {
@@ -42,6 +59,8 @@ export interface Profile {
     mods: InstalledMod[];
     needs_sync?: boolean;
     apply_interrupted?: boolean;
+    pending_removals?: PendingModRemoval[];
+    selective_sync_restore?: SelectiveSyncRestore;
     dateCreated: number;
     lastUsed: number;
     profileImageUrl?: string;
