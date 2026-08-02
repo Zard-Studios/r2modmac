@@ -38,7 +38,6 @@ function chunkIntoRows<T>(items: T[], cols: number): T[][] {
 export function VirtualizedModGrid({ packages, installedMods, onInstall, onUninstall, onModClick, viewMode = 'grid', isBrowsing, searchQuery, legacyInstallMode = false, onLoadMore, hasMore, isLoadingMore }: VirtualizedModGridProps) {
     const parentRef = useRef<HTMLDivElement>(null);
     const [columnCount, setColumnCount] = useState(3);
-    const [availableWidth, setAvailableWidth] = useState(0);
 
     // Scroll to top when search query changes
     const prevSearchQuery = useRef(searchQuery);
@@ -96,19 +95,19 @@ export function VirtualizedModGrid({ packages, installedMods, onInstall, onUnins
             if (!parentRef.current) return;
             if (viewMode === 'list') {
                 setColumnCount(1);
-                setAvailableWidth(0);
                 return;
             }
             const width = parentRef.current.offsetWidth - 100;
             const cols = Math.max(1, Math.min(3, Math.floor(width / (COLUMN_WIDTH + GAP))));
-            setColumnCount(cols);
-            setAvailableWidth(width);
+            setColumnCount(previousCount => previousCount === cols ? previousCount : cols);
         };
 
         updateColumnCount();
 
+        let resizeTimer: number | undefined;
         const resizeObserver = new ResizeObserver(() => {
-            updateColumnCount();
+            window.clearTimeout(resizeTimer);
+            resizeTimer = window.setTimeout(updateColumnCount, 120);
         });
 
         if (parentRef.current) {
@@ -116,13 +115,12 @@ export function VirtualizedModGrid({ packages, installedMods, onInstall, onUnins
         }
 
         return () => {
+            window.clearTimeout(resizeTimer);
             resizeObserver.disconnect();
         };
     }, [viewMode]);
 
-    const gridColumnWidth = viewMode === 'grid' && columnCount > 0
-        ? Math.min(420, Math.floor((availableWidth - GAP * (columnCount - 1)) / columnCount))
-        : COLUMN_WIDTH;
+    const gridMaximumWidth = columnCount * 420 + GAP * (columnCount - 1);
 
     // For grid: chunk packages into rows so we can virtualize row-by-row
     const gridRows = useMemo(
@@ -193,8 +191,9 @@ export function VirtualizedModGrid({ packages, installedMods, onInstall, onUnins
                                     <div
                                         className="grid gap-4"
                                         style={{
-                                            gridTemplateColumns: `repeat(${columnCount}, minmax(0, ${gridColumnWidth}px))`,
+                                            gridTemplateColumns: `repeat(${columnCount}, minmax(0, 1fr))`,
                                             justifyContent: 'start',
+                                            maxWidth: `${gridMaximumWidth}px`,
                                             paddingBottom: GAP,
                                         }}
                                     >

@@ -129,6 +129,21 @@ body {
   contain-intrinsic-size: auto 56px;
 }
 
+.profile-sidebar-motion-item {
+  opacity: 1;
+  transform: translate3d(0, 0, 0) scale(1);
+  transform-origin: left center;
+  transition:
+    transform 300ms cubic-bezier(0.32, 0.72, 0, 1),
+    opacity 180ms ease-out;
+  transition-delay: calc(var(--sidebar-motion-order, 0) * 18ms);
+}
+
+.sidebar-content-closed .profile-sidebar-motion-item {
+  opacity: 0;
+  transform: translate3d(-14px, 0, 0) scale(0.985);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .download-glyph-sweep {
     animation: none;
@@ -141,6 +156,10 @@ body {
   }
 
   .profile-mod-segment-indicator {
+    transition: none;
+  }
+
+  .profile-sidebar-motion-item {
     transition: none;
   }
 }

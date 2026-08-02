@@ -53,6 +53,8 @@ export function Layout({ sidebar, main, isSidebarOpen, onToggleSidebar }: Layout
     const sidebarContentRef = useRef<HTMLDivElement>(null);
     const currentWidthRef = useRef(sidebarWidth);
     const activePointerIdRef = useRef<number | null>(null);
+    const pendingPointerXRef = useRef<number | null>(null);
+    const resizeFrameRef = useRef<number | null>(null);
 
     const getAvailableWidth = () => (
         layoutRef.current?.getBoundingClientRect().width ?? window.innerWidth
@@ -96,6 +98,26 @@ export function Layout({ sidebar, main, isSidebarOpen, onToggleSidebar }: Layout
         return () => window.removeEventListener('resize', handleWindowResize);
     }, [isSidebarOpen, sidebarWidth]);
 
+    useEffect(() => () => {
+        if (resizeFrameRef.current !== null) {
+            window.cancelAnimationFrame(resizeFrameRef.current);
+        }
+    }, []);
+
+    const renderPointerWidth = (clientX: number) => {
+        const layoutBounds = layoutRef.current?.getBoundingClientRect();
+        const layoutLeft = layoutBounds?.left ?? 0;
+        const layoutWidth = layoutBounds?.width ?? window.innerWidth;
+        renderWidth(clampSidebarWidth(clientX - layoutLeft, layoutWidth));
+    };
+
+    const flushPendingPointerWidth = () => {
+        resizeFrameRef.current = null;
+        const pendingPointerX = pendingPointerXRef.current;
+        pendingPointerXRef.current = null;
+        if (pendingPointerX !== null) renderPointerWidth(pendingPointerX);
+    };
+
     const handleResizePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
         if (event.button !== 0) return;
 
@@ -107,8 +129,10 @@ export function Layout({ sidebar, main, isSidebarOpen, onToggleSidebar }: Layout
     const handleResizePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
         if (activePointerIdRef.current !== event.pointerId) return;
 
-        const layoutLeft = layoutRef.current?.getBoundingClientRect().left ?? 0;
-        renderWidth(clampSidebarWidth(event.clientX - layoutLeft, getAvailableWidth()));
+        pendingPointerXRef.current = event.clientX;
+        if (resizeFrameRef.current === null) {
+            resizeFrameRef.current = window.requestAnimationFrame(flushPendingPointerWidth);
+        }
     };
 
     const finishPointerResize = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -116,6 +140,10 @@ export function Layout({ sidebar, main, isSidebarOpen, onToggleSidebar }: Layout
 
         if (event.currentTarget.hasPointerCapture(event.pointerId)) {
             event.currentTarget.releasePointerCapture(event.pointerId);
+        }
+        if (resizeFrameRef.current !== null) {
+            window.cancelAnimationFrame(resizeFrameRef.current);
+            flushPendingPointerWidth();
         }
         activePointerIdRef.current = null;
         setIsResizing(false);
@@ -151,12 +179,12 @@ export function Layout({ sidebar, main, isSidebarOpen, onToggleSidebar }: Layout
                 <>
                     <div
                         ref={sidebarShellRef}
-                        className={`relative z-30 flex-shrink-0 overflow-hidden ${isResizing ? '' : 'transition-[width,opacity] duration-500 ease-[cubic-bezier(0.32,0.72,0,1)]'} ${isSidebarOpen ? 'opacity-100' : 'opacity-0'}`}
+                        className={`relative z-30 flex-shrink-0 overflow-hidden ${isResizing ? '' : 'transition-[width] duration-[420ms] ease-[cubic-bezier(0.32,0.72,0,1)]'}`}
                         style={{ width: isSidebarOpen ? displayedSidebarWidth : 0 }}
                     >
                         <div
                             ref={sidebarContentRef}
-                            className={`h-full min-w-0 relative origin-left transition-[opacity,transform,filter] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] ${isSidebarOpen ? 'translate-x-0 scale-100 opacity-100 blur-0' : '-translate-x-3 scale-[0.985] opacity-0 blur-[1px]'}`}
+                            className={`sidebar-content-motion h-full min-w-0 relative ${isSidebarOpen ? 'sidebar-content-open' : 'sidebar-content-closed'}`}
                             style={{ width: displayedSidebarWidth }}
                         >
                             {sidebar}

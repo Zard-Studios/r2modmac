@@ -408,9 +408,9 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
     }, [selectedMods]);
 
     return (
-        <div className="h-full w-full min-w-0 flex flex-col bg-gray-900 border-r border-gray-800">
+        <div className="profile-sidebar-surface h-full w-full min-w-0 flex flex-col bg-gray-900 border-r border-gray-800">
             {/* Header */}
-            <div className="px-5 py-[19px] border-b border-gray-800">
+            <div className="profile-sidebar-motion-item [--sidebar-motion-order:0] px-5 py-[19px] border-b border-gray-800">
                 <div className="flex items-center gap-3">
                     <button
                         onClick={() => onSelectProfile('')}
@@ -500,7 +500,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
             </div>
 
             {/* Local Mod Search */}
-            <div className="px-4 pt-4 pb-2">
+            <div className="profile-sidebar-motion-item [--sidebar-motion-order:1] px-4 pt-4 pb-2">
                 <div className="flex gap-2">
                     <div className="relative group flex-1 min-w-0">
                         <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -535,7 +535,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
             </div>
 
             {runtimeHealth && ['missing', 'incomplete', 'unconfigured'].includes(runtimeHealth.status) && (
-                <div className="mx-4 mb-2 flex items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2.5">
+                <div className="profile-sidebar-motion-item [--sidebar-motion-order:2] mx-4 mb-2 flex items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2.5">
                     <svg className="h-4 w-4 flex-shrink-0 text-amber-400" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
                         <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l6.518 11.597c.75 1.334-.213 2.98-1.742 2.98H3.48c-1.53 0-2.493-1.646-1.743-2.98L8.257 3.1zM11 14a1 1 0 10-2 0 1 1 0 002 0zm-1-6a1 1 0 00-1 1v3a1 1 0 102 0V9a1 1 0 00-1-1z" clipRule="evenodd" />
                     </svg>
@@ -561,7 +561,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
             )}
 
             {/* Mod List */}
-            <div className={`flex-1 overflow-y-auto p-2 space-y-1 scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-transparent ${activeProfile?.is_vanilla ? 'grayscale opacity-75' : ''}`}>
+            <div className={`profile-sidebar-motion-item [--sidebar-motion-order:2] flex-1 overflow-y-auto p-2 space-y-1 scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-transparent ${activeProfile?.is_vanilla ? 'grayscale opacity-75' : ''}`}>
                 <div className="px-2 py-2 text-xs font-bold">
                     <div role="tablist" aria-label="Profile mod view" className="relative flex w-full overflow-hidden rounded-lg border border-gray-700 bg-gray-800 p-0.5">
                         <div
@@ -808,7 +808,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
             </div>
 
             {/* Footer Actions */}
-            <div className="p-4 border-t border-gray-800 bg-gray-900/50 backdrop-blur-sm space-y-3">
+            <div className="profile-sidebar-motion-item [--sidebar-motion-order:3] p-4 border-t border-gray-800 bg-gray-900/50 backdrop-blur-sm space-y-3">
                 {/* Game Info - Always Show */}
                 {currentCommunity && (
                     <div className="flex items-center gap-3">
