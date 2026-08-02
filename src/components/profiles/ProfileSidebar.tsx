@@ -1,4 +1,4 @@
-import React, { startTransition, useMemo, useState } from 'react';
+import React, { useDeferredValue, useMemo, useState } from 'react';
 import type { Community, Package } from '../../types/thunderstore';
 import type { Profile, InstalledMod } from '../../types/profile';
 import type { RuntimeHealth } from '../../types/electron';
@@ -138,10 +138,11 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
     const [selectedModIds, setSelectedModIds] = useState<string[]>([]);
     const [selectionAnchorId, setSelectionAnchorId] = useState<string | null>(null);
     const [modView, setModView] = useState<'all' | 'updates'>('all');
+    const renderedModView = useDeferredValue(modView);
 
     const changeModView = (nextView: 'all' | 'updates') => {
         if (nextView === modView) return;
-        startTransition(() => setModView(nextView));
+        setModView(nextView);
     };
 
     const handleEditClick = () => {
@@ -215,7 +216,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
     const searchedMods = activeProfile?.mods.filter(mod =>
         `${mod.fullName} ${mod.displayName || ''} ${mod.author || ''}`.toLowerCase().includes(searchQuery.toLowerCase())
     ) || [];
-    const displayedMods = modView === 'updates'
+    const displayedMods = renderedModView === 'updates'
         ? searchedMods.filter(mod => updateIds.has(mod.uuid4))
         : searchedMods;
     const visibleModIds = useMemo(() => new Set(displayedMods.map((m) => m.uuid4)), [displayedMods]);
@@ -602,16 +603,16 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                 </div>
 
                 <div
-                    key={modView}
                     id="profile-mod-view-panel"
                     role="tabpanel"
-                    className={`space-y-1 ${modView === 'updates' ? 'profile-mod-view-enter-forward' : 'profile-mod-view-enter-backward'}`}
+                    aria-busy={renderedModView !== modView}
+                    className="space-y-1"
                 >
-                {modView === 'updates' && profileUpdates.length > 0 ? (
+                {renderedModView === 'updates' && profileUpdates.length > 0 ? (
                     <button
                         type="button"
                         onClick={() => onUpdateAll(profileUpdates)}
-                        className="group/update-all mx-2 mb-2 flex w-[calc(100%-16px)] items-center gap-3 rounded-xl border border-blue-500/25 bg-blue-500/10 px-3 py-2.5 text-left transition-[background-color,border-color,transform] duration-200 hover:border-blue-500/45 hover:bg-blue-500/15 active:scale-[0.985]"
+                        className="profile-update-action-enter group/update-all mx-2 mb-2 flex w-[calc(100%-16px)] items-center gap-3 rounded-xl border border-blue-500/25 bg-blue-500/10 px-3 py-2.5 text-left transition-[background-color,border-color,transform] duration-200 hover:border-blue-500/45 hover:bg-blue-500/15 active:scale-[0.985]"
                     >
                         <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-blue-500/15 text-blue-300">
                             <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
@@ -640,7 +641,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                     return (
                         <div
                             key={mod.uuid4}
-                            className={`isolate flex items-center gap-3 p-2 rounded-lg group cursor-pointer transition-all border relative overflow-hidden ${modView === 'updates' ? 'pr-24' : 'pr-16'} ${isSelected
+                            className={`profile-mod-row isolate flex items-center gap-3 p-2 rounded-lg group cursor-pointer transition-all border relative overflow-hidden ${renderedModView === 'updates' ? 'pr-24' : 'pr-16'} ${isSelected
                                 ? 'bg-blue-500/12 border-blue-500/35'
                                 : 'border-transparent hover:border-gray-700 hover:bg-gray-800'
                                 } ${!mod.enabled ? 'opacity-50' : ''}`}
@@ -682,7 +683,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                                 <div className="flex min-w-0 items-center gap-2 overflow-hidden text-xs text-gray-500">
                                     <span className="truncate">
                                         v{mod.versionNumber}
-                                        {modView === 'updates' && update ? (
+                                        {renderedModView === 'updates' && update ? (
                                             <span className="text-amber-300"> → v{update.version.version_number}</span>
                                         ) : null}
                                     </span>
@@ -712,7 +713,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                                 </div>
                             </div>
 
-                            {modView === 'updates' && update ? (
+                            {renderedModView === 'updates' && update ? (
                                 <button
                                     type="button"
                                     onClick={(event) => {
@@ -781,12 +782,12 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                 {activeProfile && activeProfile.mods.length > 0 && displayedMods.length === 0 && (
                     <div className="flex flex-col items-center px-4 py-12 text-center">
                         <p className="text-sm font-medium text-gray-400">
-                            {modView === 'updates' && profileUpdates.length === 0
+                            {renderedModView === 'updates' && profileUpdates.length === 0
                                 ? 'All mods are up to date'
                                 : 'No matching mods'}
                         </p>
                         <p className="mt-1 text-xs text-gray-600">
-                            {modView === 'updates' && profileUpdates.length === 0
+                            {renderedModView === 'updates' && profileUpdates.length === 0
                                 ? 'Updates will appear here when available.'
                                 : 'Try a different search.'}
                         </p>
