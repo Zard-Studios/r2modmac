@@ -259,7 +259,8 @@ export function VirtualizedModGrid({ packages, installedMods, onInstall, onUnins
                                         className="grid gap-4"
                                         style={{
                                             gridTemplateColumns: `repeat(${columnCount}, minmax(0, 1fr))`,
-                                            justifyContent: 'start',
+                                            justifyContent: 'center',
+                                            marginInline: 'auto',
                                             maxWidth: `${gridMaximumWidth}px`,
                                             paddingBottom: GAP,
                                         }}
