@@ -1,7 +1,7 @@
 use super::legacy_persistent_download as legacy;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime};

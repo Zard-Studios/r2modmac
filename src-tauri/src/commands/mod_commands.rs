@@ -65,19 +65,16 @@ fn mod_install_lock() -> &'static tokio::sync::Mutex<()> {
     MOD_INSTALL_LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
 }
 
-#[command]
 pub fn begin_mod_operations() -> bool {
     MOD_OPERATIONS_CANCELLED.store(false, Ordering::Release);
     true
 }
 
-#[command]
 pub fn cancel_mod_operations() -> bool {
     MOD_OPERATIONS_CANCELLED.store(true, Ordering::Release);
     true
 }
 
-#[command]
 pub fn mod_operations_cancelled() -> bool {
     MOD_OPERATIONS_CANCELLED.load(Ordering::Acquire)
 }
@@ -3073,7 +3070,6 @@ fn detect_bepinex_pack_platform<R: std::io::Read + std::io::Seek>(
     (has_macos_loader, has_windows_loader)
 }
 
-#[command]
 pub async fn install_mod(
     app: AppHandle,
     profile_id: String,

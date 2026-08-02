@@ -1,7 +1,6 @@
 use super::legacy_mod_commands as legacy;
 use crate::models::shared::normalize_zip_entry_name;
 use crate::utils::persistent_download::{download_persistent, DownloadProgress};
-use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::fs;
 use std::io::Read;
@@ -280,12 +279,15 @@ pub async fn install_mod(
 mod tests {
     use super::*;
     use std::io::Write;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static ARCHIVE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
     fn archive_with_entries(entries: &[(&str, &[u8])]) -> std::path::PathBuf {
         let path = std::env::temp_dir().join(format!(
             "r2modmac-secure-preflight-{}-{}.zip",
             std::process::id(),
-            entries.len()
+            ARCHIVE_SEQUENCE.fetch_add(1, Ordering::Relaxed)
         ));
         let file = fs::File::create(&path).unwrap();
         let mut writer = zip::ZipWriter::new(file);
@@ -313,7 +315,7 @@ mod tests {
     fn rejects_archive_entry_traversal() {
         let archive = archive_with_entries(&[("../../outside.txt", b"bad")]);
         let error = validate_archive(&archive, "Author-Mod-1.0.0").unwrap_err();
-        assert!(error.contains("unsafe archive path"));
+        assert!(error.contains("unsafe archive path"), "{error}");
         let _ = fs::remove_file(archive);
     }
 

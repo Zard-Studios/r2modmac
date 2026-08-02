@@ -1,5 +1,7 @@
 use std::fs;
-use std::io::{Read, Write};
+#[cfg(target_os = "windows")]
+use std::io::Read;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;

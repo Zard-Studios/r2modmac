@@ -1228,7 +1228,6 @@ pub async fn check_update(current_version: String) -> Result<UpdateInfo, String>
     })
 }
 
-#[command]
 pub async fn install_update(app: AppHandle, download_url: String) -> Result<(), String> {
     use std::process::Command;
 
