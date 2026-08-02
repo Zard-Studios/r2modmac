@@ -1,7 +1,7 @@
 import type { Package, PackageVersion } from '../types/thunderstore';
 import type { InstalledMod } from '../types/profile';
 import { useProfileStore } from '../store/useProfileStore';
-import { findPinnedVersion, parsePackageReference } from '../utils/modVersioning';
+import { compareVersions, findPinnedVersion, parsePackageReference } from '../utils/modVersioning';
 
 const MAX_PARALLEL_OPS = 10;
 
@@ -70,8 +70,16 @@ export function useModActions({
     const { profiles, addMod, removeMod, updateProfile } = useProfileStore();
 
     const getPackageKey = (fullName: string) => {
-        const parts = fullName.split('-');
-        return parts.length >= 2 ? `${parts[0]}-${parts[1]}` : fullName;
+        return parsePackageReference(fullName).packageName;
+    };
+
+    const profileSatisfiesPackage = (profileId: string, fullName: string, minimumVersion: string) => {
+        const packageKey = getPackageKey(fullName).toLowerCase();
+        const profile = useProfileStore.getState().profiles.find(candidate => candidate.id === profileId);
+        return !!profile?.mods.some(mod =>
+            getPackageKey(mod.fullName).toLowerCase() === packageKey
+            && compareVersions(mod.versionNumber, minimumVersion) >= 0
+        );
     };
 
     const runWithConcurrency = async (tasks: Array<() => Promise<void>>, maxConcurrency: number) => {
@@ -122,8 +130,10 @@ export function useModActions({
         for (const depString of version.dependencies) {
             const dependency = parsePackageReference(depString);
             if (!dependency.version) throw new Error(`Dependency ${depString} has no pinned version`);
-            const activeProfile = profiles.find(p => p.id === profileIdToUse);
-            if (activeProfile?.mods.some(m => m.fullName.toLowerCase() === dependency.fullName.toLowerCase())) continue;
+            // Thunderstore dependencies pin a historical version, but an equal or
+            // newer installed package already satisfies it. Re-installing the pin
+            // here would silently downgrade that package.
+            if (profileSatisfiesPackage(profileIdToUse, dependency.packageName, dependency.version)) continue;
             if (installedCache.has(`package:${dependency.packageName.toLowerCase()}@${dependency.version}`)) continue;
             depsToInstall.push(dependency);
         }
@@ -252,15 +262,21 @@ export function useModActions({
 
         // New mode: metadata only (no progress modal - this is not a real install)
         try {
-            const modsToAdd: InstalledMod[] = [];
-            const processed = new Set<string>();
+            const modsToAdd = new Map<string, InstalledMod>();
+            const processedVersions = new Map<string, string>();
 
-            const collectModAndDeps = async (_pkg: Package, ver: PackageVersion) => {
-                if (processed.has(ver.full_name)) return;
-                processed.add(ver.full_name);
-                const profile = profiles.find(p => p.id === profileIdToUse);
-                if (profile?.mods.some(m => m.fullName === ver.full_name)) return;
-                modsToAdd.push({
+            const collectModAndDeps = async (_pkg: Package, ver: PackageVersion, isRoot = false) => {
+                const packageKey = getPackageKey(ver.full_name).toLowerCase();
+
+                // Preserve an installed dependency even when the manifest pins an
+                // older version. The root remains replaceable so explicit version
+                // selection continues to work.
+                if (!isRoot && profileSatisfiesPackage(profileIdToUse, ver.full_name, ver.version_number)) return;
+
+                const processedVersion = processedVersions.get(packageKey);
+                if (processedVersion && compareVersions(processedVersion, ver.version_number) >= 0) return;
+                processedVersions.set(packageKey, ver.version_number);
+                modsToAdd.set(packageKey, {
                     uuid4: ver.uuid4,
                     fullName: ver.full_name,
                     versionNumber: ver.version_number,
@@ -273,8 +289,9 @@ export function useModActions({
                 for (const depString of ver.dependencies) {
                     const dependency = parsePackageReference(depString);
                     if (!dependency.version) throw new Error(`Dependency ${depString} has no pinned version`);
-                    if (profile?.mods.some(m => m.fullName.toLowerCase() === dependency.fullName.toLowerCase())) continue;
-                    if (processed.has(dependency.fullName)) continue;
+                    if (profileSatisfiesPackage(profileIdToUse, dependency.packageName, dependency.version)) continue;
+                    const plannedVersion = processedVersions.get(getPackageKey(dependency.packageName).toLowerCase());
+                    if (plannedVersion && compareVersions(plannedVersion, dependency.version) >= 0) continue;
                     depsToResolve.push(dependency);
                 }
 
@@ -304,8 +321,8 @@ export function useModActions({
                 }
             };
 
-            await collectModAndDeps(pkg, version);
-            for (const mod of modsToAdd) addMod(profileIdToUse, mod);
+            await collectModAndDeps(pkg, version, true);
+            for (const mod of modsToAdd.values()) addMod(profileIdToUse, mod);
             updateProfile(profileIdToUse, { needs_sync: true });
         } catch (err: any) {
             alert(`Failed to add mod: ${err.message}`);
