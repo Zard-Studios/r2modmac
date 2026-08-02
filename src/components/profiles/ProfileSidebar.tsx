@@ -731,7 +731,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                                         event.stopPropagation();
                                         void onUpdateMod(update.pkg, activeProfile?.id, update.version);
                                     }}
-                                    className="absolute right-2 top-1/2 z-20 -translate-y-1/2 rounded-lg border border-amber-500/40 bg-amber-500/15 px-2.5 py-1.5 text-xs font-bold text-amber-200 transition-colors hover:bg-amber-500/25"
+                                    className="absolute right-2 top-1/2 z-20 -translate-y-1/2 rounded-lg bg-yellow-600 px-3 py-1.5 text-xs font-bold text-white shadow-lg shadow-yellow-900/20 transition-all duration-200 hover:bg-yellow-500 active:scale-95"
                                 >
                                     Update
                                 </button>
