@@ -2160,16 +2160,16 @@ function App() {
 
     const main = (
       <div className="flex-1 flex flex-col min-w-0 bg-gray-900 h-full">
-        <div className="px-[50px] py-5 border-b border-gray-800 flex items-center justify-between gap-4 flex-shrink-0">
-          <div className="flex items-center gap-4">
+        <div className="px-[clamp(1rem,3vw,50px)] py-5 border-b border-gray-800 flex flex-wrap items-center justify-between gap-4 flex-shrink-0">
+          <div className="flex shrink-0 items-center gap-4">
             {isBrowsingMode && (
               <Button variant="ghost" size="sm" onClick={() => setIsBrowsingMode(false)}>
                 ← Exit
               </Button>
             )}
-            <h1 className="text-2xl font-bold text-white">Browse Mods</h1>
+            <h1 className="whitespace-nowrap text-2xl font-bold text-white">Browse Mods</h1>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-3">
             <div className="relative flex bg-gray-800 rounded-lg p-1 border border-gray-700 overflow-hidden">
               {/* Sliding Background */}
               <div
@@ -2200,7 +2200,7 @@ function App() {
               onChange={setFilterOptions}
               availableCategories={availableCategories}
             />
-            <div className="w-80">
+            <div className="min-w-48 max-w-80 flex-1 basis-48">
               <SearchBar value={searchQuery} onChange={setSearchQuery} />
             </div>
           </div>

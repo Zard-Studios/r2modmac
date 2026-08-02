@@ -408,7 +408,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
     }, [selectedMods]);
 
     return (
-        <div className="h-full flex flex-col bg-gray-900 border-r border-gray-800 w-80 flex-shrink-0">
+        <div className="h-full w-full min-w-0 flex flex-col bg-gray-900 border-r border-gray-800">
             {/* Header */}
             <div className="px-5 py-[19px] border-b border-gray-800">
                 <div className="flex items-center gap-3">
