@@ -2358,11 +2358,12 @@ function App() {
 
       {/* Modals */}
       <UpdateAllModal
-        isOpen={pendingProfileUpdates.length > 0}
+        isOpen={pendingProfileUpdates.length > 0 && !selectedMod}
         updates={pendingProfileUpdates}
         isUpdating={isUpdatingProfile}
         onClose={() => setPendingProfileUpdates([])}
         onConfirm={() => { void confirmProfileUpdates(); }}
+        onViewMod={setSelectedMod}
       />
       <AppModals
         selectedMod={selectedMod}

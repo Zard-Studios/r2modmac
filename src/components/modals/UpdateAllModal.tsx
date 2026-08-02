@@ -1,4 +1,6 @@
+import { useEffect } from 'react';
 import type { ProfileModUpdate } from '../../hooks/useModActions';
+import type { Package } from '../../types/thunderstore';
 
 interface UpdateAllModalProps {
     isOpen: boolean;
@@ -6,17 +8,37 @@ interface UpdateAllModalProps {
     isUpdating: boolean;
     onClose: () => void;
     onConfirm: () => void;
+    onViewMod: (pkg: Package) => void;
 }
 
-export function UpdateAllModal({ isOpen, updates, isUpdating, onClose, onConfirm }: UpdateAllModalProps) {
+export function UpdateAllModal({ isOpen, updates, isUpdating, onClose, onConfirm, onViewMod }: UpdateAllModalProps) {
+    useEffect(() => {
+        if (!isOpen || isUpdating) return;
+
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key !== 'Escape') return;
+            event.preventDefault();
+            onClose();
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [isOpen, isUpdating, onClose]);
+
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+        <div
+            className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+            onMouseDown={(event) => {
+                if (event.target === event.currentTarget && !isUpdating) onClose();
+            }}
+        >
             <div
                 role="dialog"
                 aria-modal="true"
                 aria-labelledby="update-all-title"
+                onMouseDown={(event) => event.stopPropagation()}
                 className="flex max-h-[78vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-gray-700 bg-gray-800 shadow-2xl"
             >
                 <div className="border-b border-gray-700 px-6 py-5">
@@ -28,7 +50,14 @@ export function UpdateAllModal({ isOpen, updates, isUpdating, onClose, onConfirm
 
                 <div className="min-h-0 flex-1 overflow-y-auto p-3">
                     {updates.map(({ mod, pkg, version }) => (
-                        <div key={pkg.full_name} className="flex items-center gap-3 rounded-xl px-3 py-2.5 hover:bg-gray-700/50">
+                        <button
+                            key={pkg.full_name}
+                            type="button"
+                            onClick={() => onViewMod(pkg)}
+                            disabled={isUpdating}
+                            aria-label={`View details for ${pkg.name}`}
+                            className="group flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-gray-700/50 focus-visible:bg-gray-700/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-400/70 disabled:cursor-wait disabled:opacity-60"
+                        >
                             <div className="h-10 w-10 flex-shrink-0 overflow-hidden rounded-lg border border-gray-700 bg-gray-900">
                                 {version.icon ? <img src={version.icon} alt="" className="h-full w-full object-cover" /> : null}
                             </div>
@@ -41,7 +70,10 @@ export function UpdateAllModal({ isOpen, updates, isUpdating, onClose, onConfirm
                                     {!mod.enabled ? <span className="rounded bg-gray-700 px-1.5 py-0.5 text-[10px] uppercase">Disabled</span> : null}
                                 </div>
                             </div>
-                        </div>
+                            <svg className="h-4 w-4 flex-shrink-0 text-gray-500 transition-[color,transform] group-hover:translate-x-0.5 group-hover:text-blue-300" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="m9 18 6-6-6-6" />
+                            </svg>
+                        </button>
                     ))}
                 </div>
 
