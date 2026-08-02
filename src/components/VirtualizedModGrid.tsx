@@ -1,5 +1,6 @@
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useRef, useState, useEffect, useLayoutEffect, useMemo, useCallback } from 'react';
+import { flushSync } from 'react-dom';
 import { ModCard } from './ModCard';
 import { ModListItem } from './ModListItem';
 import type { Package } from '../types/thunderstore';
@@ -25,6 +26,8 @@ const COLUMN_WIDTH = 320;
 const GAP = 16;
 const GRID_ROW_HEIGHT = 224;
 const LIST_ROW_HEIGHT = 80;
+const GRID_REFLOW_DURATION = 260;
+const GRID_REFLOW_EASING = 'cubic-bezier(0.32, 0.72, 0, 1)';
 
 // Split flat array into rows of `cols` items
 function chunkIntoRows<T>(items: T[], cols: number): T[][] {
@@ -38,6 +41,7 @@ function chunkIntoRows<T>(items: T[], cols: number): T[][] {
 export function VirtualizedModGrid({ packages, installedMods, onInstall, onUninstall, onModClick, viewMode = 'grid', isBrowsing, searchQuery, legacyInstallMode = false, onLoadMore, hasMore, isLoadingMore }: VirtualizedModGridProps) {
     const parentRef = useRef<HTMLDivElement>(null);
     const [columnCount, setColumnCount] = useState(3);
+    const columnCountRef = useRef(3);
 
     // Scroll to top when search query changes
     const prevSearchQuery = useRef(searchQuery);
@@ -91,23 +95,87 @@ export function VirtualizedModGrid({ packages, installedMods, onInstall, onUnins
     }, [viewMode, columnCount]);
 
     useEffect(() => {
-        const updateColumnCount = () => {
+        const collectCardRects = () => {
+            const rects = new Map<string, DOMRect>();
+            const cards = parentRef.current?.querySelectorAll<HTMLElement>('[data-mod-grid-id]');
+            cards?.forEach(card => {
+                const id = card.dataset.modGridId;
+                if (id) rects.set(id, card.getBoundingClientRect());
+            });
+            return rects;
+        };
+
+        const updateColumnCount = (animate: boolean) => {
             if (!parentRef.current) return;
             if (viewMode === 'list') {
+                columnCountRef.current = 1;
                 setColumnCount(1);
                 return;
             }
             const width = parentRef.current.offsetWidth - 100;
             const cols = Math.max(1, Math.min(3, Math.floor(width / (COLUMN_WIDTH + GAP))));
-            setColumnCount(previousCount => previousCount === cols ? previousCount : cols);
+            if (columnCountRef.current === cols) return;
+
+            const shouldAnimate = animate
+                && !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+                && typeof Element.prototype.animate === 'function';
+            const previousRects = shouldAnimate ? collectCardRects() : new Map<string, DOMRect>();
+
+            if (shouldAnimate) {
+                parentRef.current.querySelectorAll<HTMLElement>('[data-mod-grid-id]').forEach(card => {
+                    card.getAnimations().forEach(animation => animation.cancel());
+                });
+                flushSync(() => {
+                    columnCountRef.current = cols;
+                    setColumnCount(cols);
+                });
+            } else {
+                columnCountRef.current = cols;
+                setColumnCount(cols);
+            }
+
+            if (!shouldAnimate) return;
+
+            parentRef.current.querySelectorAll<HTMLElement>('[data-mod-grid-id]').forEach(card => {
+                const id = card.dataset.modGridId;
+                const previousRect = id ? previousRects.get(id) : undefined;
+                if (!previousRect) {
+                    card.animate(
+                        [
+                            { opacity: 0, transform: 'translate3d(0, 8px, 0) scale(0.985)' },
+                            { opacity: 1, transform: 'translate3d(0, 0, 0) scale(1)' },
+                        ],
+                        { duration: 180, easing: GRID_REFLOW_EASING },
+                    );
+                    return;
+                }
+
+                const nextRect = card.getBoundingClientRect();
+                const translateX = previousRect.left - nextRect.left;
+                const translateY = previousRect.top - nextRect.top;
+                const scaleX = nextRect.width > 0 ? previousRect.width / nextRect.width : 1;
+                const scaleY = nextRect.height > 0 ? previousRect.height / nextRect.height : 1;
+
+                card.animate(
+                    [
+                        {
+                            transform: `translate3d(${translateX}px, ${translateY}px, 0) scale(${scaleX}, ${scaleY})`,
+                            transformOrigin: 'top left',
+                        },
+                        {
+                            transform: 'translate3d(0, 0, 0) scale(1)',
+                            transformOrigin: 'top left',
+                        },
+                    ],
+                    { duration: GRID_REFLOW_DURATION, easing: GRID_REFLOW_EASING },
+                );
+            });
         };
 
-        updateColumnCount();
+        updateColumnCount(false);
 
-        let resizeTimer: number | undefined;
         const resizeObserver = new ResizeObserver(() => {
-            window.clearTimeout(resizeTimer);
-            resizeTimer = window.setTimeout(updateColumnCount, 120);
+            updateColumnCount(true);
         });
 
         if (parentRef.current) {
@@ -115,7 +183,6 @@ export function VirtualizedModGrid({ packages, installedMods, onInstall, onUnins
         }
 
         return () => {
-            window.clearTimeout(resizeTimer);
             resizeObserver.disconnect();
         };
     }, [viewMode]);
@@ -198,17 +265,18 @@ export function VirtualizedModGrid({ packages, installedMods, onInstall, onUnins
                                         }}
                                     >
                                         {rowPkgs.map((pkg) => (
-                                            <ModCard
-                                                key={pkg.uuid4}
-                                                mod={pkg.versions[0]}
-                                                likesCount={pkg.rating_score}
-                                                onInstall={() => onInstall(pkg)}
-                                                onUninstall={() => onUninstall(pkg)}
-                                                onClick={() => onModClick(pkg)}
-                                                installStatus={getInstallStatus(pkg)}
-                                                isBrowsing={isBrowsing}
-                                                legacyInstallMode={legacyInstallMode}
-                                            />
+                                            <div key={pkg.uuid4} data-mod-grid-id={pkg.uuid4} className="min-w-0">
+                                                <ModCard
+                                                    mod={pkg.versions[0]}
+                                                    likesCount={pkg.rating_score}
+                                                    onInstall={() => onInstall(pkg)}
+                                                    onUninstall={() => onUninstall(pkg)}
+                                                    onClick={() => onModClick(pkg)}
+                                                    installStatus={getInstallStatus(pkg)}
+                                                    isBrowsing={isBrowsing}
+                                                    legacyInstallMode={legacyInstallMode}
+                                                />
+                                            </div>
                                         ))}
                                     </div>
                                 )}

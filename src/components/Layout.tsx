@@ -179,7 +179,7 @@ export function Layout({ sidebar, main, isSidebarOpen, onToggleSidebar }: Layout
                 <>
                     <div
                         ref={sidebarShellRef}
-                        className={`relative z-30 flex-shrink-0 overflow-hidden ${isResizing ? '' : 'transition-[width] duration-[420ms] ease-[cubic-bezier(0.32,0.72,0,1)]'}`}
+                        className={`relative z-30 flex-shrink-0 overflow-hidden ${isResizing ? '' : 'transition-[width] duration-[360ms] ease-[cubic-bezier(0.32,0.72,0,1)]'}`}
                         style={{ width: isSidebarOpen ? displayedSidebarWidth : 0 }}
                     >
                         <div
