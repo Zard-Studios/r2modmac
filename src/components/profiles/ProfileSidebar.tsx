@@ -640,14 +640,20 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                     return (
                         <div
                             key={mod.uuid4}
-                            className={`flex items-center gap-3 p-2 rounded-lg group cursor-pointer transition-all border relative overflow-hidden ${modView === 'updates' ? 'pr-24' : 'pr-16'} ${isSelected
+                            className={`isolate flex items-center gap-3 p-2 rounded-lg group cursor-pointer transition-all border relative overflow-hidden ${modView === 'updates' ? 'pr-24' : 'pr-16'} ${isSelected
                                 ? 'bg-blue-500/12 border-blue-500/35'
                                 : 'border-transparent hover:border-gray-700 hover:bg-gray-800'
                                 } ${!mod.enabled ? 'opacity-50' : ''}`}
                             onClick={(e) => handleModRowClick(e, mod, pkg)}
                         >
+                            {showDeprecatedWarnings && pkg?.is_deprecated ? (
+                                <div
+                                    aria-hidden="true"
+                                    className="pointer-events-none absolute inset-0 z-0 bg-[linear-gradient(90deg,#450a0a_0%,rgba(69,10,10,0.5)_38%,rgba(69,10,10,0)_82%)]"
+                                />
+                            ) : null}
                             {/* ... existing mod item content ... */}
-                            <div className="w-10 h-10 bg-gray-800 rounded-lg overflow-hidden flex-shrink-0 border border-gray-700 relative">
+                            <div className="relative z-10 w-10 h-10 bg-gray-800 rounded-lg overflow-hidden flex-shrink-0 border border-gray-700">
                                 {mod.iconUrl ? (
                                     <img src={mod.iconUrl} alt="" className="w-full h-full object-cover" />
                                 ) : (
@@ -660,20 +666,9 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                                         <span className="text-xs font-bold text-white">OFF</span>
                                     </div>
                                 )}
-                                {showDeprecatedWarnings && pkg?.is_deprecated ? (
-                                    <span
-                                        className="absolute right-0 top-0 z-20 flex h-5 w-5 items-center justify-center rounded-bl-lg bg-red-950/85 text-red-300 shadow-[-1px_1px_5px_rgba(0,0,0,0.35)] backdrop-blur-sm"
-                                        title="Deprecated mod"
-                                        aria-label="Deprecated mod"
-                                    >
-                                        <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                                            <path fillRule="evenodd" d="M8.26 3.1c.76-1.36 2.72-1.36 3.48 0l6.52 11.6c.75 1.33-.21 2.98-1.74 2.98H3.48c-1.53 0-2.49-1.65-1.74-2.98L8.26 3.1ZM10 7.75a.75.75 0 0 1 .75.75v3a.75.75 0 0 1-1.5 0v-3a.75.75 0 0 1 .75-.75Zm0 7.25a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z" clipRule="evenodd" />
-                                        </svg>
-                                    </span>
-                                ) : null}
                             </div>
 
-                            <div className="min-w-0 flex-1">
+                            <div className="relative z-10 min-w-0 flex-1">
                                 <div className="flex items-center gap-2">
                                     <div className={`text-sm font-medium truncate transition-colors ${mod.enabled ? 'text-gray-200 group-hover:text-white' : 'text-gray-500 line-through'}`}>
                                         {displayName}
