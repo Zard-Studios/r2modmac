@@ -4,13 +4,27 @@ use tauri::command;
 const APPLY_BACKUP_DIR: &str = "apply-transaction";
 const APPLY_MARKER: &str = "ready";
 
-fn transaction_dir(app: &AppHandle, profile_id: &str) -> Result<std::path::PathBuf, String> {
+fn legacy_transaction_dir(app: &AppHandle, profile_id: &str) -> Result<std::path::PathBuf, String> {
     Ok(crate::utils::paths::app_data_dir(app)
         .map_err(|error| error.to_string())?
         .join("profiles")
         .join(profile_id)
         .join(".r2modmac")
         .join(APPLY_BACKUP_DIR))
+}
+
+fn transaction_dir(
+    targets: &[std::path::PathBuf],
+    profile_id: &str,
+) -> Result<std::path::PathBuf, String> {
+    let runtime_root = targets
+        .first()
+        .and_then(|target| target.parent())
+        .ok_or_else(|| "Cannot resolve Apply snapshot location".to_string())?;
+    Ok(runtime_root
+        .join(".r2modmac")
+        .join("apply-transactions")
+        .join(profile_id))
 }
 
 async fn transaction_targets(
@@ -88,6 +102,52 @@ fn copy_target(source: &std::path::Path, destination: &std::path::Path) -> Resul
     }
 }
 
+fn target_size(target: &std::path::Path) -> u64 {
+    if target.is_dir() {
+        calculate_dir_size(target).unwrap_or(0)
+    } else {
+        fs::metadata(target)
+            .map(|metadata| metadata.len())
+            .unwrap_or(0)
+    }
+}
+
+fn copy_target_with_progress(
+    source: &std::path::Path,
+    destination: &std::path::Path,
+    on_copied: &mut impl FnMut(u64),
+) -> Result<(), String> {
+    if source.is_dir() {
+        fs::create_dir_all(destination).map_err(|error| error.to_string())?;
+        for entry in fs::read_dir(source).map_err(|error| error.to_string())? {
+            let entry = entry.map_err(|error| error.to_string())?;
+            let source_path = entry.path();
+            let destination_path = destination.join(entry.file_name());
+            if entry
+                .file_type()
+                .map_err(|error| error.to_string())?
+                .is_dir()
+            {
+                copy_target_with_progress(&source_path, &destination_path, on_copied)?;
+            } else {
+                if let Some(parent) = destination_path.parent() {
+                    fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+                }
+                let copied =
+                    fs::copy(&source_path, &destination_path).map_err(|error| error.to_string())?;
+                on_copied(copied);
+            }
+        }
+    } else if source.is_file() {
+        if let Some(parent) = destination.parent() {
+            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        let copied = fs::copy(source, destination).map_err(|error| error.to_string())?;
+        on_copied(copied);
+    }
+    Ok(())
+}
+
 fn remove_target(target: &std::path::Path) -> Result<(), String> {
     if target.is_dir() {
         fs::remove_dir_all(target).map_err(|error| error.to_string())
@@ -118,8 +178,15 @@ pub async fn begin_profile_apply_transaction(
     profile_id: String,
     game_identifier: String,
 ) -> Result<bool, String> {
-    let backup_root = transaction_dir(&app, &profile_id)?;
     let targets = transaction_targets(&app, &profile_id, &game_identifier).await?;
+    let backup_root = transaction_dir(&targets, &profile_id)?;
+    let legacy_backup_root = legacy_transaction_dir(&app, &profile_id)?;
+    if legacy_backup_root.exists() {
+        if legacy_backup_root.join(APPLY_MARKER).is_file() {
+            restore_snapshot(&legacy_backup_root, &targets)?;
+        }
+        fs::remove_dir_all(&legacy_backup_root).map_err(|error| error.to_string())?;
+    }
     if backup_root.exists() {
         if backup_root.join(APPLY_MARKER).is_file() {
             restore_snapshot(&backup_root, &targets)?;
@@ -128,9 +195,33 @@ pub async fn begin_profile_apply_transaction(
     }
     fs::create_dir_all(&backup_root).map_err(|error| error.to_string())?;
 
+    let total_bytes = targets
+        .iter()
+        .map(|target| target_size(target))
+        .sum::<u64>();
+    let mut copied_bytes = 0_u64;
+    let mut last_percent = u64::MAX;
     let snapshot_result = targets.iter().enumerate().try_for_each(|(index, target)| {
         let backup = backup_root.join(backup_name(index));
-        copy_target(target, &backup)
+        copy_target_with_progress(target, &backup, &mut |copied| {
+            copied_bytes = copied_bytes.saturating_add(copied);
+            let percent = if total_bytes == 0 {
+                100
+            } else {
+                copied_bytes.saturating_mul(100) / total_bytes
+            };
+            if percent != last_percent {
+                last_percent = percent;
+                let _ = app.emit(
+                    "profile-apply-snapshot-progress",
+                    serde_json::json!({
+                        "copiedBytes": copied_bytes,
+                        "totalBytes": total_bytes,
+                        "progressPercent": percent,
+                    }),
+                );
+            }
+        })
     });
     if let Err(error) = snapshot_result {
         let _ = fs::remove_dir_all(&backup_root);
@@ -146,24 +237,35 @@ pub async fn rollback_profile_apply_transaction(
     profile_id: String,
     game_identifier: String,
 ) -> Result<bool, String> {
-    let backup_root = transaction_dir(&app, &profile_id)?;
-    if !backup_root.join(APPLY_MARKER).is_file() {
-        return Ok(false);
-    }
     let targets = transaction_targets(&app, &profile_id, &game_identifier).await?;
-    restore_snapshot(&backup_root, &targets)?;
-    fs::remove_dir_all(&backup_root).map_err(|error| error.to_string())?;
-    Ok(true)
+    let backup_roots = [
+        transaction_dir(&targets, &profile_id)?,
+        legacy_transaction_dir(&app, &profile_id)?,
+    ];
+    for backup_root in backup_roots {
+        if backup_root.join(APPLY_MARKER).is_file() {
+            restore_snapshot(&backup_root, &targets)?;
+            fs::remove_dir_all(&backup_root).map_err(|error| error.to_string())?;
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 #[command]
-pub fn commit_profile_apply_transaction(
+pub async fn commit_profile_apply_transaction(
     app: AppHandle,
     profile_id: String,
+    game_identifier: String,
 ) -> Result<bool, String> {
-    let backup_root = transaction_dir(&app, &profile_id)?;
-    if backup_root.exists() {
-        fs::remove_dir_all(backup_root).map_err(|error| error.to_string())?;
+    let targets = transaction_targets(&app, &profile_id, &game_identifier).await?;
+    for backup_root in [
+        transaction_dir(&targets, &profile_id)?,
+        legacy_transaction_dir(&app, &profile_id)?,
+    ] {
+        if backup_root.exists() {
+            fs::remove_dir_all(backup_root).map_err(|error| error.to_string())?;
+        }
     }
     Ok(true)
 }
@@ -194,6 +296,45 @@ mod tests {
 
         assert_eq!(fs::read(target.join("mod.dll")).unwrap(), b"old");
         assert!(!target.join("new-only.dll").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn snapshot_is_located_on_the_target_volume() {
+        let target = std::path::PathBuf::from("/Volumes/Games/MyGame/BepInEx");
+        let snapshot = transaction_dir(&[target], "profile-id").unwrap();
+        assert_eq!(
+            snapshot,
+            std::path::PathBuf::from(
+                "/Volumes/Games/MyGame/.r2modmac/apply-transactions/profile-id"
+            )
+        );
+    }
+
+    #[test]
+    fn snapshot_copy_reports_bytes_as_files_are_written() {
+        let root = std::env::temp_dir().join(format!(
+            "r2modmac-apply-progress-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let source = root.join("source");
+        let destination = root.join("destination");
+        fs::create_dir_all(source.join("nested")).unwrap();
+        fs::write(source.join("one.bin"), b"1234").unwrap();
+        fs::write(source.join("nested/two.bin"), b"56789").unwrap();
+
+        let mut copied = 0;
+        copy_target_with_progress(&source, &destination, &mut |bytes| copied += bytes).unwrap();
+
+        assert_eq!(copied, 9);
+        assert_eq!(
+            fs::read(destination.join("nested/two.bin")).unwrap(),
+            b"56789"
+        );
         fs::remove_dir_all(root).unwrap();
     }
 }

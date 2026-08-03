@@ -296,6 +296,7 @@ export function useModActions({
                     iconUrl: ver.icon,
                     enabled: true,
                     pending_sync: true,
+                    pending_sync_status: 'queued',
                 });
 
                 const depsToResolve: ReturnType<typeof parsePackageReference>[] = [];
@@ -497,6 +498,7 @@ export function useModActions({
                 iconUrl: version.icon,
                 enabled: current?.enabled ?? true,
                 pending_sync: true,
+                pending_sync_status: 'queued',
                 synced_enabled: current?.synced_enabled ?? current?.enabled,
                 sync_baseline: current?.pending_sync
                     ? current.sync_baseline

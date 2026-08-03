@@ -3,6 +3,7 @@ export type ProfileDistribution = 'steam' | 'manual';
 export type ProfileLaunchMode = 'auto' | 'steam' | 'direct';
 export type InstalledModSource = 'thunderstore' | 'local';
 export type PendingSyncKind = 'add' | 'update' | 'enable' | 'disable';
+export type PendingSyncStatus = 'queued' | 'syncing' | 'ready' | 'failed';
 
 export interface CustomModSecurityReport {
     riskLevel: 'low' | 'medium' | 'high';
@@ -35,15 +36,19 @@ export interface InstalledMod {
     pending_sync?: boolean;
     synced_enabled?: boolean;
     pending_sync_kind?: PendingSyncKind;
+    pending_sync_status?: PendingSyncStatus;
+    pending_sync_error?: string;
     sync_baseline?: InstalledModSnapshot | null;
 }
 
 export type InstalledModSnapshot = Omit<InstalledMod,
-    'pending_sync' | 'synced_enabled' | 'pending_sync_kind' | 'sync_baseline'>;
+    'pending_sync' | 'synced_enabled' | 'pending_sync_kind' | 'pending_sync_status' | 'pending_sync_error' | 'sync_baseline'>;
 
 export interface PendingModRemoval {
     id: string;
     mod: InstalledModSnapshot;
+    sync_status?: PendingSyncStatus;
+    sync_error?: string;
 }
 
 export interface SelectiveSyncRestore {

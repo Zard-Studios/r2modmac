@@ -223,6 +223,8 @@ export const useProfileStore = create<ProfileState>((set) => ({
                         ? snapshotInstalledMod(existing)
                         : null;
                 merged.pending_sync_kind = inferPendingSyncKind(merged, merged.sync_baseline);
+                merged.pending_sync_status = merged.pending_sync_status || 'queued';
+                merged.pending_sync_error = undefined;
             }
             profile.mods = [
                 ...profile.mods.filter((m) => {
@@ -282,7 +284,7 @@ export const useProfileStore = create<ProfileState>((set) => ({
                         mods: candidate.mods.filter(item => item.uuid4 !== modId),
                         pending_removals: [
                             ...(candidate.pending_removals || []).filter(removal => getProfileModKey(removal.mod.fullName) !== getProfileModKey(baseline.fullName)),
-                            { id: `remove:${getProfileModKey(baseline.fullName)}`, mod: baseline },
+                            { id: `remove:${getProfileModKey(baseline.fullName)}`, mod: baseline, sync_status: 'queued' as const },
                         ],
                         needs_sync: true,
                     }
@@ -382,6 +384,8 @@ export const useProfileStore = create<ProfileState>((set) => ({
                                     { ...m, enabled: newEnabled },
                                     m.pending_sync ? m.sync_baseline : snapshotInstalledMod(m)
                                 ),
+                            pending_sync_status: syncFiles || !pendingSync ? undefined : 'queued',
+                            pending_sync_error: undefined,
                         };
                     }
                     return m;

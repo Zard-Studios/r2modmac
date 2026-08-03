@@ -22,4 +22,10 @@ export interface ModDownloadProgressEvent {
   done: boolean;
 }
 
+export interface ProfileApplySnapshotProgressEvent {
+  copiedBytes: number;
+  totalBytes: number;
+  progressPercent: number;
+}
+
 export type ProgressSetter = Dispatch<SetStateAction<ProgressState>>;

@@ -29,6 +29,8 @@ export const snapshotInstalledMod = (mod: InstalledMod): InstalledModSnapshot =>
     delete snapshot.pending_sync;
     delete snapshot.synced_enabled;
     delete snapshot.pending_sync_kind;
+    delete snapshot.pending_sync_status;
+    delete snapshot.pending_sync_error;
     delete snapshot.sync_baseline;
     return snapshot;
 };
@@ -37,6 +39,8 @@ export const restoreInstalledMod = (snapshot: InstalledModSnapshot): InstalledMo
     ...snapshot,
     pending_sync: false,
     synced_enabled: snapshot.enabled,
+    pending_sync_status: undefined,
+    pending_sync_error: undefined,
 });
 
 export const inferPendingSyncKind = (
@@ -66,7 +70,7 @@ export const migratePendingSyncBaselines = (
         if (!mod.pending_sync || mod.sync_baseline !== undefined) return mod;
         const inspected = inspectedByKey.get(getProfileModKey(mod.fullName));
         if (!inspected) {
-            return { ...mod, sync_baseline: null, pending_sync_kind: 'add' as const };
+            return { ...mod, sync_baseline: null, pending_sync_kind: 'add' as const, pending_sync_status: mod.pending_sync_status || 'queued' as const };
         }
 
         const baseline: InstalledModSnapshot = {
@@ -79,6 +83,7 @@ export const migratePendingSyncBaselines = (
             ...mod,
             sync_baseline: baseline,
             pending_sync_kind: inferPendingSyncKind(mod, baseline),
+            pending_sync_status: mod.pending_sync_status || 'queued',
         };
     });
 

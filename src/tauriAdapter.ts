@@ -198,8 +198,8 @@ export const tauriAPI: IElectronAPI = {
         invoke<boolean>('begin_profile_apply_transaction', { profileId, gameIdentifier }),
     rollbackProfileApplyTransaction: async (profileId, gameIdentifier) =>
         invoke<boolean>('rollback_profile_apply_transaction', { profileId, gameIdentifier }),
-    commitProfileApplyTransaction: async (profileId) =>
-        invoke<boolean>('commit_profile_apply_transaction', { profileId }),
+    commitProfileApplyTransaction: async (profileId, gameIdentifier) =>
+        invoke<boolean>('commit_profile_apply_transaction', { profileId, gameIdentifier }),
     copyModFromCache: async (profileId: string, modName: string, gamePath: string) => {
         return await invoke<{ success: boolean; copied: boolean }>('copy_mod_from_cache', { profileId, modName, gamePath });
     },

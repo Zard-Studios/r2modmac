@@ -1149,7 +1149,7 @@ function App() {
           (checked?.missingComponents.length ? ` (${checked.missingComponents.join(', ')}).` : '.')
         );
       }
-      await window.ipcRenderer.commitProfileApplyTransaction(profile.id);
+      await window.ipcRenderer.commitProfileApplyTransaction(profile.id, profile.gameIdentifier);
       repairTransactionStarted = false;
       setProgressState(previous => ({ ...previous, progress: 100, currentTask: 'Runtime repaired.' }));
       window.setTimeout(() => setProgressState(previous => ({ ...previous, isOpen: false })), 500);
@@ -1276,14 +1276,35 @@ function App() {
     };
     updateProfile(original.id, {
       mods: effectiveMods,
-      pending_removals: [],
+      pending_removals: (original.pending_removals || []).filter(removal => selected.has(removal.id)),
       selective_sync_restore: restoreState,
       needs_sync: true,
     });
     await window.ipcRenderer.saveProfiles(useProfileStore.getState().profiles);
     const succeeded = await handleSyncToGame(undefined, { silentSuccess: true });
     if (!succeeded) {
-      updateProfile(original.id, { ...restoreState, selective_sync_restore: undefined, apply_interrupted: true });
+      const failedEffective = useProfileStore.getState().profiles.find(profile => profile.id === original.id);
+      const failedByKey = new Map((failedEffective?.mods || []).map(mod => [getProfileModKey(mod.fullName), mod]));
+      const failedRemovalById = new Map((failedEffective?.pending_removals || []).map(removal => [removal.id, removal]));
+      updateProfile(original.id, {
+        ...restoreState,
+        mods: original.mods.map(mod => {
+          if (!selected.has(mod.uuid4)) return mod;
+          const failed = failedByKey.get(getProfileModKey(mod.fullName));
+          return failed ? {
+            ...mod,
+            pending_sync_status: failed.pending_sync_status,
+            pending_sync_error: failed.pending_sync_error,
+          } : mod;
+        }),
+        pending_removals: (original.pending_removals || []).map(removal => {
+          if (!selected.has(removal.id)) return removal;
+          const failed = failedRemovalById.get(removal.id);
+          return failed ? { ...removal, sync_status: failed.sync_status, sync_error: failed.sync_error } : removal;
+        }),
+        selective_sync_restore: undefined,
+        apply_interrupted: true,
+      });
       return;
     }
 
@@ -1293,7 +1314,7 @@ function App() {
     const mods = original.mods
       .filter(mod => !selectedRemovalKeys.has(getProfileModKey(mod.fullName)))
       .map(mod => selected.has(mod.uuid4)
-        ? { ...mod, pending_sync: false, synced_enabled: mod.enabled, pending_sync_kind: undefined, sync_baseline: undefined }
+        ? { ...mod, pending_sync: false, synced_enabled: mod.enabled, pending_sync_kind: undefined, pending_sync_status: undefined, pending_sync_error: undefined, sync_baseline: undefined }
         : mod);
     const pendingRemovals = (original.pending_removals || []).filter(removal => !selected.has(removal.id));
     updateProfile(original.id, {

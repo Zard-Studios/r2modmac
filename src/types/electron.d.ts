@@ -117,7 +117,7 @@ export interface IElectronAPI {
     inspectProfileSyncState: (profileId: string, gameIdentifier: string, platform?: 'windows' | 'mac') => Promise<ProfileSyncInspection>;
     beginProfileApplyTransaction: (profileId: string, gameIdentifier: string) => Promise<boolean>;
     rollbackProfileApplyTransaction: (profileId: string, gameIdentifier: string) => Promise<boolean>;
-    commitProfileApplyTransaction: (profileId: string) => Promise<boolean>;
+    commitProfileApplyTransaction: (profileId: string, gameIdentifier: string) => Promise<boolean>;
     copyModFromCache: (profileId: string, modName: string, gamePath: string) => Promise<{ success: boolean; copied: boolean }>;
     clearProfileCache: () => Promise<{ cleared: number; chunks_cleared?: number; bytes_freed: number }>;
     openProfileFolder: (profileId: string) => Promise<void>;

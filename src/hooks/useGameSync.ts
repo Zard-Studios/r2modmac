@@ -1,8 +1,8 @@
 import { listen } from '@tauri-apps/api/event';
 import type { Package } from '../types/thunderstore';
-import type { InstalledMod } from '../types/profile';
+import type { InstalledMod, PendingModRemoval } from '../types/profile';
 import { useProfileStore } from '../store/useProfileStore';
-import type { ModDownloadProgressEvent, ProgressSetter } from '../types/progress';
+import type { ModDownloadProgressEvent, ProfileApplySnapshotProgressEvent, ProgressSetter } from '../types/progress';
 import { parsePackageReference } from '../utils/modVersioning';
 
 const MAX_PARALLEL_OPS = 10;
@@ -179,12 +179,19 @@ export function useGameSync({
                 mods: reconciledProfile.mods.map((mod: InstalledMod) => {
                     const key = parsePackageReference(mod.fullName).packageName.toLowerCase();
                     const stillMissing = mod.enabled && missingKeys.has(key);
+                    const remainsPending = !!mod.pending_sync || stillMissing;
                     return {
                         ...mod,
-                        pending_sync: stillMissing,
-                        synced_enabled: stillMissing ? mod.synced_enabled : mod.enabled,
+                        pending_sync: remainsPending,
+                        pending_sync_status: remainsPending ? 'queued' : undefined,
+                        pending_sync_error: undefined,
                     };
                 }),
+                pending_removals: (reconciledProfile.pending_removals || []).map((removal: PendingModRemoval) => ({
+                    ...removal,
+                    sync_status: 'queued',
+                    sync_error: undefined,
+                })),
             });
             await persistProfilesNow();
 
@@ -193,7 +200,31 @@ export function useGameSync({
             let actuallyInstalled = 0;
             const hasSyncWork = (syncResult.pending_removals ?? 0) > 0 || syncResult.to_install.length > 0;
             if (hasSyncWork) {
-                await window.ipcRenderer.beginProfileApplyTransaction(activeProfile.id, community);
+                setProgressState({
+                    isOpen: true,
+                    title: 'Syncing to Game',
+                    progress: 2,
+                    currentTask: 'Creating safety snapshot on the game drive...',
+                    downloadSpeedBps: undefined,
+                    downloadedBytes: undefined,
+                    totalBytes: undefined,
+                    activeDownloads: 0,
+                    isCancelable: false,
+                    operation: 'mod-sync',
+                });
+                const unlistenSnapshotProgress = await listen<ProfileApplySnapshotProgressEvent>('profile-apply-snapshot-progress', event => {
+                    const percent = Math.min(100, Math.max(0, event.payload?.progressPercent || 0));
+                    setProgressState(previous => ({
+                        ...previous,
+                        progress: Math.max(previous.progress, 2 + Math.round(percent * 0.18)),
+                        currentTask: `Creating safety snapshot… ${percent}%`,
+                    }));
+                });
+                try {
+                    await window.ipcRenderer.beginProfileApplyTransaction(activeProfile.id, community);
+                } finally {
+                    unlistenSnapshotProgress();
+                }
                 applyTransactionStarted = true;
             }
 
@@ -202,7 +233,7 @@ export function useGameSync({
                 setProgressState({
                     isOpen: true,
                     title: 'Syncing to Game',
-                    progress: 0,
+                    progress: 22,
                     currentTask: `Installing ${syncResult.to_install.length} missing mods...`,
                     downloadSpeedBps: undefined,
                     downloadedBytes: undefined,
@@ -220,7 +251,7 @@ export function useGameSync({
                 const updateProgress = (task: string) => {
                     setProgressState(prev => ({
                         ...prev,
-                        progress: Math.round((completed / total) * 100),
+                        progress: 22 + Math.round((completed / total) * 68),
                         currentTask: task,
                     }));
                 };
@@ -241,7 +272,7 @@ export function useGameSync({
                     const partialUnits = inFlight.reduce((sum, item) => sum + (Math.min(100, Math.max(0, item.progress)) / 100), 0);
                     const overallProgress = Math.min(
                         99,
-                        Math.round(((completed + partialUnits) / Math.max(total, 1)) * 100)
+                        22 + Math.round(((completed + partialUnits) / Math.max(total, 1)) * 68)
                     );
 
                     const downloadedBytes = inFlight.reduce((sum, item) => sum + item.downloaded, 0);
@@ -287,6 +318,20 @@ export function useGameSync({
                     let status = 'Installed';
                     let trackedFullName: string | null = null;
                     let installedSuccessfully = false;
+                    const setPendingStatus = (nextStatus: 'queued' | 'syncing' | 'ready' | 'failed', error?: string) => {
+                        const currentProfile = useProfileStore.getState().profiles.find(profile => profile.id === activeProfile.id);
+                        if (!currentProfile) return;
+                        updateProfile(activeProfile.id, {
+                            mods: currentProfile.mods.map(mod =>
+                                parsePackageReference(mod.fullName).packageName.toLowerCase() === modKey.toLowerCase()
+                                    ? { ...mod, pending_sync: true, pending_sync_status: nextStatus, pending_sync_error: error }
+                                    : mod
+                            ),
+                            needs_sync: true,
+                            apply_interrupted: true,
+                        });
+                    };
+                    setPendingStatus('syncing');
                     try {
                         const profileForLookup = useProfileStore.getState().profiles.find((p) => p.id === activeProfile.id) || refreshedProfile;
                         const modInProfile = profileForLookup.mods.find((m: any) => {
@@ -403,9 +448,12 @@ export function useGameSync({
 
                     } catch (err: any) {
                         if (String(err?.message || err).includes('MOD_OPERATION_CANCELLED')) {
+                            setPendingStatus('queued');
                             throw err;
                         }
-                        failedInstalls.push(`${modKey} (${String(err?.message || err || 'unknown error')})`);
+                        const errorMessage = String(err?.message || err || 'unknown error');
+                        failedInstalls.push(`${modKey} (${errorMessage})`);
+                        setPendingStatus('failed', errorMessage);
                         status = 'Failed';
                     } finally {
                         if (trackedFullName) {
@@ -414,6 +462,9 @@ export function useGameSync({
                         }
                         completed++;
                         if (installedSuccessfully) successfullyInstalledKeys.add(modKey.toLowerCase());
+                        if (!installedSuccessfully && status !== 'Failed' && status !== 'Installed') {
+                            setPendingStatus('failed', status);
+                        }
                         updateProgress(`${status} ${completed}/${total}: ${modKey}`);
                     }
                 };
@@ -431,7 +482,7 @@ export function useGameSync({
                             const parts = mod.fullName.split('-');
                             const key = (parts.length >= 2 ? `${parts[0]}-${parts[1]}` : mod.fullName).toLowerCase();
                             return completedKeys.has(key)
-                                ? { ...mod, pending_sync: false, synced_enabled: mod.enabled }
+                                ? { ...mod, pending_sync: true, pending_sync_status: 'ready' as const, pending_sync_error: undefined }
                                 : mod;
                         }),
                     });
@@ -457,13 +508,15 @@ export function useGameSync({
                 }
                 setProgressState(prev => ({
                     ...prev,
-                    isOpen: false,
+                    isOpen: true,
+                    progress: Math.max(prev.progress, 96),
+                    currentTask: 'Validating installed payloads...',
                     downloadSpeedBps: undefined,
                     downloadedBytes: undefined,
                     totalBytes: undefined,
                     activeDownloads: 0,
                     isCancelable: false,
-                    operation: undefined,
+                    operation: 'mod-sync',
                 }));
             }
 
@@ -477,6 +530,17 @@ export function useGameSync({
                 );
             }
             await ensureNotStopped();
+
+            const profileBeforeFinalize = useProfileStore.getState().profiles.find(profile => profile.id === activeProfile.id);
+            if (profileBeforeFinalize?.pending_removals?.length) {
+                updateProfile(activeProfile.id, {
+                    pending_removals: profileBeforeFinalize.pending_removals.map(removal => ({
+                        ...removal,
+                        sync_status: 'syncing',
+                        sync_error: undefined,
+                    })),
+                });
+            }
 
             // Cleanup is deliberately deferred until every requested payload is
             // present. A failed download therefore leaves the previous working
@@ -495,7 +559,7 @@ export function useGameSync({
                 setProgressState({
                     isOpen: true,
                     title: 'Syncing to Game',
-                    progress: 100,
+                    progress: 98,
                     isCancelable: false,
                     operation: undefined,
                     currentTask: community === 'balatro'
@@ -509,11 +573,7 @@ export function useGameSync({
             await window.ipcRenderer.installToGame(community, latestProfile.id, disabledMods);
 
             if (applyTransactionStarted) {
-                try {
-                    await window.ipcRenderer.commitProfileApplyTransaction(activeProfile.id);
-                } catch (cleanupError) {
-                    console.warn('Failed to remove completed Apply snapshot', cleanupError);
-                }
+                await window.ipcRenderer.commitProfileApplyTransaction(activeProfile.id, community);
                 applyTransactionStarted = false;
             }
 
@@ -530,6 +590,8 @@ export function useGameSync({
                     pending_sync: false,
                     synced_enabled: m.enabled,
                     pending_sync_kind: undefined,
+                    pending_sync_status: undefined,
+                    pending_sync_error: undefined,
                     sync_baseline: undefined,
                 })),
             });
@@ -580,12 +642,31 @@ export function useGameSync({
             } catch (e: any) {
             console.error('Sync to game failed:', e);
             setProgressState(prev => ({ ...prev, isOpen: false }));
+            let rolledBack = false;
             if (applyTransactionStarted) {
                 try {
-                    await window.ipcRenderer.rollbackProfileApplyTransaction(activeProfile.id, community);
+                    rolledBack = await window.ipcRenderer.rollbackProfileApplyTransaction(activeProfile.id, community);
                 } catch (rollbackError) {
                     console.error('Failed to roll back interrupted Apply', rollbackError);
                 }
+            }
+            const failedProfile = useProfileStore.getState().profiles.find(profile => profile.id === activeProfile.id);
+            if (failedProfile) {
+                const errorMessage = String(e?.message || e || 'Sync failed');
+                updateProfile(activeProfile.id, {
+                    mods: failedProfile.mods.map(mod => {
+                        if (mod.pending_sync_status === 'syncing') {
+                            return { ...mod, pending_sync_status: 'failed' as const, pending_sync_error: errorMessage };
+                        }
+                        if (rolledBack && mod.pending_sync_status === 'ready') {
+                            return { ...mod, pending_sync_status: 'queued' as const, pending_sync_error: undefined };
+                        }
+                        return mod;
+                    }),
+                    pending_removals: (failedProfile.pending_removals || []).map(removal => removal.sync_status === 'syncing'
+                        ? { ...removal, sync_status: 'failed', sync_error: errorMessage }
+                        : removal),
+                });
             }
             if (String(e?.message || e).includes('MOD_OPERATION_CANCELLED')) {
                 await window.ipcRenderer.beginModOperations();

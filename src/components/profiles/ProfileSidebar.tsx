@@ -144,6 +144,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
     const [selectionAnchorId, setSelectionAnchorId] = useState<string | null>(null);
     const [modView, setModView] = useState<'all' | 'updates' | 'sync'>('all');
     const [syncSelectedIds, setSyncSelectedIds] = useState<string[]>([]);
+    const [syncSelectionAnchorId, setSyncSelectionAnchorId] = useState<string | null>(null);
     const [syncConfirmation, setSyncConfirmation] = useState<{ kind: 'sync' | 'revert'; ids: string[] } | null>(null);
     const previousPendingCountRef = useRef<number | null>(null);
     const renderedModView = useDeferredValue(modView);
@@ -229,12 +230,16 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                 mod,
                 kind: mod.pending_sync_kind || 'add',
                 revertable: mod.sync_baseline !== undefined,
+                status: mod.pending_sync_status || 'queued',
+                error: mod.pending_sync_error,
             })),
             ...(activeProfile.pending_removals || []).map(removal => ({
                 id: removal.id,
                 mod: restoreInstalledMod(removal.mod),
                 kind: 'remove' as const,
                 revertable: true,
+                status: removal.sync_status || 'queued',
+                error: removal.sync_error,
             })),
         ];
     }, [activeProfile, legacyInstallMode]);
@@ -462,6 +467,32 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
         void resolveAndOpenModDetails(mod, pkg);
     };
 
+    const handleSyncRowClick = (event: React.MouseEvent, entryId: string, mod: InstalledMod, pkg?: Package) => {
+        if (event.shiftKey && syncSelectionAnchorId) {
+            const anchorIndex = pendingEntries.findIndex(entry => entry.id === syncSelectionAnchorId);
+            const currentIndex = pendingEntries.findIndex(entry => entry.id === entryId);
+            if (anchorIndex !== -1 && currentIndex !== -1) {
+                const start = Math.min(anchorIndex, currentIndex);
+                const end = Math.max(anchorIndex, currentIndex);
+                setSyncSelectedIds(pendingEntries.slice(start, end + 1).map(entry => entry.id));
+                setSyncSelectionAnchorId(entryId);
+                return;
+            }
+        }
+        if (event.metaKey || event.ctrlKey) {
+            setSyncSelectedIds(current => current.includes(entryId)
+                ? current.filter(id => id !== entryId)
+                : [...current, entryId]);
+            setSyncSelectionAnchorId(entryId);
+            return;
+        }
+        if (syncSelectedIds.length > 0) {
+            setSyncSelectedIds([]);
+            setSyncSelectionAnchorId(null);
+        }
+        void resolveAndOpenModDetails(mod, pkg);
+    };
+
     const bulkActionLabel = useMemo(() => {
         const enabledCount = selectedMods.filter((m) => m.enabled).length;
         const disabledCount = selectedMods.length - enabledCount;
@@ -497,6 +528,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                                 if (confirmation.kind === 'sync') await onSyncPending(confirmedSyncEntries.map(entry => entry.id));
                                 else await onRevertPending(confirmation.ids);
                                 setSyncSelectedIds([]);
+                                setSyncSelectionAnchorId(null);
                             }} className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white">{syncConfirmation.kind === 'sync' ? 'Sync' : 'Revert'}</button>
                         </div>
                     </div>
@@ -655,7 +687,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
 
             {/* Mod List */}
             <div className={`profile-sidebar-motion-item [--sidebar-motion-order:2] flex-1 overflow-y-auto p-2 space-y-1 scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-transparent ${activeProfile?.is_vanilla ? 'grayscale opacity-75' : ''}`}>
-                <div className="px-2 py-2 text-xs font-bold">
+                {availableTabs.length > 1 ? <div className="px-2 py-2 text-xs font-bold">
                     <div role="tablist" aria-label="Profile mod view" className="relative flex w-full overflow-hidden rounded-lg border border-gray-700 bg-gray-800 p-0.5">
                         <div
                             aria-hidden="true"
@@ -676,7 +708,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                             </button>
                         ))}
                     </div>
-                </div>
+                </div> : null}
 
                 <div
                     id="profile-mod-view-panel"
@@ -686,18 +718,27 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                 >
                 {renderedModView === 'sync' ? (
                     <div className="space-y-2 px-2 pb-2">
-                        {activeProfile?.apply_interrupted ? (
+                        {activeProfile?.apply_interrupted && !isApplying ? (
                             <button type="button" onClick={() => onInstallToGame()}
-                                className="w-full rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-left text-xs text-amber-200">
-                                <span className="block font-bold">Apply was interrupted</span>
-                                <span className="text-[10px] text-amber-300/70">Resume Apply before reverting changes.</span>
+                                className="flex w-full items-start gap-2.5 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-left text-xs text-amber-200">
+                                <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-amber-500/15 text-amber-300" aria-hidden="true">
+                                    <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+                                        <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l6.518 11.597c.75 1.334-.213 2.98-1.742 2.98H3.48c-1.53 0-2.493-1.646-1.743-2.98L8.257 3.1zM11 14a1 1 0 10-2 0 1 1 0 002 0zm-1-6a1 1 0 00-1 1v3a1 1 0 102 0V9a1 1 0 00-1-1z" clipRule="evenodd" />
+                                    </svg>
+                                </span>
+                                <span className="min-w-0 flex-1">
+                                    <span className="block font-bold">Apply was interrupted</span>
+                                    <span className="block text-[10px] text-amber-300/70">Resume Apply before reverting changes.</span>
+                                </span>
                             </button>
                         ) : null}
                         <div className="flex items-center gap-2 rounded-xl border border-sky-500/20 bg-sky-500/8 p-2">
                             <span className="min-w-0 flex-1 px-1 text-xs font-semibold text-sky-100">
-                                {syncSelectedIds.length ? `${syncSelectedIds.length} selected` : `${pendingSyncCount} pending changes`}
+                                {isApplying
+                                    ? `${pendingEntries.filter(entry => entry.status === 'syncing').length} syncing · ${pendingSyncCount} pending`
+                                    : syncSelectedIds.length ? `${syncSelectedIds.length} selected` : `${pendingSyncCount} pending changes`}
                             </span>
-                            <button type="button" disabled={!!activeProfile?.apply_interrupted || (syncSelectedIds.length
+                            <button type="button" disabled={isApplying || !!activeProfile?.apply_interrupted || (syncSelectedIds.length
                                 ? pendingEntries.filter(entry => syncSelectedIds.includes(entry.id)).some(entry => !entry.revertable)
                                 : pendingEntries.some(entry => !entry.revertable))}
                                 onClick={() => {
@@ -705,7 +746,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                                     setSyncConfirmation({ kind: 'revert', ids });
                                 }}
                                 className="rounded-lg border border-gray-600 px-2.5 py-1.5 text-[11px] font-semibold text-gray-200 disabled:opacity-40">Revert{syncSelectedIds.length ? '' : ' all'}</button>
-                            <button type="button" disabled={!!activeProfile?.apply_interrupted} onClick={() => {
+                            <button type="button" disabled={isApplying || !!activeProfile?.apply_interrupted} onClick={() => {
                                 const ids = syncSelectedIds.length ? syncSelectedIds : pendingEntries.map(entry => entry.id);
                                 setSyncConfirmation({ kind: 'sync', ids });
                             }} className="rounded-lg bg-blue-600 px-2.5 py-1.5 text-[11px] font-bold text-white disabled:opacity-40">Sync{syncSelectedIds.length ? '' : ' all'}</button>
@@ -715,23 +756,58 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                             const packageName = parsePackageReference(entry.mod.fullName).packageName.toLowerCase();
                             const pkg = packageIndex[packageName];
                             const selected = syncSelectedIds.includes(entry.id);
+                            const syncStatus = entry.status;
+                            const statusLabel: string | null = syncStatus === 'syncing'
+                                ? 'Syncing…'
+                                : syncStatus === 'failed'
+                                    ? `Failed${entry.error ? ` · ${entry.error}` : ''}`
+                                    : syncStatus === 'ready'
+                                        ? 'Ready · waiting for finalization'
+                                        : entry.kind === 'add'
+                                            ? null
+                                            : `${entry.kind[0].toUpperCase() + entry.kind.slice(1)}${entry.kind === 'update' && baseline ? ` ${baseline.versionNumber} → ${entry.mod.versionNumber}` : ''}`;
                             return (
-                                <div key={entry.id} className={`flex items-center gap-3 rounded-lg border p-2 ${selected ? 'border-sky-500/40 bg-sky-500/10' : 'border-transparent hover:bg-gray-800'}`}>
-                                    <button type="button" aria-label={`${selected ? 'Deselect' : 'Select'} ${entry.mod.displayName || entry.mod.fullName}`}
-                                        onClick={() => setSyncSelectedIds(current => current.includes(entry.id) ? current.filter(id => id !== entry.id) : [...current, entry.id])}
-                                        className={`h-5 w-5 shrink-0 rounded-full border ${selected ? 'border-sky-400 bg-sky-500 shadow-[inset_0_0_0_4px_#0f172a]' : 'border-gray-600'}`} />
-                                    <button type="button" onClick={() => { void resolveAndOpenModDetails(entry.mod, pkg); }} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+                                <div key={entry.id}
+                                    onClick={event => handleSyncRowClick(event, entry.id, entry.mod, pkg)}
+                                    className={`group/sync-row relative flex cursor-pointer items-center gap-3 overflow-hidden rounded-lg border p-2 transition-colors ${selected ? 'border-sky-500/40 bg-sky-500/10' : 'border-transparent hover:border-gray-700 hover:bg-gray-800'}`}>
+                                    {selected ? <span className="absolute inset-y-2 left-0 w-0.5 rounded-full bg-sky-400" aria-hidden="true" /> : null}
+                                    <div className="flex min-w-0 flex-1 items-center gap-3 text-left">
                                         <div className="h-10 w-10 shrink-0 overflow-hidden rounded-lg border border-gray-700 bg-gray-800">
                                             {entry.mod.iconUrl ? <img src={entry.mod.iconUrl} alt="" className="h-full w-full object-cover" /> : null}
                                         </div>
                                         <span className="min-w-0 flex-1">
                                             <span className="block truncate text-sm font-medium text-gray-100">{entry.mod.displayName || entry.mod.fullName.split('-')[1] || entry.mod.fullName}</span>
-                                            <span className="block truncate text-xs text-sky-300">
-                                                {entry.kind[0].toUpperCase() + entry.kind.slice(1)}{entry.kind === 'update' && baseline ? ` ${baseline.versionNumber} → ${entry.mod.versionNumber}` : ''}
-                                            </span>
+                                            {statusLabel ? (
+                                                <span className={`block truncate text-xs ${syncStatus === 'failed' ? 'text-red-300' : syncStatus === 'ready' ? 'text-emerald-300' : 'text-sky-300'}`} title={statusLabel}>
+                                                    {statusLabel}
+                                                </span>
+                                            ) : null}
                                             {!entry.revertable ? <span className="block truncate text-[10px] text-amber-400">Previous state could not be verified</span> : null}
                                         </span>
-                                    </button>
+                                    </div>
+                                    <div className="flex shrink-0 items-center gap-1.5">
+                                        <button type="button"
+                                            onClick={event => { event.stopPropagation(); setSyncConfirmation({ kind: 'revert', ids: [entry.id] }); }}
+                                            disabled={isApplying || !!activeProfile?.apply_interrupted || !entry.revertable}
+                                            className="flex h-8 w-8 items-center justify-center rounded-lg border border-gray-700 text-gray-400 transition-colors hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-300 disabled:opacity-30"
+                                            title="Revert this change" aria-label={`Revert ${entry.mod.displayName || entry.mod.fullName}`}>
+                                            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                            </svg>
+                                        </button>
+                                        <button type="button"
+                                            onClick={event => { event.stopPropagation(); setSyncConfirmation({ kind: 'sync', ids: [entry.id] }); }}
+                                            disabled={isApplying || !!activeProfile?.apply_interrupted || syncStatus === 'ready'}
+                                            title={syncStatus === 'syncing' ? 'Syncing this change' : syncStatus === 'failed' ? 'Retry this change' : syncStatus === 'ready' ? 'Ready for finalization' : 'Sync this change'}
+                                            aria-label={syncStatus === 'syncing' ? 'Syncing this change' : syncStatus === 'failed' ? 'Retry this change' : syncStatus === 'ready' ? 'Ready for finalization' : 'Sync this change'}
+                                            className={`flex h-8 w-8 items-center justify-center rounded-lg transition-colors disabled:cursor-wait ${syncStatus === 'failed' ? 'bg-red-500/15 text-red-200 hover:bg-red-500/25' : syncStatus === 'ready' ? 'bg-emerald-500/10 text-emerald-300' : 'bg-blue-600 text-white hover:bg-blue-500'} disabled:opacity-60`}>
+                                            <span className={syncStatus === 'syncing' ? 'animate-spin' : ''}>
+                                                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v6h6M20 20v-6h-6M5.6 15a7 7 0 0011.9 2M18.4 9A7 7 0 006.5 7" />
+                                                </svg>
+                                            </span>
+                                        </button>
+                                    </div>
                                 </div>
                             );
                         })}
