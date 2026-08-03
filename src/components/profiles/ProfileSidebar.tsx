@@ -8,6 +8,9 @@ import { compareVersions, hasNewerVersion, latestVersionNumber, parsePackageRefe
 import { restoreInstalledMod } from '../../utils/profileSync';
 
 const MAX_PARALLEL_TOGGLES = 10;
+const formatCount = (count: number, singular: string, plural = `${singular}s`) => (
+    `${count} ${count === 1 ? singular : plural}`
+);
 
 interface DesktopSelectionResult {
     selectedIds: string[];
@@ -299,6 +302,23 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
         ];
     }, [activeProfile, legacyInstallMode]);
     const pendingSyncCount = pendingEntries.length;
+    const pendingChangeSummary = useMemo(() => {
+        const counts = pendingEntries.reduce<Record<string, number>>((result, entry) => {
+            result[entry.kind] = (result[entry.kind] || 0) + 1;
+            return result;
+        }, {});
+        const parts: string[] = [];
+        if (counts.update) parts.push(formatCount(counts.update, 'update'));
+        if (counts.add) {
+            parts.push(counts.update
+                ? formatCount(counts.add, 'dependency', 'dependencies')
+                : formatCount(counts.add, 'addition'));
+        }
+        if (counts.enable) parts.push(formatCount(counts.enable, 'enable'));
+        if (counts.disable) parts.push(formatCount(counts.disable, 'disable'));
+        if (counts.remove) parts.push(formatCount(counts.remove, 'removal'));
+        return parts.length > 0 ? parts.join(' + ') : `${pendingSyncCount} pending changes`;
+    }, [pendingEntries, pendingSyncCount]);
     const confirmedSyncEntries = useMemo(() => {
         if (!syncConfirmation) return [];
         const ids = new Set(syncConfirmation.ids);
@@ -779,10 +799,10 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                             </button>
                         ) : null}
                         <div className="flex items-center gap-2 rounded-xl border border-sky-500/20 bg-sky-500/8 p-2">
-                            <span className="min-w-0 flex-1 px-1 text-xs font-semibold text-sky-100">
+                            <span className="min-w-0 flex-1 truncate px-1 text-xs font-semibold text-sky-100" title={pendingChangeSummary}>
                                 {isApplying
                                     ? `${pendingEntries.filter(entry => entry.status === 'syncing').length} syncing · ${pendingSyncCount} pending`
-                                    : syncSelectedIds.length ? `${syncSelectedIds.length} selected` : `${pendingSyncCount} pending changes`}
+                                    : syncSelectedIds.length ? `${syncSelectedIds.length} selected` : pendingChangeSummary}
                             </span>
                             <button type="button" disabled={isApplying || (syncSelectedIds.length
                                 ? pendingEntries.filter(entry => syncSelectedIds.includes(entry.id)).some(entry => !entry.revertable)
@@ -875,7 +895,6 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                         </span>
                         <span className="min-w-0 flex-1">
                             <span className="block text-xs font-extrabold">Update all {profileUpdates.length} mods</span>
-                            <span className="block truncate text-[10px] font-semibold text-yellow-100/75">Review and prepare profile updates</span>
                         </span>
                         <svg className="h-4 w-4 flex-shrink-0 text-yellow-100/75 transition-transform duration-200 group-hover/update-all:translate-x-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="m9 18 6-6-6-6" />
