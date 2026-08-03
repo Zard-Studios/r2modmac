@@ -996,7 +996,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                             key={mod.uuid4}
                             onMouseDown={(event) => { if (event.shiftKey || event.metaKey || event.ctrlKey) event.preventDefault(); }}
                             aria-selected={isSelected}
-                            className={`profile-mod-row isolate flex items-center gap-3 p-2 rounded-lg group cursor-pointer transition-all border relative overflow-hidden ${renderedModView === 'updates' ? 'pr-24' : 'pr-16'} ${isSelected
+                            className={`profile-mod-row isolate flex items-center gap-3 rounded-lg border p-2 pr-16 transition-[background-color,border-color] duration-200 group relative cursor-pointer overflow-hidden ${renderedModView === 'updates' ? 'pr-24' : ''} ${isSelected
                                 ? 'bg-blue-500/12 border-blue-500/35'
                                 : 'border-transparent hover:border-gray-700 hover:bg-gray-800'
                                 } ${!mod.enabled ? 'opacity-50' : ''}`}
@@ -1094,14 +1094,14 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                                 </button>
                             ) : (
                             <>
-                            <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 right-0 z-20 w-[48%] bg-gradient-to-l from-gray-800 via-gray-800/95 to-transparent opacity-0 transition-opacity duration-200 group-hover:opacity-100" />
-                            <div className="absolute right-2 top-1/2 z-30 flex -translate-y-1/2 items-center gap-1 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
+                            <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 right-0 z-20 w-[48%] transform-gpu bg-gradient-to-l from-gray-800 via-gray-800/95 to-transparent opacity-0 transition-opacity duration-200 will-change-[opacity] group-hover:opacity-100" />
+                            <div className="absolute right-2 top-1/2 z-30 flex w-[104px] -translate-y-1/2 transform-gpu items-center justify-between opacity-0 transition-opacity duration-200 will-change-[opacity] group-hover:opacity-100">
                                 <button
                                     onClick={(e) => {
                                         e.stopPropagation();
                                         void handleToggleSingleMod(mod);
                                     }}
-                                    className={`p-1.5 rounded-md transition-colors ${mod.enabled
+                                    className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md transition-colors ${mod.enabled
                                         ? 'text-gray-400 hover:text-yellow-400 hover:bg-yellow-400/10'
                                         : 'text-yellow-500 bg-yellow-500/10 hover:bg-yellow-500/20'
                                         }`}
@@ -1116,7 +1116,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                                         e.stopPropagation();
                                         onOpenModFolder(activeProfile!.id, mod.fullName);
                                     }}
-                                    className="p-1.5 text-gray-400 hover:text-blue-400 hover:bg-blue-400/10 rounded-md transition-colors"
+                                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-blue-400/10 hover:text-blue-400"
                                     title="Locate in Finder"
                                 >
                                     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1128,7 +1128,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                                         e.stopPropagation();
                                         await onUninstallMod(mod);
                                     }}
-                                    className="p-1.5 text-gray-400 hover:text-red-400 hover:bg-red-400/10 rounded-md transition-colors"
+                                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-red-400/10 hover:text-red-400"
                                     title="Uninstall"
                                 >
                                     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
