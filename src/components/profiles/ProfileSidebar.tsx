@@ -1065,7 +1065,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                                 </button>
                             ) : (
                             <>
-                            <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 right-0 z-10 w-32 bg-gradient-to-l from-gray-800 via-gray-800/85 to-transparent opacity-0 transition-opacity duration-200 group-hover:opacity-100" />
+                            <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 right-0 z-10 w-[42%] bg-gradient-to-l from-gray-800 via-gray-800/85 to-transparent opacity-0 transition-opacity duration-200 group-hover:opacity-100" />
                             <div className="absolute right-2 top-1/2 z-20 flex -translate-y-1/2 items-center gap-1 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
                                 <button
                                     onClick={(e) => {
