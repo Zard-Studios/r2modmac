@@ -303,11 +303,14 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
         ];
     }, [activeProfile, legacyInstallMode]);
     const pendingSyncCount = pendingEntries.length;
-    const pendingChangeSummary = useMemo(() => {
-        const counts = pendingEntries.reduce<Record<string, number>>((result, entry) => {
+    const pendingChangeCounts = useMemo(() => (
+        pendingEntries.reduce<Record<string, number>>((result, entry) => {
             result[entry.kind] = (result[entry.kind] || 0) + 1;
             return result;
-        }, {});
+        }, {})
+    ), [pendingEntries]);
+    const pendingChangeSummary = useMemo(() => {
+        const counts = pendingChangeCounts;
         const parts: string[] = [];
         if (counts.update) parts.push(formatCount(counts.update, 'update'));
         if (counts.add) {
@@ -319,7 +322,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
         if (counts.disable) parts.push(formatCount(counts.disable, 'disable'));
         if (counts.remove) parts.push(formatCount(counts.remove, 'removal'));
         return parts.length > 0 ? parts.join(' + ') : `${pendingSyncCount} pending changes`;
-    }, [pendingEntries, pendingSyncCount]);
+    }, [pendingChangeCounts, pendingSyncCount]);
     const confirmedSyncEntries = useMemo(() => {
         if (!syncConfirmation) return [];
         const ids = new Set(syncConfirmation.ids);
@@ -566,6 +569,52 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
         return 'Toggle';
     }, [selectedMods]);
 
+    const syncSummaryIndicators = (
+        <span className="flex min-w-0 items-center gap-2" title={pendingChangeSummary} aria-label={pendingChangeSummary}>
+            {pendingChangeCounts.update ? (
+                <span className="inline-flex items-center gap-1 text-amber-300">
+                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v6h6M20 20v-6h-6M5.6 15a7 7 0 0011.9 2M18.4 9A7 7 0 006.5 7" />
+                    </svg>
+                    <span>{pendingChangeCounts.update}</span>
+                </span>
+            ) : null}
+            {pendingChangeCounts.add ? (
+                <span className="inline-flex items-center gap-1 text-sky-300">
+                    <svg className="h-4 w-4" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                        <path d="M8.75 2.75a.75.75 0 0 0-1.5 0v5.69L5.03 6.22a.75.75 0 0 0-1.06 1.06l3.5 3.5a.75.75 0 0 0 1.06 0l3.5-3.5a.75.75 0 0 0-1.06-1.06L8.75 8.44V2.75Z" />
+                        <path d="M3.5 9.75a.75.75 0 0 0-1.5 0v1.5A2.75 2.75 0 0 0 4.75 14h6.5A2.75 2.75 0 0 0 14 11.25v-1.5a.75.75 0 0 0-1.5 0v1.5c0 .69-.56 1.25-1.25 1.25h-6.5c-.69 0-1.25-.56-1.25-1.25v-1.5Z" />
+                    </svg>
+                    <span>{pendingChangeCounts.add}</span>
+                </span>
+            ) : null}
+            {pendingChangeCounts.enable ? (
+                <span className="inline-flex items-center gap-1 text-emerald-300">
+                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                    <span>{pendingChangeCounts.enable}</span>
+                </span>
+            ) : null}
+            {pendingChangeCounts.disable ? (
+                <span className="inline-flex items-center gap-1 text-yellow-300">
+                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                    </svg>
+                    <span>{pendingChangeCounts.disable}</span>
+                </span>
+            ) : null}
+            {pendingChangeCounts.remove ? (
+                <span className="inline-flex items-center gap-1 text-red-300">
+                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 0 0-1 1v3M4 7h16" />
+                    </svg>
+                    <span>{pendingChangeCounts.remove}</span>
+                </span>
+            ) : null}
+        </span>
+    );
+
     return (
         <div className="profile-sidebar-surface h-full w-full min-w-0 flex flex-col bg-gray-900 border-r border-gray-800">
             {syncConfirmation ? (
@@ -617,7 +666,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                             className={`w-12 h-12 rounded-xl shadow-lg object-cover bg-gray-800 ${activeProfile?.is_vanilla ? 'grayscale' : ''}`}
                         />
                     ) : (
-                        <div style={{ backgroundImage: getProfileAvatarGradient(activeProfile?.id || '', activeProfile?.name) }} className={`w-12 h-12 rounded-xl shadow-lg flex items-center justify-center text-xl font-bold text-white ${activeProfile?.is_vanilla ? 'grayscale' : ''}`}>
+                        <div style={{ backgroundImage: getProfileAvatarGradient(activeProfile?.name || '', activeProfile?.id) }} className={`w-12 h-12 rounded-xl shadow-lg flex items-center justify-center text-xl font-bold text-white ${activeProfile?.is_vanilla ? 'grayscale' : ''}`}>
                             {getFirstLetter(activeProfile?.name)}
                         </div>
                     )}
@@ -800,10 +849,10 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                             </button>
                         ) : null}
                         <div className="flex items-center gap-2 rounded-xl border border-sky-500/20 bg-sky-500/8 p-2">
-                            <span className="min-w-0 flex-1 truncate px-1 text-xs font-semibold text-sky-100" title={pendingChangeSummary}>
+                            <span className="min-w-0 flex-1 px-1 text-xs font-semibold text-sky-100">
                                 {isApplying
                                     ? `${pendingEntries.filter(entry => entry.status === 'syncing').length} syncing · ${pendingSyncCount} pending`
-                                    : syncSelectedIds.length ? `${syncSelectedIds.length} selected` : pendingChangeSummary}
+                                    : syncSelectedIds.length ? `${syncSelectedIds.length} selected` : syncSummaryIndicators}
                             </span>
                             <button type="button" disabled={isApplying || (syncSelectedIds.length
                                 ? pendingEntries.filter(entry => syncSelectedIds.includes(entry.id)).some(entry => !entry.revertable)
@@ -1214,7 +1263,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                                         className="w-24 h-24 rounded-full object-cover border-4 border-gray-700 group-hover:border-blue-500 transition-colors"
                                     />
                                 ) : (
-                                    <div style={{ backgroundImage: getProfileAvatarGradient(activeProfile.id, activeProfile.name) }} className="w-24 h-24 rounded-full flex items-center justify-center text-4xl font-bold text-white border-4 border-gray-700 group-hover:border-blue-500 transition-colors">
+                                    <div style={{ backgroundImage: getProfileAvatarGradient(activeProfile.name, activeProfile.id) }} className="w-24 h-24 rounded-full flex items-center justify-center text-4xl font-bold text-white border-4 border-gray-700 group-hover:border-blue-500 transition-colors">
                                         {getFirstLetter(activeProfile.name)}
                                     </div>
                                 )}

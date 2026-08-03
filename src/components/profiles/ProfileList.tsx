@@ -390,7 +390,7 @@ export function ProfileList({
                                         className="w-16 h-16 rounded-2xl mb-4 flex-shrink-0 object-cover bg-gray-800 shadow-md"
                                     />
                                 ) : (
-                                    <div style={{ backgroundImage: getProfileAvatarGradient(profile.id, profile.name) }} className="w-16 h-16 rounded-2xl mb-4 flex-shrink-0 flex items-center justify-center text-2xl font-bold text-white shadow-md">
+                                    <div style={{ backgroundImage: getProfileAvatarGradient(profile.name, profile.id) }} className="w-16 h-16 rounded-2xl mb-4 flex-shrink-0 flex items-center justify-center text-2xl font-bold text-white shadow-md">
                                         {getFirstLetter(profile.name)}
                                     </div>
                                 )}
@@ -638,7 +638,7 @@ export function ProfileList({
                                             className="w-24 h-24 rounded-full object-cover border-4 border-gray-700 group-hover:border-blue-500 transition-colors"
                                         />
                                     ) : (
-                                        <div style={{ backgroundImage: getProfileAvatarGradient(editingProfile.id, editName) }} className="w-24 h-24 rounded-full flex items-center justify-center text-4xl font-bold text-white border-4 border-gray-700 group-hover:border-blue-500 transition-colors">
+                                        <div style={{ backgroundImage: getProfileAvatarGradient(editName, editingProfile.id) }} className="w-24 h-24 rounded-full flex items-center justify-center text-4xl font-bold text-white border-4 border-gray-700 group-hover:border-blue-500 transition-colors">
                                             {getFirstLetter(editName)}
                                         </div>
                                     )}
