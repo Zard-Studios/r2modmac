@@ -33,6 +33,10 @@ forwards that category and the subject for delivery and frequency limiting.
 ADtention may use delivery metadata for billable impressions. r2modmac does not add first-party
 analytics or telemetry to this integration.
 
+The proxy can retain a response together with its subject in process memory for up to 15 minutes
+to avoid repeated delivery requests. This is not a database or durable server-side store; a Vercel
+Function instance may disappear sooner.
+
 ## What is never sent by r2modmac for sponsorship
 
 - Mod lists, mod names, mod versions, package metadata, or game selection
@@ -40,6 +44,15 @@ analytics or telemetry to this integration.
 - Search terms, clicks outside the optional sponsor link, workflow activity, errors, terminal
   output, prompts, or content from the application
 - Hardware identifiers or device fingerprints
+
+## Frequently asked questions
+
+### Does r2modmac send information about my mods or files?
+
+No. Sponsored messages never receive installed mods, Thunderstore profiles, local file paths,
+configuration files, repository contents, prompts, or personal documents. The minimum data passed
+by r2modmac is the random installation identifier, static category, and static placement described
+above.
 
 ## Hosting and links
 
