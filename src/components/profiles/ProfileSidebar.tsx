@@ -965,18 +965,17 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                     <button
                         type="button"
                         onClick={() => onUpdateAll(profileUpdates)}
-                        className="profile-update-action-enter group/update-all mx-2 mb-2 flex w-[calc(100%-16px)] items-center gap-3 rounded-xl border border-yellow-500 bg-yellow-600 px-3 py-2.5 text-left text-white shadow-lg shadow-yellow-950/20 transition-[background-color,border-color,transform] duration-200 hover:border-yellow-400 hover:bg-yellow-500 active:scale-[0.985]"
+                        className="profile-update-action-enter group/update-all mx-2 mb-1 flex w-[calc(100%-16px)] items-center gap-2.5 rounded-lg border border-amber-500/35 bg-amber-500/10 px-2.5 py-2 text-left text-amber-200 transition-[background-color,border-color,transform] duration-200 hover:border-amber-400/60 hover:bg-amber-500/15 active:scale-[0.985]"
                     >
-                        <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-black/10 text-white">
-                            <svg className="h-4 w-4" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-                                <path d="M8.75 2.75a.75.75 0 0 0-1.5 0v5.69L5.03 6.22a.75.75 0 0 0-1.06 1.06l3.5 3.5a.75.75 0 0 0 1.06 0l3.5-3.5a.75.75 0 0 0-1.06-1.06L8.75 8.44V2.75Z" />
-                                <path d="M3.5 9.75a.75.75 0 0 0-1.5 0v1.5A2.75 2.75 0 0 0 4.75 14h6.5A2.75 2.75 0 0 0 14 11.25v-1.5a.75.75 0 0 0-1.5 0v1.5c0 .69-.56 1.25-1.25 1.25h-6.5c-.69 0-1.25-.56-1.25-1.25v-1.5Z" />
+                        <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md bg-amber-400/10 text-amber-300">
+                            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v6h6M20 20v-6h-6M5.6 15a7 7 0 0011.9 2M18.4 9A7 7 0 006.5 7" />
                             </svg>
                         </span>
                         <span className="min-w-0 flex-1">
-                            <span className="block text-xs font-extrabold">Update all {profileUpdates.length} mods</span>
+                            <span className="block text-xs font-bold">Update all {profileUpdates.length} mods</span>
                         </span>
-                        <svg className="h-4 w-4 flex-shrink-0 text-yellow-100/75 transition-transform duration-200 group-hover/update-all:translate-x-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        <svg className="h-4 w-4 flex-shrink-0 text-amber-300/70 transition-transform duration-200 group-hover/update-all:translate-x-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="m9 18 6-6-6-6" />
                         </svg>
                     </button>
