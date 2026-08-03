@@ -1011,7 +1011,9 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                                     Update
                                 </button>
                             ) : (
-                            <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center opacity-0 group-hover:opacity-100 transition-opacity gap-1 bg-gray-800/90 rounded-lg p-1 shadow-sm backdrop-blur-sm z-20">
+                            <>
+                            <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 right-0 z-10 w-32 bg-gradient-to-l from-gray-900 via-gray-900/85 to-transparent opacity-0 transition-opacity duration-200 group-hover:opacity-100" />
+                            <div className="absolute right-2 top-1/2 z-20 flex -translate-y-1/2 items-center gap-1 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
                                 <button
                                     onClick={(e) => {
                                         e.stopPropagation();
@@ -1052,6 +1054,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                                     </svg>
                                 </button>
                             </div>
+                            </>
                             )}
                         </div>
                     );
