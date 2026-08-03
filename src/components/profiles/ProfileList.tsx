@@ -326,7 +326,7 @@ export function ProfileList({
                             }}
                             className="bg-gray-800 border border-gray-700 rounded-xl p-6 hover:border-blue-500 transition-all cursor-pointer flex flex-col min-h-[200px] group relative overflow-hidden"
                         >
-                            <div aria-hidden="true" className="pointer-events-none absolute right-0 top-0 z-10 h-24 w-48 bg-gradient-to-l from-gray-900/90 via-gray-900/50 to-transparent opacity-0 transition-opacity duration-200 group-hover:opacity-100" />
+                            <div aria-hidden="true" className="pointer-events-none absolute right-0 top-0 z-10 h-24 w-48 bg-gradient-to-l from-gray-800/90 via-gray-800/50 to-transparent opacity-0 transition-opacity duration-200 group-hover:opacity-100" />
                             <div className="absolute right-0 top-0 z-20 flex gap-2 p-6 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
                                     <button
                                         onClick={(e) => {
