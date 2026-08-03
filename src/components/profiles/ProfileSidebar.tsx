@@ -198,6 +198,8 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
     const [syncSelectionAnchorId, setSyncSelectionAnchorId] = useState<string | null>(null);
     const [syncConfirmation, setSyncConfirmation] = useState<{ kind: 'sync' | 'revert'; ids: string[] } | null>(null);
     const previousPendingCountRef = useRef<number | null>(null);
+    const modListScrollRef = useRef<HTMLDivElement>(null);
+    const [scrollFades, setScrollFades] = useState({ top: false, bottom: false });
     const renderedModView = useDeferredValue(modView);
 
     const clearSelections = () => {
@@ -385,6 +387,25 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
     const displayedMods = renderedModView === 'updates'
         ? searchedMods.filter(mod => updateIds.has(mod.uuid4))
         : renderedModView === 'sync' ? [] : searchedMods;
+    const updateScrollFades = (element: HTMLDivElement | null) => {
+        if (!element) return;
+        const next = {
+            top: element.scrollTop > 1,
+            bottom: element.scrollTop + element.clientHeight < element.scrollHeight - 1,
+        };
+        setScrollFades(current => current.top === next.top && current.bottom === next.bottom ? current : next);
+    };
+    useEffect(() => {
+        const element = modListScrollRef.current;
+        if (!element) return;
+        const frame = window.requestAnimationFrame(() => updateScrollFades(element));
+        const resizeObserver = new ResizeObserver(() => updateScrollFades(element));
+        resizeObserver.observe(element);
+        return () => {
+            window.cancelAnimationFrame(frame);
+            resizeObserver.disconnect();
+        };
+    }, [activeProfile?.id, displayedMods.length, pendingSyncCount, renderedModView]);
     const visibleModIds = useMemo(() => new Set(displayedMods.map((m) => m.uuid4)), [displayedMods]);
     const effectiveSelectedModIds = useMemo(
         () => selectedModIds.filter((id) => visibleModIds.has(id)),
@@ -827,7 +848,8 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                     </div>
                 </div> : null}
 
-                <div className="profile-sidebar-scroll-fade min-h-0 flex-1 overflow-y-auto p-2 space-y-1 scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-transparent">
+                <div className="relative min-h-0 flex-1">
+                <div ref={modListScrollRef} onScroll={event => updateScrollFades(event.currentTarget)} className="h-full overflow-y-auto p-2 space-y-1 scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-transparent">
                 <div
                     id="profile-mod-view-panel"
                     role="tabpanel"
@@ -1143,6 +1165,9 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                     </div>
                 )}
                 </div>
+                </div>
+                <div aria-hidden="true" className={`pointer-events-none absolute inset-x-0 top-0 z-10 h-7 bg-gradient-to-b from-gray-900 via-gray-900/80 to-transparent transition-opacity duration-200 ease-out ${scrollFades.top ? 'opacity-100' : 'opacity-0'}`} />
+                <div aria-hidden="true" className={`pointer-events-none absolute inset-x-0 bottom-0 z-10 h-7 bg-gradient-to-t from-gray-900 via-gray-900/80 to-transparent transition-opacity duration-200 ease-out ${scrollFades.bottom ? 'opacity-100' : 'opacity-0'}`} />
                 </div>
             </div>
 

@@ -129,12 +129,6 @@ body {
   contain-intrinsic-size: auto 56px;
 }
 
-/* Keep category tabs outside the scrolling layer and soften the clipped rows at both edges. */
-.profile-sidebar-scroll-fade {
-  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 22px, #000 calc(100% - 22px), transparent 100%);
-  mask-image: linear-gradient(to bottom, transparent 0, #000 22px, #000 calc(100% - 22px), transparent 100%);
-}
-
 .profile-sidebar-motion-item {
   opacity: 1;
   transform: translate3d(0, 0, 0) scale(1);
