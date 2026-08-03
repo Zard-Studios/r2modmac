@@ -106,7 +106,7 @@ export const ModListItem = memo(function ModListItem({ mod, likesCount, onInstal
             {/* Actions */}
             {!isBrowsing && (
                 <div className="flex items-center gap-1.5 pl-2 border-l border-gray-700 flex-shrink-0 min-w-[136px] justify-end">
-                    {installStatus === 'installed' && onUninstall && (
+                    {installStatus !== 'not_installed' && onUninstall && (
                         <button
                             onClick={(e) => {
                                 e.stopPropagation();

@@ -106,7 +106,7 @@ export const ModCard = memo(function ModCard({ mod, likesCount, onInstall, onUni
                 </div>
 
                 <div className="flex shrink-0 gap-2">
-                    {!isBrowsing && installStatus === 'installed' && onUninstall && (
+                    {!isBrowsing && installStatus !== 'not_installed' && onUninstall && (
                         <button
                             onClick={(e) => {
                                 e.stopPropagation();
