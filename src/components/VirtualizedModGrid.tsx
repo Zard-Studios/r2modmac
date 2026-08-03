@@ -230,7 +230,7 @@ export function VirtualizedModGrid({ packages, installedMods, onInstall, onUnins
         return (
             <div
                 ref={parentRef}
-                className="flex-1 h-full overflow-y-auto px-[50px] pt-[50px] pb-0"
+                className="flex-1 h-full overflow-y-auto px-[clamp(1rem,3vw,3.125rem)] pt-[clamp(1rem,3vw,3.125rem)] pb-0"
             >
                 {/* Virtual grid: only visible rows are in the DOM */}
                 <div style={{ height: `${gridRowVirtualizer.getTotalSize()}px`, position: 'relative' }}>
@@ -292,7 +292,7 @@ export function VirtualizedModGrid({ packages, installedMods, onInstall, onUnins
     return (
         <div
             ref={parentRef}
-            className="flex-1 h-full overflow-y-auto px-[50px] pt-[50px] pb-0"
+            className="flex-1 h-full overflow-y-auto px-[clamp(1rem,3vw,3.125rem)] pt-[clamp(1rem,3vw,3.125rem)] pb-0"
         >
             <div
                 style={{

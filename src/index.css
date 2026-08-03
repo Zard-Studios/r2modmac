@@ -211,3 +211,11 @@ body {
 @container (max-width: 350px) {
   .mod-card .mod-card-file-size { display: none; }
 }
+
+/* A narrow main pane keeps the mod's identity and actions; metadata yields first. */
+.mod-list-item { container-type: inline-size; }
+@container (max-width: 610px) {
+  .mod-list-item .mod-list-stats { display: none; }
+  .mod-list-item .mod-list-actions { min-width: 0; padding-left: 0.5rem; }
+  .mod-list-item .mod-list-action-button { min-width: 5rem; padding-inline: 0.75rem; }
+}

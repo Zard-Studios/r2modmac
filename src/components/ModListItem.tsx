@@ -29,7 +29,7 @@ export const ModListItem = memo(function ModListItem({ mod, likesCount, onInstal
 
     return (
         <div
-            className="flex items-center gap-4 p-3 bg-gray-800 border border-gray-700 rounded-lg hover:border-blue-500/50 hover:bg-gray-750 transition-[border-color,background-color] cursor-pointer group"
+            className="mod-list-item flex items-center gap-4 p-3 bg-gray-800 border border-gray-700 rounded-lg hover:border-blue-500/50 hover:bg-gray-750 transition-[border-color,background-color] cursor-pointer group"
             onClick={onClick}
         >
             {/* Icon */}
@@ -82,7 +82,7 @@ export const ModListItem = memo(function ModListItem({ mod, likesCount, onInstal
             </div>
 
             {/* Stats */}
-            <div className={`flex flex-col items-end gap-1 text-xs text-gray-500 font-medium justify-center flex-shrink-0 ${isBrowsing ? 'ml-auto mr-4' : 'w-24 mr-2'}`}>
+            <div className={`mod-list-stats flex flex-col items-end gap-1 text-xs text-gray-500 font-medium justify-center flex-shrink-0 ${isBrowsing ? 'ml-auto mr-4' : 'w-24 mr-2'}`}>
                 <div className="flex items-center flex-row-reverse gap-1.5" title="Downloads">
                     <svg className="w-3.5 h-3.5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
                     <span className="text-gray-400">{mod.downloads.toLocaleString()}</span>
@@ -105,7 +105,7 @@ export const ModListItem = memo(function ModListItem({ mod, likesCount, onInstal
 
             {/* Actions */}
             {!isBrowsing && (
-                <div className="flex items-center gap-1.5 pl-2 border-l border-gray-700 flex-shrink-0 min-w-[136px] justify-end">
+                <div className="mod-list-actions flex items-center gap-1.5 pl-2 border-l border-gray-700 flex-shrink-0 min-w-[136px] justify-end">
                     {installStatus !== 'not_installed' && onUninstall && (
                         <button
                             onClick={(e) => {
@@ -129,7 +129,7 @@ export const ModListItem = memo(function ModListItem({ mod, likesCount, onInstal
                             }
                         }}
                         disabled={installStatus === 'installed'}
-                        className={`px-4 py-1.5 rounded-lg text-sm font-semibold transition-all duration-200 min-w-[90px] text-center ${installStatus === 'installed'
+                        className={`mod-list-action-button px-4 py-1.5 rounded-lg text-sm font-semibold transition-all duration-200 min-w-[90px] text-center ${installStatus === 'installed'
                             ? 'bg-green-500/10 text-green-500 border border-green-500/20 cursor-default'
                             : installStatus === 'update_available'
                                 ? 'bg-yellow-600 hover:bg-yellow-500 text-white shadow-lg shadow-yellow-900/20 active:scale-95'

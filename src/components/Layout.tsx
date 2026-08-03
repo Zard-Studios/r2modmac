@@ -11,7 +11,7 @@ const SIDEBAR_WIDTH_STORAGE_KEY = 'r2modmac:profile-sidebar-width:v1';
 const DEFAULT_SIDEBAR_WIDTH = 320;
 const MIN_SIDEBAR_WIDTH = 300;
 const MAX_SIDEBAR_WIDTH = 640;
-const MIN_MAIN_WIDTH = 780;
+const MIN_MAIN_WIDTH = 840;
 const KEYBOARD_RESIZE_STEP = 16;
 
 function clampSidebarWidth(width: number, availableWidth: number) {
