@@ -11,6 +11,10 @@ jobs:
     permissions:
       contents: write
     runs-on: ${{ matrix.settings.platform }}
+    env:
+      # Set as a GitHub Actions secret after the Vercel proxy is deployed. An unset value
+      # deliberately leaves sponsor traffic disabled in the distributed application.
+      R2MODMAC_SPONSOR_PROXY_URL: ${{ secrets.R2MODMAC_SPONSOR_PROXY_URL }}
     strategy:
       fail-fast: false
       matrix:
