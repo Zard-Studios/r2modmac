@@ -1007,9 +1007,11 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
 
                             <div className="relative z-10 min-w-0 flex-1">
                                 <div className="flex items-center gap-2">
-                                    <div className={`text-sm font-medium truncate transition-colors ${mod.enabled ? 'text-gray-200 group-hover:text-white' : 'text-gray-500 line-through'}`}>
-                                        {displayName}
-                                    </div>
+                                    <HoverMarquee
+                                        text={displayName}
+                                        lazy
+                                        className={`text-sm font-medium transition-colors ${mod.enabled ? 'text-gray-200 group-hover:text-white' : 'text-gray-500 line-through'}`}
+                                    />
                                     {mod.source === 'local' && (
                                         <span className="text-[10px] px-1.5 py-0.5 rounded-full border border-blue-500/25 bg-blue-500/10 text-blue-300">
                                             Custom

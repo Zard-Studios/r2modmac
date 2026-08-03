@@ -1,8 +1,10 @@
-import { useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 
 interface HoverMarqueeProps {
     text: string;
     className?: string;
+    /** Defer measurement until hover/focus for large lists. */
+    lazy?: boolean;
 }
 
 type MarqueeStyle = CSSProperties & {
@@ -10,29 +12,35 @@ type MarqueeStyle = CSSProperties & {
     '--marquee-duration': string;
 };
 
-export function HoverMarquee({ text, className = '' }: HoverMarqueeProps) {
+export function HoverMarquee({ text, className = '', lazy = false }: HoverMarqueeProps) {
     const containerRef = useRef<HTMLDivElement>(null);
     const measurementRef = useRef<HTMLSpanElement>(null);
     const [metrics, setMetrics] = useState({ overflowing: false, distance: 0 });
 
-    useLayoutEffect(() => {
-        const measure = () => {
-            const container = containerRef.current;
-            const content = measurementRef.current;
-            if (!container || !content) return;
-            const textWidth = content.getBoundingClientRect().width;
-            setMetrics({
-                overflowing: textWidth > container.clientWidth + 1,
-                distance: Math.ceil(textWidth + 32),
-            });
+    const measure = useCallback(() => {
+        const container = containerRef.current;
+        const content = measurementRef.current;
+        if (!container || !content) return;
+        const textWidth = content.getBoundingClientRect().width;
+        const nextMetrics = {
+            overflowing: textWidth > container.clientWidth + 1,
+            distance: Math.ceil(textWidth + 32),
         };
+        setMetrics(current => (
+            current.overflowing === nextMetrics.overflowing && current.distance === nextMetrics.distance
+                ? current
+                : nextMetrics
+        ));
+    }, []);
 
+    useLayoutEffect(() => {
+        if (lazy) return;
         measure();
         const observer = new ResizeObserver(measure);
         if (containerRef.current) observer.observe(containerRef.current);
         if (measurementRef.current) observer.observe(measurementRef.current);
         return () => observer.disconnect();
-    }, [text]);
+    }, [lazy, measure, text]);
 
     const style: MarqueeStyle = {
         '--marquee-distance': `${metrics.distance}px`,
@@ -45,6 +53,8 @@ export function HoverMarquee({ text, className = '' }: HoverMarqueeProps) {
             className={`hover-marquee min-w-0 max-w-full flex-shrink overflow-hidden ${metrics.overflowing ? 'is-overflowing' : ''} ${className}`}
             title={text}
             style={style}
+            onPointerEnter={lazy ? measure : undefined}
+            onFocus={lazy ? measure : undefined}
         >
             <span ref={measurementRef} className="pointer-events-none absolute invisible whitespace-nowrap" aria-hidden="true">
                 {text}
