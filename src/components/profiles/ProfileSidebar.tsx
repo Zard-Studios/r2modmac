@@ -804,7 +804,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
 
             {/* Mod List */}
             <div className={`profile-sidebar-motion-item [--sidebar-motion-order:2] flex min-h-0 flex-1 flex-col ${activeProfile?.is_vanilla ? 'grayscale opacity-75' : ''}`}>
-                {availableTabs.length > 1 ? <div className="px-2 py-2 text-xs font-bold">
+                {availableTabs.length > 1 ? <div className="px-4 py-2 text-xs font-bold">
                     <div role="tablist" aria-label="Profile mod view" className="relative flex w-full overflow-hidden rounded-lg border border-gray-700 bg-gray-800 p-0.5">
                         <div
                             aria-hidden="true"
