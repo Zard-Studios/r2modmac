@@ -20,6 +20,15 @@ export interface AppSettings {
     hide_crossover_guide?: boolean;
     hide_macos_guide?: boolean;
     stream_mode?: boolean;
+    sponsored_messages_enabled?: boolean;
+    sponsored_messages_less_frequently?: boolean;
+}
+
+export interface SponsorMessage {
+    id: string;
+    sponsorName?: string | null;
+    message: string;
+    url?: string | null;
 }
 
 export interface RuntimeHealth {
@@ -98,6 +107,11 @@ export interface IElectronAPI {
     deleteProfileFolder: (profileId: string, gameIdentifier?: string, platform?: 'windows' | 'mac') => Promise<boolean>;
     getSettings: () => Promise<AppSettings>;
     saveSettings: (settings: AppSettings) => Promise<void>;
+    requestSponsor: () => Promise<SponsorMessage | null>;
+    acknowledgeSponsorDisplay: (sponsorId: string) => Promise<void>;
+    dismissSponsor: (sponsorId: string) => Promise<void>;
+    resetSponsorCache: () => Promise<void>;
+    updateSponsorPreferences: (enabled: boolean, lessFrequently: boolean) => Promise<void>;
     getGamePath: (gameIdentifier: string, platform?: 'windows' | 'mac') => Promise<string | null>;
     getGameSource: (gameIdentifier: string, platform?: 'windows' | 'mac') => Promise<'steam' | 'manual' | 'unknown'>;
     setGamePath: (gameIdentifier: string, path: string, platform?: 'windows' | 'mac') => Promise<void>;

@@ -46,6 +46,7 @@ export interface AppModalsProps {
     setShowPreferences: (show: boolean) => void;
     preferences: PreferencesSettings;
     onSavePreferences: (settings: PreferencesSettings) => Promise<void>;
+    onSponsorPreferencesChange: (enabled: boolean, lessFrequently: boolean) => Promise<void>;
     hasHiddenGuideWarnings: boolean;
     onRestoreGuideWarnings: () => Promise<void>;
     onSetGuideHidden: (guide: 'crossover' | 'macos', hidden: boolean) => Promise<void>;
@@ -65,7 +66,7 @@ export function AppModals({
     showExportModal, setShowExportModal, handleExportCode, handleExportFile,
     showUpdateModal, setShowUpdateModal, updateInfo,
     showCrossOverGuide, setShowCrossOverGuide, hideCrossOverGuide, setHideCrossOverGuide,
-    showPreferences, setShowPreferences, preferences, onSavePreferences,
+    showPreferences, setShowPreferences, preferences, onSavePreferences, onSponsorPreferencesChange,
     hasHiddenGuideWarnings, onRestoreGuideWarnings, onSetGuideHidden,
     legacyInstallMode,
     onCheckForUpdates,
@@ -221,6 +222,7 @@ export function AppModals({
                 onClose={() => setShowPreferences(false)}
                 settings={preferences}
                 onSave={onSavePreferences}
+                onSponsorPreferencesChange={onSponsorPreferencesChange}
                 hasHiddenGuideWarnings={hasHiddenGuideWarnings}
                 onRestoreGuideWarnings={onRestoreGuideWarnings}
                 onCheckForUpdates={onCheckForUpdates}

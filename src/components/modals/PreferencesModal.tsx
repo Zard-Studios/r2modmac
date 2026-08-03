@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Button } from '../ui';
+import type { SponsorMessage } from '../../types/electron';
 
 export interface PreferencesSettings {
     legacy_install_mode: boolean;
@@ -10,6 +11,8 @@ export interface PreferencesSettings {
     default_mod_view_mode: 'grid' | 'list';
     show_deprecated_warnings: boolean;
     stream_mode: boolean;
+    sponsored_messages_enabled: boolean;
+    sponsored_messages_less_frequently: boolean;
 }
 
 interface PreferencesModalProps {
@@ -17,6 +20,7 @@ interface PreferencesModalProps {
     onClose: () => void;
     settings: PreferencesSettings;
     onSave: (settings: PreferencesSettings) => void;
+    onSponsorPreferencesChange: (enabled: boolean, lessFrequently: boolean) => Promise<void>;
     hasHiddenGuideWarnings: boolean;
     onRestoreGuideWarnings: () => Promise<void>;
     onCheckForUpdates: () => Promise<void>;
@@ -48,7 +52,7 @@ function IconBox({ children, colorClass }: { children: React.ReactNode; colorCla
     );
 }
 
-function RowIcon({ kind }: { kind: 'install' | 'version' | 'parallel' | 'apply' | 'logs' | 'layout' | 'warning' | 'cache' | 'stream' | 'update' }) {
+function RowIcon({ kind }: { kind: 'install' | 'version' | 'parallel' | 'apply' | 'logs' | 'layout' | 'warning' | 'cache' | 'stream' | 'update' | 'support' }) {
     if (kind === 'install') return (
         <IconBox colorClass="text-blue-400">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -112,6 +116,13 @@ function RowIcon({ kind }: { kind: 'install' | 'version' | 'parallel' | 'apply' 
             </svg>
         </IconBox>
     );
+    if (kind === 'support') return (
+        <IconBox colorClass="text-rose-300">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 21s-7-4.35-7-10a4 4 0 017-2.65A4 4 0 0119 11c0 5.65-7 10-7 10z" />
+            </svg>
+        </IconBox>
+    );
     return (
         <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-red-500/10 border border-red-500/20 text-red-400 flex-shrink-0">
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -126,6 +137,7 @@ export default function PreferencesModal({
     onClose,
     settings,
     onSave,
+    onSponsorPreferencesChange,
     hasHiddenGuideWarnings,
     onRestoreGuideWarnings,
     onCheckForUpdates,
@@ -138,6 +150,10 @@ export default function PreferencesModal({
     const [defaultModViewMode, setDefaultModViewMode] = useState<'grid' | 'list'>(settings.default_mod_view_mode);
     const [showDeprecatedWarnings, setShowDeprecatedWarnings] = useState(settings.show_deprecated_warnings);
     const [streamMode, setStreamMode] = useState(settings.stream_mode);
+    const [sponsoredMessagesEnabled, setSponsoredMessagesEnabled] = useState(settings.sponsored_messages_enabled);
+    const [sponsoredMessagesLessFrequently, setSponsoredMessagesLessFrequently] = useState(settings.sponsored_messages_less_frequently);
+    const [sponsorMessage, setSponsorMessage] = useState<SponsorMessage | null>(null);
+    const [sponsorPreferenceRevision, setSponsorPreferenceRevision] = useState(0);
     const [restoringWarnings, setRestoringWarnings] = useState(false);
     const [checkingUpdates, setCheckingUpdates] = useState(false);
 
@@ -160,6 +176,9 @@ export default function PreferencesModal({
             setDefaultModViewMode(settings.default_mod_view_mode);
             setShowDeprecatedWarnings(settings.show_deprecated_warnings);
             setStreamMode(settings.stream_mode);
+            setSponsoredMessagesEnabled(settings.sponsored_messages_enabled);
+            setSponsoredMessagesLessFrequently(settings.sponsored_messages_less_frequently);
+            setSponsorMessage(null);
         } else {
             setIsVisible(false);
         }
@@ -174,6 +193,27 @@ export default function PreferencesModal({
         }
     }, [isOpen]);
 
+    useEffect(() => {
+        if (!isOpen || !sponsoredMessagesEnabled) {
+            setSponsorMessage(null);
+            return;
+        }
+        let cancelled = false;
+        void window.ipcRenderer.requestSponsor()
+            .then((candidate) => {
+                if (!cancelled) setSponsorMessage(candidate);
+            })
+            .catch(() => {
+                if (!cancelled) setSponsorMessage(null);
+            });
+        return () => { cancelled = true; };
+    }, [isOpen, sponsoredMessagesEnabled, sponsorPreferenceRevision]);
+
+    useEffect(() => {
+        if (!sponsorMessage) return;
+        void window.ipcRenderer.acknowledgeSponsorDisplay(sponsorMessage.id).catch(() => undefined);
+    }, [sponsorMessage]);
+
     if (!isOpen) return null;
 
     const handleSave = () => {
@@ -186,8 +226,19 @@ export default function PreferencesModal({
             default_mod_view_mode: defaultModViewMode,
             show_deprecated_warnings: showDeprecatedWarnings,
             stream_mode: streamMode,
+            sponsored_messages_enabled: sponsoredMessagesEnabled,
+            sponsored_messages_less_frequently: sponsoredMessagesLessFrequently,
         });
         onClose();
+    };
+
+    const persistSponsorPreferences = (enabled: boolean, lessFrequently: boolean) => {
+        setSponsoredMessagesEnabled(enabled);
+        setSponsoredMessagesLessFrequently(lessFrequently);
+        if (!enabled) setSponsorMessage(null);
+        void onSponsorPreferencesChange(enabled, lessFrequently)
+            .catch(() => undefined)
+            .finally(() => setSponsorPreferenceRevision((revision) => revision + 1));
     };
 
     return (
@@ -356,6 +407,103 @@ export default function PreferencesModal({
                                 <Toggle value={streamMode} onChange={setStreamMode} />
                             </div>
                         </div>
+                    </div>
+
+                    {/* Support Section */}
+                    <div className="space-y-3">
+                        <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-widest px-1">Support r2modmac</h3>
+
+                        <div className="divide-y divide-gray-700/50 overflow-hidden rounded-2xl border border-gray-700 bg-gray-800">
+                            <div className="flex items-center justify-between gap-4 p-4 transition-colors hover:bg-gray-750">
+                                <div className="flex items-center gap-4">
+                                    <RowIcon kind="support" />
+                                    <div>
+                                        <p className="text-[15px] font-medium text-white">Support r2modmac with sponsored messages</p>
+                                        <p className="mt-0.5 text-[13px] leading-snug text-gray-400">r2modmac may occasionally display short sponsored messages to help fund development. This feature is enabled by default, can be disabled at any time from Preferences, and never affects the application&apos;s functionality.</p>
+                                    </div>
+                                </div>
+                                <Toggle value={sponsoredMessagesEnabled} onChange={(enabled) => persistSponsorPreferences(enabled, sponsoredMessagesLessFrequently)} label="Enable sponsored messages" />
+                            </div>
+                            <div className={`flex items-center justify-between gap-4 p-4 transition-colors ${sponsoredMessagesEnabled ? 'hover:bg-gray-750' : 'opacity-50'}`}>
+                                <div className="flex items-center gap-4">
+                                    <RowIcon kind="support" />
+                                    <div>
+                                        <p className="text-[15px] font-medium text-white">Show less frequently</p>
+                                        <p className="mt-0.5 text-[13px] leading-snug text-gray-400">At most one message every 7 days and one per 30 days.</p>
+                                    </div>
+                                </div>
+                                <Toggle value={sponsoredMessagesLessFrequently} onChange={(lessFrequently) => {
+                                    if (sponsoredMessagesEnabled) persistSponsorPreferences(true, lessFrequently);
+                                }} label="Show sponsored messages less frequently" />
+                            </div>
+                            <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+                                <div className="flex items-center gap-4">
+                                    <RowIcon kind="cache" />
+                                    <div>
+                                        <p className="text-[15px] font-medium text-white">Reset sponsor cache</p>
+                                        <p className="mt-0.5 text-[13px] leading-snug text-gray-400">Forget recently shown and dismissed messages on this device.</p>
+                                    </div>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={async () => {
+                                        await window.ipcRenderer.resetSponsorCache().catch(() => undefined);
+                                        setSponsorMessage(null);
+                                    }}
+                                    className="shrink-0 rounded-xl border border-gray-600 px-4 py-2 text-[13px] font-medium text-gray-200 transition-colors hover:border-gray-500 hover:bg-gray-700"
+                                >
+                                    Reset
+                                </button>
+                            </div>
+                        </div>
+
+                        <p className="px-1 text-[13px] leading-snug text-gray-500">Sponsored messages are displayed sparingly and are designed not to interrupt your workflow.</p>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                void import('@tauri-apps/plugin-shell').then(({ open }) => open('https://github.com/Zard-Studios/r2modmac/blob/main/docs/sponsored-messages.md'));
+                            }}
+                            className="px-1 text-[13px] font-medium text-blue-400 transition-colors hover:text-blue-300"
+                        >
+                            Learn more about sponsored messages ↗
+                        </button>
+
+                        {sponsorMessage ? (
+                            <div className="flex items-start gap-3 rounded-xl border border-gray-700 bg-gray-800/70 px-4 py-3">
+                                <span className="mt-0.5 shrink-0 text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-500">Sponsored</span>
+                                <div className="min-w-0 flex-1">
+                                    {sponsorMessage.sponsorName ? (
+                                        <p className="text-[13px] font-medium text-gray-200">{sponsorMessage.sponsorName}</p>
+                                    ) : null}
+                                    <p className={`${sponsorMessage.sponsorName ? 'mt-0.5' : ''} text-[13px] leading-snug text-gray-400`}>{sponsorMessage.message}</p>
+                                    {sponsorMessage.url ? (
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                void import('@tauri-apps/plugin-shell').then(({ open }) => open(sponsorMessage.url!));
+                                            }}
+                                            className="mt-2 text-xs font-medium text-blue-400 transition-colors hover:text-blue-300"
+                                        >
+                                            Learn more ↗
+                                        </button>
+                                    ) : null}
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        void window.ipcRenderer.dismissSponsor(sponsorMessage.id).catch(() => undefined);
+                                        setSponsorMessage(null);
+                                    }}
+                                    className="-mr-1 -mt-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-700 hover:text-gray-200"
+                                    aria-label="Dismiss sponsored message"
+                                    title="Dismiss"
+                                >
+                                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="m6 6 12 12M18 6 6 18" />
+                                    </svg>
+                                </button>
+                            </div>
+                        ) : null}
                     </div>
 
                     {/* Guides & Warnings Section */}

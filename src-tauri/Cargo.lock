@@ -114,7 +114,9 @@ dependencies = [
  "tauri-plugin-log",
  "tauri-plugin-shell",
  "tokio",
+ "url",
  "urlencoding",
+ "uuid",
  "walkdir",
  "zip",
 ]
