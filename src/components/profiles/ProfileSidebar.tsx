@@ -6,6 +6,7 @@ import type { ProfileModUpdate } from '../../hooks/useModActions';
 import { Button, HoverMarquee } from '../ui';
 import { compareVersions, hasNewerVersion, latestVersionNumber, parsePackageReference } from '../../utils/modVersioning';
 import { restoreInstalledMod } from '../../utils/profileSync';
+import { getProfileAvatarGradient } from '../../utils/profileAvatar';
 
 const MAX_PARALLEL_TOGGLES = 10;
 const formatCount = (count: number, singular: string, plural = `${singular}s`) => (
@@ -616,7 +617,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                             className={`w-12 h-12 rounded-xl shadow-lg object-cover bg-gray-800 ${activeProfile?.is_vanilla ? 'grayscale' : ''}`}
                         />
                     ) : (
-                        <div className={`w-12 h-12 bg-gradient-to-br from-blue-500 to-purple-600 rounded-xl shadow-lg flex items-center justify-center text-xl font-bold text-white ${activeProfile?.is_vanilla ? 'grayscale' : ''}`}>
+                        <div style={{ backgroundImage: getProfileAvatarGradient(activeProfile?.id || '', activeProfile?.name) }} className={`w-12 h-12 rounded-xl shadow-lg flex items-center justify-center text-xl font-bold text-white ${activeProfile?.is_vanilla ? 'grayscale' : ''}`}>
                             {getFirstLetter(activeProfile?.name)}
                         </div>
                     )}
@@ -1213,7 +1214,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                                         className="w-24 h-24 rounded-full object-cover border-4 border-gray-700 group-hover:border-blue-500 transition-colors"
                                     />
                                 ) : (
-                                    <div className="w-24 h-24 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-4xl font-bold text-white border-4 border-gray-700 group-hover:border-blue-500 transition-colors">
+                                    <div style={{ backgroundImage: getProfileAvatarGradient(activeProfile.id, activeProfile.name) }} className="w-24 h-24 rounded-full flex items-center justify-center text-4xl font-bold text-white border-4 border-gray-700 group-hover:border-blue-500 transition-colors">
                                         {getFirstLetter(activeProfile.name)}
                                     </div>
                                 )}

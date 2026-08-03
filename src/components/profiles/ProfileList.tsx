@@ -5,6 +5,7 @@ import type { CommunityPlatformInfo } from '../../types/thunderstore';
 import { Button, HoverMarquee } from '../ui';
 import { PlatformPicker } from './PlatformPicker';
 import { revealInFileManagerLabel } from '../../utils/platformUtils';
+import { getProfileAvatarGradient } from '../../utils/profileAvatar';
 
 function getFirstLetter(name: string): string {
     if (!name) return '';
@@ -389,7 +390,7 @@ export function ProfileList({
                                         className="w-16 h-16 rounded-2xl mb-4 flex-shrink-0 object-cover bg-gray-800 shadow-md"
                                     />
                                 ) : (
-                                    <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-purple-600 rounded-2xl mb-4 flex-shrink-0 flex items-center justify-center text-2xl font-bold text-white shadow-md">
+                                    <div style={{ backgroundImage: getProfileAvatarGradient(profile.id, profile.name) }} className="w-16 h-16 rounded-2xl mb-4 flex-shrink-0 flex items-center justify-center text-2xl font-bold text-white shadow-md">
                                         {getFirstLetter(profile.name)}
                                     </div>
                                 )}
@@ -637,7 +638,7 @@ export function ProfileList({
                                             className="w-24 h-24 rounded-full object-cover border-4 border-gray-700 group-hover:border-blue-500 transition-colors"
                                         />
                                     ) : (
-                                        <div className="w-24 h-24 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-4xl font-bold text-white border-4 border-gray-700 group-hover:border-blue-500 transition-colors">
+                                        <div style={{ backgroundImage: getProfileAvatarGradient(editingProfile.id, editName) }} className="w-24 h-24 rounded-full flex items-center justify-center text-4xl font-bold text-white border-4 border-gray-700 group-hover:border-blue-500 transition-colors">
                                             {getFirstLetter(editName)}
                                         </div>
                                     )}
