@@ -9,6 +9,53 @@ import { restoreInstalledMod } from '../../utils/profileSync';
 
 const MAX_PARALLEL_TOGGLES = 10;
 
+interface DesktopSelectionResult {
+    selectedIds: string[];
+    anchorId: string | null;
+}
+
+const resolveDesktopSelection = (
+    orderedIds: string[],
+    selectedIds: string[],
+    anchorId: string | null,
+    clickedId: string,
+    event: Pick<React.MouseEvent, 'shiftKey' | 'metaKey' | 'ctrlKey'>,
+): DesktopSelectionResult => {
+    const visibleIds = new Set(orderedIds);
+    const visibleSelection = selectedIds.filter(id => visibleIds.has(id));
+    const additive = event.metaKey || event.ctrlKey;
+
+    if (event.shiftKey) {
+        const stableAnchor = anchorId && visibleIds.has(anchorId) ? anchorId : clickedId;
+        const anchorIndex = orderedIds.indexOf(stableAnchor);
+        const clickedIndex = orderedIds.indexOf(clickedId);
+        if (anchorIndex !== -1 && clickedIndex !== -1) {
+            const start = Math.min(anchorIndex, clickedIndex);
+            const end = Math.max(anchorIndex, clickedIndex);
+            const range = orderedIds.slice(start, end + 1);
+            return {
+                selectedIds: additive ? Array.from(new Set([...visibleSelection, ...range])) : range,
+                anchorId: stableAnchor,
+            };
+        }
+    }
+
+    if (additive) {
+        const isSelected = visibleSelection.includes(clickedId);
+        const nextSelection = isSelected
+            ? visibleSelection.filter(id => id !== clickedId)
+            : [...visibleSelection, clickedId];
+        return {
+            selectedIds: nextSelection,
+            anchorId: isSelected && anchorId === clickedId
+                ? (nextSelection.at(-1) ?? null)
+                : (isSelected ? anchorId : clickedId),
+        };
+    }
+
+    return { selectedIds: [clickedId], anchorId: clickedId };
+};
+
 const localModToPackage = (mod: InstalledMod): Package => {
     const owner = mod.author || 'Local';
     const name = mod.displayName || mod.fullName.split('-')[1] || mod.fullName;
@@ -149,8 +196,16 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
     const previousPendingCountRef = useRef<number | null>(null);
     const renderedModView = useDeferredValue(modView);
 
+    const clearSelections = () => {
+        setSelectedModIds([]);
+        setSelectionAnchorId(null);
+        setSyncSelectedIds([]);
+        setSyncSelectionAnchorId(null);
+    };
+
     const changeModView = (nextView: 'all' | 'updates' | 'sync') => {
         if (nextView === modView) return;
+        clearSelections();
         setModView(nextView);
     };
 
@@ -289,6 +344,17 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
         window.addEventListener('keydown', onKeyDown);
         return () => window.removeEventListener('keydown', onKeyDown);
     }, [syncConfirmation]);
+    useEffect(() => {
+        const onKeyDown = (event: KeyboardEvent) => {
+            if (event.key !== 'Escape' || syncConfirmation) return;
+            setSelectedModIds([]);
+            setSelectionAnchorId(null);
+            setSyncSelectedIds([]);
+            setSyncSelectionAnchorId(null);
+        };
+        window.addEventListener('keydown', onKeyDown);
+        return () => window.removeEventListener('keydown', onKeyDown);
+    }, [syncConfirmation]);
     const searchedMods = activeProfile?.mods.filter(mod =>
         `${mod.fullName} ${mod.displayName || ''} ${mod.author || ''}`.toLowerCase().includes(searchQuery.toLowerCase())
     ) || [];
@@ -379,32 +445,15 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
 
     const handleSelectRow = (e: React.MouseEvent, modId: string) => {
         if (!activeProfile) return;
-
-        const currentIndex = displayedMods.findIndex((m) => m.uuid4 === modId);
-        if (currentIndex === -1) return;
-
-        if (e.shiftKey && selectionAnchorId) {
-            const anchorIndex = displayedMods.findIndex((m) => m.uuid4 === selectionAnchorId);
-            if (anchorIndex !== -1) {
-                const start = Math.min(anchorIndex, currentIndex);
-                const end = Math.max(anchorIndex, currentIndex);
-                const rangeIds = displayedMods.slice(start, end + 1).map((m) => m.uuid4);
-                setSelectedModIds(rangeIds);
-                setSelectionAnchorId(modId);
-                return;
-            }
-            setSelectedModIds([modId]);
-            setSelectionAnchorId(modId);
-            return;
-        }
-
-        if (e.metaKey || e.ctrlKey) {
-            setSelectedModIds((prev) =>
-                prev.includes(modId) ? prev.filter((id) => id !== modId) : [...prev, modId]
-            );
-            setSelectionAnchorId(modId);
-            return;
-        }
+        const result = resolveDesktopSelection(
+            displayedMods.map(mod => mod.uuid4),
+            effectiveSelectedModIds,
+            selectionAnchorId,
+            modId,
+            e,
+        );
+        setSelectedModIds(result.selectedIds);
+        setSelectionAnchorId(result.anchorId);
     };
 
     const handleToggleSingleMod = async (mod: InstalledMod) => {
@@ -468,22 +517,16 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
     };
 
     const handleSyncRowClick = (event: React.MouseEvent, entryId: string, mod: InstalledMod, pkg?: Package) => {
-        if (event.shiftKey && syncSelectionAnchorId) {
-            const anchorIndex = pendingEntries.findIndex(entry => entry.id === syncSelectionAnchorId);
-            const currentIndex = pendingEntries.findIndex(entry => entry.id === entryId);
-            if (anchorIndex !== -1 && currentIndex !== -1) {
-                const start = Math.min(anchorIndex, currentIndex);
-                const end = Math.max(anchorIndex, currentIndex);
-                setSyncSelectedIds(pendingEntries.slice(start, end + 1).map(entry => entry.id));
-                setSyncSelectionAnchorId(entryId);
-                return;
-            }
-        }
-        if (event.metaKey || event.ctrlKey) {
-            setSyncSelectedIds(current => current.includes(entryId)
-                ? current.filter(id => id !== entryId)
-                : [...current, entryId]);
-            setSyncSelectionAnchorId(entryId);
+        if (event.shiftKey || event.metaKey || event.ctrlKey) {
+            const result = resolveDesktopSelection(
+                pendingEntries.map(entry => entry.id),
+                syncSelectedIds,
+                syncSelectionAnchorId,
+                entryId,
+                event,
+            );
+            setSyncSelectedIds(result.selectedIds);
+            setSyncSelectionAnchorId(result.anchorId);
             return;
         }
         if (syncSelectedIds.length > 0) {
@@ -636,7 +679,10 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                         <input
                             type="text"
                             value={searchQuery}
-                            onChange={(e) => setSearchQuery(e.target.value)}
+                            onChange={(e) => {
+                                clearSelections();
+                                setSearchQuery(e.target.value);
+                            }}
                             placeholder="search profile mods..."
                             spellCheck={false}
                             autoCorrect="off"
@@ -721,14 +767,14 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                         {activeProfile?.apply_interrupted && !isApplying ? (
                             <button type="button" onClick={() => onInstallToGame()}
                                 className="flex w-full items-start gap-2.5 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-left text-xs text-amber-200">
-                                <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-amber-500/15 text-amber-300" aria-hidden="true">
-                                    <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
-                                        <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l6.518 11.597c.75 1.334-.213 2.98-1.742 2.98H3.48c-1.53 0-2.493-1.646-1.743-2.98L8.257 3.1zM11 14a1 1 0 10-2 0 1 1 0 002 0zm-1-6a1 1 0 00-1 1v3a1 1 0 102 0V9a1 1 0 00-1-1z" clipRule="evenodd" />
+                                <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center text-amber-300" aria-hidden="true">
+                                    <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M12 9v2m0 4h.01m-7.938 4h15.876c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L2.33 16c-.77 1.333.192 3 1.732 3z" />
                                     </svg>
                                 </span>
                                 <span className="min-w-0 flex-1">
                                     <span className="block font-bold">Apply was interrupted</span>
-                                    <span className="block text-[10px] text-amber-300/70">Resume Apply before reverting changes.</span>
+                                    <span className="block text-[10px] text-amber-300/70">Resume Apply, or revert pending changes below.</span>
                                 </span>
                             </button>
                         ) : null}
@@ -738,7 +784,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                                     ? `${pendingEntries.filter(entry => entry.status === 'syncing').length} syncing · ${pendingSyncCount} pending`
                                     : syncSelectedIds.length ? `${syncSelectedIds.length} selected` : `${pendingSyncCount} pending changes`}
                             </span>
-                            <button type="button" disabled={isApplying || !!activeProfile?.apply_interrupted || (syncSelectedIds.length
+                            <button type="button" disabled={isApplying || (syncSelectedIds.length
                                 ? pendingEntries.filter(entry => syncSelectedIds.includes(entry.id)).some(entry => !entry.revertable)
                                 : pendingEntries.some(entry => !entry.revertable))}
                                 onClick={() => {
@@ -769,7 +815,9 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                             return (
                                 <div key={entry.id}
                                     onClick={event => handleSyncRowClick(event, entry.id, entry.mod, pkg)}
-                                    className={`group/sync-row relative flex cursor-pointer items-center gap-3 overflow-hidden rounded-lg border p-2 transition-colors ${selected ? 'border-sky-500/40 bg-sky-500/10' : 'border-transparent hover:border-gray-700 hover:bg-gray-800'}`}>
+                                    onMouseDown={event => { if (event.shiftKey || event.metaKey || event.ctrlKey) event.preventDefault(); }}
+                                    aria-selected={selected}
+                                    className={`group/sync-row relative flex cursor-pointer select-none items-center gap-3 overflow-hidden rounded-lg border p-2 transition-colors ${selected ? 'border-sky-500/40 bg-sky-500/10' : 'border-transparent hover:border-gray-700 hover:bg-gray-800'}`}>
                                     {selected ? <span className="absolute inset-y-2 left-0 w-0.5 rounded-full bg-sky-400" aria-hidden="true" /> : null}
                                     <div className="flex min-w-0 flex-1 items-center gap-3 text-left">
                                         <div className="h-10 w-10 shrink-0 overflow-hidden rounded-lg border border-gray-700 bg-gray-800">
@@ -788,7 +836,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                                     <div className="flex shrink-0 items-center gap-1.5">
                                         <button type="button"
                                             onClick={event => { event.stopPropagation(); setSyncConfirmation({ kind: 'revert', ids: [entry.id] }); }}
-                                            disabled={isApplying || !!activeProfile?.apply_interrupted || !entry.revertable}
+                                            disabled={isApplying || !entry.revertable}
                                             className="flex h-8 w-8 items-center justify-center rounded-lg border border-gray-700 text-gray-400 transition-colors hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-300 disabled:opacity-30"
                                             title="Revert this change" aria-label={`Revert ${entry.mod.displayName || entry.mod.fullName}`}>
                                             <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
@@ -817,18 +865,19 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                     <button
                         type="button"
                         onClick={() => onUpdateAll(profileUpdates)}
-                        className="profile-update-action-enter group/update-all mx-2 mb-2 flex w-[calc(100%-16px)] items-center gap-3 rounded-xl border border-blue-500/25 bg-blue-500/10 px-3 py-2.5 text-left transition-[background-color,border-color,transform] duration-200 hover:border-blue-500/45 hover:bg-blue-500/15 active:scale-[0.985]"
+                        className="profile-update-action-enter group/update-all mx-2 mb-2 flex w-[calc(100%-16px)] items-center gap-3 rounded-xl border border-yellow-500 bg-yellow-600 px-3 py-2.5 text-left text-white shadow-lg shadow-yellow-950/20 transition-[background-color,border-color,transform] duration-200 hover:border-yellow-400 hover:bg-yellow-500 active:scale-[0.985]"
                     >
-                        <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-blue-500/15 text-blue-300">
-                            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v6h6M20 20v-6h-6M5.6 15a7 7 0 0011.9 2M18.4 9A7 7 0 006.5 7" />
+                        <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-black/10 text-white">
+                            <svg className="h-4 w-4" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                                <path d="M8.75 2.75a.75.75 0 0 0-1.5 0v5.69L5.03 6.22a.75.75 0 0 0-1.06 1.06l3.5 3.5a.75.75 0 0 0 1.06 0l3.5-3.5a.75.75 0 0 0-1.06-1.06L8.75 8.44V2.75Z" />
+                                <path d="M3.5 9.75a.75.75 0 0 0-1.5 0v1.5A2.75 2.75 0 0 0 4.75 14h6.5A2.75 2.75 0 0 0 14 11.25v-1.5a.75.75 0 0 0-1.5 0v1.5c0 .69-.56 1.25-1.25 1.25h-6.5c-.69 0-1.25-.56-1.25-1.25v-1.5Z" />
                             </svg>
                         </span>
                         <span className="min-w-0 flex-1">
-                            <span className="block text-xs font-bold text-blue-100">Update all {profileUpdates.length} mods</span>
-                            <span className="block truncate text-[10px] font-medium text-blue-300/65">Review versions before updating</span>
+                            <span className="block text-xs font-extrabold">Update all {profileUpdates.length} mods</span>
+                            <span className="block truncate text-[10px] font-semibold text-yellow-100/75">Review and prepare profile updates</span>
                         </span>
-                        <svg className="h-4 w-4 flex-shrink-0 text-blue-300/70 transition-transform duration-200 group-hover/update-all:translate-x-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        <svg className="h-4 w-4 flex-shrink-0 text-yellow-100/75 transition-transform duration-200 group-hover/update-all:translate-x-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="m9 18 6-6-6-6" />
                         </svg>
                     </button>
@@ -846,6 +895,8 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                     return (
                         <div
                             key={mod.uuid4}
+                            onMouseDown={(event) => { if (event.shiftKey || event.metaKey || event.ctrlKey) event.preventDefault(); }}
+                            aria-selected={isSelected}
                             className={`profile-mod-row isolate flex items-center gap-3 p-2 rounded-lg group cursor-pointer transition-all border relative overflow-hidden ${renderedModView === 'updates' ? 'pr-24' : 'pr-16'} ${isSelected
                                 ? 'bg-blue-500/12 border-blue-500/35'
                                 : 'border-transparent hover:border-gray-700 hover:bg-gray-800'

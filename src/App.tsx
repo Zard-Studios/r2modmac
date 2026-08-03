@@ -1212,10 +1212,38 @@ function App() {
     }
   }, [activeProfileId, handleSyncToGame, isUpdatingProfile, legacyInstallMode, pendingProfileUpdates, refreshRuntimeHealth, stageProfileUpdates]);
 
-  const handleRevertPending = useCallback((ids: string[]) => {
-    if (!activeProfileId) return;
-    revertPendingMods(activeProfileId, ids);
-  }, [activeProfileId, revertPendingMods]);
+  const handleRevertPending = useCallback(async (ids: string[]) => {
+    const profile = useProfileStore.getState().profiles.find(candidate => candidate.id === activeProfileId);
+    if (!profile || ids.length === 0) return;
+
+    if (profile.apply_interrupted) {
+      const community = profile.gameIdentifier || selectedCommunity;
+      if (!community) {
+        await window.ipcRenderer.alert('Cannot Revert', 'Configure the game path before reverting an interrupted Apply.');
+        return;
+      }
+      try {
+        await window.ipcRenderer.rollbackProfileApplyTransaction(profile.id, community);
+      } catch (error: any) {
+        await window.ipcRenderer.alert(
+          'Revert Failed',
+          `The game snapshot could not be restored: ${String(error?.message || error || 'unknown error')}`,
+        );
+        return;
+      }
+    }
+
+    revertPendingMods(profile.id, ids);
+    const reverted = useProfileStore.getState().profiles.find(candidate => candidate.id === profile.id);
+    if (!reverted) return;
+    const stillPending = reverted.mods.some(mod => mod.pending_sync)
+      || (reverted.pending_removals?.length ?? 0) > 0;
+    updateProfile(profile.id, {
+      apply_interrupted: false,
+      needs_sync: stillPending,
+    });
+    await window.ipcRenderer.saveProfiles(useProfileStore.getState().profiles);
+  }, [activeProfileId, revertPendingMods, selectedCommunity, updateProfile]);
 
   const handleSyncPending = useCallback(async (ids: string[]) => {
     const original = useProfileStore.getState().profiles.find(profile => profile.id === activeProfileId);
