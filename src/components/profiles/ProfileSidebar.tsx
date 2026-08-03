@@ -894,15 +894,21 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                                         <div className="h-10 w-10 shrink-0 overflow-hidden rounded-lg border border-gray-700 bg-gray-800">
                                             {entry.mod.iconUrl ? <img src={entry.mod.iconUrl} alt="" className="h-full w-full object-cover" /> : null}
                                         </div>
-                                        <span className="min-w-0 flex-1">
-                                            <span className="block truncate text-sm font-medium text-gray-100">{entry.mod.displayName || entry.mod.fullName.split('-')[1] || entry.mod.fullName}</span>
+                                        <div className="min-w-0 flex-1">
+                                            <HoverMarquee
+                                                text={entry.mod.displayName || entry.mod.fullName.split('-')[1] || entry.mod.fullName}
+                                                lazy
+                                                className="text-sm font-medium text-gray-100"
+                                            />
                                             {statusLabel ? (
-                                                <span className={`block truncate text-xs ${syncStatus === 'failed' ? 'text-red-300' : syncStatus === 'ready' ? 'text-emerald-300' : 'text-sky-300'}`} title={statusLabel}>
-                                                    {statusLabel}
-                                                </span>
+                                                <HoverMarquee
+                                                    text={statusLabel}
+                                                    lazy
+                                                    className={`text-xs ${syncStatus === 'failed' ? 'text-red-300' : syncStatus === 'ready' ? 'text-emerald-300' : 'text-sky-300'}`}
+                                                />
                                             ) : null}
                                             {!entry.revertable ? <span className="block truncate text-[10px] text-amber-400">Previous state could not be verified</span> : null}
-                                        </span>
+                                        </div>
                                     </div>
                                     <div className="flex shrink-0 items-center gap-1.5">
                                         <button type="button"
