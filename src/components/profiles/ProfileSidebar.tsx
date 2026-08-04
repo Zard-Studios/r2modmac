@@ -889,11 +889,11 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                                     const ids = syncSelectedIds.length ? syncSelectedIds : pendingEntries.map(entry => entry.id);
                                     setSyncConfirmation({ kind: 'revert', ids });
                                 }}
-                                className="rounded-lg border border-gray-600 px-2.5 py-1.5 text-[11px] font-semibold text-gray-200 disabled:opacity-40">Revert{syncSelectedIds.length ? '' : ' all'}</button>
+                                className="rounded-lg border border-gray-600 px-2.5 py-1.5 text-[11px] font-semibold text-gray-200 disabled:opacity-40">Revert{syncSelectedIds.length || pendingSyncCount < 2 ? '' : ' all'}</button>
                             <button type="button" disabled={isApplying || !!activeProfile?.apply_interrupted} onClick={() => {
                                 const ids = syncSelectedIds.length ? syncSelectedIds : pendingEntries.map(entry => entry.id);
                                 setSyncConfirmation({ kind: 'sync', ids });
-                            }} className="rounded-lg bg-blue-600 px-2.5 py-1.5 text-[11px] font-bold text-white disabled:opacity-40">Sync{syncSelectedIds.length ? '' : ' all'}</button>
+                            }} className="rounded-lg bg-blue-600 px-2.5 py-1.5 text-[11px] font-bold text-white disabled:opacity-40">Sync{syncSelectedIds.length || pendingSyncCount < 2 ? '' : ' all'}</button>
                         </div>
                         {pendingEntries.map(entry => {
                             const baseline = entry.mod.sync_baseline;
@@ -965,7 +965,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                         })}
                     </div>
                 ) : null}
-                {renderedModView === 'updates' && profileUpdates.length > 0 ? (
+                {renderedModView === 'updates' && profileUpdates.length > 1 ? (
                     <button
                         type="button"
                         onClick={() => onUpdateAll(profileUpdates)}
