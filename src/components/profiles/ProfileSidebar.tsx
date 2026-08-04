@@ -5,7 +5,7 @@ import type { RuntimeHealth } from '../../types/electron';
 import type { ProfileModUpdate } from '../../hooks/useModActions';
 import { Button, HoverMarquee } from '../ui';
 import { compareVersions, hasNewerVersion, latestVersionNumber, parsePackageReference } from '../../utils/modVersioning';
-import { restoreInstalledMod } from '../../utils/profileSync';
+import { hasPendingRuntimeInstall, restoreInstalledMod } from '../../utils/profileSync';
 import { getProfileAvatarGradient } from '../../utils/profileAvatar';
 
 const MAX_PARALLEL_TOGGLES = 10;
@@ -305,6 +305,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
         ];
     }, [activeProfile, legacyInstallMode]);
     const pendingSyncCount = pendingEntries.length;
+    const runtimeQueuedForSync = hasPendingRuntimeInstall(activeProfile, runtimeHealth?.runtime);
     const pendingChangeCounts = useMemo(() => (
         pendingEntries.reduce<Record<string, number>>((result, entry) => {
             result[entry.kind] = (result[entry.kind] || 0) + 1;
@@ -797,7 +798,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                 </div>
             </div>
 
-            {runtimeHealth && ['missing', 'incomplete', 'unconfigured'].includes(runtimeHealth.status) && (
+            {runtimeHealth && !runtimeQueuedForSync && ['missing', 'incomplete', 'unconfigured'].includes(runtimeHealth.status) && (
                 <div className="profile-sidebar-motion-item [--sidebar-motion-order:2] mx-4 mb-2 flex items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2.5">
                     <svg className="h-4 w-4 flex-shrink-0 text-amber-400" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
                         <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l6.518 11.597c.75 1.334-.213 2.98-1.742 2.98H3.48c-1.53 0-2.493-1.646-1.743-2.98L8.257 3.1zM11 14a1 1 0 10-2 0 1 1 0 002 0zm-1-6a1 1 0 00-1 1v3a1 1 0 102 0V9a1 1 0 00-1-1z" clipRule="evenodd" />

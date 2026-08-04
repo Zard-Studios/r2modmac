@@ -29,7 +29,7 @@ import type { ProfileModUpdate } from './hooks/useModActions';
 import { useProfileActions } from './hooks/useProfileActions';
 import { useGameSync } from './hooks/useGameSync';
 import { compareVersions, findPinnedVersion, parsePackageReference } from './utils/modVersioning';
-import { getProfileModKey, migratePendingSyncBaselines, restoreInstalledMod } from './utils/profileSync';
+import { getProfileModKey, hasPendingRuntimeInstall, migratePendingSyncBaselines, restoreInstalledMod } from './utils/profileSync';
 
 const QUICK_MAC_HINTS = new Set([
   'btd6',
@@ -1070,7 +1070,7 @@ function App() {
     if (!community) return false;
 
     const health = runtimeHealth || await refreshRuntimeHealth();
-    if (health?.status === 'healthy') return true;
+    if (health?.status === 'healthy' || hasPendingRuntimeInstall(profile, health?.runtime)) return true;
     if (!health || !health.repairable) {
       if (health?.status === 'unconfigured') setShowSettings(true);
       return false;
@@ -1270,7 +1270,7 @@ function App() {
     }
 
     const health = await refreshRuntimeHealth();
-    if (health && (health.status === 'missing' || health.status === 'incomplete')) {
+    if (health && (health.status === 'missing' || health.status === 'incomplete') && !hasPendingRuntimeInstall(original, health.runtime)) {
       const confirmedRepair = await window.ipcRenderer.confirm(
         'Repair Runtime Before Sync?',
         `${health.runtime === 'bepinex' ? 'BepInEx' : health.runtime === 'owml' ? 'OWML' : health.runtime === 'returnofmodding' ? 'ReturnOfModding' : 'Lovely'} is ${health.status}. Repair it before synchronizing this selection?`
@@ -1842,7 +1842,7 @@ function App() {
     try {
       if (isVanillaOverride === undefined) {
         const health = await refreshRuntimeHealth();
-        if (health && (health.status === 'missing' || health.status === 'incomplete')) {
+        if (health && (health.status === 'missing' || health.status === 'incomplete') && !hasPendingRuntimeInstall(activeProfile, health.runtime)) {
           const confirmedRepair = await window.ipcRenderer.confirm(
             'Repair Runtime Before Apply?',
             `${health.runtime === 'bepinex' ? 'BepInEx' : health.runtime === 'owml' ? 'OWML' : health.runtime === 'returnofmodding' ? 'ReturnOfModding' : 'Lovely'} is ${health.status}. ` +

@@ -4,6 +4,13 @@ import type { SponsorMessage } from '../../types/electron';
 const INITIAL_REQUEST_DELAY_MS = 900;
 const SPONSOR_ROTATION_INTERVAL_MS = 15_000;
 
+// Screen routes mount separate sponsor surfaces. Keep the current line outside
+// React so navigating never blanks or recounts an already visible sponsor.
+let persistentMessage: SponsorMessage | null = null;
+let persistentDismissed = false;
+let persistentEnabled: boolean | null = null;
+let persistentAcknowledgedId: string | null = null;
+
 export type SponsorPlacement = 'home-support' | 'catalog-support' | 'profile-selector-support';
 
 interface SponsorSurfaceProps {
@@ -18,24 +25,35 @@ interface SponsorSurfaceProps {
  * scroll boundary. This prevents prefetching or counting an unseen placement.
  */
 export function SponsorSurface({ placement, visible, className = '' }: SponsorSurfaceProps) {
-    const [message, setMessage] = useState<SponsorMessage | null>(null);
-    const [dismissed, setDismissed] = useState(false);
-    const [enabled, setEnabled] = useState<boolean | null>(null);
-    const acknowledgedRef = useRef<string | null>(null);
+    const [message, setMessage] = useState<SponsorMessage | null>(persistentMessage);
+    const [dismissed, setDismissed] = useState(persistentDismissed);
+    const [enabled, setEnabled] = useState<boolean | null>(persistentEnabled);
+    const acknowledgedRef = useRef<string | null>(persistentAcknowledgedId);
 
     useEffect(() => {
         void window.ipcRenderer.getSettings()
-            .then((settings) => setEnabled(settings.sponsored_messages_enabled !== false))
-            .catch(() => setEnabled(false));
+            .then((settings) => {
+                persistentEnabled = settings.sponsored_messages_enabled !== false;
+                setEnabled(persistentEnabled);
+            })
+            .catch(() => {
+                persistentEnabled = false;
+                setEnabled(false);
+            });
 
         const onPreferenceChange = (event: Event) => {
             const nextEnabled = (event as CustomEvent<{ enabled?: boolean }>).detail?.enabled === true;
+            persistentEnabled = nextEnabled;
             setEnabled(nextEnabled);
             if (!nextEnabled) {
+                persistentMessage = null;
+                persistentDismissed = false;
+                persistentAcknowledgedId = null;
                 setMessage(null);
                 setDismissed(false);
                 acknowledgedRef.current = null;
             } else {
+                persistentDismissed = false;
                 setDismissed(false);
             }
         };
@@ -53,7 +71,10 @@ export function SponsorSurface({ placement, visible, className = '' }: SponsorSu
             try {
                 const candidate = await window.ipcRenderer.requestSponsor(placement);
                 if (!cancelled && candidate) {
+                    persistentMessage = candidate;
+                    persistentDismissed = false;
                     setMessage((current) => current?.id === candidate.id ? current : candidate);
+                    setDismissed(false);
                 }
             } catch {
                 // Sponsorship is optional; keep the current line and retry later.
@@ -75,6 +96,7 @@ export function SponsorSurface({ placement, visible, className = '' }: SponsorSu
         if (!message || acknowledgedRef.current === message.id) return;
         const frame = window.requestAnimationFrame(() => {
             acknowledgedRef.current = message.id;
+            persistentAcknowledgedId = message.id;
             void window.ipcRenderer.acknowledgeSponsorDisplay(message.id).catch(() => undefined);
         });
         return () => window.cancelAnimationFrame(frame);
@@ -84,12 +106,12 @@ export function SponsorSurface({ placement, visible, className = '' }: SponsorSu
 
     return (
         <div
-            className={`pointer-events-none absolute inset-x-0 bottom-0 z-20 flex justify-center bg-gradient-to-t from-gray-900/90 via-gray-900/70 to-transparent px-[clamp(1rem,3vw,3.125rem)] pb-4 pt-12 transition-[opacity,transform] duration-300 ease-out ${visible ? 'translate-y-0 opacity-100' : 'translate-y-3 opacity-0'} ${className}`}
+            className={`pointer-events-none absolute inset-x-0 bottom-0 z-20 flex justify-center bg-gradient-to-t from-gray-900/90 via-gray-900/70 to-transparent px-4 pb-3 pt-8 transition-[opacity,transform] duration-300 ease-out ${visible ? 'translate-y-0 opacity-100' : 'translate-y-3 opacity-0'} ${className}`}
             aria-hidden={!visible}
         >
-            <div className="pointer-events-auto flex w-full items-center gap-3 rounded-xl border border-gray-700/90 bg-gray-800/80 p-3 backdrop-blur-[2px] shadow-[0_12px_35px_rgba(0,0,0,0.28)]">
-                <span className="shrink-0 border-r border-gray-700 pr-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-500">Sponsored</span>
-                <p className="min-w-0 flex-1 truncate text-[15px] text-gray-200" title={message.message}>{message.message}</p>
+            <div className="pointer-events-auto flex w-auto max-w-[min(46rem,calc(100%-1rem))] min-w-0 items-center gap-2 rounded-lg border border-gray-700/90 bg-gray-800/80 px-3 py-2 backdrop-blur-[2px] shadow-[0_10px_28px_rgba(0,0,0,0.24)]">
+                <span className="shrink-0 border-r border-gray-700 pr-2 text-[9px] font-semibold uppercase tracking-[0.14em] text-gray-500">Sponsored</span>
+                <p className="min-w-0 max-w-[min(30rem,45vw)] truncate text-sm text-gray-200" title={message.message}>{message.message}</p>
                 <div className="flex shrink-0 items-center gap-2">
                     {message.url ? (
                         <button
@@ -97,7 +119,7 @@ export function SponsorSurface({ placement, visible, className = '' }: SponsorSu
                             onClick={() => {
                                 void import('@tauri-apps/plugin-shell').then(({ open }) => open(message.url!));
                             }}
-                            className="flex h-8 items-center rounded-lg border border-blue-400/25 bg-blue-500/10 px-3 text-xs font-semibold text-blue-300 transition-colors hover:border-blue-400/40 hover:bg-blue-500/20 hover:text-blue-200"
+                            className="flex h-7 items-center rounded-md border border-blue-400/25 bg-blue-500/10 px-2.5 text-[11px] font-semibold text-blue-300 transition-colors hover:border-blue-400/40 hover:bg-blue-500/20 hover:text-blue-200"
                         >
                             Learn more ↗
                         </button>
@@ -105,10 +127,11 @@ export function SponsorSurface({ placement, visible, className = '' }: SponsorSu
                     <button
                         type="button"
                         onClick={() => {
+                            persistentDismissed = true;
                             setDismissed(true);
                             void window.ipcRenderer.dismissSponsor(message.id).catch(() => undefined);
                         }}
-                        className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-700 hover:text-gray-200"
+                        className="flex h-7 w-7 items-center justify-center rounded-md text-gray-500 transition-colors hover:bg-gray-700 hover:text-gray-200"
                         aria-label="Dismiss sponsored message"
                         title="Dismiss"
                     >
