@@ -423,7 +423,7 @@ export default function PreferencesModal({
                                     <RowIcon kind="support" />
                                     <div>
                                         <p className="text-[15px] font-medium text-white">Support r2modmac with sponsored messages</p>
-                                        <p className="mt-0.5 text-[13px] leading-snug text-gray-400">r2modmac may occasionally display short sponsored messages to help fund development. This feature is enabled by default, can be disabled at any time from Preferences, and never affects the application&apos;s functionality.</p>
+                                        <p className="mt-0.5 text-[13px] leading-snug text-gray-400">Occasional short text messages help fund development. Enabled by default, they can be disabled at any time and never affect the application&apos;s functionality.</p>
                                     </div>
                                 </div>
                                 <Toggle value={sponsoredMessagesEnabled} onChange={persistSponsorPreferences} label="Enable sponsored messages" />
@@ -449,7 +449,7 @@ export default function PreferencesModal({
                             </div>
                         </div>
 
-                        <p className="px-1 text-[13px] leading-snug text-gray-500">Sponsored messages are kept outside installs, updates, Sync, Apply, warnings, and dialogs.</p>
+                        <p className="px-1 text-[13px] leading-snug text-gray-500">Text-only messages: no images or banners. They never interrupt installs, updates, Sync, Apply, warnings, dialogs, or your workflow.</p>
                         <button
                             type="button"
                             onClick={() => {

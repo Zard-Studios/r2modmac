@@ -264,14 +264,10 @@ pub async fn dismiss_sponsor(app: AppHandle, sponsor_id: String) -> Result<(), S
 
 #[command]
 pub async fn reset_sponsor_cache(app: AppHandle) -> Result<(), String> {
-    let subject = load_state(&app).installation_subject;
-    save_state(
-        &app,
-        &SponsorState {
-            installation_subject: subject,
-            ..Default::default()
-        },
-    )
+    // Reset the cache and installation identity together. The next eligible
+    // request will create a fresh opaque UUID; no previous sponsor history is
+    // carried over to the new identity.
+    save_state(&app, &SponsorState::default())
 }
 
 #[command]
