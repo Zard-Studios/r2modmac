@@ -5982,6 +5982,40 @@ mod tests {
     }
 
     #[test]
+    fn ror2_bepinex_pack_extracts_runtime_to_game_root() {
+        let cursor = Cursor::new(Vec::new());
+        let mut writer = zip::ZipWriter::new(cursor);
+        let options = zip::write::FileOptions::default();
+        for (path, bytes) in [
+            ("BepInExPack/BepInEx/core/BepInEx.Preloader.dll", b"preloader".as_slice()),
+            ("BepInExPack/BepInEx/core/BepInEx.dll", b"core".as_slice()),
+            ("BepInExPack/winhttp.dll", b"doorstop".as_slice()),
+            ("BepInExPack/doorstop_config.ini", b"enabled=true".as_slice()),
+        ] {
+            writer.start_file(path, options).unwrap();
+            writer.write_all(bytes).unwrap();
+        }
+        let bytes = writer.finish().unwrap().into_inner();
+        let root = temp_dir("ror2-bepinex-extract");
+        let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
+
+        extract_bepinex_pack_to_root(&mut archive, &root, false, false).unwrap();
+
+        assert_eq!(
+            fs::read(root.join("BepInEx/core/BepInEx.Preloader.dll")).unwrap(),
+            b"preloader"
+        );
+        assert_eq!(fs::read(root.join("BepInEx/core/BepInEx.dll")).unwrap(), b"core");
+        assert_eq!(fs::read(root.join("winhttp.dll")).unwrap(), b"doorstop");
+        assert_eq!(
+            fs::read(root.join("doorstop_config.ini")).unwrap(),
+            b"enabled=true"
+        );
+        assert!(!root.join("BepInEx/plugins/BepInExPack").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn risk_of_rain_2_detection_accepts_folder_name() {
         let path = std::path::Path::new("/tmp/steamapps/common/Risk of Rain 2");
         assert!(is_probably_risk_of_rain_2_game_dir(path));

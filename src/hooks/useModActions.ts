@@ -1,7 +1,7 @@
 import type { Package, PackageVersion } from '../types/thunderstore';
 import type { InstalledMod } from '../types/profile';
 import { useProfileStore } from '../store/useProfileStore';
-import { compareVersions, findPinnedVersion, parsePackageReference } from '../utils/modVersioning';
+import { compareVersions, findPinnedVersion, parsePackageReference, satisfiesMinimumVersion } from '../utils/modVersioning';
 import { inferPendingSyncKind, snapshotInstalledMod } from '../utils/profileSync';
 
 const MAX_PARALLEL_OPS = 10;
@@ -91,7 +91,7 @@ export function useModActions({
         const profile = useProfileStore.getState().profiles.find(candidate => candidate.id === profileId);
         return !!profile?.mods.some(mod =>
             getPackageKey(mod.fullName).toLowerCase() === packageKey
-            && compareVersions(mod.versionNumber, minimumVersion) >= 0
+            && satisfiesMinimumVersion(mod.versionNumber, minimumVersion)
         );
     };
 
@@ -486,7 +486,7 @@ export function useModActions({
         const collect = async (version: PackageVersion, isRoot: boolean) => {
             const key = getPackageKey(version.full_name).toLowerCase();
             const current = currentByKey.get(key);
-            if (!isRoot && current && compareVersions(current.versionNumber, version.version_number) >= 0) return;
+            if (!isRoot && current && satisfiesMinimumVersion(current.versionNumber, version.version_number)) return;
             const processed = processedVersions.get(key);
             if (processed && compareVersions(processed, version.version_number) >= 0) return;
             processedVersions.set(key, version.version_number);
@@ -515,7 +515,7 @@ export function useModActions({
             const requirements = parsedRequirements
                 .filter(requirement => {
                     const installed = currentByKey.get(requirement.packageName.toLowerCase());
-                    if (installed && compareVersions(installed.versionNumber, requirement.version!) >= 0) return false;
+                    if (installed && satisfiesMinimumVersion(installed.versionNumber, requirement.version!)) return false;
                     const queued = processedVersions.get(requirement.packageName.toLowerCase());
                     return !queued || compareVersions(queued, requirement.version!) < 0;
                 });

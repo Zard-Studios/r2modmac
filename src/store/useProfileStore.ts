@@ -7,6 +7,7 @@ import type {
     ProfilePlatform
 } from '../types/profile';
 import { getProfileModKey, inferPendingSyncKind, restoreInstalledMod, snapshotInstalledMod } from '../utils/profileSync';
+import { packageIdentityKey } from '../utils/modVersioning';
 
 // Debounced save to prevent rapid-fire file writes causing race conditions
 let saveTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -18,11 +19,7 @@ const debouncedSaveProfiles = (profiles: Profile[]) => {
 };
 
 const getModKey = (fullName: string): string => {
-    const parts = fullName.split('-');
-    if (parts.length >= 2) {
-        return `${parts[0]}-${parts[1]}`.toLowerCase();
-    }
-    return fullName.toLowerCase();
+    return packageIdentityKey(fullName);
 };
 
 const normalizeLocalKeyPart = (value?: string | null): string => (

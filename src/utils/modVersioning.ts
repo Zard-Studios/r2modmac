@@ -20,6 +20,14 @@ export function parsePackageReference(fullName: string): PackageReference {
     };
 }
 
+export function packageIdentityKey(fullName: string): string {
+    return parsePackageReference(fullName).packageName.toLowerCase();
+}
+
+export function satisfiesMinimumVersion(installedVersion: string, requiredVersion: string): boolean {
+    return compareVersions(installedVersion, requiredVersion) >= 0;
+}
+
 export function findPinnedVersion(pkg: Package, requestedVersion: string, label = pkg.full_name): PackageVersion {
     const version = pkg.versions.find(candidate => candidate.version_number === requestedVersion);
     if (!version) {

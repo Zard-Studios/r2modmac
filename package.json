@@ -7,6 +7,7 @@
     "dev": "node ./scripts/dev.mjs",
     "dev:vite": "vite",
     "build": "tsc -b && vite build",
+    "test:issue-23": "node --experimental-strip-types --test tests/issue-23-regressions.test.ts",
     "tauri": "tauri",
     "lint": "eslint .",
     "preview": "vite preview"
