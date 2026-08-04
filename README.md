@@ -29,6 +29,14 @@
 
 r2modmac is a native mod manager for macOS/Windows that allows you to easily manage mods for Thunderstore supported games and Outer Wilds (via OWML). Designed with a modern and intuitive interface, it offers a smooth experience to install, update, and organize your favorite mods.
 
+## Supporting development
+
+r2modmac is not ad-free: it can occasionally show a short, clearly labelled **text-only sponsored message** to help fund development. There are no banner images, pop-ups, video ads, or interruptions to installing, updating, syncing, or playing.
+
+Sponsored messages are enabled by default and can be disabled at any time from **Settings → Support r2modmac**. Disabling them immediately stops future sponsor requests and removes cached messages; every core feature of the app continues to work exactly the same.
+
+We do not send your installed mods, profiles, local files, paths, configuration, or other app content to the sponsor service. See [Sponsored messages](docs/sponsored-messages.md) for the full data boundary.
+
 ## Features
 
 - **Multi-Game Support**: Manage mods for all games available on Thunderstore
@@ -157,7 +165,7 @@ If you like the project, leave a star! ⭐
 
 <div align="center">
 
-r2modmac is and will always remain open-source and completely tracker-free. I dedicate all my free time to it as a student and independent developer. If this tool has saved you hours of configuration and headaches, please consider supporting its development with a micro donation!
+r2modmac is and will always remain open-source. It has no analytics or telemetry, and it does not share personal data or application content. Optional text-only sponsored messages help support development and can always be disabled in Settings. I dedicate all my free time to it as a student and independent developer. If this tool has saved you hours of configuration and headaches, please consider supporting its development with a micro donation!
 
 **Made with ❤️ for the modding community**
 

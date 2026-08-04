@@ -2,9 +2,12 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { SponsorSlot, type Sponsor } from '@adtention/sdk';
 
 const CATEGORY = 'gaming-mod-manager';
-const PLACEMENT = 'preferences-support';
+const PLACEMENTS = new Set([
+  'preferences-support',
+  'profile-selector-support',
+  'catalog-support',
+]);
 const ADTENTION_CATEGORY = 'general' as const;
-const CACHE_MS = 15 * 60 * 1000;
 
 type SponsorPayload = {
   id: string;
@@ -12,8 +15,6 @@ type SponsorPayload = {
   message: string;
   url?: string;
 };
-
-let cached: { subject: string; value: SponsorPayload; expiresAt: number } | undefined;
 
 function text(value: unknown, maximum: number): string | undefined {
   return typeof value === 'string' && value.trim().length > 0 && value.length <= maximum
@@ -54,17 +55,17 @@ function noContent(response: VercelResponse) {
 export default async function handler(request: VercelRequest, response: VercelResponse) {
   if (request.method !== 'POST') return noContent(response);
   const subject = text(request.body?.subject, 128);
-  if (request.body?.category !== CATEGORY || request.body?.placement !== PLACEMENT || !subject) {
+  if (
+    request.body?.category !== CATEGORY
+    || typeof request.body?.placement !== 'string'
+    || !PLACEMENTS.has(request.body.placement)
+    || !subject
+  ) {
     return noContent(response);
   }
 
   const publisherId = process.env.ADTENTION_PUBLISHER_ID;
   if (!publisherId) return noContent(response);
-
-  const now = Date.now();
-  if (cached && cached.subject === subject && cached.expiresAt > now) {
-    return response.status(200).setHeader('Cache-Control', 'no-store').json(cached.value);
-  }
 
   try {
     const slot = new SponsorSlot({ publisherId, serveOnly: true, category: ADTENTION_CATEGORY });
@@ -73,7 +74,6 @@ export default async function handler(request: VercelRequest, response: VercelRe
     const candidate = await slot.next({ subject });
     const sponsor = normalizeSponsor(candidate);
     if (!sponsor) return noContent(response);
-    cached = { subject, value: sponsor, expiresAt: now + CACHE_MS };
     return response.status(200).setHeader('Cache-Control', 'no-store').json(sponsor);
   } catch {
     return noContent(response);

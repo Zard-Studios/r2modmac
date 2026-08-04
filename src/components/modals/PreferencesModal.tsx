@@ -236,6 +236,7 @@ export default function PreferencesModal({
         setSponsoredMessagesEnabled(enabled);
         setSponsoredMessagesLessFrequently(lessFrequently);
         if (!enabled) setSponsorMessage(null);
+        window.dispatchEvent(new CustomEvent('r2modmac:sponsor-preferences', { detail: { enabled } }));
         void onSponsorPreferencesChange(enabled, lessFrequently)
             .catch(() => undefined)
             .finally(() => setSponsorPreferenceRevision((revision) => revision + 1));
@@ -429,7 +430,7 @@ export default function PreferencesModal({
                                     <RowIcon kind="support" />
                                     <div>
                                         <p className="text-[15px] font-medium text-white">Show less frequently</p>
-                                        <p className="mt-0.5 text-[13px] leading-snug text-gray-400">At most one message every 7 days and one per 30 days.</p>
+                                        <p className="mt-0.5 text-[13px] leading-snug text-gray-400">Keep more space between sponsored messages while you browse.</p>
                                     </div>
                                 </div>
                                 <Toggle value={sponsoredMessagesLessFrequently} onChange={(lessFrequently) => {
@@ -457,7 +458,7 @@ export default function PreferencesModal({
                             </div>
                         </div>
 
-                        <p className="px-1 text-[13px] leading-snug text-gray-500">Sponsored messages are displayed sparingly and are designed not to interrupt your workflow.</p>
+                        <p className="px-1 text-[13px] leading-snug text-gray-500">Sponsored messages are kept outside installs, updates, Sync, Apply, warnings, and dialogs.</p>
                         <button
                             type="button"
                             onClick={() => {

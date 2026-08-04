@@ -31,6 +31,8 @@ export interface SponsorMessage {
     url?: string | null;
 }
 
+export type SponsorPlacement = 'preferences-support' | 'profile-selector-support' | 'catalog-support';
+
 export interface RuntimeHealth {
     runtime: 'bepinex' | 'owml' | 'lovely';
     status: 'healthy' | 'missing' | 'incomplete' | 'unconfigured' | 'unsupported';
@@ -107,7 +109,7 @@ export interface IElectronAPI {
     deleteProfileFolder: (profileId: string, gameIdentifier?: string, platform?: 'windows' | 'mac') => Promise<boolean>;
     getSettings: () => Promise<AppSettings>;
     saveSettings: (settings: AppSettings) => Promise<void>;
-    requestSponsor: () => Promise<SponsorMessage | null>;
+    requestSponsor: (placement?: SponsorPlacement) => Promise<SponsorMessage | null>;
     acknowledgeSponsorDisplay: (sponsorId: string) => Promise<void>;
     dismissSponsor: (sponsorId: string) => Promise<void>;
     resetSponsorCache: () => Promise<void>;

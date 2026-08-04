@@ -2103,7 +2103,7 @@ function App() {
     const selectedGameCover = selectedGame ? communityImages[selectedGame.identifier] : undefined;
 
     content = (
-      <div className="flex flex-col h-full bg-gray-900 overflow-y-auto">
+      <div className="flex flex-col h-full bg-gray-900 overflow-hidden">
         <div className="p-4 border-b border-gray-800 sticky top-0 bg-gray-900 z-10 relative overflow-hidden">
           <div className="absolute inset-0 bg-gray-900" />
           {selectedGameCover && (

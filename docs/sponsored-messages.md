@@ -1,16 +1,17 @@
 # Sponsored messages and privacy
 
-r2modmac can show an occasional, compact sponsored message only inside
-**Preferences → Support r2modmac**. It is not a popup, banner, dialog, progress message, or
-part of installation, updates, Sync, Apply, Repair, errors, warnings, or onboarding.
+r2modmac can show a compact, clearly labelled sponsored message in **Preferences → Support
+r2modmac**, the **Profile Selector**, and the lower edge of **Browse Mods**. The Browse Mods
+surface fades away at the real end of the catalog and returns when you scroll back up. It is not a
+popup, dialog, progress message, or part of installation, updates, Sync, Apply, Repair, errors,
+warnings, or onboarding.
 
 ## Your controls
 
 - **Sponsored messages** is enabled by default and can be disabled at any time in Preferences.
 - Disabling it immediately removes the current message, clears the local sponsor state (including
   the random installation identifier), and prevents future sponsor requests.
-- **Show less frequently** reduces the local limit to at most once every 7 days and once per 30
-  days.
+- **Show less frequently** leaves more space between sponsored messages while you browse.
 - **Reset sponsor cache** removes recently shown, dismissed, and cached sponsor messages. It keeps
   the random installation identifier so a reset cannot bypass the network's frequency limits.
 
@@ -26,7 +27,7 @@ file, path, or application activity.
 The request to the r2modmac proxy also contains only these static values:
 
 - category: `gaming-mod-manager`
-- placement: `preferences-support`
+- placement: one of `preferences-support`, `profile-selector-support`, or `catalog-support`
 
 The proxy maps the fixed r2modmac category to ADtention's documented `general` category. The SDK
 then sends ADtention exactly these JSON fields for a delivery request:
@@ -40,9 +41,8 @@ The placement remains inside the r2modmac proxy and is not forwarded to ADtentio
 use these delivery fields for billable impressions. r2modmac does not add first-party analytics or
 telemetry to this integration.
 
-The proxy can retain a response together with its subject in process memory for up to 15 minutes
-to avoid repeated delivery requests. This is not a database or durable server-side store; a Vercel
-Function instance may disappear sooner.
+The proxy does not cache or replay sponsored messages. A line is requested only after its surface
+has remained visible briefly, so r2modmac does not prefetch messages that the user never sees.
 
 ## What is never sent by r2modmac for sponsorship
 
@@ -79,3 +79,14 @@ any time.
 The sponsor module is limited to its own Tauri commands and the `services/adtention-proxy` service.
 It has no dependency on profiles, mod management, game installation, or Sync/Apply. It can be
 disabled or removed without changing those core flows.
+
+## Local developer verification
+
+`npm run dev` is the only local development command. It starts the ignored local proxy on
+`127.0.0.1:3000` and then starts Tauri with that endpoint. The proxy reads the Vercel
+**Development** Publisher ID from the ignored `services/adtention-proxy/.env.local` file; it is
+never committed.
+
+The developer build accepts `http://127.0.0.1` only for that local proxy. Release builds require
+an HTTPS proxy. A `204 No Content` response is an expected safe fallback: the application simply
+does not render a sponsor line.

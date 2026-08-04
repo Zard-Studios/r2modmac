@@ -9,11 +9,13 @@ use tauri::{command, AppHandle};
 use url::Url;
 use uuid::Uuid;
 
-const STANDARD_COOLDOWN_SECONDS: i64 = 3 * 24 * 60 * 60;
-const REDUCED_COOLDOWN_SECONDS: i64 = 7 * 24 * 60 * 60;
-const ATTEMPT_BACKOFF_SECONDS: i64 = 6 * 60 * 60;
+const REDUCED_ATTEMPT_BACKOFF_SECONDS: i64 = 5 * 60;
 const MONTH_SECONDS: i64 = 30 * 24 * 60 * 60;
 const CACHE_SECONDS: i64 = 15 * 60;
+
+const PREFERENCES_PLACEMENT: &str = "preferences-support";
+const PROFILE_SELECTOR_PLACEMENT: &str = "profile-selector-support";
+const CATALOG_PLACEMENT: &str = "catalog-support";
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -77,27 +79,36 @@ fn save_state(app: &AppHandle, state: &SponsorState) -> Result<(), String> {
     fs::rename(temporary_path, path).map_err(|error| error.to_string())
 }
 
-fn policy(settings: &Settings) -> (i64, usize, u64) {
-    if settings.sponsored_messages_less_frequently {
-        (REDUCED_COOLDOWN_SECONDS, 1, 15)
-    } else {
-        (STANDARD_COOLDOWN_SECONDS, 2, 20)
-    }
+fn is_allowed_placement(placement: &str) -> bool {
+    matches!(
+        placement,
+        PREFERENCES_PLACEMENT | PROFILE_SELECTOR_PLACEMENT | CATALOG_PLACEMENT
+    )
 }
 
 fn prune_state(state: &mut SponsorState, now: i64) {
     state.shown_at.retain(|shown| *shown > now - MONTH_SECONDS);
     state.recent_ids.truncate(8);
     state.dismissed_ids.truncate(8);
-    if state.cached.as_ref().is_some_and(|cached| cached.expires_at <= now) {
+    if state
+        .cached
+        .as_ref()
+        .is_some_and(|cached| cached.expires_at <= now)
+    {
         state.cached = None;
     }
 }
 
 fn is_valid_message(message: &SponsorMessage) -> bool {
-    if message.id.is_empty() || message.id.len() > 128
-        || message.sponsor_name.as_ref().is_some_and(|name| name.is_empty() || name.len() > 80)
-        || message.message.is_empty() || message.message.len() > 280 {
+    if message.id.is_empty()
+        || message.id.len() > 128
+        || message
+            .sponsor_name
+            .as_ref()
+            .is_some_and(|name| name.is_empty() || name.len() > 80)
+        || message.message.is_empty()
+        || message.message.len() > 280
+    {
         return false;
     }
 
@@ -112,40 +123,40 @@ fn is_eligible(state: &SponsorState, settings: &Settings, now: i64) -> bool {
     if !settings.sponsored_messages_enabled {
         return false;
     }
-    let (cooldown, monthly_limit, _) = policy(settings);
-    if state.shown_at.len() >= monthly_limit {
-        return false;
-    }
-    if state.last_shown_at.is_some_and(|shown| shown > now - cooldown) {
-        return false;
-    }
-    !state.last_attempt_at.is_some_and(|attempt| attempt > now - ATTEMPT_BACKOFF_SECONDS)
+    !settings.sponsored_messages_less_frequently
+        || !state
+            .last_attempt_at
+            .is_some_and(|attempt| attempt > now - REDUCED_ATTEMPT_BACKOFF_SECONDS)
 }
 
-// A local pseudo-random roll deliberately has no user-derived input.
-fn should_request(attempt_count: u64, now: i64, probability: u64) -> bool {
-    let mut value = (now as u64) ^ attempt_count.wrapping_mul(0x9E37_79B9_7F4A_7C15);
-    value ^= value >> 30;
-    value = value.wrapping_mul(0xBF58_476D_1CE4_E5B9);
-    value ^= value >> 27;
-    value = value.wrapping_mul(0x94D0_49BB_1331_11EB);
-    value ^= value >> 31;
-    value % 100 < probability
+fn is_allowed_proxy_url(endpoint: &Url) -> bool {
+    if endpoint.scheme() == "https" && endpoint.host_str().is_some() {
+        return true;
+    }
+
+    // Local HTTP is available only to an unoptimised developer build so the complete
+    // request chain can be inspected without ever weakening a distributed build.
+    cfg!(debug_assertions)
+        && endpoint.scheme() == "http"
+        && matches!(endpoint.host_str(), Some("127.0.0.1" | "localhost" | "::1"))
 }
 
-async fn request_proxy(subject: &str) -> Option<SponsorMessage> {
+async fn request_proxy(subject: &str, placement: &str) -> Option<SponsorMessage> {
     let endpoint = option_env!("R2MODMAC_SPONSOR_PROXY_URL")?;
     let endpoint_url = Url::parse(endpoint).ok()?;
-    if endpoint_url.scheme() != "https" || endpoint_url.host_str().is_none() {
+    if !is_allowed_proxy_url(&endpoint_url) {
         return None;
     }
-    let client = Client::builder().timeout(Duration::from_millis(2_500)).build().ok()?;
+    let client = Client::builder()
+        .timeout(Duration::from_millis(2_500))
+        .build()
+        .ok()?;
     let response = client
         .post(endpoint_url)
         .header("content-type", "application/json")
         .json(&serde_json::json!({
             "category": "gaming-mod-manager",
-            "placement": "preferences-support",
+            "placement": placement,
             "subject": subject
         }))
         .send()
@@ -166,42 +177,62 @@ async fn request_proxy(subject: &str) -> Option<SponsorMessage> {
 }
 
 #[command]
-pub async fn request_sponsor(app: AppHandle) -> Result<Option<SponsorMessage>, String> {
+pub async fn request_sponsor(
+    app: AppHandle,
+    placement: Option<String>,
+) -> Result<Option<SponsorMessage>, String> {
+    request_sponsor_with_options(app, placement.as_deref().unwrap_or(PREFERENCES_PLACEMENT)).await
+}
+
+async fn request_sponsor_with_options(
+    app: AppHandle,
+    placement: &str,
+) -> Result<Option<SponsorMessage>, String> {
+    if !is_allowed_placement(placement) {
+        return Ok(None);
+    }
     let settings = load_settings_impl(&app);
     let now = Utc::now().timestamp();
     let mut state = load_state(&app);
     prune_state(&mut state, now);
 
+    if !settings.sponsored_messages_enabled {
+        let _ = save_state(&app, &state);
+        return Ok(None);
+    }
     if !is_eligible(&state, &settings, now) {
         let _ = save_state(&app, &state);
         return Ok(None);
     }
 
     if let Some(cached) = &state.cached {
-        if !state.recent_ids.contains(&cached.message.id) && !state.dismissed_ids.contains(&cached.message.id) {
+        if !state.recent_ids.contains(&cached.message.id)
+            && !state.dismissed_ids.contains(&cached.message.id)
+        {
             return Ok(Some(cached.message.clone()));
         }
     }
 
     state.last_attempt_at = Some(now);
     state.attempt_count = state.attempt_count.wrapping_add(1);
-    let (_, _, probability) = policy(&settings);
-    let should_fetch = should_request(state.attempt_count, now, probability);
     save_state(&app, &state)?;
-    if !should_fetch {
-        return Ok(None);
-    }
 
-    let subject = state.installation_subject.get_or_insert_with(|| Uuid::new_v4().to_string()).clone();
+    let subject = state
+        .installation_subject
+        .get_or_insert_with(|| Uuid::new_v4().to_string())
+        .clone();
     save_state(&app, &state)?;
-    let Some(message) = request_proxy(&subject).await else {
+    let Some(message) = request_proxy(&subject, placement).await else {
         return Ok(None);
     };
     if state.recent_ids.contains(&message.id) || state.dismissed_ids.contains(&message.id) {
         return Ok(None);
     }
 
-    state.cached = Some(CachedSponsor { message: message.clone(), expires_at: now + CACHE_SECONDS });
+    state.cached = Some(CachedSponsor {
+        message: message.clone(),
+        expires_at: now + CACHE_SECONDS,
+    });
     save_state(&app, &state)?;
     Ok(Some(message))
 }
@@ -211,14 +242,18 @@ pub async fn acknowledge_sponsor_display(app: AppHandle, sponsor_id: String) -> 
     let now = Utc::now().timestamp();
     let mut state = load_state(&app);
     prune_state(&mut state, now);
-    if state.cached.as_ref().map(|cached| cached.message.id.as_str()) != Some(sponsor_id.as_str()) {
+    if state
+        .cached
+        .as_ref()
+        .map(|cached| cached.message.id.as_str())
+        != Some(sponsor_id.as_str())
+    {
         return Ok(());
     }
     state.last_shown_at = Some(now);
     state.shown_at.push(now);
     state.recent_ids.retain(|id| id != &sponsor_id);
     state.recent_ids.insert(0, sponsor_id);
-    state.cached = None;
     save_state(&app, &state)
 }
 
@@ -227,21 +262,32 @@ pub async fn dismiss_sponsor(app: AppHandle, sponsor_id: String) -> Result<(), S
     let now = Utc::now().timestamp();
     let mut state = load_state(&app);
     prune_state(&mut state, now);
-    if state.cached.as_ref().map(|cached| cached.message.id.as_str()) != Some(sponsor_id.as_str()) {
+    let is_current_or_seen = state
+        .cached
+        .as_ref()
+        .map(|cached| cached.message.id.as_str() == sponsor_id)
+        .unwrap_or(false)
+        || state.recent_ids.iter().any(|id| id == &sponsor_id);
+    if !is_current_or_seen {
         return Ok(());
     }
     state.last_shown_at = Some(now);
     state.shown_at.push(now);
     state.dismissed_ids.retain(|id| id != &sponsor_id);
     state.dismissed_ids.insert(0, sponsor_id);
-    state.cached = None;
     save_state(&app, &state)
 }
 
 #[command]
 pub async fn reset_sponsor_cache(app: AppHandle) -> Result<(), String> {
     let subject = load_state(&app).installation_subject;
-    save_state(&app, &SponsorState { installation_subject: subject, ..Default::default() })
+    save_state(
+        &app,
+        &SponsorState {
+            installation_subject: subject,
+            ..Default::default()
+        },
+    )
 }
 
 #[command]
@@ -277,18 +323,45 @@ mod tests {
     }
 
     #[test]
-    fn cooldown_and_monthly_limit_are_enforced() {
+    fn enabled_sponsorship_has_no_local_calendar_cap() {
         let settings = standard_settings();
-        let mut state = SponsorState { last_shown_at: Some(1_000), ..Default::default() };
+        let state = SponsorState { shown_at: vec![1_000; 100], ..Default::default() };
+        assert!(is_eligible(&state, &settings, 1_001));
+    }
+
+    #[test]
+    fn reduced_frequency_uses_a_short_local_backoff() {
+        let mut settings = standard_settings();
+        settings.sponsored_messages_less_frequently = true;
+        let state = SponsorState {
+            last_attempt_at: Some(1_000),
+            ..Default::default()
+        };
         assert!(!is_eligible(&state, &settings, 1_001));
-        state.last_shown_at = None;
-        state.shown_at = vec![1_000, 1_001];
-        assert!(!is_eligible(&state, &settings, 1_100));
+        assert!(is_eligible(&state, &settings, 1_301));
     }
 
     #[test]
     fn rejects_non_https_payloads() {
-        let invalid = SponsorMessage { id: "one".into(), sponsor_name: None, message: "Text".into(), url: Some("http://example.com".into()) };
+        let invalid = SponsorMessage {
+            id: "one".into(),
+            sponsor_name: None,
+            message: "Text".into(),
+            url: Some("http://example.com".into()),
+        };
         assert!(!is_valid_message(&invalid));
+    }
+
+    #[test]
+    fn developer_proxy_allows_only_local_http() {
+        assert!(is_allowed_proxy_url(
+            &Url::parse("http://127.0.0.1:3000/api/sponsor").unwrap()
+        ));
+        assert!(is_allowed_proxy_url(
+            &Url::parse("https://example.com/api/sponsor").unwrap()
+        ));
+        assert!(!is_allowed_proxy_url(
+            &Url::parse("http://example.com/api/sponsor").unwrap()
+        ));
     }
 }

@@ -6,6 +6,7 @@ import { Button, HoverMarquee } from '../ui';
 import { PlatformPicker } from './PlatformPicker';
 import { revealInFileManagerLabel } from '../../utils/platformUtils';
 import { getProfileAvatarGradient } from '../../utils/profileAvatar';
+import { SponsorSurface } from '../sponsors/SponsorSurface';
 
 function getFirstLetter(name: string): string {
     if (!name) return '';
@@ -211,7 +212,8 @@ export function ProfileList({
     const hasProfilesForGame = filteredProfiles.length > 0;
 
     return (
-        <div className="flex-1 p-8 overflow-y-auto">
+        <div className="relative flex-1 min-h-0">
+            <div className="h-full overflow-y-auto p-8 pb-32">
             <div className="max-w-4xl mx-auto">
                 <div className="flex items-start justify-between gap-6 mb-8">
                     <div className="min-w-0">
@@ -684,6 +686,8 @@ export function ProfileList({
                     </div>
                 )
             }
-        </div >
+            </div>
+            <SponsorSurface placement="profile-selector-support" visible />
+        </div>
     );
 }

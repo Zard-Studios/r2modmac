@@ -1,10 +1,10 @@
-# Upcoming release
+# 0.8.2 Release
 
 ## New: Optional Sponsored Messages
 
-To help fund the continued development of r2modmac, the application can now occasionally display short sponsored messages in **Preferences → Support r2modmac**.
+To help fund the continued development of r2modmac, the application can occasionally display short, clearly labelled **text-only** sponsored messages in the Profile Selector, the Browse Mods surface, and **Preferences → Support r2modmac**.
 
-This feature is enabled by default, but can be disabled at any time from Preferences. Sponsored messages never affect the application's functionality and are designed to be infrequent and non-intrusive.
+This feature is enabled by default, but can be disabled at any time from Preferences. There are no banner images, pop-ups, video ads, or interruptions to core workflows. Sponsored messages never affect the application's functionality.
 
 The integration does not send your mods, files, configuration, profiles, paths, or other application content. When enabled, it uses a random installation identifier required by the sponsorship SDK to deliver and limit sponsored messages. See [Sponsored messages](docs/sponsored-messages.md) for the complete data boundary.
 
