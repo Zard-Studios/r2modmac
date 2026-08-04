@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import type { SponsorMessage } from '../../types/electron';
 
+const INITIAL_REQUEST_DELAY_MS = 900;
+const SPONSOR_ROTATION_INTERVAL_MS = 15_000;
+
 export type SponsorPlacement = 'home-support' | 'catalog-support' | 'profile-selector-support';
 
 interface SponsorSurfaceProps {
@@ -18,7 +21,6 @@ export function SponsorSurface({ placement, visible, className = '' }: SponsorSu
     const [message, setMessage] = useState<SponsorMessage | null>(null);
     const [dismissed, setDismissed] = useState(false);
     const [enabled, setEnabled] = useState<boolean | null>(null);
-    const requestedRef = useRef(false);
     const acknowledgedRef = useRef<string | null>(null);
 
     useEffect(() => {
@@ -32,10 +34,8 @@ export function SponsorSurface({ placement, visible, className = '' }: SponsorSu
             if (!nextEnabled) {
                 setMessage(null);
                 setDismissed(false);
-                requestedRef.current = false;
                 acknowledgedRef.current = null;
             } else {
-                requestedRef.current = false;
                 setDismissed(false);
             }
         };
@@ -44,17 +44,32 @@ export function SponsorSurface({ placement, visible, className = '' }: SponsorSu
     }, []);
 
     useEffect(() => {
-        if (enabled !== true || !visible || dismissed || message || requestedRef.current) return;
+        if (enabled !== true || !visible || dismissed) return;
 
-        const timeoutId = window.setTimeout(() => {
-            requestedRef.current = true;
-            void window.ipcRenderer.requestSponsor(placement)
-                .then((candidate) => setMessage(candidate))
-                .catch(() => undefined);
-        }, 900);
+        let cancelled = false;
+        let timeoutId: number | undefined;
 
-        return () => window.clearTimeout(timeoutId);
-    }, [dismissed, enabled, message, placement, visible]);
+        const requestNextSponsor = async () => {
+            try {
+                const candidate = await window.ipcRenderer.requestSponsor(placement);
+                if (!cancelled && candidate) {
+                    setMessage((current) => current?.id === candidate.id ? current : candidate);
+                }
+            } catch {
+                // Sponsorship is optional; keep the current line and retry later.
+            } finally {
+                if (!cancelled) {
+                    timeoutId = window.setTimeout(requestNextSponsor, SPONSOR_ROTATION_INTERVAL_MS);
+                }
+            }
+        };
+
+        timeoutId = window.setTimeout(requestNextSponsor, INITIAL_REQUEST_DELAY_MS);
+        return () => {
+            cancelled = true;
+            if (timeoutId !== undefined) window.clearTimeout(timeoutId);
+        };
+    }, [dismissed, enabled, placement, visible]);
 
     useEffect(() => {
         if (!message || acknowledgedRef.current === message.id) return;

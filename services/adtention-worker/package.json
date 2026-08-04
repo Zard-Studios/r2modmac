@@ -1,0 +1,21 @@
+{
+  "name": "r2modmac-adtention-worker",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "check": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test test/*.test.ts",
+    "types": "wrangler types",
+    "deploy:staging": "wrangler deploy --env staging",
+    "deploy:production": "wrangler deploy --env production"
+  },
+  "dependencies": {
+    "@adtention/sdk": "^0.4.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260804.1",
+    "typescript": "^5.9.3",
+    "wrangler": "^4.118.0"
+  }
+}

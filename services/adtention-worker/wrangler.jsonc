@@ -1,0 +1,32 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "r2modmac-sponsor",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-04",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "preview_urls": false,
+  "observability": {
+    "enabled": false
+  },
+  "env": {
+    "staging": {
+      "name": "r2modmac-sponsor-staging",
+      "vars": {
+        "DEPLOYMENT_ENV": "staging"
+      },
+      "secrets": {
+        "required": ["ADTENTION_PUBLISHER_ID"]
+      }
+    },
+    "production": {
+      "name": "r2modmac-sponsor-production",
+      "vars": {
+        "DEPLOYMENT_ENV": "production"
+      },
+      "secrets": {
+        "required": ["ADTENTION_PUBLISHER_ID"]
+      }
+    }
+  }
+}

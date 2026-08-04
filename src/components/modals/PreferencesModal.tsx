@@ -190,19 +190,28 @@ export default function PreferencesModal({
     }, [isOpen]);
 
     useEffect(() => {
-        if (!isOpen || !sponsoredMessagesEnabled) {
-            setSponsorMessage(null);
-            return;
-        }
+        if (!isOpen || !sponsoredMessagesEnabled) return;
         let cancelled = false;
-        void window.ipcRenderer.requestSponsor()
-            .then((candidate) => {
-                if (!cancelled) setSponsorMessage(candidate);
-            })
-            .catch(() => {
-                if (!cancelled) setSponsorMessage(null);
-            });
-        return () => { cancelled = true; };
+        let timeoutId: number | undefined;
+
+        const requestNextSponsor = async () => {
+            try {
+                const candidate = await window.ipcRenderer.requestSponsor();
+                if (!cancelled && candidate) {
+                    setSponsorMessage((current) => current?.id === candidate.id ? current : candidate);
+                }
+            } catch {
+                // Sponsorship is optional; keep Preferences fully usable.
+            } finally {
+                if (!cancelled) timeoutId = window.setTimeout(requestNextSponsor, 15_000);
+            }
+        };
+
+        void requestNextSponsor();
+        return () => {
+            cancelled = true;
+            if (timeoutId !== undefined) window.clearTimeout(timeoutId);
+        };
     }, [isOpen, sponsoredMessagesEnabled, sponsorPreferenceRevision]);
 
     useEffect(() => {

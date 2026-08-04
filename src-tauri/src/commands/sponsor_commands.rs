@@ -9,7 +9,6 @@ use tauri::{command, AppHandle};
 use url::Url;
 use uuid::Uuid;
 
-const MONTH_SECONDS: i64 = 30 * 24 * 60 * 60;
 const CACHE_SECONDS: i64 = 15 * 60;
 
 const PREFERENCES_PLACEMENT: &str = "preferences-support";
@@ -30,8 +29,6 @@ pub struct SponsorMessage {
 #[serde(default)]
 struct SponsorState {
     installation_subject: Option<String>,
-    last_shown_at: Option<i64>,
-    shown_at: Vec<i64>,
     recent_ids: Vec<String>,
     dismissed_ids: Vec<String>,
     cached: Option<CachedSponsor>,
@@ -86,7 +83,6 @@ fn is_allowed_placement(placement: &str) -> bool {
 }
 
 fn prune_state(state: &mut SponsorState, now: i64) {
-    state.shown_at.retain(|shown| *shown > now - MONTH_SECONDS);
     state.recent_ids.truncate(8);
     state.dismissed_ids.truncate(8);
     if state
@@ -141,7 +137,7 @@ async fn request_proxy(subject: &str, placement: &str) -> Option<SponsorMessage>
         return None;
     }
     let client = Client::builder()
-        .timeout(Duration::from_millis(2_500))
+        .timeout(Duration::from_millis(6_000))
         .build()
         .ok()?;
     let response = client
@@ -242,8 +238,6 @@ pub async fn acknowledge_sponsor_display(app: AppHandle, sponsor_id: String) -> 
     {
         return Ok(());
     }
-    state.last_shown_at = Some(now);
-    state.shown_at.push(now);
     state.recent_ids.retain(|id| id != &sponsor_id);
     state.recent_ids.insert(0, sponsor_id);
     save_state(&app, &state)
@@ -263,8 +257,6 @@ pub async fn dismiss_sponsor(app: AppHandle, sponsor_id: String) -> Result<(), S
     if !is_current_or_seen {
         return Ok(());
     }
-    state.last_shown_at = Some(now);
-    state.shown_at.push(now);
     state.dismissed_ids.retain(|id| id != &sponsor_id);
     state.dismissed_ids.insert(0, sponsor_id);
     save_state(&app, &state)
@@ -315,7 +307,7 @@ mod tests {
     #[test]
     fn enabled_sponsorship_has_no_local_calendar_cap() {
         let settings = standard_settings();
-        let state = SponsorState { shown_at: vec![1_000; 100], ..Default::default() };
+        let state = SponsorState::default();
         assert!(is_eligible(&state, &settings, 1_001));
     }
 
