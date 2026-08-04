@@ -33,7 +33,7 @@ export interface SponsorMessage {
 export type SponsorPlacement = 'preferences-support' | 'home-support' | 'profile-selector-support' | 'catalog-support';
 
 export interface RuntimeHealth {
-    runtime: 'bepinex' | 'owml' | 'lovely';
+    runtime: 'bepinex' | 'owml' | 'lovely' | 'returnofmodding';
     status: 'healthy' | 'missing' | 'incomplete' | 'unconfigured' | 'unsupported';
     missingComponents: string[];
     repairable: boolean;

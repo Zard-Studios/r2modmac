@@ -6,6 +6,15 @@ pub(crate) use self::process::*;
 
 use super::*;
 
+fn configure_native_version_dll_override(
+    command: &mut std::process::Command,
+    game_path: &std::path::Path,
+) {
+    if game_path.join("version.dll").is_file() {
+        command.env("WINEDLLOVERRIDES", "version=n,b");
+    }
+}
+
 pub(crate) fn launch_windows_direct_game(game_path: &std::path::Path) -> Result<(), String> {
     launch_windows_direct_game_with_working_dir(game_path, None)
 }
@@ -83,6 +92,7 @@ pub(crate) fn launch_windows_direct_game_with_working_dir(
                 &runner_path,
                 prefix_root.as_deref(),
             )?;
+            configure_native_version_dll_override(&mut command, game_path);
             eprintln!(
                 "[launch_windows_direct_game] Launching Windows executable directly: {:?}",
                 executable_path
@@ -182,7 +192,7 @@ pub(crate) fn launch_windows_steam_game(
                     prefix_root_path,
                     &steam_executable,
                     &args,
-                    Some(&steam_root),
+                    Some(game_path),
                     "launch_windows_steam_game",
                 ) {
                     Ok(()) => {
@@ -213,6 +223,7 @@ pub(crate) fn launch_windows_steam_game(
 
         let mut command = std::process::Command::new(&runner_path);
         configure_host_compat_runner_command(&mut command, &runner_path, prefix_root.as_deref())?;
+        configure_native_version_dll_override(&mut command, game_path);
         eprintln!(
 			"[launch_windows_steam_game] Launching Steam app {} via {:?} using steam executable {:?}",
 			app_id, runner_path, steam_executable
@@ -248,6 +259,33 @@ pub(crate) fn launch_windows_steam_game(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::configure_native_version_dll_override;
+    use std::ffi::OsStr;
+
+    #[test]
+    fn return_of_modding_loader_enables_native_version_dll_under_wine() {
+        let root = std::env::temp_dir().join(format!(
+            "r2modmac-rom-wine-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("version.dll"), b"loader").unwrap();
+        let mut command = std::process::Command::new("wine");
+        configure_native_version_dll_override(&mut command, &root);
+        assert!(command.get_envs().any(|(key, value)| {
+            key == OsStr::new("WINEDLLOVERRIDES")
+                && value == Some(OsStr::new("version=n,b"))
+        }));
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }
 
 pub(crate) fn launch_windows_game(

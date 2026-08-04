@@ -33,6 +33,10 @@ fn runtime_name(game_identifier: &str) -> &'static str {
         "owml"
     } else if normalized.contains("balatro") {
         "lovely"
+    } else if normalized.contains("riskofrainreturns")
+        || normalized.contains("risk-of-rain-returns")
+    {
+        "returnofmodding"
     } else {
         "bepinex"
     }
@@ -136,6 +140,7 @@ mod tests {
     fn identifies_supported_runtime_families() {
         assert_eq!(runtime_name("outerwilds"), "owml");
         assert_eq!(runtime_name("balatro"), "lovely");
+        assert_eq!(runtime_name("risk-of-rain-returns"), "returnofmodding");
         assert_eq!(runtime_name("lethal-company"), "bepinex");
     }
 }

@@ -1238,6 +1238,238 @@ fn balatro_target_folder_name(mod_name: &str) -> String {
     }
 }
 
+fn is_return_of_modding_loader(mod_name: &str) -> bool {
+    extract_mod_key(mod_name) == "returnofmodding-returnofmodding"
+}
+
+fn thunderstore_package_name(full_name: &str) -> String {
+    let without_version = extract_version_number_from_full_name(full_name)
+        .and_then(|version| full_name.strip_suffix(&format!("-{version}")))
+        .unwrap_or(full_name);
+    without_version
+        .split_once('-')
+        .map(|(_, name)| name)
+        .unwrap_or(without_version)
+        .to_string()
+}
+
+fn normalize_return_of_modding_entry(
+    entry: &std::path::Path,
+    mod_name: &str,
+) -> Option<std::path::PathBuf> {
+    let components = entry
+        .components()
+        .filter_map(|component| match component {
+            std::path::Component::Normal(value) => Some(value.to_string_lossy().to_string()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    if components.is_empty() {
+        return None;
+    }
+
+    if is_return_of_modding_loader(mod_name) {
+        let pack_index = components
+            .iter()
+            .position(|component| component.eq_ignore_ascii_case("ReturnOfModdingPack"))?;
+        let relative = components.iter().skip(pack_index + 1).collect::<Vec<_>>();
+        if relative.is_empty() {
+            return None;
+        }
+        return Some(relative.iter().fold(std::path::PathBuf::new(), |path, part| path.join(part)));
+    }
+
+    let package_name = thunderstore_package_name(mod_name);
+    let first = components[0].to_ascii_lowercase();
+    if first == "plugins_data" || first == "config" {
+        let mut target = std::path::PathBuf::from("ReturnOfModding")
+            .join(&components[0])
+            .join(package_name);
+        for component in components.iter().skip(1) {
+            target.push(component);
+        }
+        return Some(target);
+    }
+
+    let mut target = std::path::PathBuf::from("ReturnOfModding")
+        .join("plugins")
+        .join(package_name);
+    for component in components {
+        target.push(component);
+    }
+    Some(target)
+}
+
+fn collect_return_of_modding_files<R: std::io::Read + std::io::Seek>(
+    archive: &mut zip::ZipArchive<R>,
+    mod_name: &str,
+) -> Result<Vec<std::path::PathBuf>, String> {
+    let mut files = Vec::new();
+    for index in 0..archive.len() {
+        let file = archive.by_index(index).map_err(|error| error.to_string())?;
+        if zip_entry_is_dir(file.name()) {
+            continue;
+        }
+        let Some(entry) = normalize_zip_entry_path(file.name()) else {
+            continue;
+        };
+        if let Some(target) = normalize_return_of_modding_entry(&entry, mod_name) {
+            if target.starts_with(std::path::Path::new("ReturnOfModding").join("config")) {
+                continue;
+            }
+            files.push(target);
+        }
+    }
+    files.sort();
+    files.dedup();
+    Ok(files)
+}
+
+fn extract_return_of_modding_to_root<R: std::io::Read + std::io::Seek>(
+    archive: &mut zip::ZipArchive<R>,
+    target_root: &std::path::Path,
+    mod_name: &str,
+) -> Result<(), String> {
+    for index in 0..archive.len() {
+        let mut file = archive.by_index(index).map_err(|error| error.to_string())?;
+        let Some(entry) = normalize_zip_entry_path(file.name()) else {
+            continue;
+        };
+        let Some(relative_target) = normalize_return_of_modding_entry(&entry, mod_name) else {
+            continue;
+        };
+        let outpath = target_root.join(relative_target);
+        let is_persistent_config = outpath
+            .strip_prefix(target_root)
+            .is_ok_and(|relative| {
+                relative.starts_with(std::path::Path::new("ReturnOfModding").join("config"))
+            });
+        if is_persistent_config && outpath.exists() {
+            continue;
+        }
+        if zip_entry_is_dir(file.name()) {
+            fs::create_dir_all(&outpath).map_err(|error| error.to_string())?;
+            continue;
+        }
+        if let Some(parent) = outpath.parent() {
+            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        let mut output = fs::File::create(outpath).map_err(|error| error.to_string())?;
+        std::io::copy(&mut file, &mut output).map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod return_of_modding_tests {
+    use super::*;
+    use std::io::{Cursor, Write};
+
+    fn fixture(entries: &[(&str, &[u8])]) -> Vec<u8> {
+        let mut bytes = Cursor::new(Vec::new());
+        {
+            let mut writer = zip::ZipWriter::new(&mut bytes);
+            let options = zip::write::FileOptions::default();
+            for (name, content) in entries {
+                writer.start_file(*name, options).unwrap();
+                writer.write_all(content).unwrap();
+            }
+            writer.finish().unwrap();
+        }
+        bytes.into_inner()
+    }
+
+    fn test_dir(label: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!(
+            "r2modmac-return-of-modding-{label}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ))
+    }
+
+    #[test]
+    fn loader_pack_installs_version_dll_at_game_root_without_bepinex() {
+        let bytes = fixture(&[
+            ("manifest.json", br#"{"version_number":"1.1.30"}"#),
+            ("ReturnOfModdingPack/version.dll", b"loader"),
+        ]);
+        let root = test_dir("loader");
+        fs::create_dir_all(&root).unwrap();
+        let mut archive = zip::ZipArchive::new(Cursor::new(&bytes)).unwrap();
+        let files = collect_return_of_modding_files(
+            &mut archive,
+            "ReturnOfModding-ReturnOfModding-1.1.30",
+        )
+        .unwrap();
+        assert_eq!(files, vec![std::path::PathBuf::from("version.dll")]);
+
+        let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
+        extract_return_of_modding_to_root(
+            &mut archive,
+            &root,
+            "ReturnOfModding-ReturnOfModding-1.1.30",
+        )
+        .unwrap();
+        assert_eq!(fs::read(root.join("version.dll")).unwrap(), b"loader");
+        assert!(!root.join("BepInEx").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn plugin_routes_payload_data_and_config_like_r2modman() {
+        let bytes = fixture(&[
+            ("manifest.json", b"{}"),
+            ("main.lua", b"plugin"),
+            ("nested/helper.lua", b"helper"),
+            ("plugins_data/data.dat", b"data"),
+            ("config/options.cfg", b"config"),
+        ]);
+        let root = test_dir("plugin");
+        fs::create_dir_all(&root).unwrap();
+        let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
+        extract_return_of_modding_to_root(
+            &mut archive,
+            &root,
+            "ReturnsAPI-ReturnsAPI-0.1.58",
+        )
+        .unwrap();
+
+        let plugin = root.join("ReturnOfModding/plugins/ReturnsAPI");
+        assert_eq!(fs::read(plugin.join("main.lua")).unwrap(), b"plugin");
+        assert_eq!(
+            fs::read(plugin.join("nested/helper.lua")).unwrap(),
+            b"helper"
+        );
+        assert_eq!(
+            fs::read(root.join("ReturnOfModding/plugins_data/ReturnsAPI/data.dat")).unwrap(),
+            b"data"
+        );
+        assert_eq!(
+            fs::read(root.join("ReturnOfModding/config/ReturnsAPI/options.cfg")).unwrap(),
+            b"config"
+        );
+
+        let updated = fixture(&[("config/options.cfg", b"packaged-update")]);
+        let mut archive = zip::ZipArchive::new(Cursor::new(updated)).unwrap();
+        extract_return_of_modding_to_root(
+            &mut archive,
+            &root,
+            "ReturnsAPI-ReturnsAPI-0.1.59",
+        )
+        .unwrap();
+        assert_eq!(
+            fs::read(root.join("ReturnOfModding/config/ReturnsAPI/options.cfg")).unwrap(),
+            b"config",
+            "updates must preserve the user's ReturnOfModding config"
+        );
+        assert!(!root.join("BepInEx").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+}
+
 fn set_script_executable(path: &std::path::Path) -> Result<(), String> {
     #[cfg(unix)]
     {
@@ -3186,8 +3418,15 @@ async fn install_mod_bytes(
     let target_is_balatro = crate::models::shared::is_balatro_identifier(&game_identifier) || is_balatro_game_path(game_dir);
     let target_is_outerwilds = crate::models::shared::is_outerwilds_identifier(&game_identifier)
         || crate::models::shared::is_outerwilds_game_path(game_dir);
+    let target_is_risk_of_rain_returns =
+        crate::models::shared::is_risk_of_rain_returns_identifier(&game_identifier)
+            || crate::models::shared::is_risk_of_rain_returns_game_path(game_dir);
     let install_into_disabled_runtime =
-        target_is_macos && !target_is_balatro && !target_is_outerwilds && profile_is_vanilla(&app, &profile_id);
+        target_is_macos
+            && !target_is_balatro
+            && !target_is_outerwilds
+            && !target_is_risk_of_rain_returns
+            && profile_is_vanilla(&app, &profile_id);
 
     eprintln!(
         "[install_mod] Installing {} directly to game: {:?}",
@@ -3196,6 +3435,48 @@ async fn install_mod_bytes(
 
     let mut runtime_bytes = bytes;
     validate_downloaded_archive_version(&runtime_bytes, &mod_name)?;
+
+    if target_is_risk_of_rain_returns {
+        let cursor = std::io::Cursor::new(&runtime_bytes);
+        let mut archive = zip::ZipArchive::new(cursor).map_err(|error| error.to_string())?;
+        let managed_files = collect_return_of_modding_files(&mut archive, &mod_name)?;
+        if managed_files.is_empty() {
+            return Err(format!("{} has no ReturnOfModding payload", mod_name));
+        }
+        let backed_up_files = backup_existing_mod_files(
+            &app,
+            &profile_id,
+            GAME_MANIFEST_SCOPE,
+            &mod_name,
+            game_dir,
+            &managed_files,
+        )?;
+
+        let cursor = std::io::Cursor::new(&runtime_bytes);
+        let mut archive = zip::ZipArchive::new(cursor).map_err(|error| error.to_string())?;
+        extract_return_of_modding_to_root(&mut archive, game_dir, &mod_name)?;
+        save_owned_mod_manifest(
+            &app,
+            &profile_id,
+            GAME_MANIFEST_SCOPE,
+            &mod_name,
+            game_dir,
+            &managed_files,
+            &backed_up_files,
+        )?;
+
+        if use_profile_cache.unwrap_or(false) {
+            let profile_dir = crate::utils::paths::app_data_dir(&app)
+                .map_err(|error| error.to_string())?
+                .join("profiles")
+                .join(&profile_id);
+            let cursor = std::io::Cursor::new(&runtime_bytes);
+            let mut archive = zip::ZipArchive::new(cursor).map_err(|error| error.to_string())?;
+            extract_return_of_modding_to_root(&mut archive, &profile_dir, &mod_name)?;
+        }
+
+        return Ok(serde_json::json!({ "success": true }));
+    }
 
     if target_is_outerwilds {
         let cursor = std::io::Cursor::new(&runtime_bytes);
@@ -3665,6 +3946,13 @@ pub async fn remove_mod(
         .join("profiles")
         .join(&profile_id);
     let plugins_dir = profile_dir.join("BepInEx").join("plugins");
+    let return_of_modding_plugins = profile_dir.join("ReturnOfModding").join("plugins");
+    let return_of_modding_name = thunderstore_package_name(&mod_name);
+    let return_of_modding_mod = return_of_modding_plugins.join(&return_of_modding_name);
+    if return_of_modding_mod.is_dir() {
+        fs::remove_dir_all(return_of_modding_mod).map_err(|error| error.to_string())?;
+        return Ok(true);
+    }
 
     // mod_name is usually "Namespace-Name-Version" or "Namespace-Name"
     // We need to find the folder.
@@ -3716,6 +4004,35 @@ pub async fn open_mod_folder(
         .ok_or_else(|| "GAME_PATH_NOT_CONFIGURED".to_string())?;
     let game_root = std::path::Path::new(&game_path);
     let mod_key = extract_mod_key(&mod_name);
+
+    if crate::models::shared::is_risk_of_rain_returns_identifier(&game_identifier)
+        || crate::models::shared::is_risk_of_rain_returns_game_path(game_root)
+    {
+        if is_return_of_modding_loader(&mod_name) {
+            let loader = if game_root.join("version.dll").is_file() {
+                game_root.join("version.dll")
+            } else {
+                game_root.join("version.dll_DISABLED")
+            };
+            if loader.is_file() {
+                open::that(game_root)
+                    .map_err(|error| format!("Failed to open game root: {error}"))?;
+                return Ok(());
+            }
+            return Err("MODS_NOT_APPLIED".to_string());
+        }
+
+        let target = game_root
+            .join("ReturnOfModding")
+            .join("plugins")
+            .join(thunderstore_package_name(&mod_name));
+        if target.is_dir() {
+            open::that(&target)
+                .map_err(|error| format!("Failed to open ReturnOfModding mod folder: {error}"))?;
+            return Ok(());
+        }
+        return Err("MOD_NOT_INSTALLED".to_string());
+    }
 
     if crate::models::shared::is_outerwilds_identifier(&game_identifier)
         || crate::models::shared::is_outerwilds_game_path(game_root)
@@ -4081,6 +4398,38 @@ pub async fn copy_mod_from_cache(
     let game_identifier = get_profile_game_identifier(&app, &profile_id).unwrap_or_default();
     let target_is_outerwilds = crate::models::shared::is_outerwilds_identifier(&game_identifier)
         || crate::models::shared::is_outerwilds_game_path(game_dir);
+    let target_is_risk_of_rain_returns =
+        crate::models::shared::is_risk_of_rain_returns_identifier(&game_identifier)
+            || crate::models::shared::is_risk_of_rain_returns_game_path(game_dir);
+
+    if target_is_risk_of_rain_returns {
+        if is_return_of_modding_loader(&mod_name) {
+            let source = profile_dir.join("version.dll");
+            if source.is_file() {
+                fs::copy(source, game_dir.join("version.dll")).map_err(|error| error.to_string())?;
+                return Ok(serde_json::json!({ "success": true, "copied": true }));
+            }
+        } else {
+            let package_name = thunderstore_package_name(&mod_name);
+            let source_root = profile_dir.join("ReturnOfModding");
+            let game_root = game_dir.join("ReturnOfModding");
+            let mut copied = false;
+            for route in ["plugins", "plugins_data", "config"] {
+                let source = source_root.join(route).join(&package_name);
+                if !source.exists() {
+                    continue;
+                }
+                let destination = game_root.join(route).join(&package_name);
+                if destination.exists() {
+                    fs::remove_dir_all(&destination).map_err(|error| error.to_string())?;
+                }
+                copy_dir_recursive(&source, &destination).map_err(|error| error.to_string())?;
+                copied = true;
+            }
+            return Ok(serde_json::json!({ "success": copied, "copied": copied }));
+        }
+        return Ok(serde_json::json!({ "success": false, "copied": false }));
+    }
 
     if target_is_outerwilds {
         let profile_mods_dir = profile_dir.join("OWML").join("Mods");

@@ -163,7 +163,7 @@ pub(crate) fn launch_macos_wineskin_program(
     prefix_root: &std::path::Path,
     executable_path: &std::path::Path,
     args: &[String],
-    _working_dir: Option<&std::path::Path>,
+    working_dir: Option<&std::path::Path>,
     context: &str,
 ) -> Result<(), String> {
     let info_plist = bundle_path.join("Contents").join("Info.plist");
@@ -228,8 +228,14 @@ pub(crate) fn launch_macos_wineskin_program(
     write_key("Program Flags", &win_flags)?;
 
     // Open the bundle as a new macOS application instance.
-    let open_status = std::process::Command::new("open")
-        .arg("-n")
+    let mut open_command = std::process::Command::new("open");
+    open_command.arg("-n");
+    if working_dir.is_some_and(|path| path.join("version.dll").is_file()) {
+        open_command
+            .arg("--env")
+            .arg("WINEDLLOVERRIDES=version=n,b");
+    }
+    let open_status = open_command
         .arg(bundle_path)
         .status()
         .map_err(|e| format!("Failed to open Sikarugir bundle: {}", e))?;

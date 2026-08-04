@@ -94,7 +94,13 @@ pub async fn install_to_game(
         && (is_balatro_identifier(&game_identifier) || is_balatro_game_path(game_path));
     let is_outerwilds_profile = is_outerwilds_identifier(&game_identifier)
         || is_outerwilds_game_path(game_path);
-    let runtime_game_path_buf = if is_mac_profile && !is_balatro_profile && !is_outerwilds_profile {
+    let is_risk_of_rain_returns_profile = is_risk_of_rain_returns_identifier(&game_identifier)
+        || is_risk_of_rain_returns_game_path(game_path);
+    let runtime_game_path_buf = if is_mac_profile
+        && !is_balatro_profile
+        && !is_outerwilds_profile
+        && !is_risk_of_rain_returns_profile
+    {
         let resolved = resolve_macos_runtime_root(game_path);
         if resolved != game_path {
             eprintln!(
@@ -112,9 +118,15 @@ pub async fn install_to_game(
         && !is_vanilla
         && !is_balatro_profile
         && !is_outerwilds_profile
+        && !is_risk_of_rain_returns_profile
         && has_complete_macos_bepinex_runtime(runtime_game_path);
 
-    if is_mac_profile && !is_vanilla && !is_balatro_profile && !is_outerwilds_profile {
+    if is_mac_profile
+        && !is_vanilla
+        && !is_balatro_profile
+        && !is_outerwilds_profile
+        && !is_risk_of_rain_returns_profile
+    {
         validate_macos_bepinex_support(runtime_game_path)?;
     }
 
@@ -142,6 +154,27 @@ pub async fn install_to_game(
         // Outer Wilds uses OWML; no BepInEx operations needed here.
         // install_mod_bytes handles all OWML-specific installation.
         eprintln!("[install_to_game] Outer Wilds profile - skipping BepInEx install, OWML manages mods.");
+        return Ok(());
+    }
+
+    if is_risk_of_rain_returns_profile {
+        let loader = game_path.join("version.dll");
+        let disabled_loader = game_path.join("version.dll_DISABLED");
+        if is_vanilla {
+            if loader.exists() {
+                if disabled_loader.exists() {
+                    fs::remove_file(&disabled_loader).map_err(|error| error.to_string())?;
+                }
+                fs::rename(&loader, &disabled_loader)
+                    .map_err(|error| format!("Failed to disable ReturnOfModding: {error}"))?;
+            }
+        } else if disabled_loader.exists() && !loader.exists() {
+            fs::rename(&disabled_loader, &loader)
+                .map_err(|error| format!("Failed to enable ReturnOfModding: {error}"))?;
+        }
+        eprintln!(
+            "[install_to_game] Risk of Rain Returns profile - skipping BepInEx operations"
+        );
         return Ok(());
     }
 

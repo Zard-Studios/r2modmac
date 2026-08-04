@@ -1095,12 +1095,16 @@ function App() {
         const name = `${pkg.full_name} ${pkg.name}`.toLowerCase();
         if (health.runtime === 'owml') return pkg.name.toLowerCase() === 'owml' || name.includes('-owml');
         if (health.runtime === 'lovely') return name.includes('thunderstore-lovely') || pkg.name.toLowerCase() === 'lovely';
+        if (health.runtime === 'returnofmodding') {
+          return pkg.full_name.toLowerCase() === 'returnofmodding-returnofmodding';
+        }
         return name.includes('bepinexpack');
       };
       const registeredLoader = profile.mods.find(mod => {
         const name = mod.fullName.toLowerCase();
         if (health.runtime === 'owml') return name.includes('owml');
         if (health.runtime === 'lovely') return name.includes('-lovely-');
+        if (health.runtime === 'returnofmodding') return name.startsWith('returnofmodding-returnofmodding-');
         return name.includes('bepinexpack');
       });
 
@@ -1111,7 +1115,13 @@ function App() {
           )
         : null;
       if (!loaderPackage || !matchesRuntime(loaderPackage)) {
-        const query = health.runtime === 'owml' ? 'OWML' : health.runtime === 'lovely' ? 'lovely' : 'BepInExPack';
+        const query = health.runtime === 'owml'
+          ? 'OWML'
+          : health.runtime === 'lovely'
+            ? 'lovely'
+            : health.runtime === 'returnofmodding'
+              ? 'ReturnOfModding'
+              : 'BepInExPack';
         const result = await window.ipcRenderer.getPackages(community, 0, 30, query, 'downloads');
         loaderPackage = result.items.find(matchesRuntime) || null;
       }
@@ -1263,7 +1273,7 @@ function App() {
     if (health && (health.status === 'missing' || health.status === 'incomplete')) {
       const confirmedRepair = await window.ipcRenderer.confirm(
         'Repair Runtime Before Sync?',
-        `${health.runtime === 'bepinex' ? 'BepInEx' : health.runtime === 'owml' ? 'OWML' : 'Lovely'} is ${health.status}. Repair it before synchronizing this selection?`
+        `${health.runtime === 'bepinex' ? 'BepInEx' : health.runtime === 'owml' ? 'OWML' : health.runtime === 'returnofmodding' ? 'ReturnOfModding' : 'Lovely'} is ${health.status}. Repair it before synchronizing this selection?`
       );
       if (!confirmedRepair || !await repairProfileRuntime()) return;
     }
@@ -1835,7 +1845,7 @@ function App() {
         if (health && (health.status === 'missing' || health.status === 'incomplete')) {
           const confirmedRepair = await window.ipcRenderer.confirm(
             'Repair Runtime Before Apply?',
-            `${health.runtime === 'bepinex' ? 'BepInEx' : health.runtime === 'owml' ? 'OWML' : 'Lovely'} is ${health.status}. ` +
+            `${health.runtime === 'bepinex' ? 'BepInEx' : health.runtime === 'owml' ? 'OWML' : health.runtime === 'returnofmodding' ? 'ReturnOfModding' : 'Lovely'} is ${health.status}. ` +
             'The working files will be repaired before the profile is synchronized.'
           );
           if (!confirmedRepair || !await repairProfileRuntime()) return;

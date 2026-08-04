@@ -15,7 +15,7 @@ export interface ProfileSyncInspectionMod {
 
 export interface ProfileSyncInspection {
     status: 'ready' | 'unconfigured' | 'unsupported';
-    runtime: 'bepinex' | 'owml' | 'lovely';
+    runtime: 'bepinex' | 'owml' | 'lovely' | 'returnofmodding';
     mods: ProfileSyncInspectionMod[];
     unresolvedKeys: string[];
 }

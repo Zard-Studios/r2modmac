@@ -60,6 +60,16 @@ async fn transaction_targets(
         return Ok(targets);
     }
 
+    if is_risk_of_rain_returns_identifier(game_identifier)
+        || is_risk_of_rain_returns_game_path(&game_root)
+    {
+        return Ok(vec![
+            game_root.join("version.dll"),
+            game_root.join("version.dll_DISABLED"),
+            game_root.join("ReturnOfModding"),
+        ]);
+    }
+
     let runtime_root = if platform == "mac" {
         resolve_macos_runtime_root(&game_root)
     } else {

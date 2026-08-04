@@ -99,6 +99,19 @@ fn inspect_lovely(game_path: &std::path::Path) -> RuntimeHealth {
     health("lovely", missing)
 }
 
+fn inspect_return_of_modding(game_path: &std::path::Path, vanilla: bool) -> RuntimeHealth {
+    let loader = if vanilla && game_path.join("version.dll_DISABLED").is_file() {
+        game_path.join("version.dll_DISABLED")
+    } else {
+        game_path.join("version.dll")
+    };
+    if loader.is_file() {
+        health("returnofmodding", Vec::new())
+    } else {
+        health("returnofmodding", vec!["runtime".to_string()])
+    }
+}
+
 fn inspect_windows_bepinex(game_path: &std::path::Path, vanilla: bool) -> RuntimeHealth {
     let disabled = vanilla && game_path.join("BepInEx_DISABLED").exists();
     let bep_dir = game_path.join(if disabled {
@@ -162,6 +175,12 @@ pub async fn check_profile_runtime_health(
     let vanilla = profile_is_vanilla(&app, &profile_id);
     if is_outerwilds_identifier(&game_identifier) || is_outerwilds_game_path(game_path) {
         return Ok(inspect_owml(game_path, vanilla));
+    }
+
+    if is_risk_of_rain_returns_identifier(&game_identifier)
+        || is_risk_of_rain_returns_game_path(game_path)
+    {
+        return Ok(inspect_return_of_modding(game_path, vanilla));
     }
 
     if profile_platform == "mac"
@@ -254,6 +273,22 @@ mod tests {
         fs::write(root.join("winhttp.dll_DISABLED"), b"").unwrap();
         assert_eq!(inspect_windows_bepinex(&root, true).status, "healthy");
         assert_eq!(inspect_windows_bepinex(&root, false).status, "missing");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn return_of_modding_accepts_active_and_intentionally_disabled_loader() {
+        let root = test_dir("return-of-modding");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("version.dll"), b"loader").unwrap();
+        assert_eq!(inspect_return_of_modding(&root, false).status, "healthy");
+        fs::rename(
+            root.join("version.dll"),
+            root.join("version.dll_DISABLED"),
+        )
+        .unwrap();
+        assert_eq!(inspect_return_of_modding(&root, true).status, "healthy");
+        assert_eq!(inspect_return_of_modding(&root, false).status, "missing");
         fs::remove_dir_all(root).unwrap();
     }
 

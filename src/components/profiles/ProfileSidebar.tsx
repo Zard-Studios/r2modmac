@@ -806,7 +806,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                         <div className="truncate text-xs font-medium text-amber-200">
                             {runtimeHealth.status === 'unconfigured'
                                 ? 'Game path not configured'
-                                : `${runtimeHealth.runtime === 'bepinex' ? 'BepInEx' : runtimeHealth.runtime === 'owml' ? 'OWML' : 'Lovely'} runtime ${runtimeHealth.status}`}
+                                : `${runtimeHealth.runtime === 'bepinex' ? 'BepInEx' : runtimeHealth.runtime === 'owml' ? 'OWML' : runtimeHealth.runtime === 'returnofmodding' ? 'ReturnOfModding' : 'Lovely'} runtime ${runtimeHealth.status}`}
                         </div>
                         {runtimeHealth.missingComponents.length > 0 ? (
                             <div className="truncate text-[10px] text-amber-300/70">Missing: {runtimeHealth.missingComponents.join(', ')}</div>
