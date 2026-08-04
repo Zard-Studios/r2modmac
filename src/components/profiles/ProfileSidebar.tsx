@@ -266,7 +266,10 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
     const profileUpdates = useMemo<ProfileModUpdate[]>(() => {
         if (!activeProfile) return [];
         return activeProfile.mods.flatMap(mod => {
-            if (mod.source === 'local' || mod.pending_sync) return [];
+            // Imported modpacks are staged as pending Sync immediately. They can
+            // still be older than Thunderstore, so keep them visible in Updates
+            // and let staging replace their pending target before the first Sync.
+            if (mod.source === 'local') return [];
             const packageName = parsePackageReference(mod.fullName).packageName.toLowerCase();
             const pkg = packageIndex[packageName];
             const latest = pkg ? latestVersionByPackage.get(packageName) : undefined;
