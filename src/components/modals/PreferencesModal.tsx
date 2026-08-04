@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import { Button } from '../ui';
-import type { SponsorMessage } from '../../types/electron';
 import { HeartIcon } from '../LikeStat';
 
 export interface PreferencesSettings {
@@ -13,6 +12,8 @@ export interface PreferencesSettings {
     show_deprecated_warnings: boolean;
     stream_mode: boolean;
     sponsored_messages_enabled: boolean;
+    sponsored_messages_scale: number;
+    sponsored_messages_background_opacity: number;
 }
 
 interface PreferencesModalProps {
@@ -149,8 +150,8 @@ export default function PreferencesModal({
     const [showDeprecatedWarnings, setShowDeprecatedWarnings] = useState(settings.show_deprecated_warnings);
     const [streamMode, setStreamMode] = useState(settings.stream_mode);
     const [sponsoredMessagesEnabled, setSponsoredMessagesEnabled] = useState(settings.sponsored_messages_enabled);
-    const [sponsorMessage, setSponsorMessage] = useState<SponsorMessage | null>(null);
-    const [sponsorPreferenceRevision, setSponsorPreferenceRevision] = useState(0);
+    const [sponsoredMessagesScale, setSponsoredMessagesScale] = useState(settings.sponsored_messages_scale ?? 80);
+    const [sponsoredMessagesOpacity, setSponsoredMessagesOpacity] = useState(settings.sponsored_messages_background_opacity ?? 80);
     const [restoringWarnings, setRestoringWarnings] = useState(false);
     const [checkingUpdates, setCheckingUpdates] = useState(false);
 
@@ -169,17 +170,19 @@ export default function PreferencesModal({
             setAskVersionBeforeInstall(settings.ask_version_before_install);
             setInstallInParallel(settings.install_in_parallel);
             setConfirmBeforeApply(settings.confirm_before_apply_to_game);
-            setWriteDebugLogsToGame(settings.write_debug_logs_to_game);
-            setDefaultModViewMode(settings.default_mod_view_mode);
+            setWriteDebugLogsToGame(settings.write_debug_logs_to_game ?? false);
             setShowDeprecatedWarnings(settings.show_deprecated_warnings);
-            setStreamMode(settings.stream_mode);
+            setStreamMode(settings.stream_mode ?? false);
+            setDefaultModViewMode(settings.default_mod_view_mode ?? 'grid');
             setSponsoredMessagesEnabled(settings.sponsored_messages_enabled);
-            setSponsorMessage(null);
+            setSponsoredMessagesScale(settings.sponsored_messages_scale ?? 80);
+            setSponsoredMessagesOpacity(settings.sponsored_messages_background_opacity ?? 80);
         } else {
             setIsVisible(false);
         }
     }
 
+    // Handle smooth backdrop animation
     useEffect(() => {
         if (isOpen) {
             const raf = requestAnimationFrame(() => {
@@ -189,6 +192,7 @@ export default function PreferencesModal({
         }
     }, [isOpen]);
 
+    // Silently fetch preferences sponsor every 15 seconds in background
     useEffect(() => {
         if (!isOpen || !sponsoredMessagesEnabled) return;
         let cancelled = false;
@@ -196,12 +200,9 @@ export default function PreferencesModal({
 
         const requestNextSponsor = async () => {
             try {
-                const candidate = await window.ipcRenderer.requestSponsor();
-                if (!cancelled && candidate) {
-                    setSponsorMessage((current) => current?.id === candidate.id ? current : candidate);
-                }
+                await window.ipcRenderer.requestSponsor('preferences-support');
             } catch {
-                // Sponsorship is optional; keep Preferences fully usable.
+                // Sponsorship is optional
             } finally {
                 if (!cancelled) timeoutId = window.setTimeout(requestNextSponsor, 15_000);
             }
@@ -212,12 +213,7 @@ export default function PreferencesModal({
             cancelled = true;
             if (timeoutId !== undefined) window.clearTimeout(timeoutId);
         };
-    }, [isOpen, sponsoredMessagesEnabled, sponsorPreferenceRevision]);
-
-    useEffect(() => {
-        if (!sponsorMessage) return;
-        void window.ipcRenderer.acknowledgeSponsorDisplay(sponsorMessage.id).catch(() => undefined);
-    }, [sponsorMessage]);
+    }, [isOpen, sponsoredMessagesEnabled]);
 
     if (!isOpen) return null;
 
@@ -232,17 +228,16 @@ export default function PreferencesModal({
             show_deprecated_warnings: showDeprecatedWarnings,
             stream_mode: streamMode,
             sponsored_messages_enabled: sponsoredMessagesEnabled,
+            sponsored_messages_scale: sponsoredMessagesScale,
+            sponsored_messages_background_opacity: sponsoredMessagesOpacity,
         });
         onClose();
     };
 
     const persistSponsorPreferences = (enabled: boolean) => {
         setSponsoredMessagesEnabled(enabled);
-        if (!enabled) setSponsorMessage(null);
-        window.dispatchEvent(new CustomEvent('r2modmac:sponsor-preferences', { detail: { enabled } }));
-        void onSponsorPreferencesChange(enabled)
-            .catch(() => undefined)
-            .finally(() => setSponsorPreferenceRevision((revision) => revision + 1));
+        window.dispatchEvent(new CustomEvent('r2modmac:sponsor-preferences', { detail: { enabled, scale: sponsoredMessagesScale, opacity: sponsoredMessagesOpacity } }));
+        void onSponsorPreferencesChange(enabled).catch(() => undefined);
     };
 
     return (
@@ -428,6 +423,20 @@ export default function PreferencesModal({
                                 </div>
                                 <Toggle value={sponsoredMessagesEnabled} onChange={persistSponsorPreferences} label="Enable sponsored messages" />
                             </div>
+                            <div className={`grid transition-[grid-template-rows,opacity] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] ${sponsoredMessagesEnabled ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'}`} aria-hidden={!sponsoredMessagesEnabled}>
+                                <div className="min-h-0 overflow-hidden">
+                                    <div className="space-y-4 border-t border-gray-700/50 p-4">
+                                        <label className="block text-[13px] text-gray-400">
+                                            <span className="mb-1 flex items-center justify-between"><span>Ad size</span><span className="tabular-nums text-gray-300">{sponsoredMessagesScale}%</span></span>
+                                            <input type="range" min="70" max="100" step="1" value={sponsoredMessagesScale} onChange={(event) => { const value = Number(event.target.value); setSponsoredMessagesScale(value); window.dispatchEvent(new CustomEvent('r2modmac:sponsor-preferences', { detail: { enabled: sponsoredMessagesEnabled, scale: value, opacity: sponsoredMessagesOpacity } })); }} style={{ background: `linear-gradient(to right, #2563eb ${((sponsoredMessagesScale - 70) / 30) * 100}%, #374151 ${((sponsoredMessagesScale - 70) / 30) * 100}%)` }} className="h-2 w-full cursor-pointer appearance-none rounded-full border border-gray-600/70 [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:appearance-none [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-2 [&::-moz-range-thumb]:border-blue-200 [&::-moz-range-thumb]:bg-white [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-blue-200 [&::-webkit-slider-thumb]:bg-white" aria-label="Sponsored message size" />
+                                        </label>
+                                        <label className="block text-[13px] text-gray-400">
+                                            <span className="mb-1 flex items-center justify-between"><span>Background opacity</span><span className="tabular-nums text-gray-300">{sponsoredMessagesOpacity}%</span></span>
+                                            <input type="range" min="0" max="100" step="1" value={sponsoredMessagesOpacity} onChange={(event) => { const value = Number(event.target.value); setSponsoredMessagesOpacity(value); window.dispatchEvent(new CustomEvent('r2modmac:sponsor-preferences', { detail: { enabled: sponsoredMessagesEnabled, scale: sponsoredMessagesScale, opacity: value } })); }} style={{ background: `linear-gradient(to right, #2563eb ${sponsoredMessagesOpacity}%, #374151 ${sponsoredMessagesOpacity}%)` }} className="h-2 w-full cursor-pointer appearance-none rounded-full border border-gray-600/70 [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:appearance-none [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-2 [&::-moz-range-thumb]:border-blue-200 [&::-moz-range-thumb]:bg-white [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-blue-200 [&::-webkit-slider-thumb]:bg-white" aria-label="Sponsored message background opacity" />
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
                             <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
                                 <div className="flex items-center gap-4">
                                     <RowIcon kind="cache" />
@@ -440,7 +449,6 @@ export default function PreferencesModal({
                                     type="button"
                                     onClick={async () => {
                                         await window.ipcRenderer.resetSponsorCache().catch(() => undefined);
-                                        setSponsorMessage(null);
                                     }}
                                     className="shrink-0 rounded-xl border border-gray-600 px-4 py-2 text-[13px] font-medium text-gray-200 transition-colors hover:border-gray-500 hover:bg-gray-700"
                                 >
@@ -459,43 +467,6 @@ export default function PreferencesModal({
                         >
                             Learn more about sponsored messages ↗
                         </button>
-
-                        {sponsorMessage ? (
-                            <div className="flex items-start gap-3 rounded-xl border border-gray-700 bg-gray-800/70 px-4 py-3">
-                                <span className="mt-0.5 shrink-0 text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-500">Sponsored</span>
-                                <div className="min-w-0 flex-1">
-                                    {sponsorMessage.sponsorName ? (
-                                        <p className="text-[13px] font-medium text-gray-200">{sponsorMessage.sponsorName}</p>
-                                    ) : null}
-                                    <p className={`${sponsorMessage.sponsorName ? 'mt-0.5' : ''} text-[13px] leading-snug text-gray-400`}>{sponsorMessage.message}</p>
-                                    {sponsorMessage.url ? (
-                                        <button
-                                            type="button"
-                                            onClick={() => {
-                                                void import('@tauri-apps/plugin-shell').then(({ open }) => open(sponsorMessage.url!));
-                                            }}
-                                            className="mt-2 text-xs font-medium text-blue-400 transition-colors hover:text-blue-300"
-                                        >
-                                            Learn more ↗
-                                        </button>
-                                    ) : null}
-                                </div>
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        void window.ipcRenderer.dismissSponsor(sponsorMessage.id).catch(() => undefined);
-                                        setSponsorMessage(null);
-                                    }}
-                                    className="-mr-1 -mt-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-700 hover:text-gray-200"
-                                    aria-label="Dismiss sponsored message"
-                                    title="Dismiss"
-                                >
-                                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="m6 6 12 12M18 6 6 18" />
-                                    </svg>
-                                </button>
-                            </div>
-                        ) : null}
                     </div>
 
                     {/* Guides & Warnings Section */}

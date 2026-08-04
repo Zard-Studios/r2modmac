@@ -21,6 +21,8 @@ export interface AppSettings {
     hide_macos_guide?: boolean;
     stream_mode?: boolean;
     sponsored_messages_enabled?: boolean;
+    sponsored_messages_scale?: number;
+    sponsored_messages_background_opacity?: number;
 }
 
 export interface SponsorMessage {

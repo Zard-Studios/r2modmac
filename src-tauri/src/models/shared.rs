@@ -164,6 +164,10 @@ pub struct Settings {
     pub stream_mode: bool,
     #[serde(default = "default_true")]
     pub sponsored_messages_enabled: bool,
+    #[serde(default = "default_sponsor_scale")]
+    pub sponsored_messages_scale: u8,
+    #[serde(default = "default_sponsor_opacity")]
+    pub sponsored_messages_background_opacity: u8,
 }
 
 impl Settings {
@@ -187,6 +191,8 @@ impl Settings {
             thunderstore_chunk_cache_migrated: false,
             stream_mode: false,
             sponsored_messages_enabled: true,
+            sponsored_messages_scale: default_sponsor_scale(),
+            sponsored_messages_background_opacity: default_sponsor_opacity(),
         }
     }
 }
@@ -201,6 +207,14 @@ fn default_true() -> bool {
 
 fn default_false() -> bool {
     false
+}
+
+fn default_sponsor_scale() -> u8 {
+    80
+}
+
+fn default_sponsor_opacity() -> u8 {
+    80
 }
 
 pub fn get_settings_path(app: &tauri::AppHandle) -> std::path::PathBuf {

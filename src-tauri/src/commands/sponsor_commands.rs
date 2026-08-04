@@ -197,6 +197,15 @@ async fn request_sponsor_with_options(
         return Ok(None);
     }
 
+    if placement == PREFERENCES_PLACEMENT {
+        let subject = state
+            .installation_subject
+            .get_or_insert_with(|| Uuid::new_v4().to_string())
+            .clone();
+        let _ = save_state(&app, &state);
+        return Ok(request_proxy(&subject, placement).await);
+    }
+
     if let Some(cached) = &state.cached {
         if !state.recent_ids.contains(&cached.message.id)
             && !state.dismissed_ids.contains(&cached.message.id)

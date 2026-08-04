@@ -310,6 +310,8 @@ function App() {
   const [defaultModViewMode, setDefaultModViewMode] = useState<'grid' | 'list'>('grid')
   const [showDeprecatedWarnings, setShowDeprecatedWarnings] = useState(true)
   const [sponsoredMessagesEnabled, setSponsoredMessagesEnabled] = useState(true)
+  const [sponsoredMessagesScale, setSponsoredMessagesScale] = useState(80)
+  const [sponsoredMessagesOpacity, setSponsoredMessagesOpacity] = useState(80)
   const [isBrowsingMode, setIsBrowsingMode] = useState(false)
   const isInitialLoadRunningRef = useRef(false)
   const packagesLoadRequestRef = useRef(0)
@@ -716,6 +718,8 @@ function App() {
       setViewMode(storedViewMode);
       setShowDeprecatedWarnings(s.show_deprecated_warnings ?? true);
       setSponsoredMessagesEnabled(s.sponsored_messages_enabled ?? true);
+      setSponsoredMessagesScale(s.sponsored_messages_scale ?? 80);
+      setSponsoredMessagesOpacity(s.sponsored_messages_background_opacity ?? 80);
       setHideCrossOverGuide(!!s.hide_crossover_guide);
       setStreamMode(!!s.stream_mode);
     });
@@ -1941,6 +1945,8 @@ function App() {
     setViewMode(newSettings.default_mod_view_mode);
     setShowDeprecatedWarnings(newSettings.show_deprecated_warnings);
     setSponsoredMessagesEnabled(newSettings.sponsored_messages_enabled);
+    setSponsoredMessagesScale(newSettings.sponsored_messages_scale);
+    setSponsoredMessagesOpacity(newSettings.sponsored_messages_background_opacity);
     setStreamMode(newSettings.stream_mode);
 
     const currentSettings = await window.ipcRenderer.getSettings();
@@ -1954,6 +1960,8 @@ function App() {
       default_mod_view_mode: newSettings.default_mod_view_mode,
       show_deprecated_warnings: newSettings.show_deprecated_warnings,
       sponsored_messages_enabled: newSettings.sponsored_messages_enabled,
+      sponsored_messages_scale: newSettings.sponsored_messages_scale,
+      sponsored_messages_background_opacity: newSettings.sponsored_messages_background_opacity,
       stream_mode: newSettings.stream_mode,
     });
   };
@@ -2083,6 +2091,11 @@ function App() {
     isProgressMinimized,
   ]);
 
+  useEffect(() => {
+    const handleOpenPreferences = () => setShowPreferences(true);
+    window.addEventListener('r2modmac:open-preferences', handleOpenPreferences);
+    return () => window.removeEventListener('r2modmac:open-preferences', handleOpenPreferences);
+  }, []);
 
   // VIEW LOGIC
   let content;
@@ -2610,6 +2623,8 @@ function App() {
           default_mod_view_mode: defaultModViewMode,
           show_deprecated_warnings: showDeprecatedWarnings,
           sponsored_messages_enabled: sponsoredMessagesEnabled,
+          sponsored_messages_scale: sponsoredMessagesScale,
+          sponsored_messages_background_opacity: sponsoredMessagesOpacity,
           stream_mode: streamMode,
         }}
         onSavePreferences={handleSavePreferences}

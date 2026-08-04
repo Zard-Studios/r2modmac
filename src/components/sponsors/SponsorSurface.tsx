@@ -10,6 +10,20 @@ let persistentMessage: SponsorMessage | null = null;
 let persistentDismissed = false;
 let persistentEnabled: boolean | null = null;
 let persistentAcknowledgedId: string | null = null;
+let persistentScale = 80;
+let persistentOpacity = 80;
+
+let persistentDismissCount = 0;
+let persistentIsFakeAd = false;
+let persistentDismissTimer: ReturnType<typeof setTimeout> | null = null;
+let persistentFakeAdTimer: ReturnType<typeof setTimeout> | null = null;
+
+const FAKE_SPONSOR_MESSAGE: SponsorMessage = {
+    id: 'fake-sponsor-tip',
+    sponsorName: 'r2modmac',
+    message: 'Did you know? You can disable sponsored messages in Preferences.',
+    url: undefined,
+};
 
 export type SponsorPlacement = 'home-support' | 'catalog-support' | 'profile-selector-support';
 
@@ -28,13 +42,19 @@ export function SponsorSurface({ placement, visible, className = '' }: SponsorSu
     const [message, setMessage] = useState<SponsorMessage | null>(persistentMessage);
     const [dismissed, setDismissed] = useState(persistentDismissed);
     const [enabled, setEnabled] = useState<boolean | null>(persistentEnabled);
+    const [scale, setScale] = useState(persistentScale);
+    const [backgroundOpacity, setBackgroundOpacity] = useState(persistentOpacity);
     const acknowledgedRef = useRef<string | null>(persistentAcknowledgedId);
 
     useEffect(() => {
         void window.ipcRenderer.getSettings()
             .then((settings) => {
                 persistentEnabled = settings.sponsored_messages_enabled !== false;
+                persistentScale = settings.sponsored_messages_scale ?? 80;
+                persistentOpacity = settings.sponsored_messages_background_opacity ?? 80;
                 setEnabled(persistentEnabled);
+                setScale(persistentScale);
+                setBackgroundOpacity(persistentOpacity);
             })
             .catch(() => {
                 persistentEnabled = false;
@@ -42,13 +62,20 @@ export function SponsorSurface({ placement, visible, className = '' }: SponsorSu
             });
 
         const onPreferenceChange = (event: Event) => {
-            const nextEnabled = (event as CustomEvent<{ enabled?: boolean }>).detail?.enabled === true;
+            const detail = (event as CustomEvent<{ enabled?: boolean; scale?: number; opacity?: number }>).detail;
+            const nextEnabled = detail?.enabled === true;
+            if (typeof detail?.scale === 'number') { persistentScale = Math.min(100, Math.max(70, detail.scale)); setScale(persistentScale); }
+            if (typeof detail?.opacity === 'number') { persistentOpacity = Math.min(100, Math.max(0, detail.opacity)); setBackgroundOpacity(persistentOpacity); }
             persistentEnabled = nextEnabled;
             setEnabled(nextEnabled);
             if (!nextEnabled) {
                 persistentMessage = null;
                 persistentDismissed = false;
                 persistentAcknowledgedId = null;
+                persistentDismissCount = 0;
+                persistentIsFakeAd = false;
+                if (persistentDismissTimer) { clearTimeout(persistentDismissTimer); persistentDismissTimer = null; }
+                if (persistentFakeAdTimer) { clearTimeout(persistentFakeAdTimer); persistentFakeAdTimer = null; }
                 setMessage(null);
                 setDismissed(false);
                 acknowledgedRef.current = null;
@@ -62,7 +89,7 @@ export function SponsorSurface({ placement, visible, className = '' }: SponsorSu
     }, []);
 
     useEffect(() => {
-        if (enabled !== true || !visible || dismissed) return;
+        if (enabled !== true || !visible || dismissed || persistentIsFakeAd) return;
 
         let cancelled = false;
         let timeoutId: number | undefined;
@@ -70,7 +97,7 @@ export function SponsorSurface({ placement, visible, className = '' }: SponsorSu
         const requestNextSponsor = async () => {
             try {
                 const candidate = await window.ipcRenderer.requestSponsor(placement);
-                if (!cancelled && candidate) {
+                if (!cancelled && candidate && !persistentIsFakeAd) {
                     persistentMessage = candidate;
                     persistentDismissed = false;
                     setMessage((current) => current?.id === candidate.id ? current : candidate);
@@ -79,7 +106,7 @@ export function SponsorSurface({ placement, visible, className = '' }: SponsorSu
             } catch {
                 // Sponsorship is optional; keep the current line and retry later.
             } finally {
-                if (!cancelled) {
+                if (!cancelled && !persistentIsFakeAd) {
                     timeoutId = window.setTimeout(requestNextSponsor, SPONSOR_ROTATION_INTERVAL_MS);
                 }
             }
@@ -93,7 +120,7 @@ export function SponsorSurface({ placement, visible, className = '' }: SponsorSu
     }, [dismissed, enabled, placement, visible]);
 
     useEffect(() => {
-        if (!message || acknowledgedRef.current === message.id) return;
+        if (!message || message.id === FAKE_SPONSOR_MESSAGE.id || acknowledgedRef.current === message.id) return;
         const frame = window.requestAnimationFrame(() => {
             acknowledgedRef.current = message.id;
             persistentAcknowledgedId = message.id;
@@ -102,6 +129,71 @@ export function SponsorSurface({ placement, visible, className = '' }: SponsorSu
         return () => window.cancelAnimationFrame(frame);
     }, [message]);
 
+    const handleDismiss = () => {
+        if (!message) return;
+
+        if (persistentIsFakeAd) {
+            persistentIsFakeAd = false;
+            persistentDismissCount = 0;
+            persistentMessage = null;
+            persistentDismissed = true;
+            setDismissed(true);
+            setMessage(null);
+
+            if (persistentFakeAdTimer) {
+                clearTimeout(persistentFakeAdTimer);
+                persistentFakeAdTimer = null;
+            }
+
+            if (persistentDismissTimer) clearTimeout(persistentDismissTimer);
+            persistentDismissTimer = setTimeout(() => {
+                persistentDismissed = false;
+                setDismissed(false);
+            }, SPONSOR_ROTATION_INTERVAL_MS);
+            return;
+        }
+
+        void window.ipcRenderer.dismissSponsor(message.id).catch(() => undefined);
+
+        const nextCount = persistentDismissCount + 1;
+        persistentDismissCount = nextCount;
+
+        if (nextCount >= 3) {
+            persistentIsFakeAd = true;
+            persistentMessage = FAKE_SPONSOR_MESSAGE;
+            persistentDismissed = false;
+            setMessage(FAKE_SPONSOR_MESSAGE);
+            setDismissed(false);
+
+            if (persistentDismissTimer) {
+                clearTimeout(persistentDismissTimer);
+                persistentDismissTimer = null;
+            }
+
+            if (persistentFakeAdTimer) clearTimeout(persistentFakeAdTimer);
+            persistentFakeAdTimer = setTimeout(() => {
+                persistentIsFakeAd = false;
+                persistentDismissCount = 0;
+                persistentMessage = null;
+                persistentDismissed = false;
+                setMessage(null);
+                setDismissed(false);
+            }, 15_000);
+        } else {
+            persistentDismissed = true;
+            persistentMessage = null;
+            setDismissed(true);
+            setMessage(null);
+
+            const delayMs = nextCount * 15_000;
+            if (persistentDismissTimer) clearTimeout(persistentDismissTimer);
+            persistentDismissTimer = setTimeout(() => {
+                persistentDismissed = false;
+                setDismissed(false);
+            }, delayMs);
+        }
+    };
+
     if (!message || dismissed || enabled !== true) return null;
 
     return (
@@ -109,11 +201,21 @@ export function SponsorSurface({ placement, visible, className = '' }: SponsorSu
             className={`pointer-events-none absolute inset-x-0 bottom-0 z-20 flex justify-center bg-gradient-to-t from-gray-900/90 via-gray-900/70 to-transparent px-4 pb-3 pt-8 transition-[opacity,transform] duration-300 ease-out ${visible ? 'translate-y-0 opacity-100' : 'translate-y-3 opacity-0'} ${className}`}
             aria-hidden={!visible}
         >
-            <div className="pointer-events-auto flex w-auto max-w-[min(46rem,calc(100%-1rem))] min-w-0 items-center gap-2 rounded-lg border border-gray-700/90 bg-gray-800/80 px-3 py-2 backdrop-blur-[2px] shadow-[0_10px_28px_rgba(0,0,0,0.24)]">
+            <div className={`pointer-events-auto flex w-auto max-w-[min(46rem,calc(100%-1rem))] min-w-0 origin-bottom items-center gap-2 rounded-lg border px-3 py-2 transition-[transform,background-color,border-color,box-shadow] duration-300 ease-out ${backgroundOpacity === 0 ? '' : 'backdrop-blur-[2px]'}`} style={{ transform: `scale(${scale / 100})`, backgroundColor: `rgb(31 41 55 / ${backgroundOpacity / 100})`, borderColor: `rgb(75 85 99 / ${backgroundOpacity / 100})`, boxShadow: backgroundOpacity === 0 ? 'none' : '0 10px 28px rgb(0 0 0 / 0.24)' }}>
                 <span className="shrink-0 border-r border-gray-700 pr-2 text-[9px] font-semibold uppercase tracking-[0.14em] text-gray-500">Sponsored</span>
-                <p className="min-w-0 max-w-[min(30rem,45vw)] truncate text-sm text-gray-200" title={message.message}>{message.message}</p>
+                <p className="min-w-0 max-w-[min(36rem,55vw)] truncate text-sm text-gray-200" title={message.message}>{message.message}</p>
                 <div className="flex shrink-0 items-center gap-2">
-                    {message.url ? (
+                    {persistentIsFakeAd ? (
+                        <button
+                            type="button"
+                            onClick={() => {
+                                window.dispatchEvent(new CustomEvent('r2modmac:open-preferences'));
+                            }}
+                            className="flex h-7 items-center rounded-md border border-blue-400/25 bg-blue-500/10 px-2.5 text-[11px] font-semibold text-blue-300 transition-colors hover:border-blue-400/40 hover:bg-blue-500/20 hover:text-blue-200"
+                        >
+                            Preferences ↗
+                        </button>
+                    ) : message.url ? (
                         <button
                             type="button"
                             onClick={() => {
@@ -126,11 +228,7 @@ export function SponsorSurface({ placement, visible, className = '' }: SponsorSu
                     ) : null}
                     <button
                         type="button"
-                        onClick={() => {
-                            persistentDismissed = true;
-                            setDismissed(true);
-                            void window.ipcRenderer.dismissSponsor(message.id).catch(() => undefined);
-                        }}
+                        onClick={handleDismiss}
                         className="flex h-7 w-7 items-center justify-center rounded-md text-gray-500 transition-colors hover:bg-gray-700 hover:text-gray-200"
                         aria-label="Dismiss sponsored message"
                         title="Dismiss"
