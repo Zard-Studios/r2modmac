@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { SponsorMessage } from '../../types/electron';
 
-export type SponsorPlacement = 'catalog-support' | 'profile-selector-support';
+export type SponsorPlacement = 'home-support' | 'catalog-support' | 'profile-selector-support';
 
 interface SponsorSurfaceProps {
     placement: SponsorPlacement;

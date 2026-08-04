@@ -2,7 +2,7 @@
 
 ## New: Optional Sponsored Messages
 
-To help fund the continued development of r2modmac, the application can occasionally display short, clearly labelled **text-only** sponsored messages in the Profile Selector, the Browse Mods surface, and **Preferences → Support r2modmac**.
+To help fund the continued development of r2modmac, the application can occasionally display short, clearly labelled **text-only** sponsored messages on the Home screen, in the Profile Selector, at the lower edge of Browse Mods, and in **Preferences → Support r2modmac**.
 
 This feature is enabled by default, but can be disabled at any time from Preferences. There are no banner images, pop-ups, video ads, or interruptions to core workflows. Sponsored messages never affect the application's functionality.
 

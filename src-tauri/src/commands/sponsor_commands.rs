@@ -13,6 +13,7 @@ const MONTH_SECONDS: i64 = 30 * 24 * 60 * 60;
 const CACHE_SECONDS: i64 = 15 * 60;
 
 const PREFERENCES_PLACEMENT: &str = "preferences-support";
+const HOME_PLACEMENT: &str = "home-support";
 const PROFILE_SELECTOR_PLACEMENT: &str = "profile-selector-support";
 const CATALOG_PLACEMENT: &str = "catalog-support";
 
@@ -80,7 +81,7 @@ fn save_state(app: &AppHandle, state: &SponsorState) -> Result<(), String> {
 fn is_allowed_placement(placement: &str) -> bool {
     matches!(
         placement,
-        PREFERENCES_PLACEMENT | PROFILE_SELECTOR_PLACEMENT | CATALOG_PLACEMENT
+        PREFERENCES_PLACEMENT | HOME_PLACEMENT | PROFILE_SELECTOR_PLACEMENT | CATALOG_PLACEMENT
     )
 }
 
@@ -316,6 +317,12 @@ mod tests {
         let settings = standard_settings();
         let state = SponsorState { shown_at: vec![1_000; 100], ..Default::default() };
         assert!(is_eligible(&state, &settings, 1_001));
+    }
+
+    #[test]
+    fn home_is_an_explicitly_allowed_sponsor_placement() {
+        assert!(is_allowed_placement(HOME_PLACEMENT));
+        assert!(!is_allowed_placement("install-support"));
     }
 
     #[test]

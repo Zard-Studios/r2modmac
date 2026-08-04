@@ -4,6 +4,7 @@ import { SponsorSlot, type Sponsor } from '@adtention/sdk';
 const CATEGORY = 'gaming-mod-manager';
 const PLACEMENTS = new Set([
   'preferences-support',
+  'home-support',
   'profile-selector-support',
   'catalog-support',
 ]);

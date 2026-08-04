@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { GameSelector } from '../game/GameSelector';
+import { SponsorSurface } from '../sponsors/SponsorSurface';
 import type { CommunityPlatformInfo } from '../../types/thunderstore';
 
 export interface GameSelectionScreenProps {
@@ -78,8 +79,9 @@ export function GameSelectionScreen({
         });
 
     return (
-        <div className="flex flex-col h-full bg-gray-900 p-8 overflow-y-auto w-full">
-            <div className="max-w-4xl mx-auto w-full flex-1">
+        <div className="relative flex h-full min-h-0 w-full bg-gray-900">
+            <div className="h-full w-full overflow-y-auto p-8 pb-32">
+                <div className="max-w-4xl mx-auto w-full min-h-full flex flex-col">
                 <div className="text-center mb-12">
                     <h1 className="text-4xl font-bold text-white mb-4">Welcome to r2modmac</h1>
                     <p className="text-xl text-gray-400">Select a game to begin managing your mods</p>
@@ -205,7 +207,9 @@ export function GameSelectionScreen({
                         </div>
                     </div>
                 </footer>
+                </div>
             </div>
+            <SponsorSurface placement="home-support" visible />
         </div>
     );
 }

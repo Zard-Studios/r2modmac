@@ -1,7 +1,7 @@
 # Sponsored messages and privacy
 
 r2modmac can show a compact, clearly labelled sponsored message in **Preferences → Support
-r2modmac**, the **Profile Selector**, and the lower edge of **Browse Mods**. The Browse Mods
+r2modmac**, the **Home screen**, the **Profile Selector**, and the lower edge of **Browse Mods**. The Browse Mods
 surface fades away at the real end of the catalog and returns when you scroll back up. It is not a
 popup, dialog, progress message, or part of installation, updates, Sync, Apply, Repair, errors,
 warnings, or onboarding.
@@ -26,7 +26,8 @@ file, path, or application activity.
 The request to the r2modmac proxy also contains only these static values:
 
 - category: `gaming-mod-manager`
-- placement: one of `preferences-support`, `profile-selector-support`, or `catalog-support`
+- placement: one of `preferences-support`, `home-support`, `profile-selector-support`, or
+  `catalog-support`
 
 The proxy maps the fixed r2modmac category to ADtention's documented `general` category. The SDK
 then sends ADtention exactly these JSON fields for a delivery request:

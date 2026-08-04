@@ -1,8 +1,8 @@
 # r2modmac ADtention proxy
 
 This Vercel Function is deliberately a privacy boundary: it accepts only the static
-`gaming-mod-manager` category, the `preferences-support` placement, and a random persistent
-installation UUID (`subject`) generated locally after sponsorship is enabled. It maps that fixed
+`gaming-mod-manager` category, one of the explicitly allowed application placements, and a random
+persistent installation UUID (`subject`) generated locally after sponsorship is enabled. It maps that fixed
 category to ADtention's supported `general` category. It never receives a user ID, profile, game,
 mod, path, activity, analytics event, device fingerprint, or application content.
 

@@ -30,7 +30,7 @@ export interface SponsorMessage {
     url?: string | null;
 }
 
-export type SponsorPlacement = 'preferences-support' | 'profile-selector-support' | 'catalog-support';
+export type SponsorPlacement = 'preferences-support' | 'home-support' | 'profile-selector-support' | 'catalog-support';
 
 export interface RuntimeHealth {
     runtime: 'bepinex' | 'owml' | 'lovely';
