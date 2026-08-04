@@ -310,7 +310,6 @@ function App() {
   const [defaultModViewMode, setDefaultModViewMode] = useState<'grid' | 'list'>('grid')
   const [showDeprecatedWarnings, setShowDeprecatedWarnings] = useState(true)
   const [sponsoredMessagesEnabled, setSponsoredMessagesEnabled] = useState(true)
-  const [sponsoredMessagesLessFrequently, setSponsoredMessagesLessFrequently] = useState(false)
   const [isBrowsingMode, setIsBrowsingMode] = useState(false)
   const isInitialLoadRunningRef = useRef(false)
   const packagesLoadRequestRef = useRef(0)
@@ -717,7 +716,6 @@ function App() {
       setViewMode(storedViewMode);
       setShowDeprecatedWarnings(s.show_deprecated_warnings ?? true);
       setSponsoredMessagesEnabled(s.sponsored_messages_enabled ?? true);
-      setSponsoredMessagesLessFrequently(s.sponsored_messages_less_frequently ?? false);
       setHideCrossOverGuide(!!s.hide_crossover_guide);
       setStreamMode(!!s.stream_mode);
     });
@@ -1933,7 +1931,6 @@ function App() {
     setViewMode(newSettings.default_mod_view_mode);
     setShowDeprecatedWarnings(newSettings.show_deprecated_warnings);
     setSponsoredMessagesEnabled(newSettings.sponsored_messages_enabled);
-    setSponsoredMessagesLessFrequently(newSettings.sponsored_messages_less_frequently);
     setStreamMode(newSettings.stream_mode);
 
     const currentSettings = await window.ipcRenderer.getSettings();
@@ -1947,15 +1944,13 @@ function App() {
       default_mod_view_mode: newSettings.default_mod_view_mode,
       show_deprecated_warnings: newSettings.show_deprecated_warnings,
       sponsored_messages_enabled: newSettings.sponsored_messages_enabled,
-      sponsored_messages_less_frequently: newSettings.sponsored_messages_less_frequently,
       stream_mode: newSettings.stream_mode,
     });
   };
 
-  const handleSponsorPreferencesChange = async (enabled: boolean, lessFrequently: boolean) => {
+  const handleSponsorPreferencesChange = async (enabled: boolean) => {
     setSponsoredMessagesEnabled(enabled);
-    setSponsoredMessagesLessFrequently(lessFrequently);
-    await window.ipcRenderer.updateSponsorPreferences(enabled, lessFrequently);
+    await window.ipcRenderer.updateSponsorPreferences(enabled);
   };
 
   const handleSetGuideHidden = async (guide: 'crossover' | 'macos', hidden: boolean) => {
@@ -2605,7 +2600,6 @@ function App() {
           default_mod_view_mode: defaultModViewMode,
           show_deprecated_warnings: showDeprecatedWarnings,
           sponsored_messages_enabled: sponsoredMessagesEnabled,
-          sponsored_messages_less_frequently: sponsoredMessagesLessFrequently,
           stream_mode: streamMode,
         }}
         onSavePreferences={handleSavePreferences}

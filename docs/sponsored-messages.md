@@ -11,7 +11,6 @@ warnings, or onboarding.
 - **Sponsored messages** is enabled by default and can be disabled at any time in Preferences.
 - Disabling it immediately removes the current message, clears the local sponsor state (including
   the random installation identifier), and prevents future sponsor requests.
-- **Show less frequently** leaves more space between sponsored messages while you browse.
 - **Reset sponsor cache** removes recently shown, dismissed, and cached sponsor messages. It keeps
   the random installation identifier so a reset cannot bypass the network's frequency limits.
 

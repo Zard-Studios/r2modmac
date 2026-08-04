@@ -164,8 +164,6 @@ pub struct Settings {
     pub stream_mode: bool,
     #[serde(default = "default_true")]
     pub sponsored_messages_enabled: bool,
-    #[serde(default)]
-    pub sponsored_messages_less_frequently: bool,
 }
 
 impl Settings {
@@ -189,7 +187,6 @@ impl Settings {
             thunderstore_chunk_cache_migrated: false,
             stream_mode: false,
             sponsored_messages_enabled: true,
-            sponsored_messages_less_frequently: false,
         }
     }
 }

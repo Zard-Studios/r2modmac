@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Button } from '../ui';
 import type { SponsorMessage } from '../../types/electron';
+import { HeartIcon } from '../LikeStat';
 
 export interface PreferencesSettings {
     legacy_install_mode: boolean;
@@ -12,7 +13,6 @@ export interface PreferencesSettings {
     show_deprecated_warnings: boolean;
     stream_mode: boolean;
     sponsored_messages_enabled: boolean;
-    sponsored_messages_less_frequently: boolean;
 }
 
 interface PreferencesModalProps {
@@ -20,7 +20,7 @@ interface PreferencesModalProps {
     onClose: () => void;
     settings: PreferencesSettings;
     onSave: (settings: PreferencesSettings) => void;
-    onSponsorPreferencesChange: (enabled: boolean, lessFrequently: boolean) => Promise<void>;
+    onSponsorPreferencesChange: (enabled: boolean) => Promise<void>;
     hasHiddenGuideWarnings: boolean;
     onRestoreGuideWarnings: () => Promise<void>;
     onCheckForUpdates: () => Promise<void>;
@@ -117,10 +117,8 @@ function RowIcon({ kind }: { kind: 'install' | 'version' | 'parallel' | 'apply' 
         </IconBox>
     );
     if (kind === 'support') return (
-        <IconBox colorClass="text-rose-300">
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 21s-7-4.35-7-10a4 4 0 017-2.65A4 4 0 0119 11c0 5.65-7 10-7 10z" />
-            </svg>
+        <IconBox colorClass="text-rose-400">
+            <HeartIcon className="h-5 w-5" />
         </IconBox>
     );
     return (
@@ -151,7 +149,6 @@ export default function PreferencesModal({
     const [showDeprecatedWarnings, setShowDeprecatedWarnings] = useState(settings.show_deprecated_warnings);
     const [streamMode, setStreamMode] = useState(settings.stream_mode);
     const [sponsoredMessagesEnabled, setSponsoredMessagesEnabled] = useState(settings.sponsored_messages_enabled);
-    const [sponsoredMessagesLessFrequently, setSponsoredMessagesLessFrequently] = useState(settings.sponsored_messages_less_frequently);
     const [sponsorMessage, setSponsorMessage] = useState<SponsorMessage | null>(null);
     const [sponsorPreferenceRevision, setSponsorPreferenceRevision] = useState(0);
     const [restoringWarnings, setRestoringWarnings] = useState(false);
@@ -177,7 +174,6 @@ export default function PreferencesModal({
             setShowDeprecatedWarnings(settings.show_deprecated_warnings);
             setStreamMode(settings.stream_mode);
             setSponsoredMessagesEnabled(settings.sponsored_messages_enabled);
-            setSponsoredMessagesLessFrequently(settings.sponsored_messages_less_frequently);
             setSponsorMessage(null);
         } else {
             setIsVisible(false);
@@ -227,17 +223,15 @@ export default function PreferencesModal({
             show_deprecated_warnings: showDeprecatedWarnings,
             stream_mode: streamMode,
             sponsored_messages_enabled: sponsoredMessagesEnabled,
-            sponsored_messages_less_frequently: sponsoredMessagesLessFrequently,
         });
         onClose();
     };
 
-    const persistSponsorPreferences = (enabled: boolean, lessFrequently: boolean) => {
+    const persistSponsorPreferences = (enabled: boolean) => {
         setSponsoredMessagesEnabled(enabled);
-        setSponsoredMessagesLessFrequently(lessFrequently);
         if (!enabled) setSponsorMessage(null);
         window.dispatchEvent(new CustomEvent('r2modmac:sponsor-preferences', { detail: { enabled } }));
-        void onSponsorPreferencesChange(enabled, lessFrequently)
+        void onSponsorPreferencesChange(enabled)
             .catch(() => undefined)
             .finally(() => setSponsorPreferenceRevision((revision) => revision + 1));
     };
@@ -423,19 +417,7 @@ export default function PreferencesModal({
                                         <p className="mt-0.5 text-[13px] leading-snug text-gray-400">r2modmac may occasionally display short sponsored messages to help fund development. This feature is enabled by default, can be disabled at any time from Preferences, and never affects the application&apos;s functionality.</p>
                                     </div>
                                 </div>
-                                <Toggle value={sponsoredMessagesEnabled} onChange={(enabled) => persistSponsorPreferences(enabled, sponsoredMessagesLessFrequently)} label="Enable sponsored messages" />
-                            </div>
-                            <div className={`flex items-center justify-between gap-4 p-4 transition-colors ${sponsoredMessagesEnabled ? 'hover:bg-gray-750' : 'opacity-50'}`}>
-                                <div className="flex items-center gap-4">
-                                    <RowIcon kind="support" />
-                                    <div>
-                                        <p className="text-[15px] font-medium text-white">Show less frequently</p>
-                                        <p className="mt-0.5 text-[13px] leading-snug text-gray-400">Keep more space between sponsored messages while you browse.</p>
-                                    </div>
-                                </div>
-                                <Toggle value={sponsoredMessagesLessFrequently} onChange={(lessFrequently) => {
-                                    if (sponsoredMessagesEnabled) persistSponsorPreferences(true, lessFrequently);
-                                }} label="Show sponsored messages less frequently" />
+                                <Toggle value={sponsoredMessagesEnabled} onChange={persistSponsorPreferences} label="Enable sponsored messages" />
                             </div>
                             <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
                                 <div className="flex items-center gap-4">

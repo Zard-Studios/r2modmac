@@ -9,7 +9,6 @@ use tauri::{command, AppHandle};
 use url::Url;
 use uuid::Uuid;
 
-const REDUCED_ATTEMPT_BACKOFF_SECONDS: i64 = 5 * 60;
 const MONTH_SECONDS: i64 = 30 * 24 * 60 * 60;
 const CACHE_SECONDS: i64 = 15 * 60;
 
@@ -30,7 +29,6 @@ pub struct SponsorMessage {
 #[serde(default)]
 struct SponsorState {
     installation_subject: Option<String>,
-    last_attempt_at: Option<i64>,
     last_shown_at: Option<i64>,
     shown_at: Vec<i64>,
     recent_ids: Vec<String>,
@@ -119,14 +117,8 @@ fn is_valid_message(message: &SponsorMessage) -> bool {
     })
 }
 
-fn is_eligible(state: &SponsorState, settings: &Settings, now: i64) -> bool {
-    if !settings.sponsored_messages_enabled {
-        return false;
-    }
-    !settings.sponsored_messages_less_frequently
-        || !state
-            .last_attempt_at
-            .is_some_and(|attempt| attempt > now - REDUCED_ATTEMPT_BACKOFF_SECONDS)
+fn is_eligible(_state: &SponsorState, settings: &Settings, _now: i64) -> bool {
+    settings.sponsored_messages_enabled
 }
 
 fn is_allowed_proxy_url(endpoint: &Url) -> bool {
@@ -213,7 +205,6 @@ async fn request_sponsor_with_options(
         }
     }
 
-    state.last_attempt_at = Some(now);
     state.attempt_count = state.attempt_count.wrapping_add(1);
     save_state(&app, &state)?;
 
@@ -294,11 +285,9 @@ pub async fn reset_sponsor_cache(app: AppHandle) -> Result<(), String> {
 pub async fn update_sponsor_preferences(
     app: AppHandle,
     enabled: bool,
-    less_frequently: bool,
 ) -> Result<(), String> {
     let mut settings = load_settings_impl(&app);
     settings.sponsored_messages_enabled = enabled;
-    settings.sponsored_messages_less_frequently = less_frequently;
     save_settings_impl(&app, &settings)?;
 
     if !enabled {
@@ -327,18 +316,6 @@ mod tests {
         let settings = standard_settings();
         let state = SponsorState { shown_at: vec![1_000; 100], ..Default::default() };
         assert!(is_eligible(&state, &settings, 1_001));
-    }
-
-    #[test]
-    fn reduced_frequency_uses_a_short_local_backoff() {
-        let mut settings = standard_settings();
-        settings.sponsored_messages_less_frequently = true;
-        let state = SponsorState {
-            last_attempt_at: Some(1_000),
-            ..Default::default()
-        };
-        assert!(!is_eligible(&state, &settings, 1_001));
-        assert!(is_eligible(&state, &settings, 1_301));
     }
 
     #[test]

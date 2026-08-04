@@ -2,7 +2,7 @@ import type { SVGProps } from 'react';
 
 type HeartIconProps = SVGProps<SVGSVGElement>;
 
-function HeartIcon({ className, ...props }: HeartIconProps) {
+export function HeartIcon({ className, ...props }: HeartIconProps) {
     return (
         <svg
             xmlns="http://www.w3.org/2000/svg"

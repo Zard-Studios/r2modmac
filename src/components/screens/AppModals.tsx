@@ -46,7 +46,7 @@ export interface AppModalsProps {
     setShowPreferences: (show: boolean) => void;
     preferences: PreferencesSettings;
     onSavePreferences: (settings: PreferencesSettings) => Promise<void>;
-    onSponsorPreferencesChange: (enabled: boolean, lessFrequently: boolean) => Promise<void>;
+    onSponsorPreferencesChange: (enabled: boolean) => Promise<void>;
     hasHiddenGuideWarnings: boolean;
     onRestoreGuideWarnings: () => Promise<void>;
     onSetGuideHidden: (guide: 'crossover' | 'macos', hidden: boolean) => Promise<void>;

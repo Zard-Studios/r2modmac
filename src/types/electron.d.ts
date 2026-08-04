@@ -21,7 +21,6 @@ export interface AppSettings {
     hide_macos_guide?: boolean;
     stream_mode?: boolean;
     sponsored_messages_enabled?: boolean;
-    sponsored_messages_less_frequently?: boolean;
 }
 
 export interface SponsorMessage {
@@ -113,7 +112,7 @@ export interface IElectronAPI {
     acknowledgeSponsorDisplay: (sponsorId: string) => Promise<void>;
     dismissSponsor: (sponsorId: string) => Promise<void>;
     resetSponsorCache: () => Promise<void>;
-    updateSponsorPreferences: (enabled: boolean, lessFrequently: boolean) => Promise<void>;
+    updateSponsorPreferences: (enabled: boolean) => Promise<void>;
     getGamePath: (gameIdentifier: string, platform?: 'windows' | 'mac') => Promise<string | null>;
     getGameSource: (gameIdentifier: string, platform?: 'windows' | 'mac') => Promise<'steam' | 'manual' | 'unknown'>;
     setGamePath: (gameIdentifier: string, path: string, platform?: 'windows' | 'mac') => Promise<void>;
