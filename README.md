@@ -39,7 +39,7 @@ We do not send your installed mods, profiles, local files, paths, configuration,
 
 ## Features
 
-- **Multi-Game Support**: Manage mods for all games available on Thunderstore
+- **Multi-Game Support**: Browse Thunderstore communities and manage mods for supported game loaders
 - **Outer Wilds Support**: Full support for Outer Wilds mods via OWML — browse, install and launch directly from the app
 - **Profile Management**: Create and manage multiple profiles for different mod setups
 - **Browse Mode**: Explore and discover mods without creating a profile first
@@ -51,6 +51,23 @@ We do not send your installed mods, profiles, local files, paths, configuration,
 - **Smart Install Modes**:
   - **New Mode (Default)**: Install adds mods to your profile list. Download only when you click "Apply to Game" (saves disk space)
   - **Legacy Mode**: Mods download immediately to a local cache when you click Install (faster but uses more storage)
+
+## Mod loader compatibility
+
+Thunderstore hosts communities that use different mod loaders. A game appearing on Thunderstore does not by itself guarantee that r2modmac can install and launch its mods correctly.
+
+| Mod loader | Support | Scope and notes |
+| --- | :---: | --- |
+| **BepInEx** | ✅ Supported | Standard Thunderstore/BepInEx package layouts, profile syncing, dependencies, updates and vanilla/modded switching. |
+| **Lovely** | ✅ Supported | Balatro packages and the Lovely runtime, including the macOS launch flow. |
+| **ReturnOfModding** | ✅ Supported | Risk of Rain Returns packages, loader installation, updates, syncing and Wine/CrossOver launch configuration. |
+| **OWML** | ✅ Supported | Outer Wilds profiles and launching through OWML. OWML is supported separately from the standard Thunderstore loader flow. |
+| **MelonLoader** | ❌ Not currently supported | Packages that require MelonLoader-specific installation or launch handling are not installed safely yet. |
+| **Northstar** | ❌ Not currently supported | Titanfall 2/Northstar-specific package layouts and launch handling are not implemented yet. |
+| **GDWeave** | ❌ Not currently supported | WEBFISHING/GDWeave-specific installation and launch handling are not implemented yet. |
+| **Other custom loaders** | ❌ Not currently supported | Loader-specific layouts are unsupported until they receive an explicit integration and tests. |
+
+“Supported” means that r2modmac understands the loader's package layout and handles Apply/Sync and launching where required. You can still browse an unsupported Thunderstore community, but you should not assume its packages can be installed correctly. If a loader is missing from this table, please [open an issue](https://github.com/Zard-Studios/r2modmac/issues) before relying on it.
 
 ## 📸 Screenshots
 
