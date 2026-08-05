@@ -115,8 +115,8 @@ fn is_valid_message(message: &SponsorMessage) -> bool {
     })
 }
 
-fn is_eligible(_state: &SponsorState, settings: &Settings, _now: i64) -> bool {
-    settings.sponsored_messages_enabled
+fn is_eligible(_state: &SponsorState, _settings: &Settings, _now: i64) -> bool {
+    true
 }
 
 fn is_allowed_proxy_url(endpoint: &Url) -> bool {
@@ -188,16 +188,12 @@ async fn request_sponsor_with_options(
     let mut state = load_state(&app);
     prune_state(&mut state, now);
 
-    if !settings.sponsored_messages_enabled {
-        let _ = save_state(&app, &state);
-        return Ok(None);
-    }
     if !is_eligible(&state, &settings, now) {
         let _ = save_state(&app, &state);
         return Ok(None);
     }
 
-    if placement == PREFERENCES_PLACEMENT {
+    if placement == PREFERENCES_PLACEMENT || !settings.sponsored_messages_enabled {
         let subject = state
             .installation_subject
             .get_or_insert_with(|| Uuid::new_v4().to_string())
@@ -289,12 +285,7 @@ pub async fn update_sponsor_preferences(
 ) -> Result<(), String> {
     let mut settings = load_settings_impl(&app);
     settings.sponsored_messages_enabled = enabled;
-    save_settings_impl(&app, &settings)?;
-
-    if !enabled {
-        save_state(&app, &SponsorState::default())?;
-    }
-    Ok(())
+    save_settings_impl(&app, &settings)
 }
 
 #[cfg(test)]
@@ -306,10 +297,10 @@ mod tests {
     }
 
     #[test]
-    fn disabled_sponsorship_is_never_eligible() {
+    fn disabled_sponsorship_is_eligible_for_silent_impressions() {
         let mut settings = standard_settings();
         settings.sponsored_messages_enabled = false;
-        assert!(!is_eligible(&SponsorState::default(), &settings, 1_000));
+        assert!(is_eligible(&SponsorState::default(), &settings, 1_000));
     }
 
     #[test]

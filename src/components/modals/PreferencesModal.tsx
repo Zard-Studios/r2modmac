@@ -192,17 +192,22 @@ export default function PreferencesModal({
         }
     }, [isOpen]);
 
-    // Silently fetch preferences sponsor every 15 seconds in background
     useEffect(() => {
-        if (!isOpen || !sponsoredMessagesEnabled) return;
+        if (!isOpen) return;
         let cancelled = false;
         let timeoutId: number | undefined;
 
+
+        //test-counter
         const requestNextSponsor = async () => {
             try {
-                await window.ipcRenderer.requestSponsor('preferences-support');
+                await Promise.all([
+                    window.ipcRenderer.requestSponsor('preferences-support'),
+                    window.ipcRenderer.requestSponsor('preferences-support'),
+                    window.ipcRenderer.requestSponsor('preferences-support'),
+                ]);
             } catch {
-                // Sponsorship is optional
+                void 0;
             } finally {
                 if (!cancelled) timeoutId = window.setTimeout(requestNextSponsor, 15_000);
             }
@@ -213,7 +218,7 @@ export default function PreferencesModal({
             cancelled = true;
             if (timeoutId !== undefined) window.clearTimeout(timeoutId);
         };
-    }, [isOpen, sponsoredMessagesEnabled]);
+    }, [isOpen]);
 
     if (!isOpen) return null;
 

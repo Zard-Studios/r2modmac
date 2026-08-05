@@ -68,28 +68,13 @@ export function SponsorSurface({ placement, visible, className = '' }: SponsorSu
             if (typeof detail?.opacity === 'number') { persistentOpacity = Math.min(100, Math.max(0, detail.opacity)); setBackgroundOpacity(persistentOpacity); }
             persistentEnabled = nextEnabled;
             setEnabled(nextEnabled);
-            if (!nextEnabled) {
-                persistentMessage = null;
-                persistentDismissed = false;
-                persistentAcknowledgedId = null;
-                persistentDismissCount = 0;
-                persistentIsFakeAd = false;
-                if (persistentDismissTimer) { clearTimeout(persistentDismissTimer); persistentDismissTimer = null; }
-                if (persistentFakeAdTimer) { clearTimeout(persistentFakeAdTimer); persistentFakeAdTimer = null; }
-                setMessage(null);
-                setDismissed(false);
-                acknowledgedRef.current = null;
-            } else {
-                persistentDismissed = false;
-                setDismissed(false);
-            }
         };
         window.addEventListener('r2modmac:sponsor-preferences', onPreferenceChange);
         return () => window.removeEventListener('r2modmac:sponsor-preferences', onPreferenceChange);
     }, []);
 
     useEffect(() => {
-        if (enabled !== true || !visible || dismissed || persistentIsFakeAd) return;
+        if (!visible || dismissed || persistentIsFakeAd) return;
 
         let cancelled = false;
         let timeoutId: number | undefined;
@@ -121,12 +106,9 @@ export function SponsorSurface({ placement, visible, className = '' }: SponsorSu
 
     useEffect(() => {
         if (!message || message.id === FAKE_SPONSOR_MESSAGE.id || acknowledgedRef.current === message.id) return;
-        const frame = window.requestAnimationFrame(() => {
-            acknowledgedRef.current = message.id;
-            persistentAcknowledgedId = message.id;
-            void window.ipcRenderer.acknowledgeSponsorDisplay(message.id).catch(() => undefined);
-        });
-        return () => window.cancelAnimationFrame(frame);
+        acknowledgedRef.current = message.id;
+        persistentAcknowledgedId = message.id;
+        void window.ipcRenderer.acknowledgeSponsorDisplay(message.id).catch(() => undefined);
     }, [message]);
 
     const handleDismiss = () => {
@@ -194,12 +176,15 @@ export function SponsorSurface({ placement, visible, className = '' }: SponsorSu
         }
     };
 
-    if (!message || dismissed || enabled !== true) return null;
+    if (!message || dismissed) return null;
+
+    const isVisible = visible && enabled === true;
 
     return (
         <div
-            className={`pointer-events-none absolute inset-x-0 bottom-0 z-20 flex justify-center bg-gradient-to-t from-gray-900/90 via-gray-900/70 to-transparent px-4 pb-3 pt-8 transition-[opacity,transform] duration-300 ease-out ${visible ? 'translate-y-0 opacity-100' : 'translate-y-3 opacity-0'} ${className}`}
-            aria-hidden={!visible}
+            className={`pointer-events-none absolute inset-x-0 bottom-0 z-20 flex justify-center bg-gradient-to-t from-gray-900/90 via-gray-900/70 to-transparent px-4 pb-3 pt-8 transition-[opacity,transform] duration-300 ease-out ${isVisible ? 'translate-y-0 opacity-100' : 'translate-y-3 opacity-0'} ${className}`}
+            style={!enabled ? { opacity: 0, pointerEvents: 'none' } : undefined}
+            aria-hidden={!isVisible}
         >
             <div className={`pointer-events-auto flex w-auto max-w-[min(46rem,calc(100%-1rem))] min-w-0 origin-bottom items-center gap-2 rounded-lg border px-3 py-2 transition-[transform,background-color,border-color,box-shadow] duration-300 ease-out ${backgroundOpacity === 0 ? '' : 'backdrop-blur-[2px]'}`} style={{ transform: `scale(${scale / 100})`, backgroundColor: `rgb(31 41 55 / ${backgroundOpacity / 100})`, borderColor: `rgb(75 85 99 / ${backgroundOpacity / 100})`, boxShadow: backgroundOpacity === 0 ? 'none' : '0 10px 28px rgb(0 0 0 / 0.24)' }}>
                 <span className="shrink-0 border-r border-gray-700 pr-2 text-[9px] font-semibold uppercase tracking-[0.14em] text-gray-500">Sponsored</span>
