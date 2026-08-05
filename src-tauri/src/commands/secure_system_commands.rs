@@ -52,7 +52,7 @@ fn select_update_asset<'a>(
 }
 
 #[tauri::command]
-pub async fn check_update(current_version: String) -> Result<UpdateInfo, String> {
+pub async fn check_update_secure(current_version: String) -> Result<UpdateInfo, String> {
     let client = reqwest::Client::new();
     let response = client
         .get("https://api.github.com/repos/Zard-Studios/r2modmac/releases/latest")

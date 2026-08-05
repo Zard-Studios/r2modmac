@@ -187,7 +187,7 @@ export const tauriAPI: IElectronAPI = {
         return await invoke<string>('fetch_text_content', { url });
     },
     checkUpdate: async (currentVersion: string) => {
-        return await invoke('check_update', { currentVersion });
+        return await invoke('check_update_secure', { currentVersion });
     },
     installUpdate: async (downloadUrl: string) => {
         return await invoke('install_update', { downloadUrl });

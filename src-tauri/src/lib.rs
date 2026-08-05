@@ -309,7 +309,7 @@ pub fn run() {
             commands::legacy_system_commands::select_file,
             commands::legacy_system_commands::select_import_path,
             commands::legacy_system_commands::read_image,
-            commands::legacy_system_commands::check_update,
+            commands::system_commands::check_update_secure,
             commands::system_commands::install_update,
             commands::settings_commands::get_settings,
             commands::settings_commands::save_settings,
