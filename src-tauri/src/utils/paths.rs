@@ -6,7 +6,11 @@ pub fn app_data_dir<R: tauri::Runtime>(manager: &impl Manager<R>) -> Result<Path
     #[cfg(target_os = "windows")]
     {
         let mut dir = dir;
-        if dir.file_name().map(|f| f == "com.r2modmac").unwrap_or(false) {
+        if dir
+            .file_name()
+            .map(|f| f == "com.r2modmac")
+            .unwrap_or(false)
+        {
             dir.pop();
             dir.push("r2modmac");
         }
@@ -16,12 +20,18 @@ pub fn app_data_dir<R: tauri::Runtime>(manager: &impl Manager<R>) -> Result<Path
     Ok(dir)
 }
 
-pub fn app_cache_dir<R: tauri::Runtime>(manager: &impl Manager<R>) -> Result<PathBuf, tauri::Error> {
+pub fn app_cache_dir<R: tauri::Runtime>(
+    manager: &impl Manager<R>,
+) -> Result<PathBuf, tauri::Error> {
     let dir = manager.path().app_cache_dir()?;
     #[cfg(target_os = "windows")]
     {
         let mut dir = dir;
-        if dir.file_name().map(|f| f == "com.r2modmac").unwrap_or(false) {
+        if dir
+            .file_name()
+            .map(|f| f == "com.r2modmac")
+            .unwrap_or(false)
+        {
             dir.pop();
             dir.push("r2modmac");
         }

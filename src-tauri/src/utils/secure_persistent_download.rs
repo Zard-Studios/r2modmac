@@ -6,7 +6,9 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime};
 
-pub use super::legacy_persistent_download::{CompletedDownload, DownloadProgress, DOWNLOAD_CANCELLED};
+pub use super::legacy_persistent_download::{
+    CompletedDownload, DownloadProgress, DOWNLOAD_CANCELLED,
+};
 
 const COMPLETED_CACHE_TTL: Duration = Duration::from_secs(30);
 const COMPLETED_CACHE_MAX_ENTRIES: usize = 32;
@@ -41,10 +43,9 @@ fn payload_snapshot(path: &Path) -> Option<(u64, Option<SystemTime>)> {
 fn prune_cache(cache: &mut HashMap<String, CachedCompletedDownload>, now: Instant) {
     cache.retain(|_, entry| {
         now.duration_since(entry.cached_at) <= COMPLETED_CACHE_TTL
-            && payload_snapshot(&entry.completed.payload_path)
-                .is_some_and(|(len, modified)| {
-                    len == entry.payload_len && modified == entry.payload_modified
-                })
+            && payload_snapshot(&entry.completed.payload_path).is_some_and(|(len, modified)| {
+                len == entry.payload_len && modified == entry.payload_modified
+            })
     });
 
     while cache.len() >= COMPLETED_CACHE_MAX_ENTRIES {
@@ -113,15 +114,8 @@ where
         return Ok(completed);
     }
 
-    let completed = legacy::download_persistent(
-        client,
-        cache_dir,
-        url,
-        mod_name,
-        cancelled,
-        progress,
-    )
-    .await?;
+    let completed =
+        legacy::download_persistent(client, cache_dir, url, mod_name, cancelled, progress).await?;
     remember(key, &completed);
     Ok(completed)
 }

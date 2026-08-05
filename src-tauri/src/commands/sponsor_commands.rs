@@ -15,7 +15,8 @@ const PREFERENCES_PLACEMENT: &str = "preferences-support";
 const HOME_PLACEMENT: &str = "home-support";
 const PROFILE_SELECTOR_PLACEMENT: &str = "profile-selector-support";
 const CATALOG_PLACEMENT: &str = "catalog-support";
-const PRODUCTION_PROXY_URL: &str = "https://r2modmac-sponsor-production.notfy-stream.workers.dev/api/sponsor";
+const PRODUCTION_PROXY_URL: &str =
+    "https://r2modmac-sponsor-production.notfy-stream.workers.dev/api/sponsor";
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -279,10 +280,7 @@ pub async fn reset_sponsor_cache(app: AppHandle) -> Result<(), String> {
 }
 
 #[command]
-pub async fn update_sponsor_preferences(
-    app: AppHandle,
-    enabled: bool,
-) -> Result<(), String> {
+pub async fn update_sponsor_preferences(app: AppHandle, enabled: bool) -> Result<(), String> {
     let mut settings = load_settings_impl(&app);
     settings.sponsored_messages_enabled = enabled;
     save_settings_impl(&app, &settings)

@@ -282,11 +282,7 @@ mod tests {
         fs::create_dir_all(&root).unwrap();
         fs::write(root.join("version.dll"), b"loader").unwrap();
         assert_eq!(inspect_return_of_modding(&root, false).status, "healthy");
-        fs::rename(
-            root.join("version.dll"),
-            root.join("version.dll_DISABLED"),
-        )
-        .unwrap();
+        fs::rename(root.join("version.dll"), root.join("version.dll_DISABLED")).unwrap();
         assert_eq!(inspect_return_of_modding(&root, true).status, "healthy");
         assert_eq!(inspect_return_of_modding(&root, false).status, "missing");
         fs::remove_dir_all(root).unwrap();

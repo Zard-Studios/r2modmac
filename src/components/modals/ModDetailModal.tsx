@@ -321,7 +321,7 @@ export function ModDetailModal({
                 onClick={onClose}
             >
                 <div
-                    className="bg-gray-800 rounded-xl max-w-4xl w-full h-[90vh] flex flex-col border border-gray-700 shadow-2xl"
+                    className="bg-gray-800 rounded-xl max-w-5xl w-full h-[90vh] flex flex-col border border-gray-700 shadow-2xl"
                     onClick={(e) => e.stopPropagation()}
                 >
                     {/* Header with Icon and Title */}

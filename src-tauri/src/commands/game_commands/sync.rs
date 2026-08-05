@@ -94,9 +94,8 @@ pub async fn sync_profile_to_game(
 
     let is_outerwilds_profile =
         is_outerwilds_identifier(&game_identifier) || is_outerwilds_game_path(game_path);
-    let is_risk_of_rain_returns_profile =
-        is_risk_of_rain_returns_identifier(&game_identifier)
-            || is_risk_of_rain_returns_game_path(game_path);
+    let is_risk_of_rain_returns_profile = is_risk_of_rain_returns_identifier(&game_identifier)
+        || is_risk_of_rain_returns_game_path(game_path);
 
     // Get list of mod names from profile (format: "Author-ModName-Version")
     // We keep the full name for matching

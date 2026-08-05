@@ -104,10 +104,7 @@ pub(crate) fn is_process_running_for_patterns(patterns: &[String]) -> bool {
         use std::process::Command;
         for pattern in patterns {
             let plain = pattern.replace(r"\/", "/").replace(r"\.", ".");
-            let status = Command::new("pgrep")
-                .arg("-f")
-                .arg(&plain)
-                .output();
+            let status = Command::new("pgrep").arg("-f").arg(&plain).output();
             if let Ok(output) = status {
                 if output.status.success() {
                     let matched_text = String::from_utf8_lossy(&output.stdout);

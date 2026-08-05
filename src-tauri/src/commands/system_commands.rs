@@ -76,6 +76,8 @@ fn is_community_cdn_image(url: &str) -> bool {
     let lower = url.to_ascii_lowercase();
     lower.starts_with("https://gcdn.thunderstore.io/live/community/")
         || lower.starts_with("https://gcdn.thunderstore.io/assets/")
+        // Thunderstore has used this shorter path for newer communities.
+        || lower.starts_with("https://gcdn.thunderstore.io/community/")
 }
 
 fn looks_like_community_cover(url: &str) -> bool {
@@ -94,6 +96,18 @@ fn looks_like_community_cover(url: &str) -> bool {
     is_community_cdn_image(url) && has_cover_hint && !obvious_non_cover
 }
 
+fn is_usable_community_image(url: &str) -> bool {
+    let lower = url.to_ascii_lowercase();
+    let obvious_non_cover = lower.contains("-bg-")
+        || lower.contains("_bg")
+        || lower.contains("-icon-")
+        || lower.contains("_icon")
+        || lower.contains("icon-192")
+        || lower.contains("logo");
+
+    is_community_cdn_image(url) && !obvious_non_cover
+}
+
 fn insert_community_image(
     images: &mut HashMap<String, String>,
     community_id: &str,
@@ -110,6 +124,9 @@ fn insert_community_image(
         return;
     }
     if require_cover_hint && !looks_like_community_cover(&image_url) {
+        return;
+    }
+    if !require_cover_hint && !is_usable_community_image(&image_url) {
         return;
     }
 
@@ -151,16 +168,22 @@ fn extract_community_images_from_html(html: &str) -> Result<HashMap<String, Stri
         );
     }
 
-    // Fallback for preload tags and serialized React Router payloads. This derives
-    // the community id from the CDN path, so only cover-like filenames are accepted.
+    // Fallback for preload tags and serialized React Router payloads. Thunderstore
+    // does not guarantee a stable cover filename, so derive the community id from
+    // any CDN asset while still rejecting obvious hero/icon/logo assets.
     let re_direct_cover = regex::Regex::new(
-        r#"(https://gcdn\.thunderstore\.io/(?:live/community|assets)/([^/"'\\\s<>]+)/[^"'\\\s<>]+)"#,
+        r#"(https://gcdn\.thunderstore\.io/(?:live/community|assets|community)/([^/"'\\\s<>]+)/[^"'\\\s<>]+)"#,
     )
     .map_err(|e| e.to_string())?;
 
     for cap in re_direct_cover.captures_iter(html) {
         if let (Some(image_url), Some(community_id)) = (cap.get(1), cap.get(2)) {
-            insert_community_image(&mut images, community_id.as_str(), image_url.as_str(), true);
+            insert_community_image(
+                &mut images,
+                community_id.as_str(),
+                image_url.as_str(),
+                false,
+            );
         }
     }
 
@@ -1681,6 +1704,35 @@ mod tests {
         assert_eq!(
             images.get("sample").map(String::as_str),
             Some("https://gcdn.thunderstore.io/live/community/sample/sample-cover-360x480.webp")
+        );
+    }
+
+    #[test]
+    fn fallback_accepts_a_cover_with_a_nonstandard_filename() {
+        let html = r#"
+            "https://gcdn.thunderstore.io/assets/viva-pinata-trouble-in-paradise-recompiled/viva-pinata-tip.webp",
+            "https://gcdn.thunderstore.io/assets/viva-pinata-trouble-in-paradise-recompiled/viva-pinata-tip-bg.webp"
+        "#;
+
+        let images = extract_community_images_from_html(html).unwrap();
+
+        assert_eq!(
+            images.get("viva-pinata-trouble-in-paradise-recompiled").map(String::as_str),
+            Some("https://gcdn.thunderstore.io/assets/viva-pinata-trouble-in-paradise-recompiled/viva-pinata-tip.webp")
+        );
+    }
+
+    #[test]
+    fn fallback_accepts_the_new_community_cdn_path() {
+        let html = r#"
+            "https://gcdn.thunderstore.io/community/superhot-mind-control-delete/superhot-mcd.webp"
+        "#;
+
+        let images = extract_community_images_from_html(html).unwrap();
+
+        assert_eq!(
+            images.get("superhot-mind-control-delete").map(String::as_str),
+            Some("https://gcdn.thunderstore.io/community/superhot-mind-control-delete/superhot-mcd.webp")
         );
     }
 

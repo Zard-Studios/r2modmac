@@ -245,7 +245,7 @@ export default function PreferencesModal({
             <div className="absolute inset-0 bg-black/60 transition-opacity" onClick={onClose} />
 
             {/* Modal Container */}
-            <div className={`relative w-full max-w-[640px] max-h-[85vh] flex flex-col bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl overflow-hidden transform transition-all duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] ${isVisible ? 'scale-100 translate-y-0 opacity-100' : 'scale-95 translate-y-4 opacity-0'}`}>
+            <div className={`relative w-full max-w-[760px] max-h-[85vh] flex flex-col bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl overflow-hidden transform transition-all duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] ${isVisible ? 'scale-100 translate-y-0 opacity-100' : 'scale-95 translate-y-4 opacity-0'}`}>
 
                 {/* Header */}
                 <div className="flex items-center justify-between px-7 py-6 border-b border-gray-800 shrink-0 z-10 bg-gray-900">

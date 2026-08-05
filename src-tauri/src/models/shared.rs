@@ -272,9 +272,7 @@ pub fn is_balatro_game_path(path: &std::path::Path) -> bool {
 }
 
 pub fn get_balatro_mods_dir() -> Option<std::path::PathBuf> {
-    dirs::data_dir().map(|dir| {
-        dir.join("Balatro").join("Mods")
-    })
+    dirs::data_dir().map(|dir| dir.join("Balatro").join("Mods"))
 }
 
 pub fn is_outerwilds_identifier(game_identifier: &str) -> bool {
@@ -286,8 +284,7 @@ pub fn is_risk_of_rain_returns_identifier(game_identifier: &str) -> bool {
 }
 
 pub fn is_risk_of_rain_returns_game_path(path: &std::path::Path) -> bool {
-    path.join("Risk of Rain Returns.exe").is_file()
-        || path.join("Risk of Rain Returns").is_file()
+    path.join("Risk of Rain Returns.exe").is_file() || path.join("Risk of Rain Returns").is_file()
 }
 
 pub fn is_outerwilds_game_path(path: &std::path::Path) -> bool {
@@ -331,8 +328,6 @@ pub fn get_owml_dir(game_path: &std::path::Path) -> Option<std::path::PathBuf> {
     }
     None
 }
-
-
 
 pub fn get_steam_library_folders(steam_path: &std::path::Path) -> Vec<std::path::PathBuf> {
     let mut folders = vec![steam_path.to_path_buf()];

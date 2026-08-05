@@ -36,7 +36,8 @@ pub(crate) fn launch_windows_direct_game_with_working_dir(
         return Err("Game is already running.".to_string());
     }
 
-    let executable_dir = working_dir.unwrap_or_else(|| executable_path.parent().unwrap_or(game_path));
+    let executable_dir =
+        working_dir.unwrap_or_else(|| executable_path.parent().unwrap_or(game_path));
 
     #[cfg(unix)]
     {
@@ -53,9 +54,8 @@ pub(crate) fn launch_windows_direct_game_with_working_dir(
                 // bundle (and therefore the game) has started. We use it for the post-
                 // launch wait, but NOT for the pre-launch check (to avoid false positives
                 // when Steam is already running inside the same bundle).
-                let wait_patterns =
-                    build_windows_wineskin_bundle_patterns(&executable_path)
-                        .unwrap_or_else(|| process_patterns.clone());
+                let wait_patterns = build_windows_wineskin_bundle_patterns(&executable_path)
+                    .unwrap_or_else(|| process_patterns.clone());
 
                 match launch_macos_wineskin_program(
                     &bundle_path,
@@ -214,7 +214,6 @@ pub(crate) fn launch_windows_steam_game(
             }
         }
 
-
         let runner_path = find_host_compat_runner_binary(prefix_root.as_deref(), &steam_executable)
 			.ok_or_else(|| {
 				"No compatible runner was found for this Steam installation. Set the game path inside a supported compatibility-tool prefix and try again."
@@ -281,8 +280,7 @@ mod tests {
         let mut command = std::process::Command::new("wine");
         configure_native_version_dll_override(&mut command, &root);
         assert!(command.get_envs().any(|(key, value)| {
-            key == OsStr::new("WINEDLLOVERRIDES")
-                && value == Some(OsStr::new("version=n,b"))
+            key == OsStr::new("WINEDLLOVERRIDES") && value == Some(OsStr::new("version=n,b"))
         }));
         std::fs::remove_dir_all(root).unwrap();
     }

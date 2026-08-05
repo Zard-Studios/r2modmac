@@ -48,6 +48,25 @@ const getGradient = (str: string) => {
     return gradients[Math.abs(hash) % gradients.length];
 };
 
+// A few Thunderstore communities reuse a game title/slug that does not have a
+// cover in the communities index. Keep these fallbacks local and lightweight;
+// they are only used when Thunderstore did not return an image URL.
+const COMMUNITY_IMAGE_FALLBACKS: Record<string, string> = {
+    superhot: 'https://cdn.cloudflare.steamstatic.com/steam/apps/690040/library_600x900_2x.jpg',
+    'superhot-mind-control-delete': 'https://cdn.cloudflare.steamstatic.com/steam/apps/690040/library_600x900_2x.jpg',
+    'slip-skid': 'https://cdn.cloudflare.steamstatic.com/steam/apps/2651350/library_600x900_2x.jpg',
+    'big-walk': 'https://cdn.cloudflare.steamstatic.com/steam/apps/1478500/library_600x900_2x.jpg',
+};
+
+const getCommunityImage = (community: Community, images: Record<string, string>) => {
+    const direct = images[community.identifier];
+    if (direct) return direct;
+
+    const normalizedIdentifier = community.identifier.toLowerCase().trim();
+    const normalizedName = community.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    return COMMUNITY_IMAGE_FALLBACKS[normalizedIdentifier] ?? COMMUNITY_IMAGE_FALLBACKS[normalizedName];
+};
+
 interface GameCardProps {
     community: Community;
     isSelected: boolean;
@@ -213,14 +232,14 @@ export function GameSelector({ communities, selectedCommunity, onSelect, communi
                         </svg>
                         <h2 className="text-lg font-bold tracking-wide uppercase text-white/90">Favorites</h2>
                     </div>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+                    <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8 3xl:grid-cols-10 gap-3.5 sm:gap-4">
                         {favorites.map((community, index) => (
                             <GameCard
                                 key={community.identifier}
                                 community={community}
                                 isSelected={selectedCommunity === community.identifier}
                                 isFavorite={true}
-                                imageUrl={communityImages[community.identifier]}
+                                imageUrl={getCommunityImage(community, communityImages)}
                                 platform={communityPlatforms[community.identifier]}
                                 eager={index < 18}
                                 searchQuery={searchQuery}
@@ -242,14 +261,14 @@ export function GameSelector({ communities, selectedCommunity, onSelect, communi
 
             {others.length > 0 && (
                 <div className="space-y-4">
-                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+                    <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8 3xl:grid-cols-10 gap-3.5 sm:gap-4">
                         {others.map((community, index) => (
                             <GameCard
                                 key={community.identifier}
                                 community={community}
                                 isSelected={selectedCommunity === community.identifier}
                                 isFavorite={false}
-                                imageUrl={communityImages[community.identifier]}
+                                imageUrl={getCommunityImage(community, communityImages)}
                                 platform={communityPlatforms[community.identifier]}
                                 eager={favorites.length === 0 && index < 24}
                                 searchQuery={searchQuery}

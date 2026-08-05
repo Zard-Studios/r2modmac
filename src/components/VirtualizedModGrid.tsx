@@ -83,8 +83,8 @@ export function VirtualizedModGrid({ packages, installedMods, onInstall, onUnins
 
             let newScrollTop = 0;
             if (newMode === 'grid') {
-                const width = parentRef.current.offsetWidth - 100;
-                const cols = Math.max(1, Math.min(3, Math.floor(width / (COLUMN_WIDTH + GAP))));
+                const width = parentRef.current.offsetWidth - 32;
+                const cols = Math.max(1, Math.min(6, Math.floor(width / (COLUMN_WIDTH + GAP))));
                 const rowIndex = Math.floor(firstVisibleItemIndex / cols);
                 newScrollTop = rowIndex * GRID_ROW_HEIGHT;
             } else {
@@ -114,8 +114,8 @@ export function VirtualizedModGrid({ packages, installedMods, onInstall, onUnins
                 setColumnCount(1);
                 return;
             }
-            const width = parentRef.current.offsetWidth - 100;
-            const cols = Math.max(1, Math.min(3, Math.floor(width / (COLUMN_WIDTH + GAP))));
+            const width = parentRef.current.offsetWidth - 32;
+            const cols = Math.max(1, Math.min(6, Math.floor(width / (COLUMN_WIDTH + GAP))));
             if (columnCountRef.current === cols) return;
 
             const shouldAnimate = animate

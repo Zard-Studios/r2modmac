@@ -10,11 +10,10 @@ use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 
 pub use super::legacy_mod_commands::{
-    cancel_custom_mod_import, copy_mod_from_cache, delete_local_mod_payload,
-    fetch_package_by_name, fetch_packages, get_available_categories, get_packages,
-    import_custom_mod, import_embedded_custom_mod, inspect_custom_mod, install_local_mod,
-    lookup_packages_by_names, open_mod_folder, refresh_local_mod_metadata, remove_mod,
-    toggle_mod,
+    cancel_custom_mod_import, copy_mod_from_cache, delete_local_mod_payload, fetch_package_by_name,
+    fetch_packages, get_available_categories, get_packages, import_custom_mod,
+    import_embedded_custom_mod, inspect_custom_mod, install_local_mod, lookup_packages_by_names,
+    open_mod_folder, refresh_local_mod_metadata, remove_mod, toggle_mod,
 };
 
 pub(crate) use super::legacy_mod_commands::{
@@ -75,12 +74,18 @@ fn validate_single_path_component(value: &str, label: &str) -> Result<(), String
         || trimmed.contains('\\')
         || trimmed.chars().any(|ch| ch == '\0' || ch.is_control())
     {
-        return Err(format!("Blocked unsafe {} in mod archive: {}", label, trimmed));
+        return Err(format!(
+            "Blocked unsafe {} in mod archive: {}",
+            label, trimmed
+        ));
     }
 
     let mut components = Path::new(trimmed).components();
     if !matches!(components.next(), Some(Component::Normal(_))) || components.next().is_some() {
-        return Err(format!("Blocked unsafe {} in mod archive: {}", label, trimmed));
+        return Err(format!(
+            "Blocked unsafe {} in mod archive: {}",
+            label, trimmed
+        ));
     }
     Ok(())
 }
@@ -109,9 +114,7 @@ fn parse_manifest_json(bytes: &[u8]) -> Result<serde_json::Value, String> {
     // Thunderstore manifests are UTF-8, but some valid packages include the
     // optional UTF-8 byte-order mark. serde_json rejects that prefix at line 1,
     // column 1, so normalize it before applying the normal JSON validation.
-    let normalized = bytes
-        .strip_prefix(&[0xEF, 0xBB, 0xBF])
-        .unwrap_or(bytes);
+    let normalized = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(bytes);
     serde_json::from_slice(normalized)
         .map_err(|error| format!("Invalid manifest.json in mod archive: {}", error))
 }
@@ -149,7 +152,8 @@ fn validate_archive(path: &Path, mod_name: &str) -> Result<(), String> {
     if archive.len() > MAX_ARCHIVE_ENTRIES {
         return Err(format!(
             "Downloaded mod archive contains too many entries ({} > {})",
-            archive.len(), MAX_ARCHIVE_ENTRIES
+            archive.len(),
+            MAX_ARCHIVE_ENTRIES
         ));
     }
 
@@ -160,7 +164,10 @@ fn validate_archive(path: &Path, mod_name: &str) -> Result<(), String> {
         let mut entry = archive.by_index(index).map_err(|error| error.to_string())?;
         let raw_name = entry.name().to_string();
         if is_zip_symlink(&entry) {
-            return Err(format!("Blocked symlink entry in mod archive: {}", raw_name));
+            return Err(format!(
+                "Blocked symlink entry in mod archive: {}",
+                raw_name
+            ));
         }
 
         let normalized = normalize_zip_entry_name(&raw_name)
@@ -177,7 +184,10 @@ fn validate_archive(path: &Path, mod_name: &str) -> Result<(), String> {
         }
 
         if entry.size() > MAX_SINGLE_FILE_BYTES {
-            return Err(format!("Blocked oversized file in mod archive: {}", normalized));
+            return Err(format!(
+                "Blocked oversized file in mod archive: {}",
+                normalized
+            ));
         }
         total_uncompressed = total_uncompressed
             .checked_add(entry.size())
@@ -200,7 +210,10 @@ fn validate_archive(path: &Path, mod_name: &str) -> Result<(), String> {
             && entry.size() > 10 * 1024 * 1024
             && entry.size() / compressed.max(1) > MAX_COMPRESSION_RATIO
         {
-            return Err(format!("Blocked suspicious compression ratio for {}", normalized));
+            return Err(format!(
+                "Blocked suspicious compression ratio for {}",
+                normalized
+            ));
         }
 
         if normalized
@@ -331,10 +344,13 @@ mod tests {
 
     #[test]
     fn accepts_safe_archive() {
-        let archive = archive_with_entries(&[(
-            "manifest.json",
-            br#"{"uniqueName":"Author.SafeMod","dependencies":[]}"#,
-        ), ("SafeMod.dll", b"dll")]);
+        let archive = archive_with_entries(&[
+            (
+                "manifest.json",
+                br#"{"uniqueName":"Author.SafeMod","dependencies":[]}"#,
+            ),
+            ("SafeMod.dll", b"dll"),
+        ]);
         validate_archive(&archive, "Author-SafeMod-1.0.0").unwrap();
         let _ = fs::remove_file(archive);
     }
@@ -342,7 +358,8 @@ mod tests {
     #[test]
     fn accepts_utf8_bom_prefixed_manifest() {
         let manifest = b"\xEF\xBB\xBF{\"name\":\"ReturnsAPI\",\"version_number\":\"0.1.58\",\"dependencies\":[]}";
-        let archive = archive_with_entries(&[("manifest.json", manifest), ("main.lua", b"return {}")]);
+        let archive =
+            archive_with_entries(&[("manifest.json", manifest), ("main.lua", b"return {}")]);
         validate_archive(&archive, "ReturnsAPI-ReturnsAPI-0.1.58").unwrap();
         let _ = fs::remove_file(archive);
     }
@@ -352,7 +369,10 @@ mod tests {
         let manifest = b"\xEF\xBB\xBF{\"name\":";
         let archive = archive_with_entries(&[("manifest.json", manifest)]);
         let error = validate_archive(&archive, "Author-Mod-1.0.0").unwrap_err();
-        assert!(error.contains("Invalid manifest.json in mod archive"), "{error}");
+        assert!(
+            error.contains("Invalid manifest.json in mod archive"),
+            "{error}"
+        );
         let _ = fs::remove_file(archive);
     }
 
@@ -361,7 +381,10 @@ mod tests {
         let manifest = b"\xFF\xFE{\x00\"name\x00\":\x00}";
         let archive = archive_with_entries(&[("manifest.json", manifest)]);
         let error = validate_archive(&archive, "Author-Mod-1.0.0").unwrap_err();
-        assert!(error.contains("Invalid manifest.json in mod archive"), "{error}");
+        assert!(
+            error.contains("Invalid manifest.json in mod archive"),
+            "{error}"
+        );
         let _ = fs::remove_file(archive);
     }
 

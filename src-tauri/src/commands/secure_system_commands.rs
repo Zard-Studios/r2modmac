@@ -22,11 +22,12 @@ fn expected_update_filename() -> Result<String, String> {
         ("macos", "aarch64") => Ok("r2modmac_macos_aarch64.dmg".to_string()),
         ("macos", "x86_64") => Ok("r2modmac_macos_x86_64.dmg".to_string()),
         ("windows", "x86_64") => Ok("r2modmac_windows_x64.zip".to_string()),
-        ("windows", "x86") | ("windows", "i686") => {
-            Ok("r2modmac_windows_x86.zip".to_string())
-        }
+        ("windows", "x86") | ("windows", "i686") => Ok("r2modmac_windows_x86.zip".to_string()),
         ("windows", "aarch64") => Ok("r2modmac_windows_arm64.zip".to_string()),
-        (os, arch) => Err(format!("Automatic updates are not supported on {} {}", os, arch)),
+        (os, arch) => Err(format!(
+            "Automatic updates are not supported on {} {}",
+            os, arch
+        )),
     }
 }
 
@@ -144,7 +145,9 @@ async fn download_update(
                 MAX_UPDATE_BYTES / 1024 / 1024
             ));
         }
-        output.write_all(&chunk).map_err(|error| error.to_string())?;
+        output
+            .write_all(&chunk)
+            .map_err(|error| error.to_string())?;
 
         if let Some(total) = total_size.filter(|total| *total > 0) {
             let percent = ((downloaded as f64 / total as f64) * 100.0)
@@ -276,10 +279,7 @@ fn verify_macos_bundle(app_path: &Path) -> Result<(), String> {
 #[cfg(target_os = "macos")]
 fn current_macos_app_path() -> Result<PathBuf, String> {
     let executable = std::env::current_exe().map_err(|error| error.to_string())?;
-    if executable
-        .to_string_lossy()
-        .contains("/target/")
-    {
+    if executable.to_string_lossy().contains("/target/") {
         return Err("Cannot auto-update a development build".to_string());
     }
     let app_path = executable
@@ -316,7 +316,9 @@ fn stage_macos_update(file_path: &Path, temp_dir: &Path) -> Result<PathBuf, Stri
     let source_app = mount_point.join("r2modmac.app");
     let copy_result = if source_app.is_dir() {
         command_succeeded(
-            Command::new("/usr/bin/ditto").arg(&source_app).arg(&staged_app),
+            Command::new("/usr/bin/ditto")
+                .arg(&source_app)
+                .arg(&staged_app),
             "Failed to stage update app",
         )
     } else {
