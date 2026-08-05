@@ -46,3 +46,9 @@ Thumbs.db
 .env.*.local
 /.codex
 agent.md
+
+# Build artifacts
+dist-local/
+src-tauri/target*/
+build-local.sh
+

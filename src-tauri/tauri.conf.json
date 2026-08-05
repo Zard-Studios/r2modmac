@@ -25,6 +25,8 @@
     }
   },
   "bundle": {
+    "publisher": "Zard Studios",
+    "copyright": "Copyright © 2026 Zard Studios",
     "active": true,
     "targets": "all",
     "icon": [

@@ -132,13 +132,17 @@ fn is_allowed_proxy_url(endpoint: &Url) -> bool {
         && matches!(endpoint.host_str(), Some("127.0.0.1" | "localhost" | "::1"))
 }
 
+fn resolve_proxy_endpoint(compile_time_override: Option<&'static str>) -> &'static str {
+    compile_time_override
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .unwrap_or(PRODUCTION_PROXY_URL)
+}
+
 async fn request_proxy(subject: &str, placement: &str) -> Option<SponsorMessage> {
     // Development builds override this with the local proxy. Release builds
     // remain functional when invoked directly with `npm run tauri build`.
-    let endpoint = option_env!("R2MODMAC_SPONSOR_PROXY_URL")
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .unwrap_or(PRODUCTION_PROXY_URL);
+    let endpoint = resolve_proxy_endpoint(option_env!("R2MODMAC_SPONSOR_PROXY_URL"));
     let endpoint_url = Url::parse(endpoint).ok()?;
     if !is_allowed_proxy_url(&endpoint_url) {
         return None;
@@ -339,5 +343,263 @@ mod tests {
         assert!(!is_allowed_proxy_url(
             &Url::parse("http://example.com/api/sponsor").unwrap()
         ));
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // resolve_proxy_endpoint — simulates the GitHub Actions / release-build path
+    // ──────────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn proxy_url_falls_back_to_production_when_env_var_is_absent() {
+        // Simulates: secret not set at all (option_env! returns None)
+        assert_eq!(
+            resolve_proxy_endpoint(None),
+            PRODUCTION_PROXY_URL,
+            "A missing env var must use the hardcoded production URL"
+        );
+    }
+
+    #[test]
+    fn proxy_url_falls_back_to_production_when_env_var_is_empty() {
+        // Simulates: GitHub Actions secret exists but value is "" (common misconfiguration)
+        assert_eq!(
+            resolve_proxy_endpoint(Some("")),
+            PRODUCTION_PROXY_URL,
+            "An empty env var must not override the production URL"
+        );
+    }
+
+    #[test]
+    fn proxy_url_falls_back_to_production_when_env_var_is_whitespace_only() {
+        // Simulates: secret set to "  " (accidental whitespace)
+        assert_eq!(
+            resolve_proxy_endpoint(Some("   ")),
+            PRODUCTION_PROXY_URL,
+            "A whitespace-only env var must be treated as absent"
+        );
+    }
+
+    #[test]
+    fn proxy_url_uses_custom_override_when_present() {
+        // Simulates: developer local proxy configured correctly
+        let custom = "https://custom.example.com/api/sponsor";
+        assert_eq!(
+            resolve_proxy_endpoint(Some(custom)),
+            custom,
+            "A non-empty env var must override the production URL"
+        );
+    }
+
+    #[test]
+    fn proxy_url_trims_surrounding_whitespace_before_use() {
+        // Simulates: secret value accidentally padded with spaces
+        let custom = "  https://custom.example.com/api/sponsor  ";
+        let resolved = resolve_proxy_endpoint(Some(custom));
+        assert_eq!(resolved, custom.trim());
+    }
+
+    #[test]
+    fn production_proxy_url_is_valid_https() {
+        // Guards against accidental typos in the hardcoded constant
+        let url = Url::parse(PRODUCTION_PROXY_URL)
+            .expect("PRODUCTION_PROXY_URL must be a well-formed URL");
+        assert_eq!(url.scheme(), "https", "Production proxy must use HTTPS");
+        assert!(
+            url.host_str().is_some(),
+            "Production proxy must have a hostname"
+        );
+    }
+
+    #[test]
+    fn production_proxy_url_is_allowed_by_gateway_check() {
+        // Ensures the hardcoded URL would actually pass is_allowed_proxy_url()
+        // i.e. the build would never silently drop every ad request
+        let url = Url::parse(PRODUCTION_PROXY_URL).unwrap();
+        assert!(
+            is_allowed_proxy_url(&url),
+            "Production proxy URL must pass is_allowed_proxy_url — if this fails ads are dead in every release build"
+        );
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // is_valid_message — validates ad payload before showing/counting
+    // ──────────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn valid_message_with_no_url_passes() {
+        let m = SponsorMessage {
+            id: "abc123".into(),
+            sponsor_name: Some("Acme".into()),
+            message: "Try Acme today!".into(),
+            url: None,
+        };
+        assert!(is_valid_message(&m));
+    }
+
+    #[test]
+    fn valid_message_with_https_url_passes() {
+        let m = SponsorMessage {
+            id: "abc123".into(),
+            sponsor_name: None,
+            message: "Try Acme today!".into(),
+            url: Some("https://acme.example.com".into()),
+        };
+        assert!(is_valid_message(&m));
+    }
+
+    #[test]
+    fn rejects_message_with_empty_id() {
+        let m = SponsorMessage {
+            id: "".into(),
+            sponsor_name: None,
+            message: "Text".into(),
+            url: None,
+        };
+        assert!(!is_valid_message(&m));
+    }
+
+    #[test]
+    fn rejects_message_with_oversized_id() {
+        let m = SponsorMessage {
+            id: "x".repeat(129),
+            sponsor_name: None,
+            message: "Text".into(),
+            url: None,
+        };
+        assert!(!is_valid_message(&m));
+    }
+
+    #[test]
+    fn rejects_message_with_empty_text() {
+        let m = SponsorMessage {
+            id: "id1".into(),
+            sponsor_name: None,
+            message: "".into(),
+            url: None,
+        };
+        assert!(!is_valid_message(&m));
+    }
+
+    #[test]
+    fn rejects_message_exceeding_280_chars() {
+        let m = SponsorMessage {
+            id: "id1".into(),
+            sponsor_name: None,
+            message: "x".repeat(281),
+            url: None,
+        };
+        assert!(!is_valid_message(&m));
+    }
+
+    #[test]
+    fn rejects_message_with_empty_sponsor_name() {
+        let m = SponsorMessage {
+            id: "id1".into(),
+            sponsor_name: Some("".into()),
+            message: "Text".into(),
+            url: None,
+        };
+        assert!(!is_valid_message(&m));
+    }
+
+    #[test]
+    fn rejects_message_with_non_https_url() {
+        let m = SponsorMessage {
+            id: "id1".into(),
+            sponsor_name: None,
+            message: "Text".into(),
+            url: Some("http://evil.com".into()),
+        };
+        assert!(!is_valid_message(&m));
+    }
+
+    #[test]
+    fn rejects_message_with_malformed_url() {
+        let m = SponsorMessage {
+            id: "id1".into(),
+            sponsor_name: None,
+            message: "Text".into(),
+            url: Some("not-a-url".into()),
+        };
+        assert!(!is_valid_message(&m));
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // prune_state — cache expiry and list trimming
+    // ──────────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn prune_state_clears_expired_cache() {
+        let msg = SponsorMessage {
+            id: "id1".into(),
+            sponsor_name: None,
+            message: "Text".into(),
+            url: None,
+        };
+        let mut state = SponsorState {
+            cached: Some(CachedSponsor { message: msg, expires_at: 999 }),
+            ..Default::default()
+        };
+        prune_state(&mut state, 1_000);
+        assert!(state.cached.is_none(), "Expired cache must be cleared");
+    }
+
+    #[test]
+    fn prune_state_keeps_fresh_cache() {
+        let msg = SponsorMessage {
+            id: "id1".into(),
+            sponsor_name: None,
+            message: "Text".into(),
+            url: None,
+        };
+        let mut state = SponsorState {
+            cached: Some(CachedSponsor { message: msg, expires_at: 2_000 }),
+            ..Default::default()
+        };
+        prune_state(&mut state, 1_000);
+        assert!(state.cached.is_some(), "Non-expired cache must be kept");
+    }
+
+    #[test]
+    fn prune_state_trims_recent_ids_to_eight() {
+        let mut state = SponsorState {
+            recent_ids: (0..12).map(|i| i.to_string()).collect(),
+            ..Default::default()
+        };
+        prune_state(&mut state, 0);
+        assert_eq!(state.recent_ids.len(), 8);
+    }
+
+    #[test]
+    fn prune_state_trims_dismissed_ids_to_eight() {
+        let mut state = SponsorState {
+            dismissed_ids: (0..15).map(|i| i.to_string()).collect(),
+            ..Default::default()
+        };
+        prune_state(&mut state, 0);
+        assert_eq!(state.dismissed_ids.len(), 8);
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // is_allowed_placement — gate for unknown/injected placement strings
+    // ──────────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn all_known_placements_are_allowed() {
+        for placement in [
+            PREFERENCES_PLACEMENT,
+            HOME_PLACEMENT,
+            PROFILE_SELECTOR_PLACEMENT,
+            CATALOG_PLACEMENT,
+        ] {
+            assert!(is_allowed_placement(placement), "Placement '{placement}' should be allowed");
+        }
+    }
+
+    #[test]
+    fn unknown_placement_strings_are_rejected() {
+        for bad in ["", "install-support", "CATALOG-SUPPORT", "catalog_support", "admin"] {
+            assert!(!is_allowed_placement(bad), "Placement '{bad}' should be rejected");
+        }
     }
 }

@@ -1,13 +1,13 @@
 [package]
-name = "app"
+name = "r2modmac"
 version = "0.8.3"
 description = "A Tauri App"
-authors = ["you"]
+authors = ["Zard Studios"]
 license = ""
 repository = ""
 edition = "2021"
 rust-version = "1.77.2"
-default-run = "app"
+default-run = "r2modmac"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -50,12 +50,14 @@ url = "2"
 uuid = { version = "1", features = ["v4"] }
 sysinfo = { version = "0.36.1", default-features = false, features = ["system"] }
 sha2 = "0.10"
+
+[target.'cfg(not(target_os = "windows"))'.dependencies]
 mimalloc = { version = "0.1", default-features = false }
 
 [profile.release]
 # Trim release binary + reduce allocator churn, lowering resident memory.
 opt-level = "z"
-lto = true
-codegen-units = 1
+lto = "thin"
+codegen-units = 16
 strip = "symbols"
 panic = "abort"

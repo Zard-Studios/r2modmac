@@ -5,7 +5,9 @@ pub mod utils;
 // Use mimalloc as the global allocator. It returns freed memory pages back to
 // the OS much more aggressively than the default macOS system allocator, which
 // significantly reduces RSS after browsing large mod stores.
+#[cfg(not(target_os = "windows"))]
 use mimalloc::MiMalloc;
+#[cfg(not(target_os = "windows"))]
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
 
