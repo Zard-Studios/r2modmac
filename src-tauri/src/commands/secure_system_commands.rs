@@ -1,3 +1,4 @@
+use crate::models::shared::UpdateInfo;
 use std::fs;
 #[cfg(target_os = "windows")]
 use std::io::Read;
@@ -8,27 +9,116 @@ use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 
 pub use super::legacy_system_commands::{
-    alert_dialog, check_update, compare_versions, confirm_dialog, fetch_communities,
-    fetch_community_images, fetch_text_content, get_username, read_image,
-    resolve_community_platforms, select_file, select_folder, select_import_path,
-    PlatformLookupInput,
+    alert_dialog, compare_versions, confirm_dialog, fetch_communities, fetch_community_images,
+    fetch_text_content, get_username, read_image, resolve_community_platforms, select_file,
+    select_folder, select_import_path, PlatformLookupInput,
 };
 
 const MAX_UPDATE_BYTES: u64 = 512 * 1024 * 1024;
 const EXPECTED_BUNDLE_IDENTIFIER: &str = "com.r2modmac";
 
-fn expected_update_filename() -> Result<String, String> {
-    match (std::env::consts::OS, std::env::consts::ARCH) {
+fn expected_update_filename_for(os: &str, arch: &str) -> Result<String, String> {
+    match (os, arch) {
         ("macos", "aarch64") => Ok("r2modmac_macos_aarch64.dmg".to_string()),
         ("macos", "x86_64") => Ok("r2modmac_macos_x86_64.dmg".to_string()),
         ("windows", "x86_64") => Ok("r2modmac_windows_x64.zip".to_string()),
-        ("windows", "x86") | ("windows", "i686") => Ok("r2modmac_windows_x86.zip".to_string()),
+        ("windows", "x86") | ("windows", "i686") => {
+            Ok("r2modmac_windows_x86.zip".to_string())
+        }
         ("windows", "aarch64") => Ok("r2modmac_windows_arm64.zip".to_string()),
+        ("linux", "x86_64") => Ok("r2modmac_linux_x64.tar.gz".to_string()),
+        ("linux", "aarch64") => Ok("r2modmac_linux_arm64.tar.gz".to_string()),
         (os, arch) => Err(format!(
             "Automatic updates are not supported on {} {}",
             os, arch
         )),
     }
+}
+
+fn expected_update_filename() -> Result<String, String> {
+    expected_update_filename_for(std::env::consts::OS, std::env::consts::ARCH)
+}
+
+fn select_update_asset<'a>(
+    assets: &'a [serde_json::Value],
+    os: &str,
+    arch: &str,
+) -> Option<&'a serde_json::Value> {
+    let expected = expected_update_filename_for(os, arch).ok()?;
+    assets.iter().find(|asset| {
+        asset
+            .get("name")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|name| name == expected)
+    })
+}
+
+#[tauri::command]
+pub async fn check_update(current_version: String) -> Result<UpdateInfo, String> {
+    let client = reqwest::Client::new();
+    let response = client
+        .get("https://api.github.com/repos/Zard-Studios/r2modmac/releases/latest")
+        .header("User-Agent", "r2modmac-updater")
+        .header("Accept", "application/vnd.github+json")
+        .header("X-GitHub-Api-Version", "2022-11-28")
+        .send()
+        .await
+        .map_err(|error| format!("Request failed: {}", error))?;
+
+    if response.status() == reqwest::StatusCode::FORBIDDEN
+        || response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS
+    {
+        return Ok(UpdateInfo {
+            available: false,
+            version: format!("v{}", current_version),
+            notes: String::new(),
+            download_url: None,
+        });
+    }
+    if !response.status().is_success() {
+        return Err(format!("GitHub API error: {}", response.status()));
+    }
+
+    let release: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|error| format!("Parse error: {}", error))?;
+    let tag_name = release
+        .get("tag_name")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| "Release is missing tag_name".to_string())?;
+    let clean_tag = tag_name.trim_start_matches('v');
+    let available = compare_versions(clean_tag, &current_version);
+    let assets = release
+        .get("assets")
+        .and_then(serde_json::Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+    let asset = select_update_asset(assets, std::env::consts::OS, std::env::consts::ARCH);
+    let download_url = asset
+        .and_then(|asset| asset.get("browser_download_url"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string);
+
+    eprintln!(
+        "[check_update] Detected OS: {}, architecture: {}, selected asset: {:?}",
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+        asset
+            .and_then(|asset| asset.get("name"))
+            .and_then(serde_json::Value::as_str)
+    );
+
+    Ok(UpdateInfo {
+        available,
+        version: tag_name.to_string(),
+        notes: release
+            .get("body")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        download_url,
+    })
 }
 
 fn validate_update_url(raw_url: &str) -> Result<(reqwest::Url, String), String> {
@@ -393,6 +483,128 @@ rm -rf "$UPDATE_DIR"
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
+fn stage_linux_update(file_path: &Path, temp_dir: &Path) -> Result<PathBuf, String> {
+    use flate2::read::GzDecoder;
+    use std::os::unix::fs::PermissionsExt;
+
+    let file = fs::File::open(file_path).map_err(|error| error.to_string())?;
+    let decoder = GzDecoder::new(file);
+    let mut archive = tar::Archive::new(decoder);
+    let staged_path = temp_dir.join("r2modmac.new");
+    let mut found_executable = false;
+    let mut entry_count = 0usize;
+
+    for entry in archive
+        .entries()
+        .map_err(|error| format!("Downloaded update is not a valid tar.gz: {}", error))?
+    {
+        entry_count += 1;
+        if entry_count > 8 {
+            return Err("Linux update archive contains too many entries".to_string());
+        }
+        let mut entry = entry.map_err(|error| error.to_string())?;
+        let path = entry.path().map_err(|error| error.to_string())?;
+        if path.as_ref() != Path::new("r2modmac")
+            || !entry.header().entry_type().is_file()
+            || found_executable
+        {
+            return Err(
+                "Linux update archive must contain only the r2modmac executable at archive root"
+                    .to_string(),
+            );
+        }
+        let declared_size = entry.header().size().map_err(|error| error.to_string())?;
+        if declared_size == 0 || declared_size > MAX_UPDATE_BYTES {
+            return Err("Linux update contains an invalid executable".to_string());
+        }
+        let mut output = fs::File::create(&staged_path).map_err(|error| error.to_string())?;
+        let copied = std::io::copy(&mut entry, &mut output).map_err(|error| error.to_string())?;
+        output.sync_all().map_err(|error| error.to_string())?;
+        if copied == 0 || copied != declared_size || copied > MAX_UPDATE_BYTES {
+            let _ = fs::remove_file(&staged_path);
+            return Err("Linux update executable failed size validation".to_string());
+        }
+        let mut permissions = fs::metadata(&staged_path)
+            .map_err(|error| error.to_string())?
+            .permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&staged_path, permissions).map_err(|error| error.to_string())?;
+        found_executable = true;
+    }
+
+    if !found_executable {
+        return Err("Linux update does not contain r2modmac at archive root".to_string());
+    }
+    Ok(staged_path)
+}
+
+#[cfg(target_os = "linux")]
+fn launch_linux_replacement(
+    app: &AppHandle,
+    staged_exe: &Path,
+    temp_dir: &Path,
+) -> Result<(), String> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let current_exe = std::env::current_exe().map_err(|error| error.to_string())?;
+    if current_exe.file_name().and_then(|name| name.to_str()) != Some("r2modmac")
+        || current_exe.to_string_lossy().contains("/target/")
+    {
+        return Err("Cannot auto-update an unexpected Linux executable path".to_string());
+    }
+
+    let script_path = temp_dir.join("update.sh");
+    let script = r#"#!/bin/sh
+set -eu
+PID="$1"
+CURRENT_EXE="$2"
+STAGED_EXE="$3"
+UPDATE_DIR="$4"
+BACKUP_EXE="${CURRENT_EXE}.r2modmac-backup"
+
+while kill -0 "$PID" 2>/dev/null; do sleep 0.5; done
+rm -f "$BACKUP_EXE"
+mv "$CURRENT_EXE" "$BACKUP_EXE"
+if ! mv "$STAGED_EXE" "$CURRENT_EXE"; then
+    mv "$BACKUP_EXE" "$CURRENT_EXE"
+    exit 1
+fi
+chmod 755 "$CURRENT_EXE"
+if "$CURRENT_EXE" >/dev/null 2>&1 & then
+    NEW_PID=$!
+    sleep 2
+    if kill -0 "$NEW_PID" 2>/dev/null; then
+        rm -f "$BACKUP_EXE"
+        rm -rf "$UPDATE_DIR"
+        exit 0
+    fi
+fi
+rm -f "$CURRENT_EXE"
+mv "$BACKUP_EXE" "$CURRENT_EXE"
+chmod 755 "$CURRENT_EXE"
+"$CURRENT_EXE" >/dev/null 2>&1 &
+exit 1
+"#;
+    fs::write(&script_path, script).map_err(|error| error.to_string())?;
+    let mut permissions = fs::metadata(&script_path)
+        .map_err(|error| error.to_string())?
+        .permissions();
+    permissions.set_mode(0o700);
+    fs::set_permissions(&script_path, permissions).map_err(|error| error.to_string())?;
+
+    Command::new("/bin/sh")
+        .arg(&script_path)
+        .arg(std::process::id().to_string())
+        .arg(&current_exe)
+        .arg(staged_exe)
+        .arg(temp_dir)
+        .spawn()
+        .map_err(|error| format!("Failed to launch Linux updater helper: {}", error))?;
+    app.exit(0);
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn install_update(app: AppHandle, download_url: String) -> Result<(), String> {
     let (url, filename) = validate_update_url(&download_url)?;
@@ -424,7 +636,13 @@ pub async fn install_update(app: AppHandle, download_url: String) -> Result<(), 
         launch_macos_replacement(&app, &staged_app, &temp_dir)
     }
 
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    #[cfg(target_os = "linux")]
+    {
+        let staged_exe = stage_linux_update(&file_path, &temp_dir)?;
+        launch_linux_replacement(&app, &staged_exe, &temp_dir)
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
     {
         let _ = app;
         let _ = file_path;
@@ -456,5 +674,40 @@ mod tests {
             .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-')));
         assert!(!filename.contains('/'));
         assert!(!filename.contains('\\'));
+    }
+
+    #[test]
+    fn maps_linux_architectures_to_release_assets() {
+        assert_eq!(
+            expected_update_filename_for("linux", "x86_64").unwrap(),
+            "r2modmac_linux_x64.tar.gz"
+        );
+        assert_eq!(
+            expected_update_filename_for("linux", "aarch64").unwrap(),
+            "r2modmac_linux_arm64.tar.gz"
+        );
+        assert!(expected_update_filename_for("linux", "x86").is_err());
+    }
+
+    #[test]
+    fn selects_only_exact_linux_architecture_asset() {
+        let assets = vec![
+            serde_json::json!({"name":"r2modmac_linux_arm64.tar.gz"}),
+            serde_json::json!({"name":"r2modmac_linux_x64.tar.gz"}),
+        ];
+        assert_eq!(
+            select_update_asset(&assets, "linux", "x86_64")
+                .unwrap()
+                .get("name")
+                .and_then(serde_json::Value::as_str),
+            Some("r2modmac_linux_x64.tar.gz")
+        );
+        assert_eq!(
+            select_update_asset(&assets, "linux", "aarch64")
+                .unwrap()
+                .get("name")
+                .and_then(serde_json::Value::as_str),
+            Some("r2modmac_linux_arm64.tar.gz")
+        );
     }
 }
