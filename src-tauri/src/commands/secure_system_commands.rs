@@ -22,9 +22,7 @@ fn expected_update_filename_for(os: &str, arch: &str) -> Result<String, String> 
         ("macos", "aarch64") => Ok("r2modmac_macos_aarch64.dmg".to_string()),
         ("macos", "x86_64") => Ok("r2modmac_macos_x86_64.dmg".to_string()),
         ("windows", "x86_64") => Ok("r2modmac_windows_x64.zip".to_string()),
-        ("windows", "x86") | ("windows", "i686") => {
-            Ok("r2modmac_windows_x86.zip".to_string())
-        }
+        ("windows", "x86") | ("windows", "i686") => Ok("r2modmac_windows_x86.zip".to_string()),
         ("windows", "aarch64") => Ok("r2modmac_windows_arm64.zip".to_string()),
         ("linux", "x86_64") => Ok("r2modmac_linux_x64.tar.gz".to_string()),
         ("linux", "aarch64") => Ok("r2modmac_linux_arm64.tar.gz".to_string()),

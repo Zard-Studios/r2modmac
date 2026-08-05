@@ -537,7 +537,10 @@ mod tests {
             url: None,
         };
         let mut state = SponsorState {
-            cached: Some(CachedSponsor { message: msg, expires_at: 999 }),
+            cached: Some(CachedSponsor {
+                message: msg,
+                expires_at: 999,
+            }),
             ..Default::default()
         };
         prune_state(&mut state, 1_000);
@@ -553,7 +556,10 @@ mod tests {
             url: None,
         };
         let mut state = SponsorState {
-            cached: Some(CachedSponsor { message: msg, expires_at: 2_000 }),
+            cached: Some(CachedSponsor {
+                message: msg,
+                expires_at: 2_000,
+            }),
             ..Default::default()
         };
         prune_state(&mut state, 1_000);
@@ -592,14 +598,26 @@ mod tests {
             PROFILE_SELECTOR_PLACEMENT,
             CATALOG_PLACEMENT,
         ] {
-            assert!(is_allowed_placement(placement), "Placement '{placement}' should be allowed");
+            assert!(
+                is_allowed_placement(placement),
+                "Placement '{placement}' should be allowed"
+            );
         }
     }
 
     #[test]
     fn unknown_placement_strings_are_rejected() {
-        for bad in ["", "install-support", "CATALOG-SUPPORT", "catalog_support", "admin"] {
-            assert!(!is_allowed_placement(bad), "Placement '{bad}' should be rejected");
+        for bad in [
+            "",
+            "install-support",
+            "CATALOG-SUPPORT",
+            "catalog_support",
+            "admin",
+        ] {
+            assert!(
+                !is_allowed_placement(bad),
+                "Placement '{bad}' should be rejected"
+            );
         }
     }
 }
