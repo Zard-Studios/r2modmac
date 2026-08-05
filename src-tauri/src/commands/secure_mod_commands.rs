@@ -346,4 +346,39 @@ mod tests {
         validate_archive(&archive, "ReturnsAPI-ReturnsAPI-0.1.58").unwrap();
         let _ = fs::remove_file(archive);
     }
+
+    #[test]
+    fn rejects_utf8_bom_malformed_json_manifest() {
+        let manifest = b"\xEF\xBB\xBF{\"name\":";
+        let archive = archive_with_entries(&[("manifest.json", manifest)]);
+        let error = validate_archive(&archive, "Author-Mod-1.0.0").unwrap_err();
+        assert!(error.contains("Invalid manifest.json in mod archive"), "{error}");
+        let _ = fs::remove_file(archive);
+    }
+
+    #[test]
+    fn rejects_utf16_le_bom_manifest() {
+        let manifest = b"\xFF\xFE{\x00\"name\x00\":\x00}";
+        let archive = archive_with_entries(&[("manifest.json", manifest)]);
+        let error = validate_archive(&archive, "Author-Mod-1.0.0").unwrap_err();
+        assert!(error.contains("Invalid manifest.json in mod archive"), "{error}");
+        let _ = fs::remove_file(archive);
+    }
+
+    #[test]
+    fn rejects_utf8_bom_outer_wilds_unique_name_traversal() {
+        let manifest = b"\xEF\xBB\xBF{\"uniqueName\":\"../../outside\",\"dependencies\":[]}";
+        let archive = archive_with_entries(&[("manifest.json", manifest)]);
+        let error = validate_archive(&archive, "Author-Mod-1.0.0").unwrap_err();
+        assert!(error.contains("uniqueName"), "{error}");
+        let _ = fs::remove_file(archive);
+    }
+
+    #[test]
+    fn accepts_utf8_bom_nested_manifest() {
+        let manifest = b"\xEF\xBB\xBF{\"name\":\"ReturnsAPI\",\"version_number\":\"0.1.58\",\"dependencies\":[]}";
+        let archive = archive_with_entries(&[("NestedDir/manifest.json", manifest)]);
+        validate_archive(&archive, "ReturnsAPI-ReturnsAPI-0.1.58").unwrap();
+        let _ = fs::remove_file(archive);
+    }
 }
