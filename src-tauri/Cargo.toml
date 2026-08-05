@@ -26,7 +26,7 @@ tauri = { version = "2.11.2", features = [] }
 tauri-plugin-log = "2"
 # reqwest: only gzip (Thunderstore uses gzip). Brotli + stream pull in large extra
 # transitive crates (brotli decoder, h2 streaming machinery) that inflate RSS.
-reqwest = { version = "0.11", default-features = false, features = ["json", "gzip", "rustls-tls"] }
+reqwest = { version = "0.11", default-features = false, features = ["json", "gzip", "rustls-tls-native-roots", "rustls-tls-webpki-roots"] }
 zip = "0.6"
 walkdir = "2"
 open = "5"
