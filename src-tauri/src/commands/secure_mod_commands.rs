@@ -105,10 +105,20 @@ fn read_limited(file: &mut zip::read::ZipFile<'_>, max_bytes: u64) -> Result<Vec
     Ok(bytes)
 }
 
+fn parse_manifest_json(bytes: &[u8]) -> Result<serde_json::Value, String> {
+    // Thunderstore manifests are UTF-8, but some valid packages include the
+    // optional UTF-8 byte-order mark. serde_json rejects that prefix at line 1,
+    // column 1, so normalize it before applying the normal JSON validation.
+    let normalized = bytes
+        .strip_prefix(&[0xEF, 0xBB, 0xBF])
+        .unwrap_or(bytes);
+    serde_json::from_slice(normalized)
+        .map_err(|error| format!("Invalid manifest.json in mod archive: {}", error))
+}
+
 fn validate_manifest(file: &mut zip::read::ZipFile<'_>) -> Result<(), String> {
     let bytes = read_limited(file, MAX_MANIFEST_BYTES)?;
-    let manifest: serde_json::Value = serde_json::from_slice(&bytes)
-        .map_err(|error| format!("Invalid manifest.json in mod archive: {}", error))?;
+    let manifest = parse_manifest_json(&bytes)?;
 
     if let Some(unique_name) = manifest.get("uniqueName").and_then(|value| value.as_str()) {
         validate_single_path_component(unique_name, "Outer Wilds uniqueName")?;
@@ -326,6 +336,14 @@ mod tests {
             br#"{"uniqueName":"Author.SafeMod","dependencies":[]}"#,
         ), ("SafeMod.dll", b"dll")]);
         validate_archive(&archive, "Author-SafeMod-1.0.0").unwrap();
+        let _ = fs::remove_file(archive);
+    }
+
+    #[test]
+    fn accepts_utf8_bom_prefixed_manifest() {
+        let manifest = b"\xEF\xBB\xBF{\"name\":\"ReturnsAPI\",\"version_number\":\"0.1.58\",\"dependencies\":[]}";
+        let archive = archive_with_entries(&[("manifest.json", manifest), ("main.lua", b"return {}")]);
+        validate_archive(&archive, "ReturnsAPI-ReturnsAPI-0.1.58").unwrap();
         let _ = fs::remove_file(archive);
     }
 }
