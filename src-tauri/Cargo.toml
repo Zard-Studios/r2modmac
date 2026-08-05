@@ -57,7 +57,7 @@ mimalloc = { version = "0.1", default-features = false }
 [profile.release]
 # Trim release binary + reduce allocator churn, lowering resident memory.
 opt-level = "z"
-lto = "thin"
-codegen-units = 16
+lto = true
+codegen-units = 1
 strip = "symbols"
 panic = "abort"
