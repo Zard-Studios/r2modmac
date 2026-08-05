@@ -135,7 +135,10 @@ fn is_allowed_proxy_url(endpoint: &Url) -> bool {
 async fn request_proxy(subject: &str, placement: &str) -> Option<SponsorMessage> {
     // Development builds override this with the local proxy. Release builds
     // remain functional when invoked directly with `npm run tauri build`.
-    let endpoint = option_env!("R2MODMAC_SPONSOR_PROXY_URL").unwrap_or(PRODUCTION_PROXY_URL);
+    let endpoint = option_env!("R2MODMAC_SPONSOR_PROXY_URL")
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or(PRODUCTION_PROXY_URL);
     let endpoint_url = Url::parse(endpoint).ok()?;
     if !is_allowed_proxy_url(&endpoint_url) {
         return None;
