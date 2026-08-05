@@ -197,15 +197,9 @@ export default function PreferencesModal({
         let cancelled = false;
         let timeoutId: number | undefined;
 
-
-        //test-counter
         const requestNextSponsor = async () => {
             try {
-                await Promise.all([
-                    window.ipcRenderer.requestSponsor('preferences-support'),
-                    window.ipcRenderer.requestSponsor('preferences-support'),
-                    window.ipcRenderer.requestSponsor('preferences-support'),
-                ]);
+                await window.ipcRenderer.requestSponsor('preferences-support');
             } catch {
                 void 0;
             } finally {
@@ -509,7 +503,7 @@ export default function PreferencesModal({
                                             setRestoringWarnings(false);
                                         }
                                     }}
-                                    className={`px-4 py-2 rounded-xl text-[13px] font-medium transition-all duration-200 shrink-0 ${hasHiddenGuideWarnings
+                                    className={`px-4 py-2 rounded-xl text-[13px] font-medium transition-all duration-200 ease-in-out flex-shrink-0 ${hasHiddenGuideWarnings
                                         ? 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 border border-amber-500/30'
                                         : 'bg-gray-900 text-gray-600 border border-gray-800 cursor-not-allowed'
                                         }`}
