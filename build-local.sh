@@ -149,8 +149,8 @@ build_frontend() {
 
 verify_compiled_sponsor_endpoint() {
   local binary="$1"
-  require strings
-  strings -a "$binary" | grep -Fq "$SPONSOR_PROXY_URL" \
+  require grep
+  LC_ALL=C grep -aFq -- "$SPONSOR_PROXY_URL" "$binary" \
     || die "Production sponsor endpoint is missing from $(basename "$binary")."
 }
 
@@ -287,7 +287,7 @@ build_linux_target() {
       cargo build --manifest-path src-tauri/Cargo.toml --release --locked
       binary="$CARGO_TARGET_DIR/release/r2modmac"
       test -f "$binary" || { echo "Linux binary not found: $binary" >&2; exit 1; }
-      strings -a "$binary" | grep -Fq "$SPONSOR_PROXY_URL" || { echo "Production sponsor endpoint is missing from Linux binary" >&2; exit 1; }
+      LC_ALL=C grep -aFq -- "$SPONSOR_PROXY_URL" "$binary" || { echo "Production sponsor endpoint is missing from Linux binary" >&2; exit 1; }
       machine="$(readelf -h "$binary" | awk -F: "/Machine:/ { gsub(/^[[:space:]]+/, \"\", \$2); print \$2 }")"
       case "$machine" in
         *"$EXPECTED_MACHINE"*) ;;
