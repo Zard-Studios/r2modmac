@@ -39,6 +39,14 @@ jobs:
             platform: "windows-latest"
             rust-target: "aarch64-pc-windows-msvc"
             arch: "arm64"
+          - name: "Linux x64"
+            platform: "ubuntu-22.04"
+            rust-target: "x86_64-unknown-linux-gnu"
+            arch: "x64"
+          - name: "Linux ARM64"
+            platform: "ubuntu-24.04-arm"
+            rust-target: "aarch64-unknown-linux-gnu"
+            arch: "arm64"
 
     steps:
       - name: Checkout repository
@@ -61,6 +69,28 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.settings.rust-target }}
+
+      - name: Setup Rust (Linux)
+        if: startsWith(matrix.settings.platform, 'ubuntu-')
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.settings.rust-target }}
+
+      - name: Install Linux build dependencies
+        if: startsWith(matrix.settings.platform, 'ubuntu-')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            librsvg2-dev \
+            libayatana-appindicator3-dev \
+            libxdo-dev \
+            libssl-dev \
+            build-essential \
+            curl \
+            wget \
+            file
 
       - name: Install dependencies
         run: npm ci
@@ -112,6 +142,10 @@ jobs:
         if: matrix.settings.platform == 'windows-latest'
         run: npm run tauri build -- --target ${{ matrix.settings.rust-target }} --no-bundle
 
+      - name: Build Tauri app (Linux)
+        if: startsWith(matrix.settings.platform, 'ubuntu-')
+        run: npm run tauri build -- --target ${{ matrix.settings.rust-target }} --no-bundle
+
       - name: Create Custom DMG
         if: matrix.settings.platform == 'macos-latest'
         run: |
@@ -140,13 +174,23 @@ jobs:
           cd src-tauri/target/${{ matrix.settings.rust-target }}/release
           7z a ../../../../r2modmac_windows_${{ matrix.settings.arch }}.zip r2modmac.exe
 
+      - name: Package Linux Binary
+        if: startsWith(matrix.settings.platform, 'ubuntu-')
+        run: |
+          cd src-tauri/target/${{ matrix.settings.rust-target }}/release
+          # The self-updater (stage_linux_update in secure_system_commands.rs) requires
+          # this archive to contain exactly one entry: the executable named "r2modmac"
+          # at the archive root.
+          tar -czf ../../../../r2modmac_linux_${{ matrix.settings.arch }}.tar.gz r2modmac
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: build-${{ matrix.settings.arch }}
+          name: build-${{ matrix.settings.rust-target }}
           path: |
             r2modmac_macos_${{ matrix.settings.arch }}.dmg
             r2modmac_windows_${{ matrix.settings.arch }}.zip
+            r2modmac_linux_${{ matrix.settings.arch }}.tar.gz
           if-no-files-found: ignore
           retention-days: 1
 
@@ -189,6 +233,7 @@ jobs:
           files: |
             release_files/*.dmg
             release_files/*.zip
+            release_files/*.tar.gz
           draft: false
           prerelease: false
         env:
