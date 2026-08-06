@@ -37,6 +37,7 @@ mod process;
 pub(crate) mod runtime_health;
 mod shared;
 mod steam;
+mod steam_state;
 pub(crate) mod sync;
 pub(crate) mod sync_state;
 mod windows;

@@ -356,7 +356,10 @@ mod tests {
 
     #[test]
     fn rotates_on_first_use_with_no_prior_subject() {
-        assert!(should_rotate_session_subject(&SponsorState::default(), 1_000));
+        assert!(should_rotate_session_subject(
+            &SponsorState::default(),
+            1_000
+        ));
     }
 
     #[test]
@@ -366,7 +369,10 @@ mod tests {
             session_subject_minted_at: Some(1_000),
             ..Default::default()
         };
-        assert!(!should_rotate_session_subject(&state, 1_000 + SESSION_SUBJECT_COOLDOWN_SECS - 1));
+        assert!(!should_rotate_session_subject(
+            &state,
+            1_000 + SESSION_SUBJECT_COOLDOWN_SECS - 1
+        ));
     }
 
     #[test]
@@ -376,7 +382,10 @@ mod tests {
             session_subject_minted_at: Some(1_000),
             ..Default::default()
         };
-        assert!(should_rotate_session_subject(&state, 1_000 + SESSION_SUBJECT_COOLDOWN_SECS));
+        assert!(should_rotate_session_subject(
+            &state,
+            1_000 + SESSION_SUBJECT_COOLDOWN_SECS
+        ));
     }
 
     #[test]

@@ -175,6 +175,25 @@ pub(crate) fn launch_windows_steam_game(
         ));
     }
 
+    // Steam accepts a launch request even when it has no intention of starting
+    // the game — a pending update or a paused download parks it indefinitely.
+    // Report that up front rather than letting the caller wait for a timeout.
+    if let Some(flags) =
+        crate::commands::game_commands::steam_state::read_state_flags(&steam_root, &app_id)
+    {
+        if let Some(blocker) =
+            crate::commands::game_commands::steam_state::describe_state_blocker(flags)
+        {
+            log::warn!(
+                "[launch_windows_steam_game] Refusing to launch app {}: StateFlags={} ({})",
+                app_id,
+                flags,
+                blocker
+            );
+            return Err(blocker);
+        }
+    }
+
     #[cfg(unix)]
     {
         let prefix_root = find_wine_prefix_root(&steam_executable)
@@ -252,6 +271,21 @@ pub(crate) fn launch_windows_steam_game(
     }
 
     if !wait_for_process_start_patterns(&process_patterns, 60_000) {
+        // Steam took the request but never created the process. The usual cause
+        // is a prompt it is waiting on (a Steam Cloud conflict, most often),
+        // which the user cannot see while they are looking at r2modmac. Surface
+        // the reason instead of failing silently.
+        if let Some(reason) = crate::commands::game_commands::steam_state::explain_stalled_launch(
+            &steam_root,
+            &app_id,
+        ) {
+            log::warn!(
+                "[launch_windows_steam_game] Steam stalled the launch of app {}: {}",
+                app_id,
+                reason
+            );
+            return Err(reason);
+        }
         log::warn!(
             "[launch_windows_steam_game] Steam accepted the launch request for app {}, but the game process was not observed in time. Continuing optimistically.",
             app_id
