@@ -9,6 +9,60 @@ use tauri::command;
 static DEQUARANTINE_LAST_RUN_MS: OnceLock<Mutex<HashMap<String, u128>>> = OnceLock::new();
 const DEQUARANTINE_COOLDOWN_MS: u128 = 10 * 60 * 1000;
 
+/// Try to copy `source` to `destination` as a copy-on-write clone.
+///
+/// Apply snapshots exist so a failed sync can be rolled back, which means they
+/// are written on every Apply and then thrown away on commit. Copying the whole
+/// BepInEx tree byte-for-byte to do that dominates sync time on large profiles.
+///
+/// On APFS a single `clonefile(2)` clones an entire directory tree in one
+/// syscall while sharing the underlying blocks, so the snapshot costs metadata
+/// only. Crucially the sharing is copy-on-write, not aliasing: later writes to
+/// the game's copy — including the in-place edits Apply makes to
+/// `doorstop_config.ini` and `run_bepinex.sh` — allocate fresh blocks and leave
+/// the snapshot's view intact. That is what makes this safe where hard links
+/// would not be.
+///
+/// Returns `false` when cloning is unavailable (other platforms, non-APFS
+/// volumes, or a destination that already exists) so callers fall back to a
+/// regular copy.
+pub fn try_clone_tree(source: &std::path::Path, destination: &std::path::Path) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        use std::os::unix::ffi::OsStrExt;
+
+        // clonefile(2) requires the destination not to exist.
+        if destination.exists() {
+            return false;
+        }
+        let (Ok(source_c), Ok(destination_c)) = (
+            std::ffi::CString::new(source.as_os_str().as_bytes()),
+            std::ffi::CString::new(destination.as_os_str().as_bytes()),
+        ) else {
+            return false;
+        };
+        // SAFETY: both pointers are valid, NUL-terminated C strings that live
+        // for the duration of the call.
+        let result = unsafe { libc::clonefile(source_c.as_ptr(), destination_c.as_ptr(), 0) };
+        if result == 0 {
+            return true;
+        }
+        log::debug!(
+            "[try_clone_tree] clonefile {} -> {} unavailable ({}); falling back to copy",
+            source.display(),
+            destination.display(),
+            std::io::Error::last_os_error()
+        );
+        false
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (source, destination);
+        false
+    }
+}
+
 pub fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
     if !dst.exists() {
         fs::create_dir_all(dst)?;
@@ -41,7 +95,7 @@ pub fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::
                         // If size is same, check modification time?
                         // For now, size is a good enough heuristic for mod files (DLLs usually don't change without size change)
                         // And we want speed.
-                        // eprintln!("[copy_dir_recursive] Skipping identical file: {:?}", entry.file_name());
+                        // log::debug!("[copy_dir_recursive] Skipping identical file: {:?}", entry.file_name());
                         false
                     }
                 } else {
@@ -63,7 +117,7 @@ pub fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::
     }
 
     if files_copied > 0 || dirs_created > 0 {
-        eprintln!(
+        log::debug!(
             "[copy_dir_recursive] {:?} -> {:?}: {} files, {} dirs",
             src.file_name().unwrap_or_default(),
             dst.file_name().unwrap_or_default(),
@@ -109,7 +163,7 @@ pub fn dequarantine_recursive(path: &std::path::Path) {
         if let Ok(mut cache_guard) = cache.lock() {
             if let Some(last_ms) = cache_guard.get(&path_key).copied() {
                 if now_epoch_ms.saturating_sub(last_ms) < DEQUARANTINE_COOLDOWN_MS {
-                    eprintln!(
+                    log::debug!(
                         "[dequarantine_recursive] skip (cooldown) path={} elapsed_since_last_ms={}",
                         path.display(),
                         now_epoch_ms.saturating_sub(last_ms)
@@ -126,7 +180,7 @@ pub fn dequarantine_recursive(path: &std::path::Path) {
             let elapsed_ms = now_ms.elapsed().as_millis();
             match output {
                 Ok(result) => {
-                    eprintln!(
+                    log::debug!(
                         "[dequarantine_recursive] path={} status={} elapsed_ms={} stdout_len={} stderr_len={}",
                         path.display(),
                         result.status.success(),
@@ -136,7 +190,7 @@ pub fn dequarantine_recursive(path: &std::path::Path) {
                     );
                 }
                 Err(error) => {
-                    eprintln!(
+                    log::warn!(
                         "[dequarantine_recursive] path={} failed elapsed_ms={} error={}",
                         path.display(),
                         elapsed_ms,
@@ -157,7 +211,7 @@ pub fn dequarantine_recursive(path: &std::path::Path) {
         let elapsed_ms = now_ms.elapsed().as_millis();
         match output {
             Ok(result) => {
-                eprintln!(
+                log::debug!(
                     "[dequarantine_recursive] path={} status={} elapsed_ms={} stdout_len={} stderr_len={} cache_lock=false",
                     path.display(),
                     result.status.success(),
@@ -167,7 +221,7 @@ pub fn dequarantine_recursive(path: &std::path::Path) {
                 );
             }
             Err(error) => {
-                eprintln!(
+                log::warn!(
                     "[dequarantine_recursive] path={} failed elapsed_ms={} error={} cache_lock=false",
                     path.display(),
                     elapsed_ms,

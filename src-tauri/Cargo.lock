@@ -3232,6 +3232,7 @@ dependencies = [
  "dirs 5.0.1",
  "flate2",
  "futures-util",
+ "libc",
  "log",
  "mimalloc",
  "notify",

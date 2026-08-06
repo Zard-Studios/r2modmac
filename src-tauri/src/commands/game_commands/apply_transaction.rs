@@ -205,14 +205,42 @@ pub async fn begin_profile_apply_transaction(
     }
     fs::create_dir_all(&backup_root).map_err(|error| error.to_string())?;
 
-    let total_bytes = targets
+    // Fast path: clone every target copy-on-write. When this works the snapshot
+    // is metadata-only, so there is no point walking the tree to size it first —
+    // that walk alone used to cost more than the whole operation now does.
+    let mut pending: Vec<(usize, &std::path::PathBuf)> = Vec::new();
+    for (index, target) in targets.iter().enumerate() {
+        if !target.exists() {
+            continue;
+        }
+        if try_clone_tree(target, &backup_root.join(backup_name(index))) {
+            continue;
+        }
+        pending.push((index, target));
+    }
+
+    if pending.is_empty() {
+        let _ = app.emit(
+            "profile-apply-snapshot-progress",
+            serde_json::json!({
+                "copiedBytes": 0,
+                "totalBytes": 0,
+                "progressPercent": 100,
+            }),
+        );
+        fs::write(backup_root.join(APPLY_MARKER), b"ready").map_err(|error| error.to_string())?;
+        return Ok(true);
+    }
+
+    // Slow path: only the targets that could not be cloned are sized and copied.
+    let total_bytes = pending
         .iter()
-        .map(|target| target_size(target))
+        .map(|(_, target)| target_size(target))
         .sum::<u64>();
     let mut copied_bytes = 0_u64;
     let mut last_percent = u64::MAX;
-    let snapshot_result = targets.iter().enumerate().try_for_each(|(index, target)| {
-        let backup = backup_root.join(backup_name(index));
+    let snapshot_result = pending.iter().try_for_each(|(index, target)| {
+        let backup = backup_root.join(backup_name(*index));
         copy_target_with_progress(target, &backup, &mut |copied| {
             copied_bytes = copied_bytes.saturating_add(copied);
             let percent = if total_bytes == 0 {
@@ -319,6 +347,42 @@ mod tests {
                 "/Volumes/Games/MyGame/.r2modmac/apply-transactions/profile-id"
             )
         );
+    }
+
+    #[test]
+    fn cloned_snapshot_survives_in_place_edits_to_the_live_tree() {
+        // Apply rewrites doorstop_config.ini and run_bepinex.sh in place after
+        // the snapshot is taken. A clone must keep the pre-Apply bytes; if this
+        // ever regresses to sharing storage (e.g. hard links) rollback would
+        // silently restore already-modified files.
+        let root = std::env::temp_dir().join(format!(
+            "r2modmac-apply-clone-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let target = root.join("BepInEx");
+        let backup = root.join("backup");
+        fs::create_dir_all(target.join("config")).unwrap();
+        fs::write(target.join("config/doorstop_config.ini"), b"enabled=false").unwrap();
+
+        if !try_clone_tree(&target, &backup) {
+            // Non-APFS volume or a non-macOS host: the copy fallback is covered
+            // by the other tests in this module.
+            fs::remove_dir_all(&root).ok();
+            return;
+        }
+
+        fs::write(target.join("config/doorstop_config.ini"), b"enabled=true").unwrap();
+
+        assert_eq!(
+            fs::read(backup.join("config/doorstop_config.ini")).unwrap(),
+            b"enabled=false",
+            "the clone must not observe the in-place edit"
+        );
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
