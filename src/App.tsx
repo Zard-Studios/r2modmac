@@ -18,6 +18,7 @@ import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { flushSync } from 'react-dom';
 import { AppModals } from './components/screens/AppModals';
 import { UpdateAllModal } from './components/modals/UpdateAllModal';
+import { LaunchIssueModal, describeLaunchIssue, type LaunchIssue } from './components/modals/LaunchIssueModal';
 import type { AppSettings, RuntimeHealth, UpdateInfo } from './types/electron';
 import type { InstalledMod } from './types/profile';
 import { MAC_IMAGE_CACHE_KEY, MAC_PLATFORM_CACHE_KEY } from './constants/cacheKeys';
@@ -301,6 +302,7 @@ function App() {
   })
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
   const [showUpdateModal, setShowUpdateModal] = useState(false)
+  const [launchIssue, setLaunchIssue] = useState<LaunchIssue | null>(null)
   const [showPreferences, setShowPreferences] = useState(false)
   const [legacyInstallMode, setLegacyInstallMode] = useState(false)
   const [askVersionBeforeInstall, setAskVersionBeforeInstall] = useState(false)
@@ -2213,10 +2215,10 @@ function App() {
         clearSteamRestartingState();
         clearLaunchGraceWindow();
         setIsGameRunning(false);
-        await window.ipcRenderer.alert(
-          'Launch Failed',
-          String(error?.message || error || 'Failed to launch the modded game.')
-        );
+        // Shown in r2modmac's own UI rather than a native alert: these are
+        // usually a Steam-side condition the user can clear in seconds, not a
+        // crash, and the wording matters.
+        setLaunchIssue(describeLaunchIssue(String(error?.message || error || 'Failed to launch the modded game.')));
       } finally {
         profileActionLockRef.current = false;
         setIsLaunchingProfile(false);
@@ -2243,10 +2245,7 @@ function App() {
         clearSteamRestartingState();
         clearLaunchGraceWindow();
         setIsGameRunning(false);
-        await window.ipcRenderer.alert(
-          'Launch Failed',
-          String(error?.message || error || 'Failed to launch the vanilla game.')
-        );
+        setLaunchIssue(describeLaunchIssue(String(error?.message || error || 'Failed to launch the vanilla game.')));
       } finally {
         profileActionLockRef.current = false;
         setIsLaunchingProfile(false);
@@ -2579,6 +2578,7 @@ function App() {
 
 
       {/* Modals */}
+      <LaunchIssueModal issue={launchIssue} onClose={() => setLaunchIssue(null)} />
       <UpdateAllModal
         isOpen={pendingProfileUpdates.length > 0 && !selectedMod}
         updates={pendingProfileUpdates}

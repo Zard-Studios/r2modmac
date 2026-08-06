@@ -194,6 +194,16 @@ pub(crate) fn launch_windows_steam_game(
         }
     }
 
+    // A cold Steam has to boot and sign in before it acts on the request, which
+    // is much slower than a warm one and needs a different deadline (and a
+    // different explanation if it runs out).
+    let steam_was_running =
+        is_process_running_for_patterns(&build_windows_process_match_patterns(&steam_executable));
+    log::info!(
+        "[launch_windows_steam_game] Steam already running: {}",
+        steam_was_running
+    );
+
     #[cfg(unix)]
     {
         let prefix_root = find_wine_prefix_root(&steam_executable)
@@ -270,29 +280,43 @@ pub(crate) fn launch_windows_steam_game(
             .map_err(|e| format!("Failed to launch Steam app {}: {}", app_id, e))?;
     }
 
-    if !wait_for_process_start_patterns(&process_patterns, 60_000) {
-        // Steam took the request but never created the process. The usual cause
-        // is a prompt it is waiting on (a Steam Cloud conflict, most often),
-        // which the user cannot see while they are looking at r2modmac. Surface
-        // the reason instead of failing silently.
-        if let Some(reason) = crate::commands::game_commands::steam_state::explain_stalled_launch(
-            &steam_root,
-            &app_id,
-        ) {
+    // Steam can take the request and never create the process — parked on a
+    // prompt the user cannot see while looking at r2modmac (a Steam Cloud
+    // conflict, most often), or on an update it decided to fetch first. Watch
+    // Steam's own state while waiting so the reason is reported as soon as it
+    // is recorded, rather than after the full timeout.
+    //
+    // A cold Steam has to boot before it can even consider the request, which
+    // takes far longer than a warm one, so the deadline accounts for that.
+    let timeout_ms = if steam_was_running { 60_000 } else { 180_000 };
+    match crate::commands::game_commands::steam_state::wait_for_launch_or_blocker(
+        &steam_root,
+        &app_id,
+        timeout_ms,
+        || is_process_running_for_patterns(&process_patterns),
+    ) {
+        crate::commands::game_commands::steam_state::LaunchWaitOutcome::Started => Ok(()),
+        crate::commands::game_commands::steam_state::LaunchWaitOutcome::Blocked(reason) => {
             log::warn!(
                 "[launch_windows_steam_game] Steam stalled the launch of app {}: {}",
                 app_id,
                 reason
             );
-            return Err(reason);
+            Err(reason)
         }
-        log::warn!(
-            "[launch_windows_steam_game] Steam accepted the launch request for app {}, but the game process was not observed in time. Continuing optimistically.",
-            app_id
-        );
+        crate::commands::game_commands::steam_state::LaunchWaitOutcome::TimedOut => {
+            log::warn!(
+                "[launch_windows_steam_game] Steam accepted the launch request for app {} but the game did not start within {}ms.",
+                app_id,
+                timeout_ms
+            );
+            Err(if steam_was_running {
+                "Steam accepted the launch but the game did not start. Open Steam to check for a prompt or an error waiting for you there.".to_string()
+            } else {
+                "Steam was not running, so r2modmac started it first — but the game did not start in time. Steam may still be signing in; check the Steam window, then press Play again.".to_string()
+            })
+        }
     }
-
-    Ok(())
 }
 
 #[cfg(test)]

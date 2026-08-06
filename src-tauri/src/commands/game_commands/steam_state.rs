@@ -167,9 +167,148 @@ pub(crate) fn explain_stalled_launch(steam_root: &Path, app_id: &str) -> Option<
     pending_user_prompt_for_app(&log, app_id)
 }
 
+/// How a launch request ended.
+pub(crate) enum LaunchWaitOutcome {
+    /// The game process appeared.
+    Started,
+    /// Steam is not going to start the game until something is resolved.
+    Blocked(String),
+    /// Nothing observable happened before the deadline.
+    TimedOut,
+}
+
+/// Wait for the game to appear, watching Steam for a reason it will not start.
+///
+/// Polling Steam's own state while waiting means a blocked launch is reported
+/// as soon as Steam records it, rather than after the caller's full timeout —
+/// a Steam Cloud conflict shows up within a couple of seconds, so there is no
+/// reason to make the user stare at a spinner for a minute first.
+pub(crate) fn wait_for_launch_or_blocker(
+    steam_root: &Path,
+    app_id: &str,
+    timeout_ms: u64,
+    is_started: impl Fn() -> bool,
+) -> LaunchWaitOutcome {
+    const POLL_INTERVAL_MS: u64 = 250;
+    // Reading a 256 KB log tail every tick would be wasteful; Steam takes a
+    // moment to write the prompt line anyway.
+    const STEAM_CHECK_EVERY: u64 = 8;
+
+    let attempts = std::cmp::max(1, timeout_ms / POLL_INTERVAL_MS);
+    for attempt in 0..attempts {
+        if is_started() {
+            return LaunchWaitOutcome::Started;
+        }
+        if attempt > 0 && attempt % STEAM_CHECK_EVERY == 0 {
+            if let Some(reason) = explain_stalled_launch(steam_root, app_id) {
+                // Re-check the process first: the game may have started in the
+                // same tick, which beats a stale log line.
+                if is_started() {
+                    return LaunchWaitOutcome::Started;
+                }
+                return LaunchWaitOutcome::Blocked(reason);
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(POLL_INTERVAL_MS));
+    }
+
+    if is_started() {
+        return LaunchWaitOutcome::Started;
+    }
+    match explain_stalled_launch(steam_root, app_id) {
+        Some(reason) => LaunchWaitOutcome::Blocked(reason),
+        None => LaunchWaitOutcome::TimedOut,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Build a throwaway Steam root with the given appmanifest / console log.
+    fn fake_steam_root(app_id: &str, state_flags: u64, console_log: &str) -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "r2modmac-steamstate-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("steamapps")).unwrap();
+        std::fs::create_dir_all(root.join("logs")).unwrap();
+        std::fs::write(
+            root.join("steamapps")
+                .join(format!("appmanifest_{}.acf", app_id)),
+            format!(
+                "\"AppState\"\n{{\n\t\"StateFlags\"\t\t\"{}\"\n}}",
+                state_flags
+            ),
+        )
+        .unwrap();
+        std::fs::write(root.join("logs").join("console_log.txt"), console_log).unwrap();
+        root
+    }
+
+    #[test]
+    fn wait_reports_started_without_consulting_steam() {
+        let root = fake_steam_root("1229490", 4, "");
+        let outcome = wait_for_launch_or_blocker(&root, "1229490", 5_000, || true);
+        assert!(matches!(outcome, LaunchWaitOutcome::Started));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn wait_reports_a_cloud_block_well_before_the_deadline() {
+        let log = "[20:07:37] GameAction [AppID 3527290, ActionID 1] : LaunchApp waiting for user response to SynchronizingCloud \"pendingcloudsessions\"\n";
+        let root = fake_steam_root("3527290", 4, log);
+        let started = std::time::Instant::now();
+        // A generous deadline: the point is that it returns as soon as Steam's
+        // state is readable, not that it waits it out.
+        let outcome = wait_for_launch_or_blocker(&root, "3527290", 60_000, || false);
+        let elapsed = started.elapsed();
+        match outcome {
+            LaunchWaitOutcome::Blocked(reason) => {
+                assert!(reason.contains("Steam Cloud"), "{reason}")
+            }
+            _ => panic!("expected Blocked"),
+        }
+        assert!(
+            elapsed < std::time::Duration::from_secs(10),
+            "should report early, took {elapsed:?}"
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn wait_reports_a_pending_update_as_blocked() {
+        // StateFlags 1030 — PEAK's observed state with a pending download.
+        let root = fake_steam_root("3527290", 1030, "");
+        match wait_for_launch_or_blocker(&root, "3527290", 30_000, || false) {
+            LaunchWaitOutcome::Blocked(reason) => assert!(reason.contains("updating"), "{reason}"),
+            _ => panic!("expected Blocked"),
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn wait_times_out_when_steam_reports_nothing() {
+        let root = fake_steam_root("1229490", 4, "");
+        let outcome = wait_for_launch_or_blocker(&root, "1229490", 1_000, || false);
+        assert!(matches!(outcome, LaunchWaitOutcome::TimedOut));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_game_that_starts_during_the_wait_beats_a_stale_log_line() {
+        // The log records an old prompt, but the process is up: starting wins,
+        // otherwise a leftover line would fail a launch that actually worked.
+        let log = "[20:07:37] GameAction [AppID 3527290, ActionID 1] : LaunchApp waiting for user response to SynchronizingCloud \"pendingcloudsessions\"\n";
+        let root = fake_steam_root("3527290", 4, log);
+        let outcome = wait_for_launch_or_blocker(&root, "3527290", 10_000, || true);
+        assert!(matches!(outcome, LaunchWaitOutcome::Started));
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn parses_state_flags_from_appmanifest() {
