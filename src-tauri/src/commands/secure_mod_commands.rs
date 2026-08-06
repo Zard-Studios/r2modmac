@@ -111,12 +111,7 @@ fn read_limited(file: &mut zip::read::ZipFile<'_>, max_bytes: u64) -> Result<Vec
 }
 
 fn parse_manifest_json(bytes: &[u8]) -> Result<serde_json::Value, String> {
-    // Thunderstore manifests are UTF-8, but some valid packages include the
-    // optional UTF-8 byte-order mark. serde_json rejects that prefix at line 1,
-    // column 1, so normalize it before applying the normal JSON validation.
-    let normalized = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(bytes);
-    serde_json::from_slice(normalized)
-        .map_err(|error| format!("Invalid manifest.json in mod archive: {}", error))
+    crate::utils::manifest_json::parse_manifest_bytes(bytes, "mod archive")
 }
 
 fn validate_manifest(file: &mut zip::read::ZipFile<'_>) -> Result<(), String> {
@@ -377,7 +372,19 @@ mod tests {
     }
 
     #[test]
-    fn rejects_utf16_le_bom_manifest() {
+    fn accepts_well_formed_utf16_le_bom_manifest() {
+        let mut manifest = vec![0xFF, 0xFE];
+        for unit in r#"{"name":"UnicodeMod","version_number":"1.0.0"}"#.encode_utf16() {
+            manifest.extend_from_slice(&unit.to_le_bytes());
+        }
+        let archive = archive_with_entries(&[("manifest.json", &manifest)]);
+        validate_archive(&archive, "Author-UnicodeMod-1.0.0").unwrap();
+        let _ = fs::remove_file(archive);
+    }
+
+    #[test]
+    fn rejects_truncated_utf16_le_bom_manifest() {
+        // Odd byte count: not decodable as UTF-16 under any interpretation.
         let manifest = b"\xFF\xFE{\x00\"name\x00\":\x00}";
         let archive = archive_with_entries(&[("manifest.json", manifest)]);
         let error = validate_archive(&archive, "Author-Mod-1.0.0").unwrap_err();

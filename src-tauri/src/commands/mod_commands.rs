@@ -453,15 +453,17 @@ fn parse_custom_mod_manifest<R: std::io::Read + std::io::Seek>(
         warnings.push("manifest.json is too large and was ignored.".to_string());
         return (None, None, warnings);
     }
-    let content = match read_zip_file_to_string(&mut file, CUSTOM_MOD_MAX_MANIFEST_BYTES) {
-        Ok(content) => content,
+    let raw = match read_zip_file_to_bytes(&mut file, CUSTOM_MOD_MAX_MANIFEST_BYTES) {
+        Ok(raw) => raw,
         Err(_) => {
-            warnings.push("manifest.json could not be read as UTF-8 and was ignored.".to_string());
+            warnings.push("manifest.json could not be read and was ignored.".to_string());
             return (None, None, warnings);
         }
     };
-    let manifest_sha256 = Some(hash_bytes(content.as_bytes()));
-    match serde_json::from_str::<serde_json::Value>(&content) {
+    // Hash the bytes as they appear in the archive so the digest stays stable
+    // regardless of how the manifest is encoded.
+    let manifest_sha256 = Some(hash_bytes(&raw));
+    match crate::utils::manifest_json::parse_manifest_bytes(&raw, "custom mod archive") {
         Ok(value) => (Some(value), manifest_sha256, warnings),
         Err(_) => {
             warnings.push("manifest.json is invalid JSON and was ignored.".to_string());
@@ -1893,7 +1895,7 @@ async fn prepare_ror2_crossover_newtonsoft_compat(
         return Ok(Vec::new());
     }
 
-    eprintln!(
+    log::debug!(
         "[install_mod] Risk of Rain 2 compatibility: installing Newtonsoft.Json {} for CrossOver/Wine runtime",
         NEWTONSOFT_JSON_VERSION
     );
@@ -1903,7 +1905,7 @@ async fn prepare_ror2_crossover_newtonsoft_compat(
         Ok(bytes) => bytes,
         Err(error) if compat_required => return Err(error),
         Err(error) => {
-            eprintln!(
+            log::warn!(
                 "[install_mod] Risk of Rain 2 compatibility: could not install Newtonsoft.Json helper: {}",
                 error
             );
@@ -2123,7 +2125,7 @@ async fn download_official_lovely_runtime(version: &str) -> Result<Vec<u8>, Stri
                 }
             })
         }) {
-            eprintln!(
+            log::debug!(
                 "[install_mod] Falling back to official Lovely runtime: {}",
                 download_url
             );
@@ -2572,7 +2574,7 @@ async fn download_bepinex_release_asset(
         return Ok(None);
     };
 
-    eprintln!(
+    log::debug!(
         "[install_mod] Falling back to official macOS BepInEx runtime: {}",
         download_url
     );
@@ -2619,7 +2621,7 @@ async fn download_official_macos_bepinex_pack(
             );
             if let Ok(response) = client.get(&direct_url).send().await {
                 if response.status().is_success() {
-                    eprintln!(
+                    log::debug!(
                         "[install_mod] Falling back to direct official macOS BepInEx asset: {}",
                         direct_url
                     );
@@ -2650,7 +2652,7 @@ async fn download_official_macos_bepinex_pack(
                 }
 
                 if let Some(download_url) = select_macos_bepinex_asset_url(&release) {
-                    eprintln!(
+                    log::debug!(
                         "[install_mod] Falling back to latest compatible BepInEx 5 macOS runtime: {} ({})",
                         tag_name,
                         download_url
@@ -2750,7 +2752,7 @@ async fn download_official_macos_bepinex6_pack(
                 format!("https://builds.bepinex.dev{}", href)
             };
 
-            eprintln!(
+            log::debug!(
                 "[install_mod] Falling back to official macOS BepInEx 6 runtime: {}",
                 download_url
             );
@@ -3380,12 +3382,12 @@ fn validate_downloaded_archive_version(bytes: &[u8], mod_name: &str) -> Result<(
         if file.size() > CUSTOM_MOD_MAX_MANIFEST_BYTES {
             return Err(format!("{} contains an oversized manifest.json", mod_name));
         }
-        let mut content = String::new();
-        file.read_to_string(&mut content)
+        // Read raw bytes rather than a String: a UTF-16 manifest is not valid
+        // UTF-8, so `read_to_string` would fail before the decoder gets a look.
+        let mut raw = Vec::new();
+        file.read_to_end(&mut raw)
             .map_err(|error| error.to_string())?;
-        let content = content.strip_prefix('\u{FEFF}').unwrap_or(&content);
-        let manifest: serde_json::Value = serde_json::from_str(content)
-            .map_err(|error| format!("Invalid manifest.json in {}: {}", mod_name, error))?;
+        let manifest = crate::utils::manifest_json::parse_manifest_bytes(&raw, mod_name)?;
         if let Some(actual_version) = manifest["version_number"].as_str() {
             if actual_version != expected_version {
                 return Err(format!(
@@ -3424,9 +3426,10 @@ async fn install_mod_bytes(
         && !target_is_risk_of_rain_returns
         && profile_is_vanilla(&app, &profile_id);
 
-    eprintln!(
+    log::debug!(
         "[install_mod] Installing {} directly to game: {:?}",
-        mod_name, game_dir
+        mod_name,
+        game_dir
     );
 
     let mut runtime_bytes = bytes;
@@ -3517,7 +3520,7 @@ async fn install_mod_bytes(
                 let _ = extract_zip_directory_to_target(&mut cache_archive, &cache_owml);
             }
 
-            eprintln!("[install_mod] Installed OWML loader to {:?}", owml_root);
+            log::debug!("[install_mod] Installed OWML loader to {:?}", owml_root);
             return Ok(serde_json::json!({ "success": true }));
         }
 
@@ -3540,10 +3543,13 @@ async fn install_mod_bytes(
                             .map(|s| s.eq_ignore_ascii_case("manifest.json"))
                             .unwrap_or(false)
                         {
-                            let mut content = String::new();
+                            let mut raw = Vec::new();
                             use std::io::Read;
-                            if file.read_to_string(&mut content).is_ok() {
-                                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&content) {
+                            if file.read_to_end(&mut raw).is_ok() {
+                                if let Ok(v) = crate::utils::manifest_json::parse_manifest_bytes(
+                                    &raw,
+                                    "OWML mod archive",
+                                ) {
                                     if let Some(un) = v["uniqueName"].as_str() {
                                         found_un = Some(un.to_string());
                                     }
@@ -3655,9 +3661,10 @@ async fn install_mod_bytes(
             }
         }
 
-        eprintln!(
+        log::debug!(
             "[install_mod] Installed OWML mod '{}' to {:?}",
-            mod_folder_name, mod_dir
+            mod_folder_name,
+            mod_dir
         );
         return Ok(serde_json::json!({
             "success": true,
@@ -3706,7 +3713,7 @@ async fn install_mod_bytes(
                 }
             }
 
-            eprintln!("[install_mod] Successfully installed Lovely runtime for Balatro");
+            log::debug!("[install_mod] Successfully installed Lovely runtime for Balatro");
             return Ok(serde_json::json!({ "success": true }));
         }
 
@@ -3770,7 +3777,7 @@ async fn install_mod_bytes(
             }
 
             if has_macos_loader {
-                eprintln!(
+                log::debug!(
                     "[install_mod] Overlaying official macOS BepInEx loader over {}",
                     mod_name
                 );
@@ -3835,7 +3842,7 @@ async fn install_mod_bytes(
             return Err("Detected a macOS-only BepInEx pack. Please use a Windows/CrossOver-compatible pack for this profile.".to_string());
         }
 
-        eprintln!("[install_mod] Detected BepInExPack - installing to game root");
+        log::debug!("[install_mod] Detected BepInExPack - installing to game root");
         extract_bepinex_pack_to_root(
             &mut archive,
             game_dir,
@@ -3895,7 +3902,7 @@ async fn install_mod_bytes(
             .map_err(|e| e.to_string())?
             .join("profiles")
             .join(&profile_id);
-        eprintln!(
+        log::debug!(
             "[install_mod] LEGACY: Also caching to profile: {:?}",
             profile_dir
         );
@@ -3918,7 +3925,7 @@ async fn install_mod_bytes(
                 )?;
             }
         } else {
-            eprintln!(
+            log::debug!(
                 "[install_mod] Updating profile cache root for {:?}",
                 profile_dir
             );
@@ -3937,7 +3944,7 @@ async fn install_mod_bytes(
         }
     }
 
-    eprintln!(
+    log::debug!(
         "[install_mod] Successfully installed {} to game folder",
         mod_name
     );
@@ -4086,8 +4093,11 @@ pub async fn open_mod_folder(
 
                     let manifest_path = entry.path().join("manifest.json");
                     if manifest_path.exists() {
-                        if let Ok(data) = fs::read_to_string(&manifest_path) {
-                            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&data) {
+                        if let Ok(data) = fs::read(&manifest_path) {
+                            if let Ok(v) = crate::utils::manifest_json::parse_manifest_bytes(
+                                &data,
+                                "OWML mod folder",
+                            ) {
                                 if let Some(un) = v["uniqueName"].as_str() {
                                     let un_normalized = un.replace('.', "-").to_lowercase();
                                     if un_normalized == normalized_mod {
@@ -4258,9 +4268,11 @@ pub async fn toggle_mod(
     game_identifier: Option<String>,
     platform: Option<String>,
 ) -> Result<(), String> {
-    eprintln!(
+    log::debug!(
         "[toggle_mod] Toggle mod: {} enabled: {} in profile: {}",
-        mod_name, enabled, profile_id
+        mod_name,
+        enabled,
+        profile_id
     );
 
     let use_disabled_runtime = profile_is_vanilla(&app, &profile_id)
@@ -4312,7 +4324,7 @@ pub async fn toggle_mod(
             if enabled {
                 // Need to add mod to game - copy from profile cache if available
                 if profile_mod_path.exists() && !game_mod_path.exists() {
-                    eprintln!(
+                    log::debug!(
                         "[toggle_mod] Enabling mod - copying from cache to game: {}",
                         folder_name
                     );
@@ -4322,7 +4334,7 @@ pub async fn toggle_mod(
             } else {
                 // Remove mod from game folder (keep in cache)
                 if game_mod_path.exists() || game_mod_path.is_symlink() {
-                    eprintln!(
+                    log::debug!(
                         "[toggle_mod] Disabling mod - removing from game: {}",
                         folder_name
                     );
@@ -4341,7 +4353,7 @@ pub async fn toggle_mod(
     }
 
     // Always succeed - the enabled state is tracked in profiles.json, not file system
-    eprintln!("[toggle_mod] Toggle complete for mod: {}", mod_name);
+    log::debug!("[toggle_mod] Toggle complete for mod: {}", mod_name);
     Ok(())
 }
 
@@ -4398,7 +4410,7 @@ pub async fn copy_mod_from_cache(
             }
         }
 
-        eprintln!(
+        log::warn!(
             "[copy_mod_from_cache] Balatro mod {} not found in profile cache",
             mod_name
         );
@@ -4454,8 +4466,10 @@ pub async fn copy_mod_from_cache(
 
         let read_owml_unique_name = |mod_dir: &std::path::Path| -> Option<String> {
             let manifest_path = mod_dir.join("manifest.json");
-            if let Ok(data) = fs::read_to_string(&manifest_path) {
-                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&data) {
+            if let Ok(data) = fs::read(&manifest_path) {
+                if let Ok(v) =
+                    crate::utils::manifest_json::parse_manifest_bytes(&data, "OWML mod folder")
+                {
                     if let Some(unique_name) = v["uniqueName"].as_str() {
                         return Some(unique_name.replace('.', "-").to_lowercase());
                     }
@@ -4492,7 +4506,7 @@ pub async fn copy_mod_from_cache(
             }
         }
 
-        eprintln!(
+        log::warn!(
             "[copy_mod_from_cache] Outer Wilds mod {} not found in profile cache",
             mod_name
         );
@@ -4602,7 +4616,7 @@ pub async fn copy_mod_from_cache(
                 let dst_path = game_plugins_dir.join(&folder_name);
 
                 if src_path.is_dir() {
-                    eprintln!(
+                    log::debug!(
                         "[copy_mod_from_cache] Copying {} from cache to game",
                         folder_name
                     );
@@ -4621,7 +4635,7 @@ pub async fn copy_mod_from_cache(
     }
 
     // Not found in cache
-    eprintln!(
+    log::warn!(
         "[copy_mod_from_cache] Mod {} not found in profile cache",
         mod_name
     );
@@ -4644,7 +4658,7 @@ fn load_packages_from_disk(app: &AppHandle, game_id: &str) -> Option<GamePackage
     let cache_dir = match crate::utils::paths::app_cache_dir(app) {
         Ok(dir) => dir,
         Err(e) => {
-            eprintln!(
+            log::error!(
                 "[load_packages_from_disk] Failed to resolve cache dir: {}",
                 e
             );
@@ -4653,7 +4667,7 @@ fn load_packages_from_disk(app: &AppHandle, game_id: &str) -> Option<GamePackage
     };
     let cache_file = cache_dir.join(format!("{}_packages_v2.json.gz", game_id));
     if !cache_file.exists() {
-        eprintln!(
+        log::debug!(
             "[load_packages_from_disk] Cache file does not exist: {:?}",
             cache_file
         );
@@ -4662,14 +4676,14 @@ fn load_packages_from_disk(app: &AppHandle, game_id: &str) -> Option<GamePackage
     let file = match std::fs::File::open(&cache_file) {
         Ok(f) => f,
         Err(e) => {
-            eprintln!("[load_packages_from_disk] Failed to open cache file: {}", e);
+            log::error!("[load_packages_from_disk] Failed to open cache file: {}", e);
             return None;
         }
     };
     let mut gz = flate2::read::GzDecoder::new(file);
     let mut data = Vec::new();
     if let Err(e) = gz.read_to_end(&mut data) {
-        eprintln!(
+        log::error!(
             "[load_packages_from_disk] Failed to decompress cache file: {}",
             e
         );
@@ -4678,7 +4692,7 @@ fn load_packages_from_disk(app: &AppHandle, game_id: &str) -> Option<GamePackage
     match serde_json::from_slice(&data) {
         Ok(cache) => Some(cache),
         Err(e) => {
-            eprintln!(
+            log::error!(
                 "[load_packages_from_disk] Failed to deserialize cache: {}",
                 e
             );
@@ -4889,7 +4903,7 @@ pub async fn fetch_packages(
             let packages_lock = state.packages.read().await;
             if let Some(packages) = packages_lock.get(&game_id) {
                 if !packages.is_empty() {
-                    eprintln!(
+                    log::debug!(
                         "[fetch_packages/ow] Serving {} packages from memory (instant)",
                         packages.len()
                     );
@@ -4905,9 +4919,10 @@ pub async fn fetch_packages(
                 all_packages.extend(chunk.packages.clone());
             }
             let count = all_packages.len();
-            eprintln!(
+            log::debug!(
                 "[fetch_packages/ow] Loaded {} packages from disk cache for {} (instant)",
-                count, game_id
+                count,
+                game_id
             );
 
             // Put them into memory state immediately so user sees them
@@ -4944,12 +4959,12 @@ pub async fn fetch_packages(
                 let resp = match client.get(OW_DB_URL).send().await {
                     Ok(r) => r,
                     Err(e) => {
-                        eprintln!("[fetch_packages/ow] Background fetch failed: {}", e);
+                        log::warn!("[fetch_packages/ow] Background fetch failed: {}", e);
                         return;
                     }
                 };
                 if !resp.status().is_success() {
-                    eprintln!(
+                    log::warn!(
                         "[fetch_packages/ow] Background fetch status failed: {}",
                         resp.status()
                     );
@@ -4958,7 +4973,7 @@ pub async fn fetch_packages(
                 let db: serde_json::Value = match resp.json().await {
                     Ok(val) => val,
                     Err(e) => {
-                        eprintln!("[fetch_packages/ow] Background JSON parse failed: {}", e);
+                        log::warn!("[fetch_packages/ow] Background JSON parse failed: {}", e);
                         return;
                     }
                 };
@@ -5170,7 +5185,7 @@ pub async fn fetch_packages(
         const OW_DB_URL: &str = "https://ow-mods.github.io/ow-mod-db/database.json";
         const OW_THUMBNAIL_BASE: &str = "https://ow-mods.github.io/ow-mod-db/thumbnails/";
 
-        eprintln!("[fetch_packages/ow] Fetching ow-mod-db from {}", OW_DB_URL);
+        log::debug!("[fetch_packages/ow] Fetching ow-mod-db from {}", OW_DB_URL);
         let resp = client
             .get(OW_DB_URL)
             .send()
@@ -5305,7 +5320,7 @@ pub async fn fetch_packages(
         }
 
         let count = packages.len();
-        eprintln!("[fetch_packages/ow] Loaded {} mods from ow-mod-db", count);
+        log::debug!("[fetch_packages/ow] Loaded {} mods from ow-mod-db", count);
 
         {
             let mut packages_lock = state.packages.write().await;
@@ -5318,7 +5333,7 @@ pub async fn fetch_packages(
         );
 
         if let Ok(elapsed) = start_time.elapsed() {
-            eprintln!("[fetch_packages/ow] Loaded in {:.2?}", elapsed);
+            log::debug!("[fetch_packages/ow] Loaded in {:.2?}", elapsed);
         }
 
         // Background: resolve file sizes via HEAD requests in parallel
@@ -5421,7 +5436,7 @@ pub async fn fetch_packages(
         let packages_lock = state.packages.read().await;
         if let Some(packages) = packages_lock.get(&game_id) {
             if !packages.is_empty() {
-                eprintln!(
+                log::debug!(
                     "[fetch_packages] Serving {} packages from memory (instant)",
                     packages.len()
                 );
@@ -5437,9 +5452,10 @@ pub async fn fetch_packages(
             all_packages.extend(chunk.packages.clone());
         }
         let count = all_packages.len();
-        eprintln!(
+        log::debug!(
             "[fetch_packages] Loaded {} packages from chunk disk cache for {} (instant)",
-            count, game_id
+            count,
+            game_id
         );
 
         // Put them into memory state immediately so user sees them
@@ -5463,12 +5479,12 @@ pub async fn fetch_packages(
             let resp = match client.get(&index_url).send().await {
                 Ok(r) => r,
                 Err(e) => {
-                    eprintln!("[fetch_packages] Background index check failed: {}", e);
+                    log::warn!("[fetch_packages] Background index check failed: {}", e);
                     return;
                 }
             };
             if !resp.status().is_success() {
-                eprintln!(
+                log::warn!(
                     "[fetch_packages] Background index check status failed: {}",
                     resp.status()
                 );
@@ -5477,21 +5493,21 @@ pub async fn fetch_packages(
             let bytes = match resp.bytes().await {
                 Ok(b) => b,
                 Err(e) => {
-                    eprintln!("[fetch_packages] Background index body read failed: {}", e);
+                    log::warn!("[fetch_packages] Background index body read failed: {}", e);
                     return;
                 }
             };
             let index_json = match decode_gzip_or_plain(&bytes, "index") {
                 Ok(j) => j,
                 Err(e) => {
-                    eprintln!("[fetch_packages] Background index decode failed: {}", e);
+                    log::warn!("[fetch_packages] Background index decode failed: {}", e);
                     return;
                 }
             };
             let online_chunk_urls = match parse_index_chunk_urls(&index_json) {
                 Ok(urls) => urls,
                 Err(e) => {
-                    eprintln!("[fetch_packages] Background index parse failed: {}", e);
+                    log::warn!("[fetch_packages] Background index parse failed: {}", e);
                     return;
                 }
             };
@@ -5503,12 +5519,12 @@ pub async fn fetch_packages(
             let online_url_set: std::collections::HashSet<&str> =
                 online_chunk_urls.iter().map(String::as_str).collect();
             if cached_url_set == online_url_set {
-                eprintln!("[fetch_packages] Chunk disk cache is fully up-to-date for {}. No updates needed.", game_id_clone);
+                log::debug!("[fetch_packages] Chunk disk cache is fully up-to-date for {}. No updates needed.", game_id_clone);
                 return;
             }
 
             // Chunks differ! Keep chunks that are still online, and download only the new ones!
-            eprintln!("[fetch_packages] Chunk URLs differ from cache. Updating changed chunks in background for {}...", game_id_clone);
+            log::debug!("[fetch_packages] Chunk URLs differ from cache. Updating changed chunks in background for {}...", game_id_clone);
 
             let mut cached_chunks: std::collections::HashMap<String, ChunkCache> = cache
                 .chunks
@@ -5546,7 +5562,10 @@ pub async fn fetch_packages(
                             kept_chunks.push(new_chunk);
                         }
                         Err(e) => {
-                            eprintln!("[fetch_packages] Background update chunk load error: {}", e);
+                            log::warn!(
+                                "[fetch_packages] Background update chunk load error: {}",
+                                e
+                            );
                             return;
                         }
                     }
@@ -5560,9 +5579,10 @@ pub async fn fetch_packages(
             }
             final_packages.shrink_to_fit();
             let count = final_packages.len();
-            eprintln!(
+            log::debug!(
                 "[fetch_packages] Background update complete. Loaded {} packages for {}",
-                count, game_id_clone
+                count,
+                game_id_clone
             );
 
             // Update in-memory state
@@ -5576,7 +5596,7 @@ pub async fn fetch_packages(
                 chunks: kept_chunks,
             };
             if let Err(e) = save_packages_to_disk(&app_handle, &game_id_clone, &new_cache) {
-                eprintln!("[fetch_packages] Failed to save updated chunk cache: {}", e);
+                log::error!("[fetch_packages] Failed to save updated chunk cache: {}", e);
             }
 
             // Emit event so frontend knows packages are updated
@@ -5597,7 +5617,7 @@ pub async fn fetch_packages(
         "https://thunderstore.io/c/{}/api/v1/package-listing-index/",
         game_id
     );
-    eprintln!("[fetch_packages] Fetching index from: {}", index_url);
+    log::debug!("[fetch_packages] Fetching index from: {}", index_url);
 
     let resp = client
         .get(&index_url)
@@ -5615,7 +5635,7 @@ pub async fn fetch_packages(
     let index_json = decode_gzip_or_plain(&bytes, "index")?;
     let chunk_urls: Vec<String> = parse_index_chunk_urls(&index_json)?;
     let total_chunks = chunk_urls.len();
-    eprintln!("[fetch_packages] Found {} chunks", total_chunks);
+    log::debug!("[fetch_packages] Found {} chunks", total_chunks);
     if total_chunks == 0 {
         return Ok(0);
     }
@@ -5629,9 +5649,10 @@ pub async fn fetch_packages(
         match load_chunk(&client, first_url).await {
             Ok(first_packages) => {
                 let count = first_packages.len();
-                eprintln!(
+                log::debug!(
                     "[fetch_packages] First chunk loaded (index {}): {} packages",
-                    idx, count
+                    idx,
+                    count
                 );
 
                 // Update state immediately so UI can show something
@@ -5647,9 +5668,10 @@ pub async fn fetch_packages(
                 break;
             }
             Err(e) => {
-                eprintln!(
+                log::warn!(
                     "[fetch_packages] Failed first chunk attempt idx {}: {}",
-                    idx, e
+                    idx,
+                    e
                 );
             }
         }
@@ -5705,7 +5727,7 @@ pub async fn fetch_packages(
                         }
                         chunks.push(chunk);
                     }
-                    Err(e) => eprintln!("[fetch_packages] Chunk error: {}", e),
+                    Err(e) => log::warn!("[fetch_packages] Chunk error: {}", e),
                 }
             }
 
@@ -5726,14 +5748,14 @@ pub async fn fetch_packages(
                     .unwrap_or(0)
             };
 
-            eprintln!(
+            log::debug!(
                 "[fetch_packages] Background loading complete. Total: {} packages",
                 final_count
             );
 
             let cache = GamePackagesCache { chunks };
             if let Err(e) = save_packages_to_disk(&app_handle, &game_id_clone, &cache) {
-                eprintln!("[fetch_packages] Failed to save chunk cache to disk: {}", e);
+                log::error!("[fetch_packages] Failed to save chunk cache to disk: {}", e);
             }
 
             let _ = app_handle.emit(
@@ -5756,7 +5778,7 @@ pub async fn fetch_packages(
     let count = packages_lock.get(&game_id).map(|p| p.len()).unwrap_or(0);
 
     if let Ok(elapsed) = start_time.elapsed() {
-        eprintln!(
+        log::debug!(
             "[fetch_packages] Initial load in {:.2?} ({} packages ready, {} chunks loading in background)",
             elapsed,
             count,
@@ -6048,7 +6070,7 @@ pub async fn fetch_package_by_name(
                 .unwrap_or(true)
         };
         if is_empty {
-            eprintln!(
+            log::debug!(
                 "[fetch_package_by_name] Outer Wilds packages not loaded in cache. Loading now..."
             );
             use tauri::Manager;
@@ -6070,9 +6092,10 @@ pub async fn fetch_package_by_name(
         (name.clone(), None)
     };
 
-    eprintln!(
+    log::debug!(
         "[fetch_package_by_name] Resolving package {} (version: {:?})...",
-        clean_name, version_str
+        clean_name,
+        version_str
     );
 
     // 2. Split Namespace and Name (dots replaced with hyphens for Outer Wilds compatibility)
@@ -6119,11 +6142,11 @@ pub async fn fetch_package_by_name(
         if let Some(pkg) = found_pkg {
             if let Some(ref v) = version_str {
                 if pkg.versions.iter().any(|ver| ver.version_number == *v) {
-                    eprintln!("[fetch_package_by_name] Found package version in cache");
+                    log::debug!("[fetch_package_by_name] Found package version in cache");
                     return Ok(Some(pkg));
                 }
             } else {
-                eprintln!("[fetch_package_by_name] Found package in cache");
+                log::debug!("[fetch_package_by_name] Found package in cache");
                 return Ok(Some(pkg));
             }
         }
@@ -6143,7 +6166,7 @@ pub async fn fetch_package_by_name(
         )
     };
 
-    eprintln!("[fetch_package_by_name] Cache miss. Fetching from: {}", url);
+    log::debug!("[fetch_package_by_name] Cache miss. Fetching from: {}", url);
 
     ensure_mod_operations_not_cancelled()?;
     let _exact_fetch_guard = if version_str.is_some() {
@@ -6187,7 +6210,7 @@ pub async fn fetch_package_by_name(
                         .and_then(|value| value.parse::<u64>().ok())
                         .map(|seconds| Duration::from_secs(seconds.min(60)))
                         .unwrap_or(delay);
-                    eprintln!(
+                    log::debug!(
                         "[fetch_package_by_name] {} for {}; retrying {}/6 in {:?}",
                         status,
                         name,
