@@ -1,0 +1,5 @@
+# Copy to .dev.vars for local `npm run dev`. Use the ADtention sandbox publisher
+# ID here, never the live one. Without this set, `wrangler dev` still starts —
+# sponsor requests just resolve to an empty 204, same as production would with
+# a missing ADTENTION_PUBLISHER_ID secret.
+ADTENTION_PUBLISHER_ID=

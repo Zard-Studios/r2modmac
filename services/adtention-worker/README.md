@@ -23,3 +23,10 @@ npm run deploy:production
 
 The desktop release is compiled with the full production endpoint in
 `R2MODMAC_SPONSOR_PROXY_URL`. Without that compile-time value, sponsor requests remain disabled.
+
+## Local development
+
+`npm run dev` (root `npm run dev` also does this automatically) runs `wrangler dev` fully locally
+via workerd — no Cloudflare login or deployment involved. Copy `.dev.vars.example` to `.dev.vars`
+and set the sandbox `ADTENTION_PUBLISHER_ID` to see real sponsor copy; without it, requests still
+work but resolve to an empty 204, same as a misconfigured deployment would.

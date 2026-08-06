@@ -44,6 +44,10 @@ Thumbs.db
 .env
 .env.local
 .env.*.local
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+.wrangler
 /.codex
 agent.md
 
