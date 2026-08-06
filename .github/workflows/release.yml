@@ -218,12 +218,11 @@ jobs:
             - Added automated Linux (x64 and ARM64) release builds.
             - Added a Verbose app logging option and a button to open the log folder, for easier troubleshooting.
             - Added an in-app dialog explaining why a game launch stalled (a Steam Cloud conflict, a pending update) instead of failing silently.
-            - Improved Sync and Apply speed on macOS by cloning Apply snapshots instead of copying them, and by installing mods with a sliding concurrency pool instead of fixed batches.
+            - Improved Sync and Apply speed on macOS.
 
             ## Fixes
             - Fixed "Sync Failed" errors caused by BOM- or UTF-16-encoded manifest.json files in some Thunderstore mods.
             - Fixed same-named ReturnOfModding mods from different authors (for example, two different "ENVY" packages) overwriting each other.
-            - Fixed the Play button silently resetting to idle when Steam had to start cold before launching a modded game.
           files: |
             release_files/*.dmg
             release_files/*.zip
