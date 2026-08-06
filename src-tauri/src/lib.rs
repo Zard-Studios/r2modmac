@@ -88,6 +88,7 @@ pub fn run() {
             use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
 
             apply_log_level(models::shared::load_settings_impl(app.handle()).verbose_logging);
+            commands::sponsor_commands::rotate_session_subject(app.handle());
 
             utils::volume_watcher::start_volume_watcher(app.handle().clone());
 
@@ -359,7 +360,6 @@ pub fn run() {
             commands::sponsor_commands::request_sponsor,
             commands::sponsor_commands::acknowledge_sponsor_display,
             commands::sponsor_commands::dismiss_sponsor,
-            commands::sponsor_commands::reset_sponsor_cache,
             commands::sponsor_commands::update_sponsor_preferences,
             commands::game_commands::paths::get_game_path,
             commands::game_commands::paths::get_game_source,

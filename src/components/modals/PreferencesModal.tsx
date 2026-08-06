@@ -474,24 +474,6 @@ export default function PreferencesModal({
                                     </div>
                                 </div>
                             </div>
-                            <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
-                                <div className="flex items-center gap-4">
-                                    <RowIcon kind="cache" />
-                                    <div>
-                                        <p className="text-[15px] font-medium text-white">Reset sponsor cache</p>
-                                        <p className="mt-0.5 text-[13px] leading-snug text-gray-400">Forget recently shown and dismissed messages on this device.</p>
-                                    </div>
-                                </div>
-                                <button
-                                    type="button"
-                                    onClick={async () => {
-                                        await window.ipcRenderer.resetSponsorCache().catch(() => undefined);
-                                    }}
-                                    className="shrink-0 rounded-xl border border-gray-600 px-4 py-2 text-[13px] font-medium text-gray-200 transition-colors hover:border-gray-500 hover:bg-gray-700"
-                                >
-                                    Reset
-                                </button>
-                            </div>
                         </div>
 
                         <p className="px-1 text-[13px] leading-snug text-gray-500">Text-only messages: no images or banners. They never interrupt installs, updates, Sync, Apply, warnings, dialogs, or your workflow.</p>

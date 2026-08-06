@@ -114,7 +114,6 @@ export interface IElectronAPI {
     requestSponsor: (placement?: SponsorPlacement) => Promise<SponsorMessage | null>;
     acknowledgeSponsorDisplay: (sponsorId: string) => Promise<void>;
     dismissSponsor: (sponsorId: string) => Promise<void>;
-    resetSponsorCache: () => Promise<void>;
     updateSponsorPreferences: (enabled: boolean) => Promise<void>;
     getGamePath: (gameIdentifier: string, platform?: 'windows' | 'mac') => Promise<string | null>;
     getGameSource: (gameIdentifier: string, platform?: 'windows' | 'mac') => Promise<'steam' | 'manual' | 'unknown'>;

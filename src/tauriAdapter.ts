@@ -158,7 +158,6 @@ export const tauriAPI: IElectronAPI = {
     requestSponsor: async (placement) => invoke('request_sponsor', { placement }),
     acknowledgeSponsorDisplay: async (sponsorId) => invoke('acknowledge_sponsor_display', { sponsorId }),
     dismissSponsor: async (sponsorId) => invoke('dismiss_sponsor', { sponsorId }),
-    resetSponsorCache: async () => invoke('reset_sponsor_cache'),
     updateSponsorPreferences: async (enabled) => invoke('update_sponsor_preferences', { enabled }),
     getGamePath: async (gameIdentifier, platform?) => invoke('get_game_path', { gameIdentifier, platform }),
     getGameSource: async (gameIdentifier, platform?) => invoke<'steam' | 'manual' | 'unknown'>('get_game_source', { gameIdentifier, platform }),

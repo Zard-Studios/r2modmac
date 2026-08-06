@@ -10,6 +10,7 @@ use url::Url;
 use uuid::Uuid;
 
 const CACHE_SECONDS: i64 = 15 * 60;
+const SESSION_SUBJECT_COOLDOWN_SECS: i64 = 60;
 
 const PREFERENCES_PLACEMENT: &str = "preferences-support";
 const HOME_PLACEMENT: &str = "home-support";
@@ -31,6 +32,8 @@ pub struct SponsorMessage {
 #[serde(default)]
 struct SponsorState {
     installation_subject: Option<String>,
+    session_subject: Option<String>,
+    session_subject_minted_at: Option<i64>,
     recent_ids: Vec<String>,
     dismissed_ids: Vec<String>,
     cached: Option<CachedSponsor>,
@@ -75,6 +78,40 @@ fn save_state(app: &AppHandle, state: &SponsorState) -> Result<(), String> {
     let raw = serde_json::to_string(state).map_err(|error| error.to_string())?;
     fs::write(&temporary_path, raw).map_err(|error| error.to_string())?;
     fs::rename(temporary_path, path).map_err(|error| error.to_string())
+}
+
+fn should_rotate_session_subject(state: &SponsorState, now: i64) -> bool {
+    match (
+        state.session_subject.as_ref(),
+        state.session_subject_minted_at,
+    ) {
+        (Some(_), Some(minted_at)) => {
+            now.saturating_sub(minted_at) >= SESSION_SUBJECT_COOLDOWN_SECS
+        }
+        _ => true,
+    }
+}
+
+/// Mint a fresh sponsor identity for this app session, unless one was already
+/// minted within the last minute — closing and immediately relaunching would
+/// otherwise churn through a new subject on every restart.
+///
+/// This only ever touches `session_subject`, the identity used by the normal
+/// (enabled) sponsor surfaces. It never reads or writes `installation_subject`.
+pub fn rotate_session_subject(app: &AppHandle) {
+    let now = Utc::now().timestamp();
+    let mut state = load_state(app);
+    prune_state(&mut state, now);
+
+    if should_rotate_session_subject(&state, now) {
+        state.session_subject = Some(Uuid::new_v4().to_string());
+        state.session_subject_minted_at = Some(now);
+        state.recent_ids.clear();
+        state.dismissed_ids.clear();
+        state.cached = None;
+    }
+
+    let _ = save_state(app, &state);
 }
 
 fn is_allowed_placement(placement: &str) -> bool {
@@ -222,7 +259,7 @@ async fn request_sponsor_with_options(
     save_state(&app, &state)?;
 
     let subject = state
-        .installation_subject
+        .session_subject
         .get_or_insert_with(|| Uuid::new_v4().to_string())
         .clone();
     save_state(&app, &state)?;
@@ -279,14 +316,6 @@ pub async fn dismiss_sponsor(app: AppHandle, sponsor_id: String) -> Result<(), S
 }
 
 #[command]
-pub async fn reset_sponsor_cache(app: AppHandle) -> Result<(), String> {
-    // Reset the cache and installation identity together. The next eligible
-    // request will create a fresh opaque UUID; no previous sponsor history is
-    // carried over to the new identity.
-    save_state(&app, &SponsorState::default())
-}
-
-#[command]
 pub async fn update_sponsor_preferences(app: AppHandle, enabled: bool) -> Result<(), String> {
     let mut settings = load_settings_impl(&app);
     settings.sponsored_messages_enabled = enabled;
@@ -319,6 +348,48 @@ mod tests {
     fn home_is_an_explicitly_allowed_sponsor_placement() {
         assert!(is_allowed_placement(HOME_PLACEMENT));
         assert!(!is_allowed_placement("install-support"));
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // should_rotate_session_subject — session identity rotation, cooldown-gated
+    // ──────────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn rotates_on_first_use_with_no_prior_subject() {
+        assert!(should_rotate_session_subject(&SponsorState::default(), 1_000));
+    }
+
+    #[test]
+    fn does_not_rotate_within_the_cooldown_window() {
+        let state = SponsorState {
+            session_subject: Some("existing".into()),
+            session_subject_minted_at: Some(1_000),
+            ..Default::default()
+        };
+        assert!(!should_rotate_session_subject(&state, 1_000 + SESSION_SUBJECT_COOLDOWN_SECS - 1));
+    }
+
+    #[test]
+    fn rotates_once_the_cooldown_has_elapsed() {
+        let state = SponsorState {
+            session_subject: Some("existing".into()),
+            session_subject_minted_at: Some(1_000),
+            ..Default::default()
+        };
+        assert!(should_rotate_session_subject(&state, 1_000 + SESSION_SUBJECT_COOLDOWN_SECS));
+    }
+
+    #[test]
+    fn session_subject_rotation_never_reads_or_implies_installation_subject() {
+        // installation_subject backs the preferences-support / sponsorship-disabled
+        // path and must stay completely independent of session rotation: a state
+        // with only installation_subject set (no session_subject) must still be
+        // treated as needing its first session rotation.
+        let state = SponsorState {
+            installation_subject: Some("stable-forever".into()),
+            ..Default::default()
+        };
+        assert!(should_rotate_session_subject(&state, 1_000));
     }
 
     #[test]
