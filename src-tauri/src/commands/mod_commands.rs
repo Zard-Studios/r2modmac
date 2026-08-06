@@ -1245,15 +1245,111 @@ fn is_return_of_modding_loader(mod_name: &str) -> bool {
     extract_mod_key(mod_name) == "returnofmodding-returnofmodding"
 }
 
-fn thunderstore_package_name(full_name: &str) -> String {
-    let without_version = extract_version_number_from_full_name(full_name)
+/// The folder name ReturnOfModding expects for a package: `Author-ModName`.
+///
+/// The loader derives a mod's GUID from its folder name and keys the Lua `mods`
+/// table by that GUID, so the author has to stay in the name. Dropping it also
+/// collides packages that share a name across authors — `LuaENVY-ENVY` and
+/// `MGReturns-ENVY` both become `ENVY` and overwrite each other, even though
+/// the second declares a dependency on the first and looks it up as
+/// `mods['LuaENVY-ENVY']`. r2modman installs to this same layout.
+fn return_of_modding_folder_name(full_name: &str) -> String {
+    extract_version_number_from_full_name(full_name)
         .and_then(|version| full_name.strip_suffix(&format!("-{version}")))
-        .unwrap_or(full_name);
+        .unwrap_or(full_name)
+        .to_string()
+}
+
+/// The pre-0.8.4 folder name: the package name with the author stripped.
+///
+/// Only used to find and migrate folders written by older versions.
+fn legacy_return_of_modding_folder_name(full_name: &str) -> String {
+    let without_version = return_of_modding_folder_name(full_name);
     without_version
         .split_once('-')
-        .map(|(_, name)| name)
+        .map(|(_, name)| name.to_string())
         .unwrap_or(without_version)
-        .to_string()
+}
+
+/// Identify the package a ReturnOfModding folder holds, from its `manifest.json`.
+///
+/// Returns the `Author-ModName` identity when the manifest states it. Older
+/// Thunderstore manifests carry only `name`, so this returns `None` for them
+/// rather than guessing an author.
+fn identify_return_of_modding_folder(folder: &std::path::Path) -> Option<String> {
+    let raw = fs::read(folder.join("manifest.json")).ok()?;
+    let manifest = crate::utils::manifest_json::parse_manifest_bytes(&raw, "mod folder").ok()?;
+
+    if let Some(full_name) = manifest.get("FullName").and_then(|value| value.as_str()) {
+        if !full_name.is_empty() {
+            return Some(full_name.to_string());
+        }
+    }
+    let namespace = manifest.get("namespace").and_then(|value| value.as_str())?;
+    let name = manifest.get("name").and_then(|value| value.as_str())?;
+    (!namespace.is_empty() && !name.is_empty()).then(|| format!("{namespace}-{name}"))
+}
+
+/// Rename pre-0.8.4 ReturnOfModding folders to the `Author-ModName` layout.
+///
+/// Migration is deliberately conservative: it only renames a legacy folder when
+/// the folder's own manifest confirms it belongs to this package. A legacy
+/// folder named `ENVY` could have come from either `LuaENVY-ENVY` or
+/// `MGReturns-ENVY`, and silently attaching it to the wrong one would hand the
+/// user another mod's config. When the folder cannot identify itself it is left
+/// in place untouched.
+fn migrate_legacy_return_of_modding_folders(root: &std::path::Path, mod_name: &str) {
+    let current = return_of_modding_folder_name(mod_name);
+    let legacy = legacy_return_of_modding_folder_name(mod_name);
+    if legacy == current {
+        return;
+    }
+
+    for route in ["plugins", "plugins_data", "config"] {
+        let base = root.join("ReturnOfModding").join(route);
+        let legacy_dir = base.join(&legacy);
+        let current_dir = base.join(&current);
+
+        if !legacy_dir.is_dir() || current_dir.exists() {
+            continue;
+        }
+        // plugins_data/config hold no manifest, so they follow the plugin
+        // folder's verdict rather than being checked on their own.
+        if route == "plugins" {
+            match identify_return_of_modding_folder(&legacy_dir) {
+                Some(identity) if identity.eq_ignore_ascii_case(&current) => {}
+                Some(identity) => {
+                    log::info!(
+                        "[return_of_modding] Leaving legacy folder {:?}: it belongs to {}, not {}",
+                        legacy_dir,
+                        identity,
+                        current
+                    );
+                    return;
+                }
+                None => {
+                    log::info!(
+                        "[return_of_modding] Leaving legacy folder {:?}: its manifest does not name an author",
+                        legacy_dir
+                    );
+                    return;
+                }
+            }
+        }
+
+        match fs::rename(&legacy_dir, &current_dir) {
+            Ok(()) => log::info!(
+                "[return_of_modding] Migrated {:?} -> {:?}",
+                legacy_dir,
+                current_dir
+            ),
+            Err(error) => log::warn!(
+                "[return_of_modding] Could not migrate {:?}: {}",
+                legacy_dir,
+                error
+            ),
+        }
+    }
 }
 
 fn normalize_return_of_modding_entry(
@@ -1286,7 +1382,7 @@ fn normalize_return_of_modding_entry(
         );
     }
 
-    let package_name = thunderstore_package_name(mod_name);
+    let package_name = return_of_modding_folder_name(mod_name);
     let first = components[0].to_ascii_lowercase();
     if first == "plugins_data" || first == "config" {
         let mut target = std::path::PathBuf::from("ReturnOfModding")
@@ -1337,6 +1433,11 @@ fn extract_return_of_modding_to_root<R: std::io::Read + std::io::Seek>(
     target_root: &std::path::Path,
     mod_name: &str,
 ) -> Result<(), String> {
+    // Adopt any folder an older r2modmac wrote under the author-less name, so
+    // an update lands on top of the existing install (and its config) instead
+    // of beside it.
+    migrate_legacy_return_of_modding_folders(target_root, mod_name);
+
     for index in 0..archive.len() {
         let mut file = archive.by_index(index).map_err(|error| error.to_string())?;
         let Some(entry) = normalize_zip_entry_path(file.name()) else {
@@ -1436,18 +1537,20 @@ mod return_of_modding_tests {
         extract_return_of_modding_to_root(&mut archive, &root, "ReturnsAPI-ReturnsAPI-0.1.58")
             .unwrap();
 
-        let plugin = root.join("ReturnOfModding/plugins/ReturnsAPI");
+        let plugin = root.join("ReturnOfModding/plugins/ReturnsAPI-ReturnsAPI");
         assert_eq!(fs::read(plugin.join("main.lua")).unwrap(), b"plugin");
         assert_eq!(
             fs::read(plugin.join("nested/helper.lua")).unwrap(),
             b"helper"
         );
         assert_eq!(
-            fs::read(root.join("ReturnOfModding/plugins_data/ReturnsAPI/data.dat")).unwrap(),
+            fs::read(root.join("ReturnOfModding/plugins_data/ReturnsAPI-ReturnsAPI/data.dat"))
+                .unwrap(),
             b"data"
         );
         assert_eq!(
-            fs::read(root.join("ReturnOfModding/config/ReturnsAPI/options.cfg")).unwrap(),
+            fs::read(root.join("ReturnOfModding/config/ReturnsAPI-ReturnsAPI/options.cfg"))
+                .unwrap(),
             b"config"
         );
 
@@ -1456,11 +1559,127 @@ mod return_of_modding_tests {
         extract_return_of_modding_to_root(&mut archive, &root, "ReturnsAPI-ReturnsAPI-0.1.59")
             .unwrap();
         assert_eq!(
-            fs::read(root.join("ReturnOfModding/config/ReturnsAPI/options.cfg")).unwrap(),
+            fs::read(root.join("ReturnOfModding/config/ReturnsAPI-ReturnsAPI/options.cfg"))
+                .unwrap(),
             b"config",
             "updates must preserve the user's ReturnOfModding config"
         );
         assert!(!root.join("BepInEx").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn folder_name_keeps_the_author() {
+        assert_eq!(
+            return_of_modding_folder_name("LuaENVY-ENVY-1.2.0"),
+            "LuaENVY-ENVY"
+        );
+        assert_eq!(
+            return_of_modding_folder_name("MGReturns-ENVY-1.2.0"),
+            "MGReturns-ENVY"
+        );
+        // Without a trailing version the full name is already the folder name.
+        assert_eq!(
+            return_of_modding_folder_name("LuaENVY-ENVY"),
+            "LuaENVY-ENVY"
+        );
+    }
+
+    #[test]
+    fn same_named_mods_from_different_authors_do_not_collide() {
+        // The exact pair reported on issue #24: MGReturns-ENVY is a shim that
+        // depends on LuaENVY-ENVY and looks it up as mods['LuaENVY-ENVY'], so
+        // one overwriting the other breaks both.
+        let root = test_dir("envy");
+        fs::create_dir_all(&root).unwrap();
+
+        for (full_name, marker) in [
+            ("LuaENVY-ENVY-1.2.0", &b"lua"[..]),
+            ("MGReturns-ENVY-1.2.0", &b"mg"[..]),
+        ] {
+            let bytes = fixture(&[("manifest.json", b"{}"), ("main.lua", marker)]);
+            let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
+            extract_return_of_modding_to_root(&mut archive, &root, full_name).unwrap();
+        }
+
+        let plugins = root.join("ReturnOfModding/plugins");
+        assert_eq!(
+            fs::read(plugins.join("LuaENVY-ENVY/main.lua")).unwrap(),
+            b"lua"
+        );
+        assert_eq!(
+            fs::read(plugins.join("MGReturns-ENVY/main.lua")).unwrap(),
+            b"mg",
+            "each author must get its own folder"
+        );
+        assert!(
+            !plugins.join("ENVY").exists(),
+            "the author-less folder must no longer be written"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_legacy_folder_is_adopted_when_its_manifest_identifies_it() {
+        let root = test_dir("rom-migrate");
+        let plugins = root.join("ReturnOfModding/plugins");
+        let config = root.join("ReturnOfModding/config");
+        fs::create_dir_all(plugins.join("ENVY")).unwrap();
+        fs::create_dir_all(config.join("ENVY")).unwrap();
+        fs::write(
+            plugins.join("ENVY/manifest.json"),
+            br#"{"namespace":"LuaENVY","name":"ENVY"}"#,
+        )
+        .unwrap();
+        fs::write(config.join("ENVY/options.cfg"), b"user-setting").unwrap();
+
+        migrate_legacy_return_of_modding_folders(&root, "LuaENVY-ENVY-1.2.0");
+
+        assert!(plugins.join("LuaENVY-ENVY/manifest.json").is_file());
+        assert!(!plugins.join("ENVY").exists());
+        assert_eq!(
+            fs::read(config.join("LuaENVY-ENVY/options.cfg")).unwrap(),
+            b"user-setting",
+            "the user's config must follow the rename"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_legacy_folder_belonging_to_another_author_is_left_alone() {
+        let root = test_dir("rom-migrate-wrong");
+        let plugins = root.join("ReturnOfModding/plugins");
+        fs::create_dir_all(plugins.join("ENVY")).unwrap();
+        fs::write(
+            plugins.join("ENVY/manifest.json"),
+            br#"{"namespace":"LuaENVY","name":"ENVY"}"#,
+        )
+        .unwrap();
+
+        migrate_legacy_return_of_modding_folders(&root, "MGReturns-ENVY-1.2.0");
+
+        assert!(
+            plugins.join("ENVY").exists(),
+            "a folder owned by a different author must not be claimed"
+        );
+        assert!(!plugins.join("MGReturns-ENVY").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn an_unidentifiable_legacy_folder_is_left_alone() {
+        // Older Thunderstore manifests carry no namespace, so the folder cannot
+        // prove which author it came from — guessing could hand over another
+        // mod's config.
+        let root = test_dir("rom-migrate-unknown");
+        let plugins = root.join("ReturnOfModding/plugins");
+        fs::create_dir_all(plugins.join("ENVY")).unwrap();
+        fs::write(plugins.join("ENVY/manifest.json"), br#"{"name":"ENVY"}"#).unwrap();
+
+        migrate_legacy_return_of_modding_folders(&root, "LuaENVY-ENVY-1.2.0");
+
+        assert!(plugins.join("ENVY").exists());
+        assert!(!plugins.join("LuaENVY-ENVY").exists());
         fs::remove_dir_all(root).unwrap();
     }
 }
@@ -3963,7 +4182,7 @@ pub async fn remove_mod(
         .join(&profile_id);
     let plugins_dir = profile_dir.join("BepInEx").join("plugins");
     let return_of_modding_plugins = profile_dir.join("ReturnOfModding").join("plugins");
-    let return_of_modding_name = thunderstore_package_name(&mod_name);
+    let return_of_modding_name = return_of_modding_folder_name(&mod_name);
     let return_of_modding_mod = return_of_modding_plugins.join(&return_of_modding_name);
     if return_of_modding_mod.is_dir() {
         fs::remove_dir_all(return_of_modding_mod).map_err(|error| error.to_string())?;
@@ -4041,7 +4260,7 @@ pub async fn open_mod_folder(
         let target = game_root
             .join("ReturnOfModding")
             .join("plugins")
-            .join(thunderstore_package_name(&mod_name));
+            .join(return_of_modding_folder_name(&mod_name));
         if target.is_dir() {
             open::that(&target)
                 .map_err(|error| format!("Failed to open ReturnOfModding mod folder: {error}"))?;
@@ -4433,7 +4652,12 @@ pub async fn copy_mod_from_cache(
                 return Ok(serde_json::json!({ "success": true, "copied": true }));
             }
         } else {
-            let package_name = thunderstore_package_name(&mod_name);
+            // The game folder may still hold author-less folders from an older
+            // r2modmac; adopt them so the user's config survives the rename.
+            migrate_legacy_return_of_modding_folders(&profile_dir, &mod_name);
+            migrate_legacy_return_of_modding_folders(game_dir, &mod_name);
+
+            let package_name = return_of_modding_folder_name(&mod_name);
             let source_root = profile_dir.join("ReturnOfModding");
             let game_root = game_dir.join("ReturnOfModding");
             let mut copied = false;
