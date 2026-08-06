@@ -105,7 +105,7 @@ pub(crate) fn macos_steam_launch_option_matches_desired(
         }
 
         if managed_macos_launch_option_semantically_matches_desired(&current, &desired, game_path) {
-            eprintln!(
+            log::debug!(
                 "[macos_steam_launch_option_matches_desired] semantically equivalent managed option for app_id={} localconfig={} current={:?} desired={:?}",
                 app_id,
                 localconfig_path.display(),
@@ -130,14 +130,14 @@ pub(crate) fn macos_steam_launch_option_matches_desired(
         // current desired one (commonly after runtime arch/script changes).
         // Let caller reconcile the option.
         if saw_managed_arch_mismatch {
-            eprintln!(
+            log::warn!(
                 "[macos_steam_launch_option_matches_desired] managed option arch mismatch for app_id={} game_path={} desired={:?}",
                 app_id,
                 game_path.display(),
                 desired
             );
         } else {
-            eprintln!(
+            log::warn!(
                 "[macos_steam_launch_option_matches_desired] managed option mismatch for app_id={} game_path={} desired={:?}",
                 app_id,
                 game_path.display(),
@@ -147,7 +147,7 @@ pub(crate) fn macos_steam_launch_option_matches_desired(
         return Ok(false);
     }
 
-    eprintln!(
+    log::debug!(
         "[macos_steam_launch_option_matches_desired] no matching launch option for app_id={} game_path={} desired={:?}",
         app_id,
         game_path.display(),
@@ -340,7 +340,7 @@ pub(crate) fn ensure_macos_steam_launch_options(
     relaunch_steam_after_update: bool,
 ) -> Result<(), String> {
     let ensure_started = std::time::Instant::now();
-    eprintln!(
+    log::debug!(
         "[ensure_macos_steam_launch_options] start enable_mods={} relaunch_after_update={} game_path={}",
         enable_mods,
         relaunch_steam_after_update,
@@ -397,7 +397,7 @@ pub(crate) fn ensure_macos_steam_launch_options(
         );
     }
 
-    eprintln!(
+    log::debug!(
         "[ensure_macos_steam_launch_options] app_id={} localconfigs={}",
         app_id,
         localconfig_paths
@@ -424,7 +424,7 @@ pub(crate) fn ensure_macos_steam_launch_options(
                 emit_steam_launch_options_restart_event(app);
             }
             steam_was_running = Some(quit_steam_if_running(&steam_roots)?);
-            eprintln!(
+            log::debug!(
                 "[ensure_macos_steam_launch_options] ensure_steam_stopped elapsed_ms={} steam_was_running={}",
                 stop_started.elapsed().as_millis(),
                 steam_was_running.unwrap_or(false)
@@ -450,7 +450,7 @@ pub(crate) fn ensure_macos_steam_launch_options(
         match fs::write(localconfig_path, updated_text) {
             Ok(()) => Ok(()),
             Err(first_error) => {
-                eprintln!(
+                log::warn!(
                         "[ensure_macos_steam_launch_options] initial {} write failed with Steam.app not running (localconfig={}): {}. Retrying after clearing stale Steam helpers...",
                         action,
                         localconfig_path.display(),
@@ -468,7 +468,7 @@ pub(crate) fn ensure_macos_steam_launch_options(
         let localconfig = match fs::read_to_string(&localconfig_path) {
             Ok(localconfig) => localconfig,
             Err(error) => {
-                eprintln!(
+                log::warn!(
                     "[ensure_macos_steam_launch_options] skipping unreadable localconfig {}: {}",
                     localconfig_path.display(),
                     error
@@ -486,7 +486,7 @@ pub(crate) fn ensure_macos_steam_launch_options(
             match update_launch_options_in_localconfig(&localconfig, &app_id, desired) {
                 Ok(result) => result,
                 Err(error) => {
-                    eprintln!(
+                    log::warn!(
                         "[ensure_macos_steam_launch_options] skipping localconfig {}: {}",
                         localconfig_path.display(),
                         error
@@ -547,7 +547,7 @@ pub(crate) fn ensure_macos_steam_launch_options(
                         localconfig_path.display()
                     ));
                 }
-                eprintln!(
+                log::debug!(
                     "[ensure_macos_steam_launch_options] updated localconfig={} elapsed_ms={}",
                     localconfig_path.display(),
                     write_started.elapsed().as_millis()
@@ -583,7 +583,7 @@ pub(crate) fn ensure_macos_steam_launch_options(
                         localconfig_path.display()
                     ));
                 }
-                eprintln!(
+                log::debug!(
                     "[ensure_macos_steam_launch_options] restored localconfig={} elapsed_ms={}",
                     localconfig_path.display(),
                     write_started.elapsed().as_millis()
@@ -611,14 +611,14 @@ pub(crate) fn ensure_macos_steam_launch_options(
                     localconfig_path.display()
                 ));
             }
-            eprintln!(
+            log::debug!(
                 "[ensure_macos_steam_launch_options] cleared localconfig={} elapsed_ms={}",
                 localconfig_path.display(),
                 write_started.elapsed().as_millis()
             );
         }
 
-        eprintln!(
+        log::debug!(
             "[ensure_macos_steam_launch_options] processed localconfig={} total_elapsed_ms={}",
             localconfig_path.display(),
             localconfig_started.elapsed().as_millis()
@@ -646,23 +646,23 @@ pub(crate) fn ensure_macos_steam_launch_options(
 
     if steam_was_running.unwrap_or(false) {
         if relaunch_steam_after_update {
-            eprintln!(
+            log::info!(
                 "[ensure_macos_steam_launch_options] Steam was closed to update launch options; relaunching Steam now because no immediate steam://run launch follows."
             );
             let relaunch_started = std::time::Instant::now();
             relaunch_macos_steam_if_needed(&steam_root_for_config);
-            eprintln!(
+            log::debug!(
                 "[ensure_macos_steam_launch_options] relaunch_requested elapsed_ms={}",
                 relaunch_started.elapsed().as_millis()
             );
         } else {
-            eprintln!(
+            log::debug!(
                 "[ensure_macos_steam_launch_options] Steam was closed to update launch options; leaving it closed so the upcoming steam://run launch starts Steam and the game together."
             );
         }
     }
 
-    eprintln!(
+    log::debug!(
         "[ensure_macos_steam_launch_options] done app_id={} total_elapsed_ms={}",
         app_id,
         ensure_started.elapsed().as_millis()

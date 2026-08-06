@@ -267,7 +267,7 @@ pub(crate) fn configure_macos_bepinex_script(
         || has_unexpanded_template_braces
         || has_legacy_bepinex_bootstrap_log;
     if needs_regeneration {
-        eprintln!(
+        log::debug!(
             "[configure_macos_bepinex_script] Regenerating script (has_doorstop={} early_exit_before_doorstop_ok={} early_exit_before_dyld_ok={} root_fallback_ok={} steam_launch_order_ok={} root_bootstrap_log_ok={} removes_codesign_signature={} has_codesign_cache_guard={} logs_loader_environment={} has_arch_env_exec={} has_dyld_loader_logging={} has_exec_failure_logging={} wrapper_modded_exec_support={} arm64_x64_fallback_retry={} preloader_crash_arch_recovery={} persistent_x64_state={} cross_generation_doorstop_bool_flags={} launch_entry_support={} steamemu_runtime_prep={} vanilla_steamemu_direct_launch={} steamemu_runtime_cleanup={} preserves_steam_dyld_hooks={} steam_launch_exec_deferred={} legacy_bepinex_bootstrap_log={}).",
             has_macos_doorstop_support(&script),
             early_exit_before_doorstop_validation,

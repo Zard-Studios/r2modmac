@@ -32,7 +32,7 @@ pub(crate) fn configure_linux_compat_runner_command(
 ) -> Result<(), String> {
     if let Some(prefix_root) = prefix_root {
         command.env("WINEPREFIX", prefix_root);
-        eprintln!(
+        log::debug!(
             "[compat_runner] Using Wine prefix {:?} with linux runner",
             prefix_root
         );

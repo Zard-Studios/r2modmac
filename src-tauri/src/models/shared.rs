@@ -100,9 +100,10 @@ impl AppState {
                 let mut order = self.packages_order.lock().await;
                 for id in &to_drop {
                     if packages_lock.remove(id).is_some() {
-                        eprintln!(
+                        log::debug!(
                             "[packages-cache] evicted {} (limit {})",
-                            id, MAX_CACHED_GAMES
+                            id,
+                            MAX_CACHED_GAMES
                         );
                     }
                 }
@@ -168,6 +169,12 @@ pub struct Settings {
     pub sponsored_messages_scale: u8,
     #[serde(default = "default_sponsor_opacity")]
     pub sponsored_messages_background_opacity: u8,
+    /// Emit the per-file/per-mod tracing that is otherwise suppressed.
+    ///
+    /// Off by default so the rotating log stays short enough to be useful in a
+    /// bug report; users turn it on to capture detail for one reproduction.
+    #[serde(default = "default_false")]
+    pub verbose_logging: bool,
 }
 
 impl Settings {
@@ -193,6 +200,7 @@ impl Settings {
             sponsored_messages_enabled: true,
             sponsored_messages_scale: default_sponsor_scale(),
             sponsored_messages_background_opacity: default_sponsor_opacity(),
+            verbose_logging: false,
         }
     }
 }

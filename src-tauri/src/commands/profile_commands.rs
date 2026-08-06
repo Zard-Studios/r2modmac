@@ -124,7 +124,7 @@ pub async fn delete_profile_folder(
             // Remove BepInEx folder
             let bepinex_path = game_path.join("BepInEx");
             if bepinex_path.exists() {
-                eprintln!("[delete_profile] Removing BepInEx folder from game");
+                log::debug!("[delete_profile] Removing BepInEx folder from game");
                 let _ = fs::remove_dir_all(&bepinex_path);
                 removed_runtime_artifact = true;
             }
@@ -132,7 +132,7 @@ pub async fn delete_profile_folder(
             // Remove winhttp.dll
             let winhttp_path = game_path.join("winhttp.dll");
             if winhttp_path.exists() {
-                eprintln!("[delete_profile] Removing winhttp.dll from game");
+                log::debug!("[delete_profile] Removing winhttp.dll from game");
                 let _ = fs::remove_file(&winhttp_path);
                 removed_runtime_artifact = true;
             }
@@ -140,7 +140,7 @@ pub async fn delete_profile_folder(
             // Remove doorstop_config.ini
             let doorstop_path = game_path.join("doorstop_config.ini");
             if doorstop_path.exists() {
-                eprintln!("[delete_profile] Removing doorstop_config.ini from game");
+                log::debug!("[delete_profile] Removing doorstop_config.ini from game");
                 let _ = fs::remove_file(&doorstop_path);
                 removed_runtime_artifact = true;
             }
@@ -152,22 +152,22 @@ pub async fn delete_profile_folder(
                 // 1. Restore vanilla Assembly-CSharp.dll BEFORE removing OWML,
                 //    so the backup lookup still works if it was inside the game root.
                 if let Err(e) = restore_outerwilds_vanilla(game_path) {
-                    eprintln!(
+                    log::error!(
                         "[delete_profile] Could not restore vanilla DLL (non-fatal): {}",
                         e
                     );
                 } else {
-                    eprintln!("[delete_profile] Restored vanilla Assembly-CSharp.dll");
+                    log::debug!("[delete_profile] Restored vanilla Assembly-CSharp.dll");
                 }
 
                 // 1a. Restore vanilla mscorlib.dll and delete its backup.
                 if let Err(e) = restore_mscorlib_vanilla(game_path, true) {
-                    eprintln!(
+                    log::error!(
                         "[delete_profile] Could not restore vanilla mscorlib.dll (non-fatal): {}",
                         e
                     );
                 } else {
-                    eprintln!("[delete_profile] Restored vanilla mscorlib.dll");
+                    log::debug!("[delete_profile] Restored vanilla mscorlib.dll");
                 }
 
                 // 1b. Clean up boot.config modifications.
@@ -179,14 +179,14 @@ pub async fn delete_profile_folder(
                             .replace("\r\n\r\n", "\r\n")
                             .replace("\n\n", "\n");
                         let _ = fs::write(&boot_config_path, updated);
-                        eprintln!("[delete_profile] Restored boot.config");
+                        log::debug!("[delete_profile] Restored boot.config");
                     }
                 }
 
                 // 2. Remove OWML folder (the whole mod runtime, not just Mods/).
                 let owml_dir = game_path.join("OWML");
                 if owml_dir.exists() {
-                    eprintln!("[delete_profile] Removing OWML folder from game");
+                    log::debug!("[delete_profile] Removing OWML folder from game");
                     let _ = fs::remove_dir_all(&owml_dir);
                     removed_runtime_artifact = true;
                 }
@@ -194,7 +194,7 @@ pub async fn delete_profile_folder(
                 // 3. Also remove OWML_DISABLED if it was left from a vanilla launch.
                 let owml_disabled_dir = game_path.join("OWML_DISABLED");
                 if owml_disabled_dir.exists() {
-                    eprintln!("[delete_profile] Removing OWML_DISABLED folder from game");
+                    log::debug!("[delete_profile] Removing OWML_DISABLED folder from game");
                     let _ = fs::remove_dir_all(&owml_disabled_dir);
                     removed_runtime_artifact = true;
                 }
@@ -203,7 +203,7 @@ pub async fn delete_profile_folder(
                 let patcher_exe = game_path.join("OWMLPatcher.exe");
                 if patcher_exe.exists() {
                     let _ = fs::remove_file(&patcher_exe);
-                    eprintln!("[delete_profile] Removed OWMLPatcher.exe");
+                    log::debug!("[delete_profile] Removed OWMLPatcher.exe");
                 }
             }
 
@@ -219,7 +219,7 @@ pub async fn delete_profile_folder(
                 ] {
                     let dir_path = game_path.join(dir_name);
                     if dir_path.exists() {
-                        eprintln!("[delete_profile] Removing {} from game", dir_name);
+                        log::debug!("[delete_profile] Removing {} from game", dir_name);
                         let _ = fs::remove_dir_all(&dir_path);
                         removed_runtime_artifact = true;
                     }
@@ -236,7 +236,7 @@ pub async fn delete_profile_folder(
                 ] {
                     let file_path = game_path.join(file_name);
                     if file_path.exists() {
-                        eprintln!("[delete_profile] Removing {} from game", file_name);
+                        log::debug!("[delete_profile] Removing {} from game", file_name);
                         let _ = fs::remove_file(&file_path);
                         removed_runtime_artifact = true;
                     }
@@ -249,7 +249,7 @@ pub async fn delete_profile_folder(
                         if path.is_file()
                             && (is_bepinex_shell_script(&name) || name.ends_with("_DISABLED"))
                         {
-                            eprintln!("[delete_profile] Removing {} from game", name);
+                            log::debug!("[delete_profile] Removing {} from game", name);
                             let _ = fs::remove_file(&path);
                             removed_runtime_artifact = true;
                         }
@@ -260,7 +260,7 @@ pub async fn delete_profile_folder(
                     for file_name in ["manifest.json", "README.md", "readme.md", "icon.png"] {
                         let file_path = game_path.join(file_name);
                         if file_path.exists() {
-                            eprintln!("[delete_profile] Removing {} from game", file_name);
+                            log::debug!("[delete_profile] Removing {} from game", file_name);
                             let _ = fs::remove_file(&file_path);
                         }
                     }
@@ -270,7 +270,10 @@ pub async fn delete_profile_folder(
                     for file_name in ["run_lovely_macos.sh", "liblovely.dylib"] {
                         let file_path = game_path.join(file_name);
                         if file_path.exists() {
-                            eprintln!("[delete_profile] Removing {} from Balatro root", file_name);
+                            log::debug!(
+                                "[delete_profile] Removing {} from Balatro root",
+                                file_name
+                            );
                             let _ = fs::remove_file(&file_path);
                         }
                     }
@@ -282,7 +285,7 @@ pub async fn delete_profile_folder(
                             .unwrap_or_else(|| mods_dir.join("Mods_DISABLED"));
                         for dir_path in [mods_dir.clone(), disabled_dir] {
                             if dir_path.exists() {
-                                eprintln!(
+                                log::debug!(
                                     "[delete_profile] Removing Balatro mods dir {:?}",
                                     dir_path
                                 );
@@ -293,7 +296,7 @@ pub async fn delete_profile_folder(
                 }
             }
 
-            eprintln!(
+            log::debug!(
                 "[delete_profile] Cleaned up game folder: {}",
                 game_path.display()
             );
@@ -315,23 +318,23 @@ pub async fn open_profile_folder(app: AppHandle, profile_id: String) -> Result<(
         .unwrap()
         .join("profiles")
         .join(&profile_id);
-    eprintln!(
+    log::debug!(
         "[open_profile_folder] Attempting to open: {:?}",
         profile_dir
     );
 
     // Create the folder if it doesn't exist
     if !profile_dir.exists() {
-        eprintln!("[open_profile_folder] Folder doesn't exist, creating it...");
+        log::debug!("[open_profile_folder] Folder doesn't exist, creating it...");
         fs::create_dir_all(&profile_dir).map_err(|e| e.to_string())?;
     }
 
-    eprintln!("[open_profile_folder] Opening folder in Finder...");
+    log::debug!("[open_profile_folder] Opening folder in Finder...");
     open::that(&profile_dir).map_err(|e| {
-        eprintln!("[open_profile_folder] Failed to open: {}", e);
+        log::error!("[open_profile_folder] Failed to open: {}", e);
         e.to_string()
     })?;
-    eprintln!("[open_profile_folder] Success!");
+    log::debug!("[open_profile_folder] Success!");
     Ok(())
 }
 
@@ -360,7 +363,7 @@ pub async fn clear_profile_cache(
                             if let Ok(size) = calculate_dir_size(&cache_dir) {
                                 size_freed += size;
                             }
-                            eprintln!("[clear_profile_cache] Removing: {:?}", cache_dir);
+                            log::debug!("[clear_profile_cache] Removing: {:?}", cache_dir);
                             let _ = fs::remove_dir_all(&cache_dir);
                             cleared += 1;
                         }
@@ -399,7 +402,7 @@ pub async fn clear_profile_cache(
                     if let Ok(meta) = entry.metadata() {
                         size_freed += meta.len();
                     }
-                    eprintln!(
+                    log::debug!(
                         "[clear_profile_cache] Removing package cache file: {}",
                         name
                     );
@@ -414,9 +417,11 @@ pub async fn clear_profile_cache(
         platform_cache.clear();
     }
 
-    eprintln!(
+    log::debug!(
         "[clear_profile_cache] Cleared {} profile caches, removed {} chunk files, freed {} bytes",
-        cleared, chunk_files_removed, size_freed
+        cleared,
+        chunk_files_removed,
+        size_freed
     );
 
     Ok(serde_json::json!({

@@ -545,7 +545,7 @@ pub(crate) fn run_owml_patcher(game_path: &Path) -> Result<(), String> {
     let owml_dir =
         crate::models::shared::get_owml_dir(game_path).unwrap_or_else(|| game_path.join("OWML"));
     let patcher_path = write_owml_patcher(&owml_dir)?;
-    eprintln!(
+    log::debug!(
         "[run_owml_patcher] Wrote OWMLPatcher.exe to {:?}",
         patcher_path
     );
@@ -558,7 +558,7 @@ pub(crate) fn run_owml_patcher(game_path: &Path) -> Result<(), String> {
         let runner_path = find_host_compat_runner_binary(prefix_root.as_deref(), &patcher_path)
             .ok_or_else(|| "No compatible Wine/CrossOver runner found to execute OWMLPatcher.exe. Make sure CrossOver or Wine is installed.".to_string())?;
 
-        eprintln!("[run_owml_patcher] Running patcher via {:?}", runner_path);
+        log::debug!("[run_owml_patcher] Running patcher via {:?}", runner_path);
 
         let mut command = std::process::Command::new(&runner_path);
         configure_host_compat_runner_command(&mut command, &runner_path, prefix_root.as_deref())?;
@@ -571,9 +571,9 @@ pub(crate) fn run_owml_patcher(game_path: &Path) -> Result<(), String> {
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
-        eprintln!("[run_owml_patcher] stdout: {}", stdout);
+        log::debug!("[run_owml_patcher] stdout: {}", stdout);
         if !stderr.is_empty() {
-            eprintln!("[run_owml_patcher] stderr: {}", stderr);
+            log::debug!("[run_owml_patcher] stderr: {}", stderr);
         }
 
         if !output.status.success() {
@@ -587,7 +587,7 @@ pub(crate) fn run_owml_patcher(game_path: &Path) -> Result<(), String> {
 
     #[cfg(target_os = "windows")]
     {
-        eprintln!("[run_owml_patcher] Running patcher natively on Windows");
+        log::debug!("[run_owml_patcher] Running patcher natively on Windows");
 
         let mut command = std::process::Command::new(&patcher_path);
         command.current_dir(game_path);
@@ -598,9 +598,9 @@ pub(crate) fn run_owml_patcher(game_path: &Path) -> Result<(), String> {
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
-        eprintln!("[run_owml_patcher] stdout: {}", stdout);
+        log::debug!("[run_owml_patcher] stdout: {}", stdout);
         if !stderr.is_empty() {
-            eprintln!("[run_owml_patcher] stderr: {}", stderr);
+            log::debug!("[run_owml_patcher] stderr: {}", stderr);
         }
 
         if !output.status.success() {
@@ -612,6 +612,6 @@ pub(crate) fn run_owml_patcher(game_path: &Path) -> Result<(), String> {
         }
     }
 
-    eprintln!("[run_owml_patcher] Patcher completed successfully.");
+    log::debug!("[run_owml_patcher] Patcher completed successfully.");
     Ok(())
 }

@@ -98,7 +98,7 @@ pub async fn check_update_secure(current_version: String) -> Result<UpdateInfo, 
         .and_then(serde_json::Value::as_str)
         .map(str::to_string);
 
-    eprintln!(
+    log::debug!(
         "[check_update] Detected OS: {}, architecture: {}, selected asset: {:?}",
         std::env::consts::OS,
         std::env::consts::ARCH,

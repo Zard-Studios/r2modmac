@@ -15,6 +15,7 @@ export interface AppSettings {
     install_in_parallel?: boolean;
     confirm_before_apply_to_game?: boolean;
     write_debug_logs_to_game?: boolean;
+    verbose_logging?: boolean;
     default_mod_view_mode?: 'grid' | 'list';
     show_deprecated_warnings?: boolean;
     hide_crossover_guide?: boolean;
@@ -147,6 +148,8 @@ export interface IElectronAPI {
     writeProfileConfigFile: (profileId: string, relativePath: string, content: string, root?: string) => Promise<boolean>;
     revealProfileConfigFile: (profileId: string, relativePath: string, root?: string) => Promise<void>;
     openProfileConfigFile: (profileId: string, relativePath: string, root?: string) => Promise<void>;
+    openAppLogsFolder: () => Promise<void>;
+    setVerboseLogging: (enabled: boolean) => Promise<void>;
 }
 
 export interface UpdateInfo {

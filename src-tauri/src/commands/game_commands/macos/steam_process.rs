@@ -111,11 +111,11 @@ pub(crate) fn quit_steam_if_running(steam_roots: &[std::path::PathBuf]) -> Resul
         }
 
         if steam_app_was_running {
-            eprintln!(
+            log::debug!(
                 "[quit_steam_if_running] Steam is running — force killing Steam processes to apply launch option changes immediately..."
             );
         } else {
-            eprintln!(
+            log::debug!(
                 "[quit_steam_if_running] Steam.app is not running, but helper processes are still alive — clearing stale Steam helpers before launch option update..."
             );
         }
@@ -154,17 +154,17 @@ pub(crate) fn quit_steam_if_running(steam_roots: &[std::path::PathBuf]) -> Resul
 
         if has_macos_steam_processes(steam_roots) {
             let leftovers = collect_macos_steam_process_snapshot();
-            eprintln!(
+            log::debug!(
                 "[quit_steam_if_running] Some Steam processes are still present after force-kill; proceeding anyway."
             );
             if !leftovers.is_empty() {
-                eprintln!(
+                log::debug!(
                     "[quit_steam_if_running] leftover_processes={}",
                     leftovers.join(" | ")
                 );
             }
         } else {
-            eprintln!("[quit_steam_if_running] Steam processes terminated.");
+            log::debug!("[quit_steam_if_running] Steam processes terminated.");
         }
 
         return Ok(steam_app_was_running);
@@ -188,10 +188,10 @@ pub(crate) fn relaunch_macos_steam_if_needed(_steam_root: &std::path::Path) {
         .stderr(std::process::Stdio::null())
         .spawn()
     else {
-        eprintln!("[relaunch_macos_steam_if_needed] Failed to issue Steam relaunch request.");
+        log::error!("[relaunch_macos_steam_if_needed] Failed to issue Steam relaunch request.");
         return;
     };
-    eprintln!("[relaunch_macos_steam_if_needed] Steam relaunch requested.");
+    log::debug!("[relaunch_macos_steam_if_needed] Steam relaunch requested.");
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -218,7 +218,7 @@ pub(crate) fn ensure_macos_steam_running_for_launch(app: &AppHandle) {
             .spawn()
         {
             Ok(child) => {
-                eprintln!(
+                log::info!(
                     "[launch_via_steam_for_game_path] Steam startup requested via `/usr/bin/open {}` pid={}",
                     args.join(" "),
                     child.id()
@@ -227,7 +227,7 @@ pub(crate) fn ensure_macos_steam_running_for_launch(app: &AppHandle) {
                 break;
             }
             Err(error) => {
-                eprintln!(
+                log::warn!(
                     "[launch_via_steam_for_game_path] Steam startup attempt failed via `/usr/bin/open {}` error={}",
                     args.join(" "),
                     error
@@ -248,7 +248,7 @@ pub(crate) fn ensure_macos_steam_running_for_launch(app: &AppHandle) {
                 .spawn()
             {
                 Ok(child) => {
-                    eprintln!(
+                    log::info!(
                         "[launch_via_steam_for_game_path] Steam startup requested via `{}` pid={}",
                         steam_binary.display(),
                         child.id()
@@ -257,7 +257,7 @@ pub(crate) fn ensure_macos_steam_running_for_launch(app: &AppHandle) {
                     break;
                 }
                 Err(error) => {
-                    eprintln!(
+                    log::warn!(
                         "[launch_via_steam_for_game_path] Steam binary launch failed path={} error={}",
                         steam_binary.display(),
                         error
@@ -268,7 +268,9 @@ pub(crate) fn ensure_macos_steam_running_for_launch(app: &AppHandle) {
     }
 
     if !started {
-        eprintln!("[launch_via_steam_for_game_path] Failed to start Steam.app before steam://run.");
+        log::error!(
+            "[launch_via_steam_for_game_path] Failed to start Steam.app before steam://run."
+        );
         return;
     }
 
@@ -277,7 +279,7 @@ pub(crate) fn ensure_macos_steam_running_for_launch(app: &AppHandle) {
         if is_steam_app_running_on_macos()
             && !collect_macos_steam_process_ids(&steam_roots).is_empty()
         {
-            eprintln!(
+            log::info!(
                 "[launch_via_steam_for_game_path] Steam startup observed elapsed_ms={}",
                 observe_started.elapsed().as_millis()
             );
@@ -286,7 +288,7 @@ pub(crate) fn ensure_macos_steam_running_for_launch(app: &AppHandle) {
         std::thread::sleep(std::time::Duration::from_millis(200));
     }
 
-    eprintln!(
+    log::warn!(
         "[launch_via_steam_for_game_path] Steam startup not fully observed; continuing with steam://run dispatch."
     );
 }

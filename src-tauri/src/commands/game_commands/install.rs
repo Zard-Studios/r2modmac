@@ -45,7 +45,7 @@ pub async fn install_to_game(
 
     // Check is_vanilla - prefer override from frontend (for timing issues)
     let is_vanilla = if let Some(override_val) = is_vanilla_override {
-        eprintln!(
+        log::debug!(
             "[install_to_game] Using is_vanilla override: {}",
             override_val
         );
@@ -71,7 +71,7 @@ pub async fn install_to_game(
         vanilla
     };
 
-    eprintln!(
+    log::debug!(
         "[install_to_game] platform={} stored_distribution={} effective_distribution={} launch_mode={} manage_steam_launch={}",
         profile_platform,
         get_profile_distribution(&app, &profile_id),
@@ -82,15 +82,15 @@ pub async fn install_to_game(
 
     if is_vanilla {
         if is_mac_profile {
-            eprintln!(
+            log::info!(
                 "[install_to_game] Profile is in VANILLA mode on macOS. Runtime will be disabled now, and any managed Steam launch option will be cleared when the user presses Play."
             );
         } else {
-            eprintln!("[install_to_game] Profile is in VANILLA mode. Cleaning game folder.");
+            log::info!("[install_to_game] Profile is in VANILLA mode. Cleaning game folder.");
         }
     }
 
-    eprintln!("[install_to_game] Disabled mods: {:?}", disabled_mods);
+    log::debug!("[install_to_game] Disabled mods: {:?}", disabled_mods);
 
     let is_balatro_profile = is_mac_profile
         && (is_balatro_identifier(&game_identifier) || is_balatro_game_path(game_path));
@@ -105,7 +105,7 @@ pub async fn install_to_game(
     {
         let resolved = resolve_macos_runtime_root(game_path);
         if resolved != game_path {
-            eprintln!(
+            log::info!(
                 "[install_to_game] Resolved macOS runtime root {} -> {}",
                 game_path.display(),
                 resolved.display()
@@ -144,18 +144,18 @@ pub async fn install_to_game(
                     let _ = fs::remove_dir_all(&owml_disabled);
                 }
                 let _ = fs::rename(&owml_folder, &owml_disabled);
-                eprintln!("[install_to_game] Renamed OWML -> OWML_DISABLED");
+                log::info!("[install_to_game] Renamed OWML -> OWML_DISABLED");
             }
         } else {
             if owml_disabled.exists() && !owml_folder.exists() {
                 let _ = fs::rename(&owml_disabled, &owml_folder);
-                eprintln!("[install_to_game] Restored OWML_DISABLED -> OWML");
+                log::info!("[install_to_game] Restored OWML_DISABLED -> OWML");
             }
             restore_outerwilds_modded(&game_path).ok();
         }
         // Outer Wilds uses OWML; no BepInEx operations needed here.
         // install_mod_bytes handles all OWML-specific installation.
-        eprintln!(
+        log::debug!(
             "[install_to_game] Outer Wilds profile - skipping BepInEx install, OWML manages mods."
         );
         return Ok(());
@@ -176,7 +176,7 @@ pub async fn install_to_game(
             fs::rename(&disabled_loader, &loader)
                 .map_err(|error| format!("Failed to enable ReturnOfModding: {error}"))?;
         }
-        eprintln!("[install_to_game] Risk of Rain Returns profile - skipping BepInEx operations");
+        log::debug!("[install_to_game] Risk of Rain Returns profile - skipping BepInEx operations");
         return Ok(());
     }
 
@@ -194,7 +194,7 @@ pub async fn install_to_game(
                 fs::rename(&mods_dir, &disabled_dir)
                     .map_err(|e| format!("Failed to disable Balatro mods: {}", e))?;
             }
-            eprintln!("[install_to_game] Balatro vanilla mode complete.");
+            log::info!("[install_to_game] Balatro vanilla mode complete.");
             return Ok(());
         }
 
@@ -213,7 +213,7 @@ pub async fn install_to_game(
             dequarantine_recursive(&mods_dir);
         }
 
-        eprintln!("[install_to_game] Balatro sync complete!");
+        log::info!("[install_to_game] Balatro sync complete!");
         return Ok(());
     }
 
@@ -252,7 +252,7 @@ pub async fn install_to_game(
                         nested_pack.join(bepinex_sentinel_file).exists()
                     };
                     if sentinel_exists {
-                        eprintln!(
+                        log::debug!(
                             "[install_to_game] Found nested BepInExPack candidate: {:?}",
                             nested_pack
                         );
@@ -274,7 +274,7 @@ pub async fn install_to_game(
                         if folder_name.contains("bepinex") {
                             score += 1;
                         }
-                        eprintln!("[install_to_game] Found direct BepInExPack candidate: {:?} (score: {})", path, score);
+                        log::debug!("[install_to_game] Found direct BepInExPack candidate: {:?} (score: {})", path, score);
                         if best_candidate.as_ref().map_or(true, |(_, s)| score > *s) {
                             best_candidate = Some((path.clone(), score));
                         }
@@ -310,9 +310,10 @@ pub async fn install_to_game(
             }
 
             if let Some((pack_dir, score)) = best_candidate {
-                eprintln!(
+                log::debug!(
                     "[install_to_game] Selected BepInExPack: {:?} (score: {})",
-                    pack_dir, score
+                    pack_dir,
+                    score
                 );
 
                 if is_mac_profile {
@@ -324,7 +325,7 @@ pub async fn install_to_game(
                     let doorstop_libs_src = pack_dir.join("doorstop_libs");
                     let doorstop_libs_dst = profile_dir.join("doorstop_libs");
                     if doorstop_libs_src.exists() && !doorstop_libs_dst.exists() {
-                        eprintln!("[install_to_game] Copying doorstop_libs/ to profile root");
+                        log::debug!("[install_to_game] Copying doorstop_libs/ to profile root");
                         copy_dir_recursive(&doorstop_libs_src, &doorstop_libs_dst)
                             .map_err(|e| format!("Failed to copy doorstop_libs: {}", e))?;
                     }
@@ -332,7 +333,7 @@ pub async fn install_to_game(
                     if let Some(run_script_src) = find_bepinex_script_in_dir(&pack_dir) {
                         let run_script_dst = profile_dir.join("run_bepinex.sh");
                         if !run_script_dst.exists() {
-                            eprintln!("[install_to_game] Copying run_bepinex.sh to profile root");
+                            log::debug!("[install_to_game] Copying run_bepinex.sh to profile root");
                             fs::copy(&run_script_src, &run_script_dst)
                                 .map_err(|e| format!("Failed to copy run_bepinex.sh: {}", e))?;
                             #[cfg(unix)]
@@ -346,14 +347,14 @@ pub async fn install_to_game(
                             }
                         }
                     } else {
-                        eprintln!("[install_to_game] Cached BepInEx pack has no macOS script; relying on profile/game root runtime fallback");
+                        log::warn!("[install_to_game] Cached BepInEx pack has no macOS script; relying on profile/game root runtime fallback");
                     }
 
                     // Also copy doorstop_config.ini for macOS
                     let doorstop_cfg_src = pack_dir.join("doorstop_config.ini");
                     let doorstop_cfg_dst = profile_dir.join("doorstop_config.ini");
                     if doorstop_cfg_src.exists() && !doorstop_cfg_dst.exists() {
-                        eprintln!(
+                        log::debug!(
                             "[install_to_game] Copying doorstop_config.ini (macOS) to profile root"
                         );
                         fs::copy(&doorstop_cfg_src, &doorstop_cfg_dst)
@@ -365,7 +366,7 @@ pub async fn install_to_game(
                     let winhttp_src = pack_dir.join("winhttp.dll");
                     let winhttp_dst = profile_dir.join("winhttp.dll");
                     if winhttp_src.exists() && !winhttp_dst.exists() {
-                        eprintln!("[install_to_game] Copying winhttp.dll to profile root");
+                        log::debug!("[install_to_game] Copying winhttp.dll to profile root");
                         fs::copy(&winhttp_src, &winhttp_dst)
                             .map_err(|e| format!("Failed to copy winhttp.dll: {}", e))?;
                     }
@@ -373,7 +374,9 @@ pub async fn install_to_game(
                     let doorstop_src = pack_dir.join("doorstop_config.ini");
                     let doorstop_dst = profile_dir.join("doorstop_config.ini");
                     if doorstop_src.exists() && !doorstop_dst.exists() {
-                        eprintln!("[install_to_game] Copying doorstop_config.ini to profile root");
+                        log::debug!(
+                            "[install_to_game] Copying doorstop_config.ini to profile root"
+                        );
                         fs::copy(&doorstop_src, &doorstop_dst)
                             .map_err(|e| format!("Failed to copy doorstop_config.ini: {}", e))?;
                         // FORCE ENABLE DOORSTOP
@@ -381,7 +384,7 @@ pub async fn install_to_game(
                             if !content.contains("enabled=true")
                                 && !content.contains("enabled = true")
                             {
-                                eprintln!("[install_to_game] Enforcing enabled=true in doorstop_config.ini");
+                                log::debug!("[install_to_game] Enforcing enabled=true in doorstop_config.ini");
                                 let new_content = content
                                     .replace("enabled=false", "enabled=true")
                                     .replace("enabled = false", "enabled = true");
@@ -394,13 +397,13 @@ pub async fn install_to_game(
                 // Merge BepInEx core/config from the pack (shared for both platforms)
                 let pack_bepinex = pack_dir.join("BepInEx");
                 if pack_bepinex.exists() {
-                    eprintln!("[install_to_game] Merging BepInEx core/config from pack...");
+                    log::debug!("[install_to_game] Merging BepInEx core/config from pack...");
                     let target_bepinex = profile_dir.join("BepInEx");
                     copy_dir_recursive(&pack_bepinex, &target_bepinex)
                         .map_err(|e| format!("Failed to merge BepInEx folder: {}", e))?;
                 }
             } else {
-                eprintln!(
+                log::warn!(
                     "[install_to_game] Warning: No BepInExPack found in plugins for {}!",
                     if is_mac_profile {
                         "macOS (looking for libdoorstop.dylib)"
@@ -413,7 +416,7 @@ pub async fn install_to_game(
     } // End if !is_vanilla
       // --- FIX BEPINEX STRUCTURE END ---
 
-    eprintln!(
+    log::info!(
         "[install_to_game] Installing profile {} to game {} (runtime root {})",
         profile_id,
         game_path.display(),
@@ -442,7 +445,7 @@ pub async fn install_to_game(
         // changes until Play. Updating localconfig.vdf can force a Steam restart,
         // which would be a surprising side effect during a profile sync.
         sync_macos_runtime_disabled_state(runtime_game_path, true)?;
-        eprintln!(
+        log::info!(
             "[install_to_game] macOS vanilla mode complete - runtime disabled now, Steam launch state will be reconciled on Play."
         );
         return Ok(());
@@ -456,10 +459,10 @@ pub async fn install_to_game(
         if bepinex_folder.exists() {
             // If disabled folder already exists, remove it first
             if bepinex_disabled.exists() {
-                eprintln!("[install_to_game] Vanilla mode: Removing old disabled folder");
+                log::debug!("[install_to_game] Vanilla mode: Removing old disabled folder");
                 let _ = fs::remove_dir_all(&bepinex_disabled);
             }
-            eprintln!("[install_to_game] Vanilla mode: Renaming BepInEx -> BepInEx_DISABLED");
+            log::debug!("[install_to_game] Vanilla mode: Renaming BepInEx -> BepInEx_DISABLED");
             fs::rename(&bepinex_folder, &bepinex_disabled)
                 .map_err(|e| format!("Failed to disable BepInEx: {}", e))?;
         }
@@ -469,7 +472,7 @@ pub async fn install_to_game(
         let bepinex_disabled = game_path.join("BepInEx_DISABLED");
 
         if bepinex_disabled.exists() && !bepinex_folder.exists() {
-            eprintln!("[install_to_game] Restoring BepInEx_DISABLED -> BepInEx");
+            log::debug!("[install_to_game] Restoring BepInEx_DISABLED -> BepInEx");
             fs::rename(&bepinex_disabled, &bepinex_folder)
                 .map_err(|e| format!("Failed to restore BepInEx: {}", e))?;
         }
@@ -489,7 +492,7 @@ pub async fn install_to_game(
                             let is_disabled =
                                 disabled_set.iter().any(|d| name.to_lowercase().contains(d));
                             if is_disabled {
-                                eprintln!(
+                                log::debug!(
                                     "[install_to_game] Skipping disabled mod in profile: {}",
                                     name
                                 );
@@ -515,9 +518,11 @@ pub async fn install_to_game(
                     let not_in_profile = !enabled_profile_mods.contains(&folder_name);
 
                     if is_disabled || not_in_profile {
-                        eprintln!(
+                        log::debug!(
                             "[install_to_game] Removing mod from game (disabled={}, orphan={}): {}",
-                            is_disabled, not_in_profile, folder_name
+                            is_disabled,
+                            not_in_profile,
+                            folder_name
                         );
                         let _ = fs::remove_dir_all(entry.path());
                     }
@@ -571,7 +576,7 @@ pub async fn install_to_game(
                                     } else {
                                         let _ = fs::remove_file(&dest_plugin_path);
                                     }
-                                    eprintln!(
+                                    log::debug!(
                                         "[install_to_game] Removed old/disabled plugin: {}",
                                         dest_plugin_name
                                     );
@@ -591,7 +596,7 @@ pub async fn install_to_game(
                                     .any(|d| plugin_name.to_lowercase().contains(d));
 
                                 if is_disabled {
-                                    eprintln!(
+                                    log::debug!(
                                         "[install_to_game] Skipping disabled plugin: {}",
                                         plugin_name
                                     );
@@ -623,9 +628,10 @@ pub async fn install_to_game(
                                             )
                                         },
                                     )?;
-                                    eprintln!(
+                                    log::debug!(
                                         "[install_to_game] Created symlink: {} -> {:?}",
-                                        plugin_name, plugin_src
+                                        plugin_name,
+                                        plugin_src
                                     );
                                 }
 
@@ -655,7 +661,7 @@ pub async fn install_to_game(
                     } else if is_mac_profile
                         && has_complete_macos_bepinex_runtime(runtime_game_path)
                     {
-                        eprintln!(
+                        log::debug!(
                             "[install_to_game] Keeping existing macOS runtime payload: {}",
                             name
                         );
@@ -674,7 +680,7 @@ pub async fn install_to_game(
                     }
                 }
             }
-            eprintln!("[install_to_game] Synced BepInEx to game folder");
+            log::debug!("[install_to_game] Synced BepInEx to game folder");
         }
     } // End if !is_vanilla
 
@@ -717,14 +723,14 @@ pub async fn install_to_game(
             }
 
             if keep_existing_macos_runtime_payload {
-                eprintln!(
+                log::debug!(
                     "[install_to_game] Keeping existing macOS root payload: {}",
                     item_name
                 );
                 continue;
             }
             if !profile_has_safe_macos_runtime_payload {
-                eprintln!(
+                log::debug!(
                     "[install_to_game] Skipping profile macOS root payload copy for {} because the cached profile runtime is incomplete or not macOS-compatible.",
                     item_name
                 );
@@ -742,18 +748,18 @@ pub async fn install_to_game(
                     .map_err(|e| format!("Failed to copy {}: {}", item_name, e))?;
             }
 
-            eprintln!("[install_to_game] Synced {} to game folder", item_name);
+            log::debug!("[install_to_game] Synced {} to game folder", item_name);
         }
 
         if let Some(source_script) = find_bepinex_script_in_dir(&profile_dir) {
             let dest_script = runtime_game_path.join(CANONICAL_MAC_BEPINEX_SCRIPT);
             if keep_existing_macos_runtime_payload {
-                eprintln!(
+                log::debug!(
                     "[install_to_game] Keeping existing macOS launcher script: {}",
                     CANONICAL_MAC_BEPINEX_SCRIPT
                 );
             } else if !profile_has_safe_macos_runtime_payload {
-                eprintln!(
+                log::debug!(
                     "[install_to_game] Skipping profile launcher script copy because the cached profile runtime is incomplete or not macOS-compatible."
                 );
             } else {
@@ -763,7 +769,7 @@ pub async fn install_to_game(
                 fs::copy(&source_script, &dest_script).map_err(|e| {
                     format!("Failed to copy {}: {}", CANONICAL_MAC_BEPINEX_SCRIPT, e)
                 })?;
-                eprintln!(
+                log::debug!(
                     "[install_to_game] Synced {} to game folder",
                     CANONICAL_MAC_BEPINEX_SCRIPT
                 );
@@ -785,7 +791,7 @@ pub async fn install_to_game(
         sync_macos_runtime_disabled_state(runtime_game_path, false)?;
         dequarantine_recursive(runtime_game_path);
         if manage_steam_launch {
-            eprintln!(
+            log::info!(
                 "[install_to_game] macOS Steam launch options deferred until Play to avoid restarting Steam during Apply."
             );
         }
@@ -803,22 +809,23 @@ pub async fn install_to_game(
                         let _ = fs::remove_file(&disabled_dest);
                     }
                     let _ = fs::rename(&dest, &disabled_dest);
-                    eprintln!(
+                    log::debug!(
                         "[install_to_game] Vanilla mode: Renamed {} -> {}",
-                        item_name, disabled_name
+                        item_name,
+                        disabled_name
                     );
                 }
             } else {
                 if disabled_dest.exists() && !dest.exists() {
                     let _ = fs::rename(&disabled_dest, &dest);
-                    eprintln!("[install_to_game] Restored {} from disabled", item_name);
+                    log::debug!("[install_to_game] Restored {} from disabled", item_name);
                 }
 
                 let source = profile_dir.join(item_name);
                 if source.exists() && !dest.exists() {
                     fs::copy(&source, &dest)
                         .map_err(|e| format!("Failed to copy {}: {}", item_name, e))?;
-                    eprintln!("[install_to_game] Synced {} to game folder", item_name);
+                    log::debug!("[install_to_game] Synced {} to game folder", item_name);
                 }
             }
         }
@@ -828,6 +835,6 @@ pub async fn install_to_game(
         }
     }
 
-    eprintln!("[install_to_game] Sync complete!");
+    log::info!("[install_to_game] Sync complete!");
     Ok(())
 }

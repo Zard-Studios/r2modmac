@@ -137,7 +137,7 @@ pub(crate) fn launch_via_steam_for_game_path(
     let app_id = find_steam_app_id_for_game_path_any(app, game_path, false)
         .ok_or_else(|| "Couldn't determine the Steam app ID for this game".to_string())?;
     let executable_path = find_macos_executable_path(game_path);
-    eprintln!(
+    log::info!(
         "[launch_via_steam_for_game_path] start app_id={} game_path={}",
         app_id,
         game_path.display()
@@ -148,7 +148,7 @@ pub(crate) fn launch_via_steam_for_game_path(
 
     ensure_macos_steam_running_for_launch(app);
     let child = dispatch_macos_steam_run_url(&app_id)?;
-    eprintln!(
+    log::info!(
         "[launch_via_steam_for_game_path] open_dispatched pid={} elapsed_ms={}",
         child.id(),
         launch_start.elapsed().as_millis()
@@ -191,14 +191,14 @@ pub(crate) fn launch_via_steam_for_game_path(
                         {
                             match dispatch_macos_steam_run_url(&observed_app_id) {
                                 Ok(retry_child) => {
-                                    eprintln!(
+                                    log::warn!(
                                         "[launch_via_steam_for_game_path] observed LaunchApp failure for app_id={} in Steam logs; retrying steam://run once pid={}",
                                         observed_app_id,
                                         retry_child.id()
                                     );
                                 }
                                 Err(error) => {
-                                    eprintln!(
+                                    log::error!(
                                         "[launch_via_steam_for_game_path] retry steam://run failed for app_id={} error={}",
                                         observed_app_id, error
                                     );
@@ -218,18 +218,18 @@ pub(crate) fn launch_via_steam_for_game_path(
 
                 if saw_app_error_18 {
                     if saw_logon_failure {
-                        eprintln!(
+                        log::error!(
                             "[launch_via_steam_for_game_path] Steam reported LaunchApp failure (AppError_18) and `LogonFailure No Connection` while launching app {}. Steam connectivity/login state likely blocked the modded launch.",
                             observed_app_id
                         );
                     } else {
-                        eprintln!(
+                        log::error!(
                             "[launch_via_steam_for_game_path] Steam reported LaunchApp failure (AppError_18) for app {} even after one retry.",
                             observed_app_id
                         );
                     }
                 } else {
-                    eprintln!(
+                    log::warn!(
                         "[launch_via_steam_for_game_path] Steam accepted the launch request for app {}, but the game process was not observed in time. Continuing optimistically.",
                         observed_app_id
                     );
@@ -238,7 +238,7 @@ pub(crate) fn launch_via_steam_for_game_path(
 
             #[cfg(not(target_os = "macos"))]
             if !wait_for_process_start(&observed_executable_path, MACOS_LAUNCH_OBSERVE_TIMEOUT_MS) {
-                eprintln!(
+                log::warn!(
                     "[launch_via_steam_for_game_path] Steam accepted the launch request for app {}, but the game process was not observed in time. Continuing optimistically.",
                     observed_app_id
                 );
@@ -246,7 +246,7 @@ pub(crate) fn launch_via_steam_for_game_path(
         });
     }
 
-    eprintln!(
+    log::info!(
         "[launch_via_steam_for_game_path] done app_id={} total_elapsed_ms={}",
         app_id,
         launch_start.elapsed().as_millis()

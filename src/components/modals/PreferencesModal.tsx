@@ -8,6 +8,7 @@ export interface PreferencesSettings {
     install_in_parallel: boolean;
     confirm_before_apply_to_game: boolean;
     write_debug_logs_to_game: boolean;
+    verbose_logging: boolean;
     default_mod_view_mode: 'grid' | 'list';
     show_deprecated_warnings: boolean;
     stream_mode: boolean;
@@ -53,7 +54,7 @@ function IconBox({ children, colorClass }: { children: React.ReactNode; colorCla
     );
 }
 
-function RowIcon({ kind }: { kind: 'install' | 'version' | 'parallel' | 'apply' | 'logs' | 'layout' | 'warning' | 'cache' | 'stream' | 'update' | 'support' }) {
+function RowIcon({ kind }: { kind: 'install' | 'version' | 'parallel' | 'apply' | 'logs' | 'layout' | 'warning' | 'cache' | 'stream' | 'update' | 'support' | 'folder' }) {
     if (kind === 'install') return (
         <IconBox colorClass="text-blue-400">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -122,6 +123,13 @@ function RowIcon({ kind }: { kind: 'install' | 'version' | 'parallel' | 'apply' 
             <HeartIcon className="h-5 w-5" />
         </IconBox>
     );
+    if (kind === 'folder') return (
+        <IconBox colorClass="text-orange-400">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+            </svg>
+        </IconBox>
+    );
     return (
         <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-red-500/10 border border-red-500/20 text-red-400 flex-shrink-0">
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -146,6 +154,7 @@ export default function PreferencesModal({
     const [installInParallel, setInstallInParallel] = useState(settings.install_in_parallel);
     const [confirmBeforeApply, setConfirmBeforeApply] = useState(settings.confirm_before_apply_to_game);
     const [writeDebugLogsToGame, setWriteDebugLogsToGame] = useState(settings.write_debug_logs_to_game);
+    const [verboseLogging, setVerboseLogging] = useState(settings.verbose_logging);
     const [defaultModViewMode, setDefaultModViewMode] = useState<'grid' | 'list'>(settings.default_mod_view_mode);
     const [showDeprecatedWarnings, setShowDeprecatedWarnings] = useState(settings.show_deprecated_warnings);
     const [streamMode, setStreamMode] = useState(settings.stream_mode);
@@ -171,6 +180,7 @@ export default function PreferencesModal({
             setInstallInParallel(settings.install_in_parallel);
             setConfirmBeforeApply(settings.confirm_before_apply_to_game);
             setWriteDebugLogsToGame(settings.write_debug_logs_to_game ?? false);
+            setVerboseLogging(settings.verbose_logging ?? false);
             setShowDeprecatedWarnings(settings.show_deprecated_warnings);
             setStreamMode(settings.stream_mode ?? false);
             setDefaultModViewMode(settings.default_mod_view_mode ?? 'grid');
@@ -223,6 +233,7 @@ export default function PreferencesModal({
             install_in_parallel: installInParallel,
             confirm_before_apply_to_game: confirmBeforeApply,
             write_debug_logs_to_game: writeDebugLogsToGame,
+            verbose_logging: verboseLogging,
             default_mod_view_mode: defaultModViewMode,
             show_deprecated_warnings: showDeprecatedWarnings,
             stream_mode: streamMode,
@@ -356,6 +367,33 @@ export default function PreferencesModal({
                                     </div>
                                 </div>
                                 <Toggle value={writeDebugLogsToGame} onChange={setWriteDebugLogsToGame} />
+                            </div>
+
+                            <div className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-gray-750">
+                                <div className="flex items-center gap-4">
+                                    <RowIcon kind="logs" />
+                                    <div>
+                                        <p className="text-[15px] font-medium text-white">Verbose app logging</p>
+                                        <p className="text-[13px] text-gray-400 mt-0.5 leading-snug">Records detailed per-mod and per-file tracing in the app log. Leave off for normal use; turn it on to reproduce a bug before reporting it.</p>
+                                    </div>
+                                </div>
+                                <Toggle value={verboseLogging} onChange={setVerboseLogging} />
+                            </div>
+
+                            <div className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-gray-750">
+                                <div className="flex items-center gap-4">
+                                    <RowIcon kind="folder" />
+                                    <div>
+                                        <p className="text-[15px] font-medium text-white">Open app logs folder</p>
+                                        <p className="text-[13px] text-gray-400 mt-0.5 leading-snug">Opens the r2modmac application log folder containing launch, Steam, and CrossOver/Wine diagnostics.</p>
+                                    </div>
+                                </div>
+                                <button
+                                    onClick={() => { void window.ipcRenderer.openAppLogsFolder(); }}
+                                    className="px-4 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-sm font-medium text-white transition-all active:scale-95 whitespace-nowrap flex-shrink-0"
+                                >
+                                    Open
+                                </button>
                             </div>
 
                             <div className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-gray-750">

@@ -69,7 +69,7 @@ pub(crate) fn is_process_running_for_patterns(patterns: &[String]) -> bool {
             .iter()
             .any(|candidate| compiled_patterns.iter().any(|re| {
                 if re.is_match(candidate) {
-                    eprintln!(
+                    log::debug!(
                         "[is_process_running_for_patterns] sysinfo MATCHED. PID: {}, Name: {}, Pattern: {:?}, Candidate: {:?}",
                         process.pid(), process.name().to_string_lossy(), re.as_str(), candidate
                     );
@@ -108,9 +108,10 @@ pub(crate) fn is_process_running_for_patterns(patterns: &[String]) -> bool {
             if let Ok(output) = status {
                 if output.status.success() {
                     let matched_text = String::from_utf8_lossy(&output.stdout);
-                    eprintln!(
+                    log::debug!(
                         "[is_process_running_for_patterns] Pattern {:?} MATCHED. pgrep output:\n{}",
-                        pattern, matched_text
+                        pattern,
+                        matched_text
                     );
                     return true;
                 }

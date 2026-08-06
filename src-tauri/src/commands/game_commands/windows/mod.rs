@@ -29,7 +29,7 @@ pub(crate) fn launch_windows_direct_game_with_working_dir(
     let process_patterns = build_windows_process_match_patterns(&executable_path);
 
     if is_process_running_for_patterns(&process_patterns) {
-        eprintln!(
+        log::warn!(
             "[launch_windows_direct_game] Blocked: 'already running'. Patterns: {:?}",
             process_patterns
         );
@@ -67,14 +67,14 @@ pub(crate) fn launch_windows_direct_game_with_working_dir(
                 ) {
                     Ok(()) => {
                         if !wait_for_process_start_patterns(&wait_patterns, 30_000) {
-                            eprintln!(
+                            log::warn!(
                                 "[launch_windows_direct_game] Wineskin bundle started but game process not observed in time. Continuing optimistically."
                             );
                         }
                         return Ok(());
                     }
                     Err(error) => {
-                        eprintln!(
+                        log::warn!(
                             "[launch_windows_direct_game] Sikarugir/Wineskin launch failed ({}); falling back to direct Wine.",
                             error
                         );
@@ -93,7 +93,7 @@ pub(crate) fn launch_windows_direct_game_with_working_dir(
                 prefix_root.as_deref(),
             )?;
             configure_native_version_dll_override(&mut command, game_path);
-            eprintln!(
+            log::info!(
                 "[launch_windows_direct_game] Launching Windows executable directly: {:?}",
                 executable_path
             );
@@ -121,7 +121,7 @@ pub(crate) fn launch_windows_direct_game_with_working_dir(
 
     #[cfg(windows)]
     {
-        eprintln!(
+        log::info!(
             "[launch_windows_direct_game] Launching Windows executable directly: {:?}",
             executable_path
         );
@@ -156,7 +156,7 @@ pub(crate) fn launch_windows_steam_game(
     let process_patterns = build_windows_process_match_patterns(&executable_path);
 
     if is_process_running_for_patterns(&process_patterns) {
-        eprintln!(
+        log::warn!(
             "[launch_windows_steam_game] Blocked: 'already running'. Patterns: {:?}",
             process_patterns
         );
@@ -197,7 +197,7 @@ pub(crate) fn launch_windows_steam_game(
                 ) {
                     Ok(()) => {
                         if !wait_for_process_start_patterns(&process_patterns, 120_000) {
-                            eprintln!(
+                            log::warn!(
                                 "[launch_windows_steam_game] Wineskin accepted the launch request for app {}, but the game process was not observed in time. Continuing optimistically.",
                                 app_id
                             );
@@ -205,7 +205,7 @@ pub(crate) fn launch_windows_steam_game(
                         return Ok(());
                     }
                     Err(error) => {
-                        eprintln!(
+                        log::warn!(
                             "[launch_windows_steam_game] Wineskin launch failed ({}); falling back to direct Wine.",
                             error
                         );
@@ -223,7 +223,7 @@ pub(crate) fn launch_windows_steam_game(
         let mut command = std::process::Command::new(&runner_path);
         configure_host_compat_runner_command(&mut command, &runner_path, prefix_root.as_deref())?;
         configure_native_version_dll_override(&mut command, game_path);
-        eprintln!(
+        log::info!(
 			"[launch_windows_steam_game] Launching Steam app {} via {:?} using steam executable {:?}",
 			app_id, runner_path, steam_executable
 		);
@@ -238,9 +238,10 @@ pub(crate) fn launch_windows_steam_game(
 
     #[cfg(windows)]
     {
-        eprintln!(
+        log::info!(
             "[launch_windows_steam_game] Launching Steam app {} via {:?}",
-            app_id, steam_executable
+            app_id,
+            steam_executable
         );
         std::process::Command::new(&steam_executable)
             .arg("-applaunch")
@@ -251,7 +252,7 @@ pub(crate) fn launch_windows_steam_game(
     }
 
     if !wait_for_process_start_patterns(&process_patterns, 60_000) {
-        eprintln!(
+        log::warn!(
             "[launch_windows_steam_game] Steam accepted the launch request for app {}, but the game process was not observed in time. Continuing optimistically.",
             app_id
         );

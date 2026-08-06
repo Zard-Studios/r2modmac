@@ -26,7 +26,7 @@ pub fn start_volume_watcher(app: AppHandle) {
         .name("storage-volume-watcher".to_string())
         .spawn(move || {
             if let Err(error) = run_volume_watcher(app_handle) {
-                eprintln!("[volume_watcher] stopped: {}", error);
+                log::warn!("[volume_watcher] stopped: {}", error);
             }
         })
         .ok();
@@ -43,9 +43,9 @@ fn run_volume_watcher(app: AppHandle) -> Result<(), String> {
     refresh_watch_roots(&mut watcher, &mut watched_roots);
 
     if watched_roots.is_empty() {
-        eprintln!("[volume_watcher] no mount roots available to watch");
+        log::debug!("[volume_watcher] no mount roots available to watch");
     } else {
-        eprintln!(
+        log::debug!(
             "[volume_watcher] watching {} mount root(s)",
             watched_roots.len()
         );
@@ -61,7 +61,7 @@ fn run_volume_watcher(app: AppHandle) -> Result<(), String> {
                 }
             }
             Ok(Err(error)) => {
-                eprintln!("[volume_watcher] watch error: {}", error);
+                log::warn!("[volume_watcher] watch error: {}", error);
                 refresh_watch_roots(&mut watcher, &mut watched_roots);
             }
             Err(RecvTimeoutError::Timeout) => {

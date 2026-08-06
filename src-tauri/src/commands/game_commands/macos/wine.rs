@@ -189,9 +189,12 @@ pub(crate) fn launch_macos_wineskin_program(
         })?;
     let win_flags = args.join(" ");
 
-    eprintln!(
+    log::info!(
         "[{}] Launching via Sikarugir bundle {:?}: program={:?} flags={:?}",
-        context, bundle_path, win_path, win_flags
+        context,
+        bundle_path,
+        win_path,
+        win_flags
     );
 
     // Read original values so we can restore them after launch.
@@ -474,18 +477,20 @@ pub(crate) fn configure_macos_compat_runner_command(
         let bottle_path = prefix_root
             .ok_or_else(|| "CrossOver bottle path could not be determined.".to_string())?;
         command.arg("--bottle").arg(bottle_path);
-        eprintln!(
+        log::info!(
             "[compat_runner] Using CrossOver bottle {:?} with runner {:?}",
-            bottle_path, runner_path
+            bottle_path,
+            runner_path
         );
     } else if let Some(prefix_root) = prefix_root {
         command.env("WINEPREFIX", prefix_root);
-        eprintln!(
+        log::info!(
             "[compat_runner] Using Wine prefix {:?} with runner {:?}",
-            prefix_root, runner_path
+            prefix_root,
+            runner_path
         );
     } else {
-        eprintln!(
+        log::info!(
             "[compat_runner] Using runner {:?} without explicit prefix",
             runner_path
         );

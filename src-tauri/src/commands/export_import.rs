@@ -262,7 +262,7 @@ pub async fn share_profile(app: AppHandle, profile_id: String) -> Result<String,
 
 #[command]
 pub async fn import_profile(_app: AppHandle, code: String) -> Result<serde_json::Value, String> {
-    eprintln!("[import_profile] Starting import with provided code");
+    log::info!("[import_profile] Starting import with provided code");
     let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::limited(10))
         .build()
@@ -273,7 +273,7 @@ pub async fn import_profile(_app: AppHandle, code: String) -> Result<serde_json:
         "https://thunderstore.io/api/experimental/legacyprofile/get/{}/",
         code
     );
-    eprintln!(
+    log::debug!(
         "[import_profile] Strategy 1: Trying profile code URL: {}",
         profile_url
     );
@@ -282,63 +282,63 @@ pub async fn import_profile(_app: AppHandle, code: String) -> Result<serde_json:
 
     match response {
         Ok(res) => {
-            eprintln!(
+            log::debug!(
                 "[import_profile] Strategy 1: Got response with status: {}",
                 res.status()
             );
             if res.status().is_success() {
                 let content = res.text().await.unwrap_or_default();
-                eprintln!(
+                log::debug!(
                     "[import_profile] Strategy 1: Content length: {}, starts with #r2modman: {}",
                     content.len(),
                     content.starts_with("#r2modman")
                 );
 
                 if content.starts_with("#r2modman") {
-                    eprintln!("[import_profile] Strategy 1: Detected r2modman profile, decoding base64...");
+                    log::debug!("[import_profile] Strategy 1: Detected r2modman profile, decoding base64...");
                     let base64_data = content.trim_start_matches("#r2modman").trim();
                     let zip_data = base64::engine::general_purpose::STANDARD
                         .decode(base64_data)
                         .map_err(|e| {
-                            eprintln!("[import_profile] Strategy 1: Base64 decode failed: {}", e);
+                            log::warn!("[import_profile] Strategy 1: Base64 decode failed: {}", e);
                             e.to_string()
                         })?;
-                    eprintln!(
+                    log::debug!(
                         "[import_profile] Strategy 1: Decoded {} bytes, creating zip archive...",
                         zip_data.len()
                     );
                     let cursor = std::io::Cursor::new(zip_data);
                     let archive = zip::ZipArchive::new(cursor).map_err(|e| {
-                        eprintln!(
+                        log::warn!(
                             "[import_profile] Strategy 1: Zip archive creation failed: {}",
                             e
                         );
                         e.to_string()
                     })?;
-                    eprintln!("[import_profile] Strategy 1: Processing zip archive...");
+                    log::debug!("[import_profile] Strategy 1: Processing zip archive...");
                     return process_zip_archive(archive);
                 }
             }
         }
         Err(e) => {
-            eprintln!("[import_profile] Strategy 1: Request failed: {}", e);
+            log::warn!("[import_profile] Strategy 1: Request failed: {}", e);
         }
     }
 
     // Strategy 2: Package UUID
-    eprintln!("[import_profile] Strategy 2: Trying package UUID lookup");
+    log::debug!("[import_profile] Strategy 2: Trying package UUID lookup");
     let resolve_url = format!(
         "https://thunderstore.io/api/experimental/namespace-by-id/{}/",
         code
     );
-    eprintln!("[import_profile] Strategy 2: URL: {}", resolve_url);
+    log::debug!("[import_profile] Strategy 2: URL: {}", resolve_url);
 
     let response = client.get(&resolve_url).send().await.map_err(|e| {
-        eprintln!("[import_profile] Strategy 2: Request failed: {}", e);
+        log::warn!("[import_profile] Strategy 2: Request failed: {}", e);
         e.to_string()
     })?;
 
-    eprintln!(
+    log::debug!(
         "[import_profile] Strategy 2: Got response with status: {}",
         response.status()
     );
@@ -351,7 +351,7 @@ pub async fn import_profile(_app: AppHandle, code: String) -> Result<serde_json:
     }
 
     let metadata: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
-    eprintln!("[import_profile] Strategy 2: Got metadata: {:?}", metadata);
+    log::debug!("[import_profile] Strategy 2: Got metadata: {:?}", metadata);
 
     let namespace = metadata["namespace"]
         .as_str()
@@ -359,16 +359,17 @@ pub async fn import_profile(_app: AppHandle, code: String) -> Result<serde_json:
     let name = metadata["name"]
         .as_str()
         .ok_or("Invalid metadata: missing name")?;
-    eprintln!(
+    log::debug!(
         "[import_profile] Strategy 2: Namespace: {}, Name: {}",
-        namespace, name
+        namespace,
+        name
     );
     let package_url = format!(
         "https://thunderstore.io/api/experimental/package/{}/{}/",
         namespace, name
     );
 
-    eprintln!(
+    log::debug!(
         "[import_profile] Strategy 2: Fetching package from: {}",
         package_url
     );
@@ -380,7 +381,7 @@ pub async fn import_profile(_app: AppHandle, code: String) -> Result<serde_json:
         .map_err(|e| e.to_string())?;
 
     if !pkg_response.status().is_success() {
-        eprintln!(
+        log::warn!(
             "[import_profile] Strategy 2: Package fetch failed with status: {}",
             pkg_response.status()
         );
@@ -391,7 +392,7 @@ pub async fn import_profile(_app: AppHandle, code: String) -> Result<serde_json:
     }
 
     let mut pkg: serde_json::Value = pkg_response.json().await.map_err(|e| e.to_string())?;
-    eprintln!("[import_profile] Strategy 2: Successfully got package");
+    log::debug!("[import_profile] Strategy 2: Successfully got package");
 
     if pkg["uuid4"].is_null() {
         pkg["uuid4"] = serde_json::json!("");
@@ -420,36 +421,36 @@ pub async fn import_profile_from_file(
     _app: AppHandle,
     path: String,
 ) -> Result<serde_json::Value, String> {
-    eprintln!(
+    log::info!(
         "[import_profile_from_file] Starting import from file: {}",
         path
     );
     let bytes = fs::read(&path).map_err(|e| {
-        eprintln!("[import_profile_from_file] Failed to read file: {}", e);
+        log::error!("[import_profile_from_file] Failed to read file: {}", e);
         e.to_string()
     })?;
-    eprintln!("[import_profile_from_file] Read {} bytes", bytes.len());
+    log::debug!("[import_profile_from_file] Read {} bytes", bytes.len());
 
     let cursor = std::io::Cursor::new(bytes);
     let archive = zip::ZipArchive::new(cursor).map_err(|e| {
-        eprintln!(
+        log::error!(
             "[import_profile_from_file] Failed to create zip archive: {}",
             e
         );
         e.to_string()
     })?;
 
-    eprintln!("[import_profile_from_file] Zip archive created, processing...");
+    log::debug!("[import_profile_from_file] Zip archive created, processing...");
     let mut result = process_zip_archive(archive)?;
     result["archivePath"] = serde_json::json!(path);
-    eprintln!("[import_profile_from_file] Result: {:?}", result);
+    log::debug!("[import_profile_from_file] Result: {:?}", result);
     Ok(result)
 }
 
 fn process_zip_archive(
     mut archive: zip::ZipArchive<std::io::Cursor<Vec<u8>>>,
 ) -> Result<serde_json::Value, String> {
-    eprintln!(
+    log::debug!(
         "[process_zip_archive] Processing zip with {} files",
         archive.len()
     );
@@ -459,7 +460,7 @@ fn process_zip_archive(
 
     // Check if export.r2x exists first to avoid double borrow
     let has_r2x = archive.by_name("export.r2x").is_ok();
-    eprintln!("[process_zip_archive] Has export.r2x: {}", has_r2x);
+    log::debug!("[process_zip_archive] Has export.r2x: {}", has_r2x);
 
     if has_r2x {
         let mut file = archive.by_name("export.r2x").map_err(|e| e.to_string())?;
@@ -467,7 +468,7 @@ fn process_zip_archive(
         file.read_to_string(&mut content)
             .map_err(|e| e.to_string())?;
         is_yaml = true;
-        eprintln!(
+        log::debug!(
             "[process_zip_archive] Read export.r2x ({} bytes)",
             content.len()
         );
@@ -479,45 +480,46 @@ fn process_zip_archive(
         file.read_to_string(&mut content)
             .map_err(|e| e.to_string())?;
         is_yaml = false;
-        eprintln!(
+        log::debug!(
             "[process_zip_archive] Read manifest.json ({} bytes)",
             content.len()
         );
     }
 
-    eprintln!(
+    log::debug!(
         "[process_zip_archive] Content preview: {}",
         &content[0..content.len().min(200)]
     );
 
     let parsed: serde_json::Value = if is_yaml {
-        eprintln!("[process_zip_archive] Parsing as YAML");
+        log::debug!("[process_zip_archive] Parsing as YAML");
         serde_yaml::from_str(&content).map_err(|e| {
-            eprintln!("[process_zip_archive] YAML parse error: {}", e);
+            log::warn!("[process_zip_archive] YAML parse error: {}", e);
             e.to_string()
         })?
     } else {
-        eprintln!("[process_zip_archive] Parsing as JSON");
+        log::debug!("[process_zip_archive] Parsing as JSON");
         serde_json::from_str(&content).map_err(|e| {
-            eprintln!("[process_zip_archive] JSON parse error: {}", e);
+            log::warn!("[process_zip_archive] JSON parse error: {}", e);
             e.to_string()
         })?
     };
 
-    eprintln!("[process_zip_archive] Parsed data: {:?}", parsed);
+    log::debug!("[process_zip_archive] Parsed data: {:?}", parsed);
 
     // Map to expected format
     let profile_name = parsed["profileName"].as_str().unwrap_or("Imported Profile");
     let platform_val = parsed["platform"].as_str();
-    eprintln!(
+    log::debug!(
         "[process_zip_archive] Profile name: {}, Platform: {:?}",
-        profile_name, platform_val
+        profile_name,
+        platform_val
     );
 
     let mods_array = parsed["mods"]
         .as_array()
         .ok_or_else(|| "Invalid profile: missing mods array".to_string())?;
-    eprintln!("[process_zip_archive] Found {} mods", mods_array.len());
+    log::debug!("[process_zip_archive] Found {} mods", mods_array.len());
 
     let mods = mods_array
         .iter()
@@ -541,9 +543,13 @@ fn process_zip_archive(
             let enabled = m["enabled"].as_bool().unwrap_or(true);
             let source = m["source"].as_str().unwrap_or("thunderstore");
 
-            eprintln!(
+            log::debug!(
                 "[process_zip_archive] Mod {}: {} -> {} (v{}), enabled: {}",
-                idx, name, clean_name, version_str, enabled
+                idx,
+                name,
+                clean_name,
+                version_str,
+                enabled
             );
 
             let mut value = serde_json::json!({
@@ -584,7 +590,7 @@ fn process_zip_archive(
         result["platform"] = serde_json::json!(p);
     }
 
-    eprintln!("[process_zip_archive] Final result: {:?}", result);
+    log::debug!("[process_zip_archive] Final result: {:?}", result);
     Ok(result)
 }
 

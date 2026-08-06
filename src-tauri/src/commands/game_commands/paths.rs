@@ -27,7 +27,7 @@ pub async fn get_game_path(
                 && key == game_identifier
                 && !manual_path_matches_platform(path_obj, is_windows_profile)
             {
-                eprintln!(
+                log::warn!(
                     "[get_game_path] Ignoring legacy manual path due to platform mismatch: {}",
                     path
                 );
@@ -48,9 +48,11 @@ pub async fn get_game_path(
     }
 
     let normalized_id = normalize_for_matching(&game_identifier);
-    eprintln!(
+    log::debug!(
         "[get_game_path] platform={:?} Looking for game: {} (normalized: {})",
-        platform, game_identifier, normalized_id
+        platform,
+        game_identifier,
+        normalized_id
     );
 
     // Scan all Steam library folders
@@ -72,9 +74,10 @@ pub async fn get_game_path(
                         || normalized_id.contains(&normalized_folder)
                     {
                         let game_path = entry.path().to_string_lossy().to_string();
-                        eprintln!(
+                        log::debug!(
                             "[get_game_path] Found match: {} -> {}",
-                            folder_name, game_path
+                            folder_name,
+                            game_path
                         );
                         if settings.game_paths.get(&cache_key) != Some(&game_path) {
                             let mut updated_settings = settings.clone();
@@ -90,7 +93,7 @@ pub async fn get_game_path(
         }
     }
 
-    eprintln!("[get_game_path] No match found for: {}", game_identifier);
+    log::debug!("[get_game_path] No match found for: {}", game_identifier);
     Ok(None)
 }
 

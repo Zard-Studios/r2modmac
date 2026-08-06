@@ -12,6 +12,7 @@ use mimalloc::MiMalloc;
 static GLOBAL: MiMalloc = MiMalloc;
 
 use tauri::Emitter;
+use tauri::Manager;
 
 #[tauri::command]
 fn open_devtools(window: tauri::WebviewWindow) -> Result<(), String> {
@@ -28,14 +29,54 @@ fn open_devtools(window: tauri::WebviewWindow) -> Result<(), String> {
     }
 }
 
+#[tauri::command]
+fn open_app_logs_folder(app: tauri::AppHandle) -> Result<(), String> {
+    let log_dir = app
+        .path()
+        .app_log_dir()
+        .map_err(|e| format!("Could not resolve app log directory: {}", e))?;
+    if !log_dir.exists() {
+        std::fs::create_dir_all(&log_dir)
+            .map_err(|e| format!("Could not create app log directory: {}", e))?;
+    }
+    open::that(&log_dir).map_err(|e| format!("Could not open app log directory: {}", e))?;
+    Ok(())
+}
+
+/// Apply the Verbose logging preference to the global `log` filter.
+///
+/// Kept separate from the plugin's build-time level so the toggle takes effect
+/// immediately, without needing an app restart.
+pub(crate) fn apply_log_level(verbose: bool) {
+    let level = if verbose {
+        log::LevelFilter::Debug
+    } else {
+        log::LevelFilter::Info
+    };
+    log::set_max_level(level);
+    log::info!("[logging] verbose={} level={}", verbose, level);
+}
+
+#[tauri::command]
+fn set_verbose_logging(enabled: bool) {
+    apply_log_level(enabled);
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(
             tauri_plugin_log::Builder::default()
-                .level(log::LevelFilter::Info)
+                // The plugin is built able to emit Debug so the Verbose logging
+                // preference can be toggled at runtime; the effective level is
+                // narrowed to Info below via `log::set_max_level` unless the
+                // user has opted in. Records above the max level are discarded
+                // by the `log` macros before any formatting happens.
+                .level(log::LevelFilter::Debug)
                 // rustls dumps TLS handshake + certificate bytes at trace/debug.
                 .level_for("rustls", log::LevelFilter::Warn)
+                .max_file_size(1_048_576) // 1 MiB
+                .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepSome(3))
                 .build(),
         )
         .plugin(tauri_plugin_dialog::init())
@@ -45,6 +86,8 @@ pub fn run() {
         .setup(|app| {
             use chrono::Datelike;
             use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
+
+            apply_log_level(models::shared::load_settings_impl(app.handle()).verbose_logging);
 
             utils::volume_watcher::start_volume_watcher(app.handle().clone());
 
@@ -65,20 +108,20 @@ pub fn run() {
                             }
                             if !new_data_dir.exists() {
                                 // Simple atomic rename (fast path).
-                                eprintln!(
+                                log::debug!(
                                     "[startup] Windows MIGRATION: renaming {:?} -> {:?}",
                                     old_dir, new_data_dir
                                 );
                                 if let Err(e) = std::fs::rename(&old_dir, &new_data_dir) {
-                                    eprintln!("[startup] Windows MIGRATION rename failed: {}", e);
+                                    log::warn!("[startup] Windows MIGRATION rename failed: {}", e);
                                 } else {
-                                    eprintln!("[startup] Windows MIGRATION SUCCESS (rename)");
+                                    log::debug!("[startup] Windows MIGRATION SUCCESS (rename)");
                                 }
                             } else {
                                 // r2modmac already exists — merge contents from old dir into it.
                                 // This happens when the app already ran once and created an empty
                                 // r2modmac before the migration had a chance to rename.
-                                eprintln!(
+                                log::debug!(
                                     "[startup] Windows MIGRATION: {:?} exists, merging {:?} into it",
                                     new_data_dir, old_dir
                                 );
@@ -95,7 +138,7 @@ pub fn run() {
                                             } else {
                                                 // Destination subdirectory doesn't exist — rename it.
                                                 if let Err(e) = std::fs::rename(&src_path, &dst_path) {
-                                                    eprintln!(
+                                                    log::error!(
                                                         "[startup] MIGRATION: failed to move dir {:?}: {}",
                                                         src_path, e
                                                     );
@@ -104,7 +147,7 @@ pub fn run() {
                                         } else if !dst_path.exists() {
                                             // Only move files that don't already exist in the destination.
                                             if let Err(e) = std::fs::rename(&src_path, &dst_path) {
-                                                eprintln!(
+                                                log::error!(
                                                     "[startup] MIGRATION: failed to move file {:?}: {}",
                                                     src_path, e
                                                 );
@@ -116,9 +159,9 @@ pub fn run() {
                                 // Remove the old directory if it is now empty.
                                 if std::fs::read_dir(&old_dir).map(|mut d| d.next().is_none()).unwrap_or(false) {
                                     let _ = std::fs::remove_dir(&old_dir);
-                                    eprintln!("[startup] Windows MIGRATION SUCCESS (merge+cleanup)");
+                                    log::debug!("[startup] Windows MIGRATION SUCCESS (merge+cleanup)");
                                 } else {
-                                    eprintln!(
+                                    log::debug!(
                                         "[startup] Windows MIGRATION: old dir {:?} not empty after merge, leaving it",
                                         old_dir
                                     );
@@ -137,14 +180,14 @@ pub fn run() {
                     if let Some(parent_dir) = new_data_dir.parent() {
                         let old_data_dir = parent_dir.join("com.r2modmac.app");
                         if old_data_dir.exists() && !new_data_dir.exists() {
-                            eprintln!(
+                            log::debug!(
                                 "[startup] macOS MIGRATION: Renaming old data dir {:?} to {:?}",
                                 old_data_dir, new_data_dir
                             );
                             if let Err(e) = std::fs::rename(&old_data_dir, &new_data_dir) {
-                                eprintln!("[startup] MIGRATION FAILED: {}", e);
+                                log::warn!("[startup] MIGRATION FAILED: {}", e);
                             } else {
-                                eprintln!("[startup] MIGRATION SUCCESS");
+                                log::debug!("[startup] MIGRATION SUCCESS");
                             }
                         }
                     }
@@ -174,7 +217,7 @@ pub fn run() {
                                 if profile_path.is_dir() {
                                     let bepinex_path = profile_path.join("BepInEx");
                                     if bepinex_path.exists() {
-                                        eprintln!(
+                                        log::debug!(
                                             "[startup] Cleaning old profile cache: {:?}",
                                             bepinex_path
                                         );
@@ -189,7 +232,7 @@ pub fn run() {
                         }
                     }
                 } else {
-                    eprintln!("[startup] Legacy mode ON - keeping profile cache");
+                    log::debug!("[startup] Legacy mode ON - keeping profile cache");
                 }
             }
 
@@ -364,6 +407,8 @@ pub fn run() {
             commands::profile_commands::reveal_profile_config_file,
             commands::profile_commands::open_profile_config_file,
             open_devtools,
+            open_app_logs_folder,
+            set_verbose_logging,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

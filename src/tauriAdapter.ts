@@ -241,6 +241,8 @@ export const tauriAPI: IElectronAPI = {
     openProfileConfigFile: async (profileId: string, relativePath: string, root?: string): Promise<void> => {
         return await invoke('open_profile_config_file', { profileId, relativePath, root: root ?? null });
     },
+    openAppLogsFolder: async () => invoke('open_app_logs_folder'),
+    setVerboseLogging: async (enabled: boolean) => invoke('set_verbose_logging', { enabled }),
 };
 
 /** Metadata about a config file inside a profile directory. */

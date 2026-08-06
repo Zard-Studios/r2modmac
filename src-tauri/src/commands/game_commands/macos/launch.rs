@@ -20,7 +20,7 @@ pub(crate) async fn launch_game_with_mods_for_macos(
     } else {
         let resolved = resolve_macos_runtime_root(game_path);
         if resolved != game_path {
-            eprintln!(
+            log::info!(
                 "[launch_game_with_mods] Resolved macOS runtime root {} -> {}",
                 game_path.display(),
                 resolved.display()
@@ -36,7 +36,7 @@ pub(crate) async fn launch_game_with_mods_for_macos(
         let owml_disabled = game_path.join("OWML_DISABLED");
         if owml_disabled.exists() && !owml_folder.exists() {
             let _ = fs::rename(&owml_disabled, &owml_folder);
-            eprintln!("[launch_game_with_mods] Restored OWML_DISABLED -> OWML");
+            log::info!("[launch_game_with_mods] Restored OWML_DISABLED -> OWML");
         }
 
         if !owml_folder.exists() {
@@ -47,16 +47,16 @@ pub(crate) async fn launch_game_with_mods_for_macos(
         let _ = restore_outerwilds_modded(game_path);
 
         // Run socket-free patcher — no sockets, no crashing
-        eprintln!("[launch_game_with_mods] Running OWMLPatcher.exe via Wine");
+        log::info!("[launch_game_with_mods] Running OWMLPatcher.exe via Wine");
         if let Err(e) = owml_patcher::run_owml_patcher(game_path) {
-            eprintln!(
+            log::warn!(
                 "[launch_game_with_mods] OWMLPatcher failed (non-fatal, continuing): {}",
                 e
             );
         }
 
         // Launch OuterWilds.exe directly — mods injected via patched Assembly-CSharp.dll
-        eprintln!("[launch_game_with_mods] Launching OuterWilds.exe directly");
+        log::info!("[launch_game_with_mods] Launching OuterWilds.exe directly");
         return launch_windows_game(app, game_path);
     }
 
@@ -83,7 +83,7 @@ pub(crate) async fn launch_game_with_mods_for_macos(
 
         if let Some(executable_path) = executable_path.as_ref() {
             if !wait_for_process_start(executable_path, 60_000) {
-                eprintln!(
+                log::warn!(
                     "[launch_game_with_mods] run_lovely_macos.sh launch request succeeded, but the game process was not observed in time. Continuing optimistically."
                 );
             }
@@ -115,7 +115,7 @@ pub(crate) async fn launch_game_with_mods_for_macos(
         dequarantine_recursive(&runtime_game_path);
 
         if let Ok(false) = macos_steam_launch_option_matches_desired(app, game_path) {
-            eprintln!(
+            log::info!(
                 "[launch_game_with_mods] Steam launch option differs (arch/script mismatch) — reconciling managed option before Steam launch."
             );
             ensure_macos_steam_launch_options(app, game_path, true, true)?;
@@ -142,7 +142,7 @@ pub(crate) async fn launch_game_with_mods_for_macos(
         let _ = open::that(&bundle);
         if let Some(executable_path) = executable_path.as_ref() {
             if !wait_for_process_start(executable_path, MACOS_LAUNCH_OBSERVE_TIMEOUT_MS) {
-                eprintln!(
+                log::warn!(
                     "[launch_game_with_mods] App bundle launch request succeeded, but the game process was not observed in time. Continuing optimistically."
                 );
             }
@@ -173,7 +173,7 @@ pub(crate) async fn launch_game_vanilla_for_macos(
     } else {
         let resolved = resolve_macos_runtime_root(&game_path);
         if resolved != game_path {
-            eprintln!(
+            log::info!(
                 "[launch_game_vanilla] Resolved macOS runtime root {} -> {}",
                 game_path.display(),
                 resolved.display()
@@ -193,7 +193,7 @@ pub(crate) async fn launch_game_vanilla_for_macos(
                 let _ = fs::remove_dir_all(&owml_disabled);
             }
             let _ = fs::rename(&owml_folder, &owml_disabled);
-            eprintln!("[launch_game_vanilla] Renamed OWML -> OWML_DISABLED");
+            log::info!("[launch_game_vanilla] Renamed OWML -> OWML_DISABLED");
         }
 
         // Restore vanilla DLLs (Assembly-CSharp + mscorlib)
@@ -201,7 +201,7 @@ pub(crate) async fn launch_game_vanilla_for_macos(
         let _ = restore_mscorlib_vanilla(&game_path, false);
 
         // Launch OuterWilds.exe directly — vanilla, no mods
-        eprintln!("[launch_game_vanilla] Launching OuterWilds.exe directly (vanilla)");
+        log::info!("[launch_game_vanilla] Launching OuterWilds.exe directly (vanilla)");
         return launch_windows_game(app, &game_path);
     }
 
@@ -210,7 +210,7 @@ pub(crate) async fn launch_game_vanilla_for_macos(
     #[cfg(target_os = "macos")]
     if let Some(app_bundle) = find_macos_launch_bundle(&game_path) {
         if is_steam_bundle_path(&app_bundle) {
-            eprintln!(
+            log::info!(
                 "[launch_game_vanilla] Skipping signature/quarantine changes for Steam bundle: {}",
                 app_bundle.display()
             );
@@ -226,7 +226,7 @@ pub(crate) async fn launch_game_vanilla_for_macos(
                     .unwrap_or(false);
 
             if needs_resign {
-                eprintln!(
+                log::warn!(
                     "[launch_game_vanilla] App bundle has invalid/no signature — re-signing with ad-hoc"
                 );
                 let _ = std::process::Command::new("codesign")
@@ -241,7 +241,7 @@ pub(crate) async fn launch_game_vanilla_for_macos(
                     .stderr(std::process::Stdio::null())
                     .status();
             } else if is_bundled_steam_emu {
-                eprintln!(
+                log::info!(
                     "[launch_game_vanilla] Skipping re-sign for bundled Steam-emu wrapper (GOG-style): {}",
                     app_bundle.display()
                 );
@@ -272,13 +272,13 @@ pub(crate) async fn launch_game_vanilla_for_macos(
             remove_r2modmac_debug_logs(&runtime_game_path);
         }
         if let Err(error) = sync_macos_runtime_disabled_state(&runtime_game_path, true) {
-            eprintln!(
+            log::warn!(
                 "[launch_game_vanilla] Failed to enforce runtime_disabled state before vanilla Steam launch: {}",
                 error
             );
         }
         if let Ok(true) = macos_steam_launch_option_is_managed(app, &game_path) {
-            eprintln!(
+            log::info!(
                 "[launch_game_vanilla] Managed BepInEx launch option detected — clearing it before vanilla Steam launch so native macOS games start outside the mod wrapper."
             );
             ensure_macos_steam_launch_options(app, &game_path, false, false)?;
@@ -291,12 +291,12 @@ pub(crate) async fn launch_game_vanilla_for_macos(
         if let Some(inner_executable_path) = executable_path.as_ref() {
             if let Some(inner_app_bundle) = find_enclosing_app_bundle(inner_executable_path) {
                 if !is_macos_bundle_signature_valid(&inner_app_bundle) {
-                    eprintln!(
+                    log::warn!(
                         "[launch_game_vanilla] Inner game app has invalid/no signature — re-signing with ad-hoc: {}",
                         inner_app_bundle.display()
                     );
                     if !ad_hoc_sign_macos_bundle(&inner_app_bundle) {
-                        eprintln!(
+                        log::warn!(
                             "[launch_game_vanilla] Failed to ad-hoc sign inner game app bundle: {}",
                             inner_app_bundle.display()
                         );
@@ -332,7 +332,7 @@ pub(crate) async fn launch_game_vanilla_for_macos(
         open::that(&bundle).map_err(|e| format!("Failed to launch app bundle: {}", e))?;
         if let Some(executable_path) = executable_path.as_ref() {
             if !wait_for_process_start(executable_path, MACOS_LAUNCH_OBSERVE_TIMEOUT_MS) {
-                eprintln!(
+                log::warn!(
                     "[launch_game_vanilla] App bundle launch request succeeded, but the game process was not observed in time. Continuing optimistically."
                 );
             }
@@ -349,7 +349,7 @@ pub(crate) async fn launch_game_vanilla_for_macos(
         open::that(executable).map_err(|e| format!("Failed to launch game executable: {}", e))?;
         if let Some(executable_path) = executable_path.as_ref() {
             if !wait_for_process_start(executable_path, MACOS_LAUNCH_OBSERVE_TIMEOUT_MS) {
-                eprintln!(
+                log::warn!(
                     "[launch_game_vanilla] Executable launch request succeeded, but the game process was not observed in time. Continuing optimistically."
                 );
             }

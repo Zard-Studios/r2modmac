@@ -59,7 +59,7 @@ pub async fn sync_profile_to_game(
     {
         let resolved = resolve_macos_runtime_root(game_path);
         if resolved != game_path {
-            eprintln!(
+            log::info!(
                 "[sync_profile_to_game] Resolved macOS runtime root {} -> {}",
                 game_path.display(),
                 resolved.display()
@@ -83,7 +83,7 @@ pub async fn sync_profile_to_game(
         .join(&profile_id);
     let profile_plugins = profile_dir.join("BepInEx").join("plugins");
 
-    eprintln!(
+    log::info!(
         "[sync_profile_to_game] Syncing profile {} to game {:?} (runtime root {:?}, legacy_cache: {}, finalize: {})",
         profile_id,
         game_path,
@@ -160,7 +160,7 @@ pub async fn sync_profile_to_game(
         }
     }
 
-    eprintln!(
+    log::debug!(
         "[sync_profile_to_game] Profile has {} mods",
         profile_mod_full_names.len()
     );
@@ -175,7 +175,7 @@ pub async fn sync_profile_to_game(
         if !profile_is_vanilla {
             if owml_disabled.exists() && !owml_folder.exists() {
                 let _ = fs::rename(&owml_disabled, &owml_folder);
-                eprintln!("[sync_profile_to_game] Restored OWML_DISABLED -> OWML");
+                log::info!("[sync_profile_to_game] Restored OWML_DISABLED -> OWML");
             }
         }
 
@@ -386,7 +386,7 @@ pub async fn sync_profile_to_game(
 
             if let Ok(serialized) = serde_json::to_string_pretty(&config) {
                 let _ = fs::write(&config_path, serialized);
-                eprintln!(
+                log::debug!(
                     "[sync_profile_to_game] Wrote OWML.Config.json (socketPort=0) at {:?}",
                     config_path
                 );
@@ -418,7 +418,7 @@ pub async fn sync_profile_to_game(
 
             if let Ok(serialized) = serde_json::to_string_pretty(&config) {
                 let _ = fs::write(&config_path, serialized);
-                eprintln!(
+                log::debug!(
                     "[sync_profile_to_game] Wrote Managed/OWML.Config.json at {:?}",
                     config_path
                 );
@@ -476,9 +476,10 @@ pub async fn sync_profile_to_game(
 
                             if let Ok(serialized) = serde_json::to_string_pretty(&config) {
                                 let _ = fs::write(&mod_config_path, serialized);
-                                eprintln!(
+                                log::debug!(
                                     "[sync_profile_to_game] Set Outer Wilds mod {} enabled={}",
-                                    folder, is_enabled
+                                    folder,
+                                    is_enabled
                                 );
                             }
                         }
@@ -496,12 +497,12 @@ pub async fn sync_profile_to_game(
                     let _ = fs::remove_dir_all(&owml_disabled);
                 }
                 let _ = fs::rename(&owml_folder, &owml_disabled);
-                eprintln!("[sync_profile_to_game] Renamed OWML -> OWML_DISABLED");
+                log::info!("[sync_profile_to_game] Renamed OWML -> OWML_DISABLED");
             }
         } else {
             if owml_disabled.exists() && !owml_folder.exists() {
                 let _ = fs::rename(&owml_disabled, &owml_folder);
-                eprintln!("[sync_profile_to_game] Restored OWML_DISABLED -> OWML");
+                log::info!("[sync_profile_to_game] Restored OWML_DISABLED -> OWML");
             }
             let _ = restore_outerwilds_modded(&game_path);
         }
@@ -687,7 +688,7 @@ pub async fn sync_profile_to_game(
                     ) {
                         game_mod_folders.push((folder_name, mod_key));
                     } else {
-                        eprintln!(
+                        log::debug!(
                             "[sync_profile_to_game] Detected broken/metadata-only mod folder: {}",
                             folder_name
                         );
@@ -698,7 +699,7 @@ pub async fn sync_profile_to_game(
         }
     }
 
-    eprintln!(
+    log::warn!(
         "[sync_profile_to_game] Game has {} valid mods installed ({} broken placeholders)",
         game_mod_folders.len(),
         invalid_game_mod_folders.len()
@@ -725,7 +726,7 @@ pub async fn sync_profile_to_game(
                 })
             });
             if is_owned_by_kept_manifest {
-                eprintln!(
+                log::debug!(
                     "[sync_profile_to_game] Keeping folder owned by kept manifest: {}",
                     folder_name
                 );
@@ -733,7 +734,7 @@ pub async fn sync_profile_to_game(
             }
 
             if game_mod_folder_is_auxiliary_payload(folder_name, gm_key, &desired_full_by_key) {
-                eprintln!(
+                log::debug!(
                     "[sync_profile_to_game] Keeping auxiliary payload folder: {}",
                     folder_name
                 );
@@ -818,7 +819,7 @@ pub async fn sync_profile_to_game(
         .collect();
     to_install.sort();
 
-    eprintln!(
+    log::debug!(
         "[sync_profile_to_game] To remove: {:?}, To install: {:?}",
         to_remove.len(),
         to_install.len()
@@ -837,7 +838,7 @@ pub async fn sync_profile_to_game(
             cleanup_stale_generated_mod_artifacts(runtime_game_path, &profile_mod_full_names)?;
         removed += removed_by_manifest + stale_generated_removed;
         if removed_by_manifest > 0 || stale_generated_removed > 0 {
-            eprintln!(
+            log::debug!(
                 "[sync_profile_to_game] Cleaned {} tracked manifests and {} stale generated artifacts",
                 removed_by_manifest, stale_generated_removed
             );
@@ -845,7 +846,7 @@ pub async fn sync_profile_to_game(
         for folder_name in &to_remove {
             let folder_path = game_plugins.join(folder_name);
             if folder_path.exists() {
-                eprintln!("[sync_profile_to_game] Removing: {}", folder_name);
+                log::debug!("[sync_profile_to_game] Removing: {}", folder_name);
                 if remove_plugin_entry(&folder_path).is_ok() {
                     if !removed_manifest_keys.contains(&extract_mod_key(folder_name)) {
                         removed += 1;
@@ -872,7 +873,7 @@ pub async fn sync_profile_to_game(
 
                     // Only copy if not already cached
                     if !cache_path.exists() {
-                        eprintln!(
+                        log::debug!(
                             "[sync_profile_to_game] Caching mod from game: {}",
                             folder_name
                         );
@@ -885,7 +886,7 @@ pub async fn sync_profile_to_game(
         }
 
         if cached > 0 {
-            eprintln!(
+            log::debug!(
                 "[sync_profile_to_game] Cached {} mods from game to profile",
                 cached
             );

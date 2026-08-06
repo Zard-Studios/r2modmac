@@ -28,17 +28,19 @@ pub(super) fn log_manual_override_once(key: &str, path: &str) {
     let dedupe_key = format!("{}::{}", key, path);
     let seen = LOGGED_GAME_PATH_OVERRIDES.get_or_init(|| Mutex::new(HashSet::new()));
     let Ok(mut seen) = seen.lock() else {
-        eprintln!(
+        log::debug!(
             "[get_game_path] Found manual override (key={}): {}",
-            key, path
+            key,
+            path
         );
         return;
     };
 
     if seen.insert(dedupe_key) {
-        eprintln!(
+        log::debug!(
             "[get_game_path] Found manual override (key={}): {}",
-            key, path
+            key,
+            path
         );
     }
 }
@@ -431,7 +433,7 @@ pub(crate) fn backup_outerwilds_vanilla_dll(game_path: &std::path::Path) -> Resu
     } else if dll_path.exists() {
         &dll_path
     } else {
-        eprintln!(
+        log::warn!(
             "[OuterWilds] WARNING: Assembly-CSharp.dll not found, cannot create vanilla backup."
         );
         return Ok(());
@@ -443,9 +445,10 @@ pub(crate) fn backup_outerwilds_vanilla_dll(game_path: &std::path::Path) -> Resu
             vanilla_path, e
         )
     })?;
-    eprintln!(
+    log::debug!(
         "[OuterWilds] Created vanilla backup from {:?} -> {:?}",
-        src, vanilla_path
+        src,
+        vanilla_path
     );
     Ok(())
 }
@@ -479,13 +482,13 @@ pub fn restore_outerwilds_vanilla(game_path: &std::path::Path) -> Result<(), Str
                     src_path, e
                 )
             })?;
-            eprintln!(
+            log::debug!(
                 "[OuterWilds] Restored vanilla Assembly-CSharp.dll from {:?}",
                 src_path
             );
         }
         None => {
-            eprintln!("[OuterWilds] WARNING: No vanilla DLL backup found (tried .vanilla, .bak). Cannot restore clean state.");
+            log::warn!("[OuterWilds] WARNING: No vanilla DLL backup found (tried .vanilla, .bak). Cannot restore clean state.");
         }
     }
     Ok(())
@@ -522,13 +525,13 @@ pub fn restore_mscorlib_vanilla(
                 bak_path, e
             )
         })?;
-        eprintln!(
+        log::debug!(
             "[OuterWilds] Restored vanilla mscorlib.dll from {:?}",
             bak_path
         );
         if delete_bak {
             let _ = fs::remove_file(&bak_path);
-            eprintln!("[OuterWilds] Cleaned up mscorlib.dll.bak");
+            log::debug!("[OuterWilds] Cleaned up mscorlib.dll.bak");
         }
     }
     Ok(())

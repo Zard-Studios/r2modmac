@@ -20,7 +20,7 @@ pub async fn fetch_communities() -> Result<Vec<serde_json::Value>, String> {
         let json: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
 
         if let Some(results) = json.get("results").and_then(|v| v.as_array()) {
-            eprintln!(
+            log::debug!(
                 "[fetch_communities] Fetched {} communities from {}",
                 results.len(),
                 current_url
@@ -45,7 +45,7 @@ pub async fn fetch_communities() -> Result<Vec<serde_json::Value>, String> {
         "require_package_listing_approval": false
     }));
 
-    eprintln!(
+    log::debug!(
         "[fetch_communities] Total communities fetched: {}",
         all_results.len()
     );
@@ -1200,7 +1200,7 @@ pub async fn check_update(current_version: String) -> Result<UpdateInfo, String>
             .get("x-ratelimit-remaining")
             .and_then(|v| v.to_str().ok())
             .unwrap_or("unknown");
-        eprintln!(
+        log::debug!(
             "[check_update] GitHub API rate limited (status: {}, remaining: {}). Skipping this check.",
             resp.status(),
             remaining
@@ -1232,13 +1232,13 @@ pub async fn check_update(current_version: String) -> Result<UpdateInfo, String>
     // Detect system architecture and OS
     let os = std::env::consts::OS;
     let arch = std::env::consts::ARCH;
-    eprintln!("[check_update] Detected OS: {}, architecture: {}", os, arch);
+    log::debug!("[check_update] Detected OS: {}, architecture: {}", os, arch);
 
     // Require an exact OS + architecture match. Installing a fallback built for
     // another CPU architecture is more dangerous than reporting it unavailable.
     let asset = select_update_asset(&release.assets, os, arch);
 
-    eprintln!(
+    log::debug!(
         "[check_update] Selected asset: {:?}",
         asset.map(|a| &a.name)
     );
@@ -1268,7 +1268,7 @@ pub async fn install_update(app: AppHandle, download_url: String) -> Result<(), 
     let filename = download_url.split('/').last().unwrap_or("update.bin");
     let file_path = temp_dir.join(filename);
 
-    eprintln!("[install_update] Downloading to {:?}", file_path);
+    log::debug!("[install_update] Downloading to {:?}", file_path);
 
     // Stream download to calculate progress
     use std::io::Write;
@@ -1318,9 +1318,10 @@ pub async fn install_update(app: AppHandle, download_url: String) -> Result<(), 
             // Extract r2modmac.exe from the zip using PowerShell
             let new_exe_path = temp_dir.join("r2modmac.exe");
 
-            eprintln!(
+            log::debug!(
                 "[install_update] Extracting zip {:?} to {:?}",
-                file_path, temp_dir
+                file_path,
+                temp_dir
             );
 
             let extract_output = Command::new("powershell")
@@ -1373,7 +1374,7 @@ pub async fn install_update(app: AppHandle, download_url: String) -> Result<(), 
 
             fs::write(&bat_path, bat_content).map_err(|e| e.to_string())?;
 
-            eprintln!(
+            log::info!(
                 "[install_update] Launching updater batch script: {:?}",
                 bat_path
             );
@@ -1382,12 +1383,12 @@ pub async fn install_update(app: AppHandle, download_url: String) -> Result<(), 
                 .spawn()
                 .map_err(|e| format!("Failed to launch updater script: {}", e))?;
 
-            eprintln!("[install_update] Exiting app to allow update...");
+            log::debug!("[install_update] Exiting app to allow update...");
             app.exit(0);
             Ok(())
         } else {
             // Legacy: run as a direct installer (.exe)
-            eprintln!(
+            log::debug!(
                 "[install_update] Spawning Windows installer: {:?}",
                 file_path
             );
@@ -1410,7 +1411,7 @@ pub async fn install_update(app: AppHandle, download_url: String) -> Result<(), 
         let current_exe = std::env::current_exe().map_err(|e| e.to_string())?;
         let exe_string = current_exe.to_string_lossy();
         if exe_string.contains("/target/debug/") || exe_string.contains("/target/release/") {
-            eprintln!("Dev/Build environment detected. Skipping destructive update.");
+            log::debug!("Dev/Build environment detected. Skipping destructive update.");
             return Err(
                 "Cannot auto-update in development environment. Build a release bundle to test."
                     .to_string(),
@@ -1556,14 +1557,14 @@ rm -rf "$UPDATE_DIR"
                 .map_err(|e| e.to_string())?;
         }
         // 3. Launch Script detached
-        eprintln!("[install_update] Launching update script...");
+        log::info!("[install_update] Launching update script...");
         Command::new("sh")
             .arg(&script_path)
             .spawn()
             .map_err(|e| format!("Failed to launch script: {}", e))?;
 
         // 4. Exit App to allow script to proceed
-        eprintln!("[install_update] Exiting app to allow update...");
+        log::debug!("[install_update] Exiting app to allow update...");
         app.exit(0);
 
         Ok(())

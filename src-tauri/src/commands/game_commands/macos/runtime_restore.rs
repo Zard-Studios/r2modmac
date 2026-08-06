@@ -170,7 +170,7 @@ pub(crate) async fn ensure_macos_bepinex_runtime_present(
         )?;
         return Ok(());
     } else if runtime_requires_fix {
-        eprintln!(
+        log::debug!(
             "[ensure_macos_bepinex_runtime_present] Existing macOS BepInEx runtime at {} is below {}.{}.{}.{}; attempting in-place refresh to include Unity 6 log-writer fix.",
             runtime_root.display(),
             MIN_BEPINEX5_UNITY6_LOG_WRITER_FIX.0,
@@ -197,7 +197,7 @@ pub(crate) async fn ensure_macos_bepinex_runtime_present(
             return Ok(());
         }
     } else if profile_requires_fix {
-        eprintln!(
+        log::debug!(
             "[ensure_macos_bepinex_runtime_present] Profile runtime at {} is below {}.{}.{}.{}; skipping direct copy and refreshing from official runtime source.",
             profile_dir.display(),
             MIN_BEPINEX5_UNITY6_LOG_WRITER_FIX.0,
@@ -210,14 +210,14 @@ pub(crate) async fn ensure_macos_bepinex_runtime_present(
     let version_number = if let Some(bepinex_full_name) = bepinex_full_name {
         extract_version_number_from_full_name(&bepinex_full_name)
             .unwrap_or_else(|| {
-                eprintln!(
+                log::warn!(
                     "[ensure_macos_bepinex_runtime_present] Could not parse BepInEx version from {}; leaving current runtime untouched.",
                     bepinex_full_name
                 );
                 "".to_string()
             })
     } else if runtime_requires_fix {
-        eprintln!(
+        log::debug!(
             "[ensure_macos_bepinex_runtime_present] No explicit BepInExPack entry found in profile mods; forcing runtime refresh with minimum version {}.{}.{}.{}.",
             MIN_BEPINEX5_UNITY6_LOG_WRITER_FIX.0,
             MIN_BEPINEX5_UNITY6_LOG_WRITER_FIX.1,
@@ -243,7 +243,7 @@ pub(crate) async fn ensure_macos_bepinex_runtime_present(
     {
         Ok(bytes) => bytes,
         Err(error) if runtime_has_complete => {
-            eprintln!(
+            log::warn!(
                     "[ensure_macos_bepinex_runtime_present] Runtime refresh failed ({}), but an existing runtime is present. Continuing with existing runtime.",
                     error
                 );

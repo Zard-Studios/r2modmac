@@ -47,9 +47,10 @@ pub(crate) fn launch_macos_bepinex_wrapper(
     configure_macos_bepinex_script(&run_script, &runtime_root, write_debug_logs_to_game)?;
     dequarantine_recursive(&runtime_root);
 
-    eprintln!(
+    log::info!(
         "[{}] Launching via run_bepinex.sh at {:?}",
-        context, run_script
+        context,
+        run_script
     );
 
     std::process::Command::new("/bin/bash")
@@ -60,7 +61,7 @@ pub(crate) fn launch_macos_bepinex_wrapper(
 
     if let Some(executable_path) = executable_path.as_ref() {
         if !wait_for_process_start(executable_path, MACOS_LAUNCH_OBSERVE_TIMEOUT_MS) {
-            eprintln!(
+            log::debug!(
                 "[{}] run_bepinex.sh launch request succeeded, but the game process was not observed in time. Continuing optimistically.",
                 context
             );

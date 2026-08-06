@@ -307,6 +307,7 @@ function App() {
   const [installInParallel, setInstallInParallel] = useState(true)
   const [confirmBeforeApplyToGame, setConfirmBeforeApplyToGame] = useState(false)
   const [writeDebugLogsToGame, setWriteDebugLogsToGame] = useState(false)
+  const [verboseLogging, setVerboseLogging] = useState(false)
   const [defaultModViewMode, setDefaultModViewMode] = useState<'grid' | 'list'>('grid')
   const [showDeprecatedWarnings, setShowDeprecatedWarnings] = useState(true)
   const [sponsoredMessagesEnabled, setSponsoredMessagesEnabled] = useState(true)
@@ -713,6 +714,9 @@ function App() {
       setInstallInParallel(s.install_in_parallel ?? true);
       setConfirmBeforeApplyToGame(!!s.confirm_before_apply_to_game);
       setWriteDebugLogsToGame(s.write_debug_logs_to_game ?? false);
+      setVerboseLogging(s.verbose_logging ?? false);
+      // Apply the persisted level immediately so early-session logs honour it.
+      void window.ipcRenderer.setVerboseLogging(s.verbose_logging ?? false);
       const storedViewMode = s.default_mod_view_mode === 'list' ? 'list' : 'grid';
       setDefaultModViewMode(storedViewMode);
       setViewMode(storedViewMode);
@@ -1941,6 +1945,8 @@ function App() {
     setInstallInParallel(newSettings.install_in_parallel);
     setConfirmBeforeApplyToGame(newSettings.confirm_before_apply_to_game);
     setWriteDebugLogsToGame(newSettings.write_debug_logs_to_game);
+    setVerboseLogging(newSettings.verbose_logging);
+    void window.ipcRenderer.setVerboseLogging(newSettings.verbose_logging);
     setDefaultModViewMode(newSettings.default_mod_view_mode);
     setViewMode(newSettings.default_mod_view_mode);
     setShowDeprecatedWarnings(newSettings.show_deprecated_warnings);
@@ -1957,6 +1963,7 @@ function App() {
       install_in_parallel: newSettings.install_in_parallel,
       confirm_before_apply_to_game: newSettings.confirm_before_apply_to_game,
       write_debug_logs_to_game: newSettings.write_debug_logs_to_game,
+      verbose_logging: newSettings.verbose_logging,
       default_mod_view_mode: newSettings.default_mod_view_mode,
       show_deprecated_warnings: newSettings.show_deprecated_warnings,
       sponsored_messages_enabled: newSettings.sponsored_messages_enabled,
@@ -2620,6 +2627,7 @@ function App() {
           install_in_parallel: installInParallel,
           confirm_before_apply_to_game: confirmBeforeApplyToGame,
           write_debug_logs_to_game: writeDebugLogsToGame,
+          verbose_logging: verboseLogging,
           default_mod_view_mode: defaultModViewMode,
           show_deprecated_warnings: showDeprecatedWarnings,
           sponsored_messages_enabled: sponsoredMessagesEnabled,
