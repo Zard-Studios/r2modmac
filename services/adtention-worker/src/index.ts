@@ -3,7 +3,18 @@ import { normalizeSponsor, text, validateSponsorRequest } from './sponsor';
 
 const SPONSOR_PATH = '/api/sponsor';
 const MAX_REQUEST_BYTES = 2_048;
-const ADTENTION_CATEGORY = 'general' as const;
+const ADTENTION_CATEGORIES = ['web', 'systems', 'devops', 'data', 'web3'] as const;
+
+function shuffleArray<T>(array: readonly T[]): T[] {
+  const result = [...array];
+  for (let i = result.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const temp = result[i];
+    result[i] = result[j];
+    result[j] = temp;
+  }
+  return result;
+}
 
 const RESPONSE_HEADERS = {
   'cache-control': 'no-store',
@@ -59,24 +70,42 @@ export default {
     const body = validateSponsorRequest(await readBoundedJson(request));
     if (!publisherId) return noContent('publisher_missing', staging);
     if (!body) return noContent('request_rejected', staging);
+    const clientIp = request.headers.get('cf-connecting-ip') ?? request.headers.get('x-forwarded-for');
+    const userAgent = request.headers.get('user-agent');
+    const customFetch: typeof fetch = (input, init) => {
+      const headers = new Headers(init?.headers);
+      if (clientIp) {
+        headers.set('x-forwarded-for', clientIp);
+      }
+      if (userAgent) {
+        headers.set('user-agent', userAgent);
+      }
+      return fetch(input, { ...init, headers });
+    };
 
     try {
       let sdkError: AdtentionError | undefined;
-      const slot = new SponsorSlot({
-        publisherId,
-        serveOnly: true,
-        category: ADTENTION_CATEGORY,
-        timeoutMs: 4_500,
-        fetch: (input, init) => fetch(input, init),
-        onError: (error) => {
-          sdkError = error;
-        },
-      });
-      const sponsor = normalizeSponsor(await slot.next({ subject: body.subject }));
-      if (!sponsor) {
-        return noContent(sdkError?.code ?? 'no_inventory', staging);
+      const categories = shuffleArray(ADTENTION_CATEGORIES);
+
+      for (const category of categories) {
+        const slot = new SponsorSlot({
+          publisherId,
+          serveOnly: true,
+          category,
+          timeoutMs: 4_500,
+          fetch: customFetch,
+          onError: (error) => {
+            sdkError = error;
+          },
+        });
+        const sponsor = normalizeSponsor(await slot.next({ subject: body.subject }));
+        if (sponsor) {
+          return Response.json(sponsor, { headers: RESPONSE_HEADERS });
+        }
       }
-      return Response.json(sponsor, { headers: RESPONSE_HEADERS });
+
+
+      return noContent(sdkError?.code ?? 'no_inventory', staging);
     } catch {
       return noContent('unexpected_error', staging);
     }

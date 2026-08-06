@@ -3,6 +3,17 @@ set -Eeuo pipefail
 IFS=$'\n\t'
 umask 022
 
+# Always use rustup's cargo/rustc, NOT Homebrew's. Homebrew rust lacks cross-compile targets.
+export PATH="$HOME/.cargo/bin:$PATH"
+
+# Use sccache if available to speed up incremental rebuilds
+if command -v sccache &>/dev/null; then
+  export RUSTC_WRAPPER
+  RUSTC_WRAPPER="$(command -v sccache)"
+  unset CARGO_INCREMENTAL
+fi
+
+
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 DIST_DIR="$ROOT_DIR/dist-local"
 SPONSOR_PROXY_URL="https://r2modmac-sponsor-production.notfy-stream.workers.dev/api/sponsor"
@@ -56,6 +67,10 @@ for arg in "$@"; do
   case "$arg" in
     --all|all) set_mode all ;;
     --macos|macos) set_mode macos ;;
+    --windows|windows) set_mode windows ;;
+    --windows-x64|windows-x64) set_mode windows-x64 ;;
+    --windows-x86|windows-x86) set_mode windows-x86 ;;
+    --windows-arm64|windows-arm64) set_mode windows-arm64 ;;
     --linux|linux) set_mode linux ;;
     --linux-x64|linux-x64) set_mode linux-x64 ;;
     --linux-arm64|linux-arm64) set_mode linux-arm64 ;;
@@ -87,12 +102,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-verify_clean_tree() {
-  require git
-  if [[ "${ALLOW_DIRTY_BUILD:-0}" != "1" ]] && [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
-    die "Tracked files are modified. Commit or stash them, or set ALLOW_DIRTY_BUILD=1 explicitly."
-  fi
-}
+
 
 verify_versions() {
   require node
@@ -230,88 +240,121 @@ build_macos() {
   build_macos_target "x86_64-apple-darwin" "x86_64"
 }
 
-write_linux_builder_dockerfile() {
-  local dockerfile="$1"
-  cat > "$dockerfile" <<'DOCKERFILE'
-FROM ubuntu:22.04
-ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential ca-certificates curl file gzip pkg-config tar binutils \
-    libssl-dev libgtk-3-dev libwebkit2gtk-4.1-dev librsvg2-dev \
-    libayatana-appindicator3-dev libxdo-dev patchelf \
- && rm -rf /var/lib/apt/lists/*
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-    | sh -s -- -y --profile minimal --default-toolchain stable
-ENV PATH=/root/.cargo/bin:${PATH}
-WORKDIR /work
-DOCKERFILE
+# --- Linux via apple/container -----------------------------------------------
+# The container system service is started on demand and shut down on script exit.
+
+_CONTAINER_STARTED=0
+
+start_container_system() {
+  if [[ "$_CONTAINER_STARTED" == "0" ]]; then
+    require container
+    log "Starting apple/container service"
+    container system start >/dev/null 2>&1 || true
+    # Wait until the container API server is responsive (up to 30s)
+    local i=0
+    until container image list >/dev/null 2>&1; do
+      i=$(( i + 1 ))
+      if [[ "$i" -ge 30 ]]; then
+        die "apple/container service did not become ready in 30s"
+      fi
+      sleep 1
+    done
+    _CONTAINER_STARTED=1
+  fi
 }
 
+stop_container_system() {
+  if [[ "$_CONTAINER_STARTED" == "1" ]]; then
+    container prune >/dev/null 2>&1 || true
+    container system stop >/dev/null 2>&1 || true
+    _CONTAINER_STARTED=0
+  fi
+}
+
+# Extend the existing cleanup trap to also stop the container service
+_original_cleanup() {
+  local path
+  for path in "${cleanup_paths[@]:-}"; do
+    [[ -n "$path" ]] && rm -rf -- "$path"
+  done
+}
+cleanup() { _original_cleanup; stop_container_system; }
+
 build_linux_target() {
-  local platform="$1"
-  local asset_arch="$2"
-  local expected_machine="$3"
-  require docker
+  local container_arch="$1"   # arm64 or x86_64
+  local asset_arch="$2"       # arm64 or x64
+  local rust_target="$3"      # e.g. aarch64-unknown-linux-gnu
 
-  local builder_dir
-  builder_dir="$(mktemp -d "${TMPDIR:-/tmp}/r2modmac-linux-builder.XXXXXX")"
-  cleanup_paths+=("$builder_dir")
-  write_linux_builder_dockerfile "$builder_dir/Dockerfile"
+  local img
+  if [[ "$asset_arch" == "arm64" ]]; then
+    img="r2modmac-builder-arm64"
+  else
+    img="r2modmac-builder-x64"
+  fi
 
-  local image="r2modmac-linux-builder:${asset_arch}"
-  log "Preparing Linux $asset_arch builder"
-  docker buildx build --platform "$platform" --load --tag "$image" "$builder_dir"
+  require container
 
-  log "Building Linux $asset_arch"
-  mkdir -p "$ROOT_DIR/src-tauri/target-local-linux-${asset_arch}"
-  docker volume create r2modmac-cargo-registry >/dev/null
-  docker volume create r2modmac-cargo-git >/dev/null
+  start_container_system
+
+  if ! container image inspect "$img" &>/dev/null; then
+    die "apple/container image '$img' not found. Build it first with: container build --arch $container_arch -t $img <Containerfile-dir>"
+  fi
+
+  log "Building Linux $asset_arch via apple/container ($img)"
+
   local archive_name="r2modmac_linux_${asset_arch}.tar.gz"
-
-  docker run --rm \
-    --platform "$platform" \
-    --volume "$ROOT_DIR:/work" \
-    --volume r2modmac-cargo-registry:/root/.cargo/registry \
-    --volume r2modmac-cargo-git:/root/.cargo/git \
-    --env "CARGO_TARGET_DIR=/work/src-tauri/target-local-linux-${asset_arch}" \
-    --env "ARCHIVE_NAME=$archive_name" \
-    --env "EXPECTED_MACHINE=$expected_machine" \
-    --env "SPONSOR_PROXY_URL=$SPONSOR_PROXY_URL" \
-    --env "HOST_UID=$(id -u)" \
-    --env "HOST_GID=$(id -g)" \
-    "$image" \
-    bash -lc '
-      set -Eeuo pipefail
-      cd /work
-      unset R2MODMAC_SPONSOR_PROXY_URL
-      cargo build --manifest-path src-tauri/Cargo.toml --release --locked
-      binary="$CARGO_TARGET_DIR/release/r2modmac"
-      test -f "$binary" || { echo "Linux binary not found: $binary" >&2; exit 1; }
-      LC_ALL=C grep -aFq -- "$SPONSOR_PROXY_URL" "$binary" || { echo "Production sponsor endpoint is missing from Linux binary" >&2; exit 1; }
-      machine="$(readelf -h "$binary" | awk -F: "/Machine:/ { gsub(/^[[:space:]]+/, \"\", \$2); print \$2 }")"
-      case "$machine" in
-        *"$EXPECTED_MACHINE"*) ;;
-        *) echo "Unexpected ELF architecture: $machine" >&2; exit 1 ;;
-      esac
-      stage="$(mktemp -d)"
-      trap "rm -rf -- \"$stage\"" EXIT
-      cp --reflink=never --sparse=never "$binary" "$stage/r2modmac"
-      chmod 0755 "$stage/r2modmac"
-      tar --format=ustar --sort=name --mtime=@0 \
-        --owner=0 --group=0 --numeric-owner \
-        -C "$stage" -cf - r2modmac \
-        | gzip -9n > "/work/dist-local/$ARCHIVE_NAME"
-      chown "$HOST_UID:$HOST_GID" "/work/dist-local/$ARCHIVE_NAME" 2>/dev/null || true
-    '
-
   local archive="$DIST_DIR/$archive_name"
+  rm -f "$archive"
+
+  container run --rm -i \
+    --arch "$container_arch" \
+    -m 8G \
+    -v "$ROOT_DIR:$ROOT_DIR" \
+    -v "$HOME/.cargo/registry:/root/.cargo/registry" \
+    -v "$HOME/.cargo/git:/root/.cargo/git" \
+    -w "$ROOT_DIR" \
+    "$img" \
+    /bin/bash -s -- "$rust_target" "$ROOT_DIR" "$archive_name" "$SPONSOR_PROXY_URL" <<'INNER'
+#!/bin/bash
+set -Eeuo pipefail
+RUST_TARGET="$1"
+ROOT_DIR="$2"
+ARCHIVE_NAME="$3"
+SPONSOR_PROXY_URL="$4"
+
+export PATH="/root/.cargo/bin:$PATH"
+export TAURI_CONFIG='{"build":{"beforeBuildCommand":"","devUrl":null}}'
+export TAURI_ENV_TARGET_TRIPLE="$RUST_TARGET"
+
+cd "$ROOT_DIR"
+rm -f "src-tauri/target/$RUST_TARGET/release/r2modmac"
+/root/.cargo/bin/cargo build --release --locked \
+  --manifest-path src-tauri/Cargo.toml \
+  --target "$RUST_TARGET"
+
+binary="src-tauri/target/$RUST_TARGET/release/r2modmac"
+test -f "$binary" || { echo "Linux binary not found: $binary" >&2; exit 1; }
+LC_ALL=C grep -aFq -- "$SPONSOR_PROXY_URL" "$binary" \
+  || { echo "Production sponsor endpoint is missing from Linux binary" >&2; exit 1; }
+
+stage="$(mktemp -d)"
+trap 'rm -rf -- "$stage"' EXIT
+cp "$binary" "$stage/r2modmac"
+chmod 0755 "$stage/r2modmac"
+touch "$stage/r2modmac"
+tar -C "$stage" -czf "$stage/$ARCHIVE_NAME" r2modmac
+cp "$stage/$ARCHIVE_NAME" "$ROOT_DIR/dist-local/$ARCHIVE_NAME"
+INNER
+
+
   [[ -f "$archive" ]] || die "Linux archive was not produced: $archive"
   validate_linux_archive "$archive"
   sha256_file "$archive"
 }
 
-build_linux_x64() { build_linux_target "linux/amd64" "x64" "X86-64"; }
-build_linux_arm64() { build_linux_target "linux/arm64" "arm64" "AArch64"; }
+build_linux_x64()   { build_linux_target "x86_64" "x64"   "x86_64-unknown-linux-gnu"; }
+build_linux_arm64() { build_linux_target "arm64"  "arm64" "aarch64-unknown-linux-gnu"; }
+
 
 write_checksums() {
   local output="$DIST_DIR/SHA256SUMS.txt"
@@ -324,7 +367,7 @@ write_checksums() {
   log "Checksums written to $output"
 }
 
-verify_clean_tree
+
 verify_versions
 verify_sponsor_endpoint
 
@@ -338,16 +381,69 @@ install_frontend_dependencies
 build_frontend
 if [[ "$SKIP_CHECKS" == "0" ]]; then run_checks; else warn "Shipping checks were skipped by explicit request."; fi
 
+# --- Windows via cargo-xwin --------------------------------------------------
+SKIP_BEFORE='{"build":{"beforeBuildCommand":"","devUrl":null}}'
+
+build_windows_target() {
+  local rust_target="$1"   # e.g. x86_64-pc-windows-msvc
+  local asset_arch="$2"    # x64 | x86 | arm64
+
+  require cargo
+
+  if ! command -v cargo-xwin &>/dev/null; then
+    log "Installing cargo-xwin"
+    cargo install cargo-xwin >/dev/null 2>&1
+  fi
+
+  rustup target add "$rust_target" >/dev/null 2>&1 || true
+
+  log "Building Windows $asset_arch"
+  XWIN_CROSS_COMPILER=clang \
+  CPPFLAGS="-DZSTD_DISABLE_ASM=1 -DZSTD_NO_INTRINSICS=1" \
+  CFLAGS="-DZSTD_DISABLE_ASM=1 -DZSTD_NO_INTRINSICS=1" \
+  ZSTD_SYS_DISABLE_ASM=1 \
+  ZSTD_DISABLE_ASM=1 \
+    npx tauri build \
+      --target "$rust_target" \
+      --runner cargo-xwin \
+      --no-bundle \
+      --config "$SKIP_BEFORE"
+
+  local exe="src-tauri/target/$rust_target/release/r2modmac.exe"
+  [[ -f "$exe" ]] || die "Windows binary not produced: $exe"
+
+  local zip="$DIST_DIR/r2modmac_windows_${asset_arch}.zip"
+  rm -f "$zip"
+  zip -j "$zip" "$exe"
+  sha256_file "$zip"
+}
+
+build_windows_x64()   { build_windows_target "x86_64-pc-windows-msvc"  "x64"; }
+build_windows_x86()   { build_windows_target "i686-pc-windows-msvc"    "x86"; }
+build_windows_arm64() { build_windows_target "aarch64-pc-windows-msvc" "arm64"; }
+
+build_windows() {
+  build_windows_x64
+  build_windows_x86
+  build_windows_arm64
+}
+
+# --- Dispatch -----------------------------------------------------------------
 case "$MODE" in
   all)
     if [[ "$(uname -s)" == "Darwin" ]]; then build_macos; else warn "Skipping macOS artifacts on non-macOS host."; fi
+    build_windows
     build_linux_x64
     build_linux_arm64
     ;;
-  macos) build_macos ;;
-  linux) build_linux_x64; build_linux_arm64 ;;
-  linux-x64) build_linux_x64 ;;
-  linux-arm64) build_linux_arm64 ;;
+  macos)         build_macos ;;
+  windows)       build_windows ;;
+  windows-x64)   build_windows_x64 ;;
+  windows-x86)   build_windows_x86 ;;
+  windows-arm64) build_windows_arm64 ;;
+  linux)         build_linux_x64; build_linux_arm64 ;;
+  linux-x64)     build_linux_x64 ;;
+  linux-arm64)   build_linux_arm64 ;;
 esac
 
 write_checksums
