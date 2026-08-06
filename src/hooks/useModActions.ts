@@ -3,6 +3,7 @@ import type { InstalledMod } from '../types/profile';
 import { useProfileStore } from '../store/useProfileStore';
 import { compareVersions, findPinnedVersion, parsePackageReference, satisfiesMinimumVersion } from '../utils/modVersioning';
 import { inferPendingSyncKind, snapshotInstalledMod } from '../utils/profileSync';
+import { runWithConcurrency } from '../utils/concurrency';
 
 const MAX_PARALLEL_OPS = 10;
 
@@ -93,19 +94,6 @@ export function useModActions({
             getPackageKey(mod.fullName).toLowerCase() === packageKey
             && satisfiesMinimumVersion(mod.versionNumber, minimumVersion)
         );
-    };
-
-    const runWithConcurrency = async (tasks: Array<() => Promise<void>>, maxConcurrency: number) => {
-        for (let i = 0; i < tasks.length; i += maxConcurrency) {
-            const batch = tasks.slice(i, i + maxConcurrency);
-            if (maxConcurrency === 1) {
-                await batch[0]();
-            } else {
-                const results = await Promise.allSettled(batch.map((task) => task()));
-                const rejected = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
-                if (rejected) throw rejected.reason;
-            }
-        }
     };
 
     // ── Core recursive installer (handles dependencies) ──────────────────────────

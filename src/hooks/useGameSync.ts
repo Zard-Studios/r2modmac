@@ -4,6 +4,7 @@ import type { InstalledMod, PendingModRemoval } from '../types/profile';
 import { useProfileStore } from '../store/useProfileStore';
 import type { ModDownloadProgressEvent, ProfileApplySnapshotProgressEvent, ProgressSetter } from '../types/progress';
 import { parsePackageReference } from '../utils/modVersioning';
+import { createFrameScheduler, runWithConcurrency } from '../utils/concurrency';
 
 const MAX_PARALLEL_OPS = 10;
 
@@ -256,7 +257,13 @@ export function useGameSync({
                     }));
                 };
 
-                const recomputeDownloadState = () => {
+                // Progress events arrive from every in-flight download at ~120 ms
+                // intervals. Applying each one directly meant a React render per
+                // event; coalescing to one update per frame keeps the numbers
+                // live without the render storm.
+                const downloadStateScheduler = createFrameScheduler();
+
+                const applyDownloadState = () => {
                     const inFlight = Array.from(activeDownloads.values());
                     if (inFlight.length === 0) {
                         setProgressState(prev => ({
@@ -290,6 +297,10 @@ export function useGameSync({
                         downloadSpeedBps: totalSpeed,
                         activeDownloads: inFlight.length,
                     }));
+                };
+
+                const recomputeDownloadState = () => {
+                    downloadStateScheduler.schedule(applyDownloadState);
                 };
 
                 const unlistenDownloadProgress = await listen<ModDownloadProgressEvent>('mod-download-progress', (event) => {
@@ -490,20 +501,26 @@ export function useGameSync({
                 };
 
                 try {
-                    for (let i = 0; i < syncResult.to_install.length; i += concurrency) {
+                    // A sliding pool rather than fixed batches: mod sizes vary
+                    // enormously, so waiting for a batch's slowest download
+                    // before starting the next one left most slots idle.
+                    let sinceLastFlush = 0;
+                    const tasks = syncResult.to_install.map((modKey: string) => async () => {
                         await ensureNotStopped();
-                        const batch = syncResult.to_install.slice(i, i + concurrency);
-                        if (concurrency === 1) {
-                            await processMod(batch[0]);
-                        } else {
-                            const results = await Promise.allSettled(batch.map((modKey) => processMod(modKey)));
+                        await processMod(modKey);
+                        // Persisting after every mod would serialise the pool on
+                        // disk writes; persisting only at the end would lose
+                        // resume information. Checkpoint every `concurrency`
+                        // completions, which is what the old batch loop did.
+                        if (++sinceLastFlush >= concurrency) {
+                            sinceLastFlush = 0;
                             await flushSuccessfullyInstalledMods();
-                            const rejected = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
-                            if (rejected) throw rejected.reason;
                         }
-                        if (concurrency === 1) await flushSuccessfullyInstalledMods();
-                    }
+                    });
+                    await runWithConcurrency(tasks, concurrency);
+                    await flushSuccessfullyInstalledMods();
                 } finally {
+                    downloadStateScheduler.cancel();
                     unlistenDownloadProgress();
                 }
                 setProgressState(prev => ({

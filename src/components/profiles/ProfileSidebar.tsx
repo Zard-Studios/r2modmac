@@ -7,6 +7,7 @@ import { Button, HoverMarquee } from '../ui';
 import { compareVersions, hasNewerVersion, latestVersionNumber, parsePackageReference } from '../../utils/modVersioning';
 import { hasPendingRuntimeInstall, restoreInstalledMod } from '../../utils/profileSync';
 import { getProfileAvatarGradient } from '../../utils/profileAvatar';
+import { runWithConcurrency } from '../../utils/concurrency';
 
 const MAX_PARALLEL_TOGGLES = 10;
 const formatCount = (count: number, singular: string, plural = `${singular}s`) => (
@@ -526,15 +527,10 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
         if (targets.length === 0) return;
 
         const concurrency = installInParallel ? MAX_PARALLEL_TOGGLES : 1;
-        for (let i = 0; i < targets.length; i += concurrency) {
-            const batch = targets.slice(i, i + concurrency);
-            if (concurrency === 1) {
-                await onToggleMod(activeProfile.id, batch[0].uuid4);
-            } else {
-                await Promise.all(batch.map((mod) => onToggleMod(activeProfile.id, mod.uuid4)));
-            }
-        }
-
+        await runWithConcurrency(
+            targets.map((mod) => () => onToggleMod(activeProfile.id, mod.uuid4)),
+            concurrency
+        );
     };
 
     const handleBulkDeleteSelected = async () => {
