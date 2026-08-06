@@ -3,7 +3,7 @@ import React from 'react';
 interface ModalProps {
     isOpen: boolean;
     onClose: () => void;
-    title?: string;
+    title?: React.ReactNode;
     children: React.ReactNode;
     size?: 'sm' | 'md' | 'lg' | 'xl';
 }
@@ -30,7 +30,11 @@ export function Modal({ isOpen, onClose, title, children, size = 'md' }: ModalPr
             <div className={`relative ${sizeStyles[size]} w-full mx-4 bg-gray-800 rounded-xl shadow-2xl border border-gray-700`}>
                 {title && (
                     <div className="flex items-center justify-between px-6 py-4 border-b border-gray-700">
-                        <h2 className="text-lg font-bold text-white">{title}</h2>
+                        {typeof title === 'string' ? (
+                            <h2 className="text-lg font-bold text-white">{title}</h2>
+                        ) : (
+                            <div className="flex-1 min-w-0 pr-4">{title}</div>
+                        )}
                         <button
                             onClick={onClose}
                             className="text-gray-400 hover:text-white transition-colors"

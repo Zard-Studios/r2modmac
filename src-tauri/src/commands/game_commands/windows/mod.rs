@@ -225,13 +225,34 @@ pub(crate) fn launch_windows_steam_game(
                     "launch_windows_steam_game",
                 ) {
                     Ok(()) => {
-                        if !wait_for_process_start_patterns(&process_patterns, 120_000) {
-                            log::warn!(
-                                "[launch_windows_steam_game] Wineskin accepted the launch request for app {}, but the game process was not observed in time. Continuing optimistically.",
-                                app_id
-                            );
+                        let timeout_ms = if steam_was_running { 60_000 } else { 180_000 };
+                        match crate::commands::game_commands::steam_state::wait_for_launch_or_blocker(
+                            &steam_root,
+                            &app_id,
+                            timeout_ms,
+                            || is_process_running_for_patterns(&process_patterns),
+                        ) {
+                            crate::commands::game_commands::steam_state::LaunchWaitOutcome::Started => return Ok(()),
+                            crate::commands::game_commands::steam_state::LaunchWaitOutcome::Blocked(reason) => {
+                                log::warn!(
+                                    "[launch_windows_steam_game] Steam stalled the launch of app {}: {}",
+                                    app_id,
+                                    reason
+                                );
+                                return Err(reason);
+                            }
+                            crate::commands::game_commands::steam_state::LaunchWaitOutcome::TimedOut => {
+                                log::warn!(
+                                    "[launch_windows_steam_game] Wineskin accepted the launch request for app {}, but the game process was not observed in time.",
+                                    app_id
+                                );
+                                return Err(if steam_was_running {
+                                    "Steam accepted the launch but the game did not start. Open Steam to check for a prompt or an error waiting for you there.".to_string()
+                                } else {
+                                    "Steam was not running, so r2modmac started it first — but the game did not start in time. Check the Steam window and try again.".to_string()
+                                });
+                            }
                         }
-                        return Ok(());
                     }
                     Err(error) => {
                         log::warn!(

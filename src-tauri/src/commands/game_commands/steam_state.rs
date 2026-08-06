@@ -14,6 +14,7 @@ use std::path::Path;
 /// Bits of `StateFlags` in `steamapps/appmanifest_<appid>.acf`.
 mod state_flags {
     pub const UNINSTALLED: u64 = 1;
+    #[allow(dead_code)]
     pub const UPDATE_REQUIRED: u64 = 2;
     pub const FILES_MISSING: u64 = 32;
     pub const FILES_CORRUPT: u64 = 128;
@@ -24,7 +25,7 @@ mod state_flags {
 
 /// How many trailing bytes of `console_log.txt` to inspect. The file grows to
 /// several MB over months; only the tail describes the launch we just asked for.
-const CONSOLE_LOG_TAIL_BYTES: u64 = 256 * 1024;
+const CONSOLE_LOG_TAIL_BYTES: u64 = 1024 * 1024;
 
 pub(crate) fn appmanifest_path(steam_root: &Path, app_id: &str) -> std::path::PathBuf {
     steam_root
@@ -73,23 +74,37 @@ pub(crate) fn describe_state_blocker(flags: u64) -> Option<String> {
     }
     if flags & state_flags::UPDATE_PAUSED != 0 {
         return Some(
-            "This game has a paused Steam update. Resume it in Steam's Downloads page, then try again."
+            "This game has a paused update in Steam. Resume the download in Steam before launching."
                 .to_string(),
         );
     }
     if flags & (state_flags::UPDATE_RUNNING | state_flags::UPDATE_STARTED) != 0 {
         return Some(
-            "Steam is currently updating this game. Wait for the download to finish, then try again."
-                .to_string(),
-        );
-    }
-    if flags & state_flags::UPDATE_REQUIRED != 0 {
-        return Some(
-            "This game has a pending Steam update. Steam will not start it until the update is installed — open Steam and let it download, then try again."
+            "Steam is currently updating this game. Wait for the update to finish before launching."
                 .to_string(),
         );
     }
     None
+}
+
+/// Does this log line refer to `app_id`?
+///
+/// Steam writes the id both as `[AppID 123, ActionID 1]` and as
+/// `AppID 123 "path"`, so the trailing character varies. It must still be a
+/// boundary, or app 123 would match every line belonging to app 1234.
+fn line_mentions_app(line: &str, app_id: &str) -> bool {
+    let needle = format!("AppID {}", app_id);
+    let mut search_from = 0;
+
+    while let Some(offset) = line[search_from..].find(&needle) {
+        let end = search_from + offset + needle.len();
+        match line[end..].chars().next() {
+            None => return true,
+            Some(next) if !next.is_ascii_digit() => return true,
+            _ => search_from = end,
+        }
+    }
+    false
 }
 
 /// Inspect a Steam console log tail for a launch that is parked on a prompt.
@@ -99,11 +114,10 @@ pub(crate) fn describe_state_blocker(flags: u64) -> Option<String> {
 /// with no following `continues with user response` for the same step — that is
 /// the invisible-dialog case.
 pub(crate) fn pending_user_prompt_for_app(log_contents: &str, app_id: &str) -> Option<String> {
-    let marker = format!("[AppID {},", app_id);
     let mut waiting_on: Option<String> = None;
 
     for line in log_contents.lines() {
-        if !line.contains(&marker) {
+        if !line_mentions_app(line, app_id) {
             continue;
         }
         if let Some(index) = line.find("waiting for user response to ") {
@@ -128,10 +142,16 @@ pub(crate) fn pending_user_prompt_for_app(log_contents: &str, app_id: &str) -> O
 
 fn describe_pending_prompt(task: &str) -> String {
     match task {
-        "SynchronizingCloud" => "Steam is waiting for an answer to a Steam Cloud conflict for this game. Open Steam, respond to the cloud sync prompt, then try again.".to_string(),
-        "ShowInterstitials" => "Steam is waiting for an answer to a prompt shown before the game starts. Open Steam, respond to it, then try again.".to_string(),
+        "SynchronizingCloud" | "CloudSync" => {
+            "This game has a Steam Cloud conflict. Resolve the conflict in Steam before launching."
+                .to_string()
+        }
+        "ShowInterstitials" => {
+            "Steam is waiting for a response to a prompt before launch. Open Steam to respond."
+                .to_string()
+        }
         other => format!(
-            "Steam is waiting for an answer to its '{}' prompt. Open Steam, respond to it, then try again.",
+            "Steam is waiting for a response to '{}'. Resolve it in Steam before launching.",
             other
         ),
     }
@@ -142,15 +162,17 @@ pub(crate) fn read_console_log_tail(steam_root: &Path) -> Option<String> {
     use std::io::{Read, Seek, SeekFrom};
 
     let path = steam_root.join("logs").join("console_log.txt");
-    let mut file = std::fs::File::open(path).ok()?;
-    let length = file.metadata().ok()?.len();
-    if length > CONSOLE_LOG_TAIL_BYTES {
-        file.seek(SeekFrom::Start(length - CONSOLE_LOG_TAIL_BYTES))
-            .ok()?;
+    if let Ok(mut file) = std::fs::File::open(&path) {
+        let length = file.metadata().ok()?.len();
+        if length > CONSOLE_LOG_TAIL_BYTES {
+            let _ = file.seek(SeekFrom::Start(length - CONSOLE_LOG_TAIL_BYTES));
+        }
+        let mut buffer = Vec::new();
+        if file.read_to_end(&mut buffer).is_ok() {
+            return Some(String::from_utf8_lossy(&buffer).into_owned());
+        }
     }
-    let mut buffer = Vec::new();
-    file.read_to_end(&mut buffer).ok()?;
-    Some(String::from_utf8_lossy(&buffer).into_owned())
+    None
 }
 
 /// Explain a launch that Steam accepted but never completed.
@@ -163,8 +185,25 @@ pub(crate) fn explain_stalled_launch(steam_root: &Path, app_id: &str) -> Option<
             return Some(blocker);
         }
     }
-    let log = read_console_log_tail(steam_root)?;
-    pending_user_prompt_for_app(&log, app_id)
+    if let Some(log) = read_console_log_tail(steam_root) {
+        if let Some(prompt) = pending_user_prompt_for_app(&log, app_id) {
+            return Some(prompt);
+        }
+    }
+
+    // Fallback: check native macOS Steam log if different from steam_root
+    if let Some(home) = dirs::home_dir() {
+        let mac_steam_root = home.join("Library/Application Support/Steam");
+        if mac_steam_root != steam_root && mac_steam_root.exists() {
+            if let Some(log) = read_console_log_tail(&mac_steam_root) {
+                if let Some(prompt) = pending_user_prompt_for_app(&log, app_id) {
+                    return Some(prompt);
+                }
+            }
+        }
+    }
+
+    None
 }
 
 /// How a launch request ended.
@@ -334,9 +373,8 @@ mod tests {
     }
 
     #[test]
-    fn update_required_alone_is_reported() {
-        let blocker = describe_state_blocker(4 | 2).expect("update required must be reported");
-        assert!(blocker.contains("pending Steam update"), "{blocker}");
+    fn update_required_alone_is_not_a_blocker() {
+        assert_eq!(describe_state_blocker(4 | 2), None);
     }
 
     #[test]
@@ -376,6 +414,33 @@ mod tests {
     fn ignores_prompts_belonging_to_a_different_app() {
         let log = "[2026-08-06 20:07:37] GameAction [AppID 3527290, ActionID 1] : LaunchApp waiting for user response to SynchronizingCloud \"pendingcloudsessions\"\n";
         assert_eq!(pending_user_prompt_for_app(log, "1229490"), None);
+    }
+
+    #[test]
+    fn matches_both_the_comma_and_space_forms_steam_writes() {
+        // "[AppID N, ActionID M]" for GameAction lines, "AppID N \"path\"" for
+        // process lines — both must count as referring to the app.
+        assert!(line_mentions_app(
+            "GameAction [AppID 3527290, ActionID 1] : LaunchApp",
+            "3527290"
+        ));
+        assert!(line_mentions_app(
+            "Game process added : AppID 3527290 \"\"C:\\PEAK.exe\"\"",
+            "3527290"
+        ));
+    }
+
+    #[test]
+    fn a_shorter_app_id_does_not_match_a_longer_one() {
+        // 352729 must not match app 3527290, in either form.
+        assert!(!line_mentions_app(
+            "GameAction [AppID 3527290, ActionID 1] : LaunchApp",
+            "352729"
+        ));
+        assert!(!line_mentions_app(
+            "Game process added : AppID 3527290 \"x\"",
+            "352729"
+        ));
     }
 
     #[test]

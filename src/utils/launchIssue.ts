@@ -26,27 +26,27 @@ export function describeLaunchIssue(raw: string): LaunchIssue {
     // word "prompt", and a files message can mention "update".
     if (lower.includes('cloud')) {
         return {
-            title: 'Steam is waiting on a Steam Cloud conflict',
+            title: 'Steam Cloud Conflict',
             message,
             pointsAtSteam: true,
         };
     }
     if (lower.includes('corrupt') || lower.includes('missing game files') || lower.includes('verify')) {
-        return { title: 'Steam reports a problem with the game files', message, pointsAtSteam: true };
+        return { title: 'Game File Issue', message, pointsAtSteam: true };
     }
     // 'updat' rather than 'update': the in-progress message says "updating",
     // which does not contain "update".
     if (lower.includes('updat')) {
-        return { title: 'This game has a pending Steam update', message, pointsAtSteam: true };
+        return { title: 'Pending Steam Update', message, pointsAtSteam: true };
     }
     if (lower.includes('waiting for an answer') || lower.includes('prompt')) {
-        return { title: 'Steam is waiting for an answer', message, pointsAtSteam: true };
+        return { title: 'Steam Prompt Waiting', message, pointsAtSteam: true };
     }
     if (lower.includes('already running')) {
-        return { title: 'The game is already running', message, pointsAtSteam: false };
+        return { title: 'Game Already Running', message, pointsAtSteam: false };
     }
     if (lower.includes('did not start') || lower.includes('was not running')) {
-        return { title: 'The game did not start', message, pointsAtSteam: true };
+        return { title: 'Game Did Not Start', message, pointsAtSteam: true };
     }
-    return { title: "The game couldn't be started", message, pointsAtSteam: false };
+    return { title: "Game Launch Failed", message, pointsAtSteam: false };
 }
