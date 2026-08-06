@@ -215,21 +215,15 @@ jobs:
             # ${{ github.ref_name }} Release
 
             ## News and improvements
-            - Added persistent pause and resume support for modpack downloads and installations.
-            - Added background profile syncing with a compact, reopenable progress indicator.
-            - Added clearer download, installation, retry, and failure feedback.
-            - Improved profile and sidebar presentation for long profile names.
+            - Added automated Linux (x64 and ARM64) release builds.
+            - Added a Verbose app logging option and a button to open the log folder, for easier troubleshooting.
+            - Added an in-app dialog explaining why a game launch stalled (a Steam Cloud conflict, a pending update) instead of failing silently.
+            - Improved Sync and Apply speed on macOS by cloning Apply snapshots instead of copying them, and by installing mods with a sliding concurrency pool instead of fixed batches.
 
             ## Fixes
-            - Fixed inaccurate update detection for large profiles and GitHub/Thunderstore rate-limit handling.
-            - Fixed pinned mod versions being replaced by the latest available release.
-            - Fixed missing or partially installed mods when importing and syncing large modpacks.
-            - Fixed invalid or empty package manifests causing silent installation failures.
-            - Fixed interrupted applies being restarted automatically when reopening a profile.
-            - Fixed completed mods being counted again after resuming an interrupted apply.
-            - Fixed progress panel layout shifts and disappearing transfer information.
-            - Fixed update asset selection across Apple Silicon, Intel Mac, and Windows architectures.
-            - Hardened application updates with complete-download validation, retry logic, and macOS rollback protection.
+            - Fixed "Sync Failed" errors caused by BOM- or UTF-16-encoded manifest.json files in some Thunderstore mods.
+            - Fixed same-named ReturnOfModding mods from different authors (for example, two different "ENVY" packages) overwriting each other.
+            - Fixed the Play button silently resetting to idle when Steam had to start cold before launching a modded game.
           files: |
             release_files/*.dmg
             release_files/*.zip
