@@ -328,6 +328,12 @@ function App() {
   const defaultGameAppliedRef = useRef(false)
   const defaultGameValidatedRef = useRef(false)
   const isInitialLoadRunningRef = useRef(false)
+  // Distinct from `communities.length > 0`: the startup default-game skip
+  // populates `communities` via a cache-only read (loadEssentialsForDefaultGame),
+  // which must NOT count as "the full load already happened" — otherwise
+  // loadData()'s own guard would block it from ever running when the user
+  // later goes back to the home screen.
+  const fullCommunitiesLoadDoneRef = useRef(false)
   const packagesLoadRequestRef = useRef(0)
   const profilePackageIndexRequestRef = useRef(0)
   const syncInspectionRequestRef = useRef<string | null>(null)
@@ -402,16 +408,15 @@ function App() {
     }
   }
 
-  async function loadData() {
+  async function loadData(refresh: boolean = true) {
     if (isInitialLoadRunningRef.current) return;
-
-    // If we already have communities, don't re-fetch them.
-    if (communities.length > 0) return;
+    if (fullCommunitiesLoadDoneRef.current) return;
 
     isInitialLoadRunningRef.current = true;
+    fullCommunitiesLoadDoneRef.current = true;
     setLoading(true)
     try {
-      const data = await window.ipcRenderer.fetchCommunities();
+      const data = await window.ipcRenderer.fetchCommunities(refresh);
       setCommunities(data)
       console.log(`[communities] loaded ${data.length} communities`);
 
@@ -421,7 +426,7 @@ function App() {
       let sessionImages: Record<string, string> = {};
 
       try {
-        sessionImages = await window.ipcRenderer.fetchCommunityImages();
+        sessionImages = await window.ipcRenderer.fetchCommunityImages(refresh);
         setCommunityImages(sessionImages);
       } catch (imgErr) {
         console.warn('[community-images] failed to fetch image map, using cached mac images', imgErr);
@@ -547,6 +552,42 @@ function App() {
     } finally {
       isInitialLoadRunningRef.current = false;
       setLoading(false)
+    }
+  }
+
+  // Startup "default game" skip: populate only what that one game's Browse
+  // Mods screen needs, with zero network activity. fetchCommunities(false)/
+  // fetchCommunityImages(false) read the on-disk cache only (no live fetch,
+  // no background refresh) — cheap even though the cache covers every game,
+  // since it's a local read either way. resolveCommunityPlatforms is called
+  // for just this one game rather than the full catalog. The full catalog
+  // (with a live refresh) is deferred to the `else if (previous)` branch in
+  // the selectedCommunity effect below, which only fires if the user
+  // actually goes back to the home screen.
+  async function loadEssentialsForDefaultGame(gameId: string) {
+    try {
+      const [comms, images] = await Promise.all([
+        window.ipcRenderer.fetchCommunities(false),
+        window.ipcRenderer.fetchCommunityImages(false),
+      ]);
+      setCommunities(comms);
+      setCommunityImages(images);
+
+      const target = comms.find((c) => c.identifier === gameId);
+      if (!target) return;
+      try {
+        const resolved = await window.ipcRenderer.resolveCommunityPlatforms([
+          { identifier: target.identifier, name: target.name },
+        ]) as Record<string, CommunityPlatformInfo>;
+        const info = resolved[target.identifier];
+        if (info) {
+          setCommunityPlatforms({ [target.identifier]: normalizePlatformInfo(info) });
+        }
+      } catch (err) {
+        console.warn('[loadEssentialsForDefaultGame] platform resolution failed', err);
+      }
+    } catch (err) {
+      console.error('[loadEssentialsForDefaultGame] failed', err);
     }
   }
 
@@ -715,7 +756,6 @@ function App() {
 
   useEffect(() => {
     setTimeout(() => {
-      loadData()
       loadProfiles()
       checkForUpdates()
     }, 0);
@@ -743,6 +783,14 @@ function App() {
       setDefaultProfile(s.default_profile ?? null);
       startupDefaultGameRef.current = s.default_game ?? null;
       startupDefaultProfileRef.current = s.default_profile ?? null;
+
+      // Skipping straight to a game: fetch only that game's essentials
+      // (cache-only, no network). Otherwise: full catalog load as before.
+      if (s.default_game) {
+        void loadEssentialsForDefaultGame(s.default_game);
+      } else {
+        void loadData(true);
+      }
     });
 
     window.ipcRenderer.getUsername().then((u: string) => {
@@ -1010,6 +1058,16 @@ function App() {
           selectProfile('')
         }
       }, 0);
+    } else if (previous) {
+      // `previous` truthy means we just transitioned AWAY from a real game
+      // back to the home screen (manual "Change Game", Escape key, or the
+      // safety-net effect reverting an invalid default). This can never be
+      // true on the initial mount, where `previous` starts at null — so the
+      // full, live-refreshing catalog load only fires here, never on every
+      // launch. It's the one place that load is owed when startup took the
+      // default-game skip path (cache-only, single-game view). No-ops if
+      // loadData() already ran in full this session (fullCommunitiesLoadDoneRef).
+      void loadData(true);
     }
   }, [selectedCommunity])
 
