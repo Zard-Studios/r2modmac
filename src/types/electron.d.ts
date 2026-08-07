@@ -9,6 +9,8 @@ export interface AppSettings {
     windows_steam_path?: string | null;
     mac_steam_path?: string | null;
     favorite_games: string[];
+    default_game?: string | null;
+    default_profile?: string | null;
     game_paths: Record<string, string>;
     legacy_install_mode?: boolean;
     ask_version_before_install?: boolean;
@@ -83,8 +85,8 @@ export interface IElectronAPI {
     installLocalMod: (profileId: string, localId: string, modName: string, gamePath: string, useProfileCache?: boolean) => Promise<{ success: boolean; error?: string }>;
     deleteLocalModPayload: (profileId: string, localId: string) => Promise<boolean>;
     checkDirectoryExists: (dirPath: string) => Promise<boolean>;
-    fetchCommunities: () => Promise<Community[]>;
-    fetchCommunityImages: () => Promise<Record<string, string>>;
+    fetchCommunities: (refresh?: boolean) => Promise<Community[]>;
+    fetchCommunityImages: (refresh?: boolean) => Promise<Record<string, string>>;
     resolveCommunityPlatforms: (games: { identifier: string; name: string }[]) => Promise<Record<string, CommunityPlatformInfo>>;
     fetchPackages: (gameId: string) => Promise<number>;
     getAvailableCategories: (gameId: string) => Promise<string[]>;

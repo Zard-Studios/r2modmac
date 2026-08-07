@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { Button } from '../ui';
 import { HeartIcon } from '../LikeStat';
+import { DefaultGamePickerModal } from './DefaultGamePickerModal';
+import type { Community, CommunityPlatformInfo } from '../../types/thunderstore';
 
 export interface PreferencesSettings {
     legacy_install_mode: boolean;
@@ -15,12 +17,17 @@ export interface PreferencesSettings {
     sponsored_messages_enabled: boolean;
     sponsored_messages_scale: number;
     sponsored_messages_background_opacity: number;
+    default_game: string | null;
+    default_profile?: string | null;
 }
 
 interface PreferencesModalProps {
     isOpen: boolean;
     onClose: () => void;
     settings: PreferencesSettings;
+    communities: Community[];
+    communityImages: Record<string, string>;
+    communityPlatforms: Record<string, CommunityPlatformInfo>;
     onSave: (settings: PreferencesSettings) => void;
     onSponsorPreferencesChange: (enabled: boolean) => Promise<void>;
     hasHiddenGuideWarnings: boolean;
@@ -54,7 +61,14 @@ function IconBox({ children, colorClass }: { children: React.ReactNode; colorCla
     );
 }
 
-function RowIcon({ kind }: { kind: 'install' | 'version' | 'parallel' | 'apply' | 'logs' | 'layout' | 'warning' | 'cache' | 'stream' | 'update' | 'support' | 'folder' }) {
+function RowIcon({ kind }: { kind: 'install' | 'version' | 'parallel' | 'apply' | 'logs' | 'layout' | 'warning' | 'cache' | 'stream' | 'update' | 'support' | 'folder' | 'game' | 'profile' }) {
+    if (kind === 'profile') return (
+        <IconBox colorClass="text-purple-400">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+            </svg>
+        </IconBox>
+    );
     if (kind === 'install') return (
         <IconBox colorClass="text-blue-400">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -130,6 +144,13 @@ function RowIcon({ kind }: { kind: 'install' | 'version' | 'parallel' | 'apply' 
             </svg>
         </IconBox>
     );
+    if (kind === 'game') return (
+        <IconBox colorClass="text-teal-400">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+            </svg>
+        </IconBox>
+    );
     return (
         <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-red-500/10 border border-red-500/20 text-red-400 flex-shrink-0">
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -143,6 +164,9 @@ export default function PreferencesModal({
     isOpen,
     onClose,
     settings,
+    communities,
+    communityImages,
+    communityPlatforms,
     onSave,
     onSponsorPreferencesChange,
     hasHiddenGuideWarnings,
@@ -161,6 +185,11 @@ export default function PreferencesModal({
     const [sponsoredMessagesEnabled, setSponsoredMessagesEnabled] = useState(settings.sponsored_messages_enabled);
     const [sponsoredMessagesScale, setSponsoredMessagesScale] = useState(settings.sponsored_messages_scale ?? 80);
     const [sponsoredMessagesOpacity, setSponsoredMessagesOpacity] = useState(settings.sponsored_messages_background_opacity ?? 80);
+    const [defaultGame, setDefaultGame] = useState<string | null>(settings.default_game ?? null);
+    const [defaultProfile, setDefaultProfile] = useState<string | null>(settings.default_profile ?? null);
+    const [showGamePicker, setShowGamePicker] = useState(false);
+    const [pickerInitialStep, setPickerInitialStep] = useState<'game' | 'profile'>('game');
+    const defaultGameName = communities.find(c => c.identifier === defaultGame)?.name ?? null;
     const [restoringWarnings, setRestoringWarnings] = useState(false);
     const [checkingUpdates, setCheckingUpdates] = useState(false);
 
@@ -187,6 +216,8 @@ export default function PreferencesModal({
             setSponsoredMessagesEnabled(settings.sponsored_messages_enabled);
             setSponsoredMessagesScale(settings.sponsored_messages_scale ?? 80);
             setSponsoredMessagesOpacity(settings.sponsored_messages_background_opacity ?? 80);
+            setDefaultGame(settings.default_game ?? null);
+            setDefaultProfile(settings.default_profile ?? null);
         } else {
             setIsVisible(false);
         }
@@ -240,6 +271,8 @@ export default function PreferencesModal({
             sponsored_messages_enabled: sponsoredMessagesEnabled,
             sponsored_messages_scale: sponsoredMessagesScale,
             sponsored_messages_background_opacity: sponsoredMessagesOpacity,
+            default_game: defaultGame,
+            default_profile: defaultProfile,
         });
         onClose();
     };
@@ -251,6 +284,7 @@ export default function PreferencesModal({
     };
 
     return (
+        <>
         <div className={`fixed inset-0 z-50 flex items-center justify-center p-4 transition-all duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] ${isVisible ? 'opacity-100 backdrop-blur-sm' : 'opacity-0 backdrop-blur-none'}`}>
             {/* Backdrop */}
             <div className="absolute inset-0 bg-black/60 transition-opacity" onClick={onClose} />
@@ -314,6 +348,60 @@ export default function PreferencesModal({
                         <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-widest px-1">Behavior</h3>
 
                         <div className="bg-gray-800 border border-gray-700 rounded-2xl divide-y divide-gray-700/50 overflow-hidden">
+                            <div className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-gray-750">
+                                <div className="flex items-center gap-4">
+                                    <RowIcon kind="game" />
+                                    <div>
+                                        <p className="text-[15px] font-medium text-white">Default game</p>
+                                        <p className="text-[13px] text-gray-400 mt-0.5 leading-snug">Skip game selection on startup and go straight to this game's profiles.</p>
+                                    </div>
+                                </div>
+                                <div className="flex shrink-0 items-center gap-3">
+                                    <span className="text-[13px] text-gray-400 max-w-[200px] truncate text-right">
+                                        {defaultGameName ?? 'Not set'}
+                                    </span>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setPickerInitialStep('game');
+                                            setShowGamePicker(true);
+                                        }}
+                                        className="rounded-lg border border-gray-600 px-4 py-2 text-[13px] font-medium text-gray-200 transition-colors hover:border-gray-500 hover:bg-gray-700"
+                                    >
+                                        {defaultGame ? 'Change game' : 'Choose game'}
+                                    </button>
+                                </div>
+                            </div>
+
+                            {defaultGame && (
+                                <div className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-gray-750 animate-[profile-update-action-enter_220ms_cubic-bezier(0.22,1,0.36,1)]">
+                                    <div className="flex items-center gap-4">
+                                        <RowIcon kind="profile" />
+                                        <div>
+                                            <p className="text-[15px] font-medium text-white">Default profile</p>
+                                            <p className="text-[13px] text-gray-400 mt-0.5 leading-snug">
+                                                Skip profile selection on startup and launch straight into this profile for {defaultGameName}.
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <div className="flex shrink-0 items-center gap-3">
+                                        <span className="text-[13px] text-gray-400 max-w-[200px] truncate text-right">
+                                            {defaultProfile ?? 'Not set'}
+                                        </span>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setPickerInitialStep('profile');
+                                                setShowGamePicker(true);
+                                            }}
+                                            className="rounded-lg border border-gray-600 px-4 py-2 text-[13px] font-medium text-gray-200 transition-colors hover:border-gray-500 hover:bg-gray-700"
+                                        >
+                                            {defaultProfile ? 'Change profile' : 'Choose profile'}
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+
                             <div className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-gray-750">
                                 <div className="flex items-center gap-4">
                                     <RowIcon kind="install" />
@@ -623,5 +711,19 @@ export default function PreferencesModal({
 
             </div>
         </div>
+        <DefaultGamePickerModal
+            isOpen={showGamePicker}
+            onClose={() => setShowGamePicker(false)}
+            communities={communities}
+            communityImages={communityImages}
+            communityPlatforms={communityPlatforms}
+            currentValue={defaultGame}
+            initialStep={pickerInitialStep}
+            onPick={(gameId, profileName) => {
+                setDefaultGame(gameId);
+                setDefaultProfile(profileName ?? null);
+            }}
+        />
+        </>
     );
 }

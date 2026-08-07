@@ -175,6 +175,14 @@ pub struct Settings {
     /// bug report; users turn it on to capture detail for one reproduction.
     #[serde(default = "default_false")]
     pub verbose_logging: bool,
+    /// Thunderstore community identifier (e.g. "lethal-company") to jump
+    /// straight to on startup, skipping the game selection screen.
+    #[serde(default)]
+    pub default_game: Option<String>,
+    /// Name of the profile under `default_game` to open automatically,
+    /// skipping profile selection too. Meaningless without `default_game` set.
+    #[serde(default)]
+    pub default_profile: Option<String>,
 }
 
 impl Settings {
@@ -201,6 +209,8 @@ impl Settings {
             sponsored_messages_scale: default_sponsor_scale(),
             sponsored_messages_background_opacity: default_sponsor_opacity(),
             verbose_logging: false,
+            default_game: None,
+            default_profile: None,
         }
     }
 }
@@ -477,4 +487,31 @@ pub fn detect_bepinex_structure<R: std::io::Read + std::io::Seek>(
     }
 
     (is_bepinex, root_prefix)
+}
+
+#[cfg(test)]
+mod default_game_and_profile_settings_tests {
+    use super::Settings;
+
+    #[test]
+    fn default_game_and_default_profile_round_trip_through_json() {
+        let mut settings = Settings::default();
+        settings.default_game = Some("lethal-company".to_string());
+        settings.default_profile = Some("MyModProfile".to_string());
+
+        let json = serde_json::to_string(&settings).unwrap();
+        let restored: Settings = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(restored.default_game.as_deref(), Some("lethal-company"));
+        assert_eq!(restored.default_profile.as_deref(), Some("MyModProfile"));
+    }
+
+    #[test]
+    fn settings_missing_both_fields_default_to_none() {
+        // Simulates a settings.json written before this feature existed.
+        let json = r#"{"steam_path": null, "favorite_games": [], "game_paths": {}}"#;
+        let settings: Settings = serde_json::from_str(json).unwrap();
+        assert_eq!(settings.default_game, None);
+        assert_eq!(settings.default_profile, None);
+    }
 }

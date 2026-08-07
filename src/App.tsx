@@ -317,6 +317,16 @@ function App() {
   const [sponsoredMessagesScale, setSponsoredMessagesScale] = useState(80)
   const [sponsoredMessagesOpacity, setSponsoredMessagesOpacity] = useState(80)
   const [isBrowsingMode, setIsBrowsingMode] = useState(false)
+  const [defaultGame, setDefaultGame] = useState<string | null>(null)
+  const [defaultProfile, setDefaultProfile] = useState<string | null>(null)
+  // Captured once from the settings loaded at launch. Deliberately not the
+  // reactive `defaultGame` state above: changing the preference mid-session
+  // (Preferences form) must only take effect on the *next* launch, not snap
+  // the user to a different game immediately after saving.
+  const startupDefaultGameRef = useRef<string | null | undefined>(undefined)
+  const startupDefaultProfileRef = useRef<string | null | undefined>(undefined)
+  const defaultGameAppliedRef = useRef(false)
+  const defaultGameValidatedRef = useRef(false)
   const isInitialLoadRunningRef = useRef(false)
   const packagesLoadRequestRef = useRef(0)
   const profilePackageIndexRequestRef = useRef(0)
@@ -729,6 +739,10 @@ function App() {
       setSponsoredMessagesOpacity(s.sponsored_messages_background_opacity ?? 80);
       setHideCrossOverGuide(!!s.hide_crossover_guide);
       setStreamMode(!!s.stream_mode);
+      setDefaultGame(s.default_game ?? null);
+      setDefaultProfile(s.default_profile ?? null);
+      startupDefaultGameRef.current = s.default_game ?? null;
+      startupDefaultProfileRef.current = s.default_profile ?? null;
     });
 
     window.ipcRenderer.getUsername().then((u: string) => {
@@ -761,6 +775,65 @@ function App() {
       unlistenSteamLaunchOptionsRestart.then(fn => fn());
     };
   }, [])
+
+  // Jump straight to the default game's profile list on startup, skipping the
+  // game selection screen. Runs once, using the value settings had at launch
+  // (startupDefaultGameRef) rather than the live `defaultGame` state, so
+  // saving a new default in Preferences mid-session never yanks the user
+  // somewhere else — it only takes effect on the next launch.
+  //
+  // Gated on settings alone, deliberately NOT on `communities`: getSettings()
+  // is a local disk read (a few ms), while communities is a real Thunderstore
+  // fetch — waiting for it here was the entire reason the skip felt slow
+  // instead of instant. Downstream code already tolerates an unrecognized
+  // `selectedCommunity` (falls back to undefined via optional chaining), and
+  // the validation effect below self-corrects if the stored identifier turns
+  // out to be stale once communities actually arrives.
+  useEffect(() => {
+    if (defaultGameAppliedRef.current) return;
+    if (startupDefaultGameRef.current === undefined) return;
+    defaultGameAppliedRef.current = true;
+    const target = startupDefaultGameRef.current;
+    if (!target) return;
+
+    const targetProfileName = startupDefaultProfileRef.current;
+    if (!targetProfileName) {
+      // No profile to also land on — go straight to this game's profile list.
+      setSelectedCommunity(target);
+      return;
+    }
+
+    // Resolve the profile BEFORE setting selectedCommunity, and set both in
+    // the same tick, so the very first render already has both — otherwise
+    // selectedCommunity alone would paint the profile-list screen for one
+    // frame before activeProfileId caught up and swapped it to Browse Mods.
+    // getProfiles() is a local disk read (same class as getSettings()), so
+    // this costs no perceptible time.
+    window.ipcRenderer.getProfiles()
+      .then((allProfiles) => {
+        const match = allProfiles.find(p => p.gameIdentifier === target && p.name === targetProfileName);
+        setSelectedCommunity(target);
+        if (match) selectProfile(match.id);
+      })
+      .catch((err) => {
+        console.error('Failed to auto-select default profile', err);
+        setSelectedCommunity(target);
+      });
+  }, [defaultGame, selectProfile])
+
+  // Safety net for the effect above: once communities has actually loaded, if
+  // the default game we jumped to on faith doesn't exist (renamed/removed
+  // Thunderstore community), back out to the normal game selection screen
+  // instead of leaving the user stranded on a nameless, image-less game page.
+  useEffect(() => {
+    if (defaultGameValidatedRef.current) return;
+    if (!defaultGameAppliedRef.current || communities.length === 0) return;
+    defaultGameValidatedRef.current = true;
+    const target = startupDefaultGameRef.current;
+    if (target && !communities.some(c => c.identifier === target)) {
+      setSelectedCommunity(null);
+    }
+  }, [communities])
 
   const clearSteamRestartingState = () => {
     steamRestartingRef.current = false;
@@ -918,13 +991,22 @@ function App() {
 
 
 
+  const previousSelectedCommunityForProfileResetRef = useRef<string | null>(null);
   useEffect(() => {
+    const previous = previousSelectedCommunityForProfileResetRef.current;
+    previousSelectedCommunityForProfileResetRef.current = selectedCommunity;
     if (selectedCommunity) {
       // Initial load for game (categories now fetched inside loadPackages after cache is populated)
       setTimeout(() => {
         loadPackages(selectedCommunity, 0, true)
-        // Reset profile selection when changing game
-        if (activeProfileId) {
+        // Reset profile selection only when actually SWITCHING from one game
+        // to a different one. Arriving at a game from nothing (previous is
+        // null — home screen selection, or the startup default-game/profile
+        // skip) must not clear activeProfileId: the skip path can set both
+        // selectedCommunity and activeProfileId together in the same tick
+        // specifically to land straight on Browse Mods, and this reset would
+        // otherwise silently undo it a moment later.
+        if (previous && previous !== selectedCommunity && activeProfileId) {
           selectProfile('')
         }
       }, 0);
@@ -1957,6 +2039,8 @@ function App() {
     setSponsoredMessagesScale(newSettings.sponsored_messages_scale);
     setSponsoredMessagesOpacity(newSettings.sponsored_messages_background_opacity);
     setStreamMode(newSettings.stream_mode);
+    setDefaultGame(newSettings.default_game);
+    setDefaultProfile(newSettings.default_profile ?? null);
 
     const currentSettings = await window.ipcRenderer.getSettings();
     await window.ipcRenderer.saveSettings({
@@ -1972,6 +2056,8 @@ function App() {
       sponsored_messages_enabled: newSettings.sponsored_messages_enabled,
       sponsored_messages_scale: newSettings.sponsored_messages_scale,
       sponsored_messages_background_opacity: newSettings.sponsored_messages_background_opacity,
+      default_game: newSettings.default_game,
+      default_profile: newSettings.default_profile ?? null,
       stream_mode: newSettings.stream_mode,
     });
   };
@@ -2635,7 +2721,12 @@ function App() {
           sponsored_messages_scale: sponsoredMessagesScale,
           sponsored_messages_background_opacity: sponsoredMessagesOpacity,
           stream_mode: streamMode,
+          default_game: defaultGame,
+          default_profile: defaultProfile,
         }}
+        communities={communities}
+        communityImages={communityImages}
+        communityPlatforms={communityPlatforms}
         onSavePreferences={handleSavePreferences}
         onSponsorPreferencesChange={handleSponsorPreferencesChange}
         hasHiddenGuideWarnings={hideCrossOverGuide}

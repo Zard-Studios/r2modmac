@@ -100,8 +100,8 @@ export const tauriAPI: IElectronAPI = {
     },
     deleteLocalModPayload: async (profileId, localId) => invoke<boolean>('delete_local_mod_payload', { profileId, localId }),
     checkDirectoryExists: async (path) => invoke<boolean>('check_directory_exists', { path }),
-    fetchCommunities: () => invoke<Community[]>('fetch_communities'),
-    fetchCommunityImages: () => invoke<Record<string, string>>('fetch_community_images'),
+    fetchCommunities: (refresh?: boolean) => invoke<Community[]>('fetch_communities', { refresh }),
+    fetchCommunityImages: (refresh?: boolean) => invoke<Record<string, string>>('fetch_community_images', { refresh }),
     resolveCommunityPlatforms: (games: { identifier: string; name: string }[]) =>
         invoke<Record<string, CommunityPlatformInfo>>('resolve_community_platforms', { games }),
     fetchPackages: (gameId: string) => fetchPackagesDeduped(gameId),

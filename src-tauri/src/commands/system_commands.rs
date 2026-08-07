@@ -8,8 +8,45 @@ use std::os::unix::fs::PermissionsExt;
 use std::time::Duration;
 use tauri::{command, AppHandle, Emitter, Manager, State};
 
-#[command]
-pub async fn fetch_communities() -> Result<Vec<serde_json::Value>, String> {
+const COMMUNITIES_CACHE_FILE: &str = "communities_v1.json.gz";
+const COMMUNITY_IMAGES_CACHE_FILE: &str = "community_images_v1.json.gz";
+
+fn read_gz_json_cache<T: serde::de::DeserializeOwned>(
+    app: &AppHandle,
+    file_name: &str,
+) -> Option<T> {
+    use std::io::Read;
+    let cache_dir = crate::utils::paths::app_cache_dir(app).ok()?;
+    let cache_file = cache_dir.join(file_name);
+    let file = std::fs::File::open(&cache_file).ok()?;
+    let mut gz = flate2::read::GzDecoder::new(file);
+    let mut data = Vec::new();
+    gz.read_to_end(&mut data).ok()?;
+    serde_json::from_slice(&data).ok()
+}
+
+fn write_gz_json_cache<T: serde::Serialize>(app: &AppHandle, file_name: &str, value: &T) {
+    use std::io::Write;
+    let Ok(cache_dir) = crate::utils::paths::app_cache_dir(app) else {
+        return;
+    };
+    if std::fs::create_dir_all(&cache_dir).is_err() {
+        return;
+    }
+    let Ok(file) = std::fs::File::create(cache_dir.join(file_name)) else {
+        return;
+    };
+    let Ok(serialized) = serde_json::to_vec(value) else {
+        return;
+    };
+    let mut encoder = flate2::write::GzEncoder::new(file, flate2::Compression::default());
+    if encoder.write_all(&serialized).is_err() {
+        return;
+    }
+    let _ = encoder.finish();
+}
+
+async fn fetch_communities_live() -> Result<Vec<serde_json::Value>, String> {
     let mut url = Some("https://thunderstore.io/api/experimental/community/".to_string());
     let mut all_results = Vec::new();
 
@@ -52,8 +89,8 @@ pub async fn fetch_communities() -> Result<Vec<serde_json::Value>, String> {
     Ok(all_results)
 }
 
-#[command]
-pub async fn fetch_community_images() -> Result<std::collections::HashMap<String, String>, String> {
+async fn fetch_community_images_live() -> Result<std::collections::HashMap<String, String>, String>
+{
     let url = "https://thunderstore.io/communities/";
     let resp = reqwest::get(url).await.map_err(|e| e.to_string())?;
     let html = resp.text().await.map_err(|e| e.to_string())?;
@@ -66,6 +103,84 @@ pub async fn fetch_community_images() -> Result<std::collections::HashMap<String
     });
 
     Ok(images)
+}
+
+/// The game list (name/identifier), used both for the home screen and to
+/// label whichever single game a startup "default game" skip lands on.
+///
+/// `refresh` distinguishes two callers with very different needs:
+///   - `false` (the startup-skip path): serve the on-disk cache only, with
+///     zero network activity — reading one game's name out of a cached list
+///     that already covers all ~300 is free, whereas the live endpoint has
+///     no per-game filter and would mean fetching the whole catalog just to
+///     read one entry.
+///   - `true` (opening the home screen): serve the cache immediately for a
+///     fast paint, then refresh it from Thunderstore in the background so
+///     the *next* load — cached or not — is current. Mirrors the existing
+///     package-listing cache in mod_commands.rs.
+/// When there is no cache yet (fresh install), a live fetch is unavoidable
+/// either way — there is nothing else to serve.
+///
+/// This is also what keeps the app usable offline: with a cache on disk,
+/// `refresh: true` still returns instantly from the cache even when the
+/// background refresh's network request fails.
+#[command]
+pub async fn fetch_communities(
+    app: AppHandle,
+    refresh: Option<bool>,
+) -> Result<Vec<serde_json::Value>, String> {
+    let refresh = refresh.unwrap_or(true);
+    if let Some(cached) = read_gz_json_cache::<Vec<serde_json::Value>>(&app, COMMUNITIES_CACHE_FILE)
+    {
+        if refresh {
+            let app_for_task = app.clone();
+            tokio::spawn(async move {
+                match fetch_communities_live().await {
+                    Ok(fresh) => write_gz_json_cache(&app_for_task, COMMUNITIES_CACHE_FILE, &fresh),
+                    Err(e) => log::warn!("[fetch_communities] Background refresh failed: {}", e),
+                }
+            });
+        }
+        return Ok(cached);
+    }
+
+    let fresh = fetch_communities_live().await?;
+    write_gz_json_cache(&app, COMMUNITIES_CACHE_FILE, &fresh);
+    Ok(fresh)
+}
+
+/// See `fetch_communities` for the `refresh` contract — identical here.
+#[command]
+pub async fn fetch_community_images(
+    app: AppHandle,
+    refresh: Option<bool>,
+) -> Result<std::collections::HashMap<String, String>, String> {
+    let refresh = refresh.unwrap_or(true);
+    if let Some(cached) =
+        read_gz_json_cache::<std::collections::HashMap<String, String>>(
+            &app,
+            COMMUNITY_IMAGES_CACHE_FILE,
+        )
+    {
+        if refresh {
+            let app_for_task = app.clone();
+            tokio::spawn(async move {
+                match fetch_community_images_live().await {
+                    Ok(fresh) => {
+                        write_gz_json_cache(&app_for_task, COMMUNITY_IMAGES_CACHE_FILE, &fresh)
+                    }
+                    Err(e) => {
+                        log::warn!("[fetch_community_images] Background refresh failed: {}", e)
+                    }
+                }
+            });
+        }
+        return Ok(cached);
+    }
+
+    let fresh = fetch_community_images_live().await?;
+    write_gz_json_cache(&app, COMMUNITY_IMAGES_CACHE_FILE, &fresh);
+    Ok(fresh)
 }
 
 fn normalize_community_image_url(url: &str) -> String {

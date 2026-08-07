@@ -7,7 +7,7 @@ import { ExportModal } from '../modals/ExportModal'
 import { CrossOverGuideModal } from '../modals/CrossOverGuideModal';
 import { UpdateModal } from '../modals/UpdateModal';
 import PreferencesModal, { type PreferencesSettings } from '../modals/PreferencesModal';
-import type { Package, PackageVersion } from '../../types/thunderstore'
+import type { Package, PackageVersion, Community, CommunityPlatformInfo } from '../../types/thunderstore'
 import type { UpdateInfo } from '../../types/electron';
 
 export interface AppModalsProps {
@@ -45,6 +45,9 @@ export interface AppModalsProps {
     showPreferences: boolean;
     setShowPreferences: (show: boolean) => void;
     preferences: PreferencesSettings;
+    communities: Community[];
+    communityImages: Record<string, string>;
+    communityPlatforms: Record<string, CommunityPlatformInfo>;
     onSavePreferences: (settings: PreferencesSettings) => Promise<void>;
     onSponsorPreferencesChange: (enabled: boolean) => Promise<void>;
     hasHiddenGuideWarnings: boolean;
@@ -66,7 +69,7 @@ export function AppModals({
     showExportModal, setShowExportModal, handleExportCode, handleExportFile,
     showUpdateModal, setShowUpdateModal, updateInfo,
     showCrossOverGuide, setShowCrossOverGuide, hideCrossOverGuide, setHideCrossOverGuide,
-    showPreferences, setShowPreferences, preferences, onSavePreferences, onSponsorPreferencesChange,
+    showPreferences, setShowPreferences, preferences, communities, communityImages, communityPlatforms, onSavePreferences, onSponsorPreferencesChange,
     hasHiddenGuideWarnings, onRestoreGuideWarnings, onSetGuideHidden,
     legacyInstallMode,
     onCheckForUpdates,
@@ -221,6 +224,9 @@ export function AppModals({
                 isOpen={showPreferences}
                 onClose={() => setShowPreferences(false)}
                 settings={preferences}
+                communities={communities}
+                communityImages={communityImages}
+                communityPlatforms={communityPlatforms}
                 onSave={onSavePreferences}
                 onSponsorPreferencesChange={onSponsorPreferencesChange}
                 hasHiddenGuideWarnings={hasHiddenGuideWarnings}
