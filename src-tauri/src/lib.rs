@@ -75,6 +75,9 @@ pub fn run() {
                 .level(log::LevelFilter::Debug)
                 // rustls dumps TLS handshake + certificate bytes at trace/debug.
                 .level_for("rustls", log::LevelFilter::Warn)
+                // Per-connection noise with no context beyond a bare URL; every
+                // request that matters already gets its own descriptive log line
+                // at the call site.
                 .max_file_size(1_048_576) // 1 MiB
                 .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepSome(3))
                 .build(),
