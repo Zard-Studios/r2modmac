@@ -63,12 +63,12 @@ ID, and one-time nonce described above.
 
 ## Hosting and links
 
-The request goes through a small Vercel Function before ADtention. Like any HTTPS host, Vercel can
-process technical connection metadata such as IP address and request time. The function contains no
+The request goes through a small Cloudflare Worker before ADtention. Like any HTTPS host, Cloudflare
+can process technical connection metadata such as IP address and request time. The Worker contains no
 custom request logging, database, analytics, tracking code, or custom identifying headers. The
-optional sponsor link opens only after you click it and must use HTTPS. The deployed staging proxy
-must still be inspected with a network proxy before release, because Node, Vercel, and ADtention may
-add normal transport-level headers outside r2modmac's source code.
+optional sponsor link opens only after you click it and must use HTTPS. The deployed staging Worker
+must still be inspected with a network proxy before release, because Node, Cloudflare, and ADtention
+may add normal transport-level headers outside r2modmac's source code.
 
 This means the feature is not described as “tracker-free”. The precise promise is: no application
 content or personal data is sent by r2modmac for sponsorship, and you can disable sponsorship at
@@ -76,17 +76,17 @@ any time.
 
 ## Why the module is isolated
 
-The sponsor module is limited to its own Tauri commands and the `services/adtention-proxy` service.
+The sponsor module is limited to its own Tauri commands and the `services/adtention-worker` service.
 It has no dependency on profiles, mod management, game installation, or Sync/Apply. It can be
 disabled or removed without changing those core flows.
 
 ## Local developer verification
 
-`npm run dev` is the only local development command. It starts the ignored local proxy on
-`127.0.0.1:3000` and then starts Tauri with that endpoint. The proxy reads the Vercel
-**Development** Publisher ID from the ignored `services/adtention-proxy/.env.local` file; it is
+`npm run dev` is the only local development command. It starts the Worker locally via `wrangler dev`
+on `127.0.0.1:3000` and then starts Tauri with that endpoint. The Worker reads the ADtention
+**sandbox** Publisher ID from the ignored `services/adtention-worker/.dev.vars` file; it is
 never committed.
 
-The developer build accepts `http://127.0.0.1` only for that local proxy. Release builds require
+The developer build accepts `http://127.0.0.1` only for that local Worker. Release builds require
 an HTTPS proxy. A `204 No Content` response is an expected safe fallback: the application simply
 does not render a sponsor line.

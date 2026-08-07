@@ -12,8 +12,9 @@ jobs:
       contents: write
     runs-on: ${{ matrix.settings.platform }}
     env:
-      # Set as a GitHub Actions secret after the Vercel proxy is deployed. An unset value
-      # deliberately leaves sponsor traffic disabled in the distributed application.
+      # Overrides the hardcoded production Cloudflare Worker URL in sponsor_commands.rs.
+      # An unset or empty value is not "disabled" — resolve_proxy_endpoint() falls back
+      # to that hardcoded URL, so the distributed app keeps working either way.
       R2MODMAC_SPONSOR_PROXY_URL: ${{ secrets.R2MODMAC_SPONSOR_PROXY_URL }}
     strategy:
       fail-fast: false
