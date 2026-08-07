@@ -78,6 +78,7 @@ pub fn run() {
                 // Per-connection noise with no context beyond a bare URL; every
                 // request that matters already gets its own descriptive log line
                 // at the call site.
+                .level_for("reqwest::connect", log::LevelFilter::Warn)
                 .max_file_size(1_048_576) // 1 MiB
                 .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepSome(3))
                 .build(),
