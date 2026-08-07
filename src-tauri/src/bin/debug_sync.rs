@@ -356,8 +356,21 @@ fn main() {
             }
         }
 
-        let bepinex_installed = game_path.join("BepInEx").join("core").exists()
-            || game_path.join("BepInEx_DISABLED").join("core").exists()
+        // Mirrors windows_bepinex_runtime_is_installed in game_commands::sync: an
+        // empty core folder left behind by a manual delete must not count, or
+        // this tool reports a healthy runtime the real sync would reinstall.
+        let has_preloader = |core_dir: std::path::PathBuf| {
+            [
+                "BepInEx.Preloader.dll",
+                "BepInEx.Preloader.Core.dll",
+                "BepInEx.Unity.IL2CPP.dll",
+                "BepInEx.Unity.Mono.Preloader.dll",
+            ]
+            .iter()
+            .any(|name| core_dir.join(name).is_file())
+        };
+        let bepinex_installed = has_preloader(game_path.join("BepInEx").join("core"))
+            || has_preloader(game_path.join("BepInEx_DISABLED").join("core"))
             || game_path.join("run_bepinex.sh").exists();
 
         let mut to_install: Vec<String> = desired_key_set

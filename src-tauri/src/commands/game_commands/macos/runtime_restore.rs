@@ -91,10 +91,28 @@ pub(crate) fn configure_macos_doorstop_target_assembly(
         return Ok(());
     }
 
-    let preloader_path = game_path
-        .join("BepInEx")
-        .join("core")
-        .join("BepInEx.Preloader.dll")
+    // BepInEx 5 boots through BepInEx.Preloader.dll, but the BepInEx 6 packs we
+    // can also install on macOS (see download_official_macos_bepinex6_pack) use
+    // a runtime-specific entry point instead. Pointing Doorstop at a DLL that is
+    // not on disk makes the game start unmodded with no visible error, so pick
+    // the entry point that actually shipped and only fall back to the BepInEx 5
+    // name when nothing is installed yet.
+    let core_dir = game_path.join("BepInEx").join("core");
+    let preloader_name = [
+        "BepInEx.Unity.IL2CPP.dll",
+        "BepInEx.Unity.Mono.Preloader.dll",
+        "BepInEx.Preloader.dll",
+    ]
+    .into_iter()
+    .find(|name| core_dir.join(name).is_file())
+    .unwrap_or("BepInEx.Preloader.dll");
+    log::debug!(
+        "[macos_doorstop] targetAssembly entry point for {:?}: {}",
+        core_dir,
+        preloader_name
+    );
+    let preloader_path = core_dir
+        .join(preloader_name)
         .to_string_lossy()
         .replace('\\', "/");
     let core_path = game_path

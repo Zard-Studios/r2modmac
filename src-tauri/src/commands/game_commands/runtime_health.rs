@@ -30,15 +30,24 @@ fn profile_is_vanilla(app: &AppHandle, profile_id: &str) -> bool {
 }
 
 fn health(runtime: &str, missing_components: Vec<String>) -> RuntimeHealth {
+    let status = if missing_components.is_empty() {
+        "healthy"
+    } else if missing_components.len() == 1 && missing_components[0] == "runtime" {
+        "missing"
+    } else {
+        "incomplete"
+    };
+    // The frontend blocks Apply/Launch and forces a repair on anything other
+    // than "healthy", so always record the verdict that drove that decision.
+    log::debug!(
+        "[runtime_health] Verdict: runtime={} status={} missing={:?}",
+        runtime,
+        status,
+        missing_components
+    );
     RuntimeHealth {
         runtime: runtime.to_string(),
-        status: if missing_components.is_empty() {
-            "healthy".to_string()
-        } else if missing_components.len() == 1 && missing_components[0] == "runtime" {
-            "missing".to_string()
-        } else {
-            "incomplete".to_string()
-        },
+        status: status.to_string(),
         repairable: !missing_components.is_empty(),
         missing_components,
     }
@@ -112,6 +121,55 @@ fn inspect_return_of_modding(game_path: &std::path::Path, vanilla: bool) -> Runt
     }
 }
 
+/// BepInEx 5 ships the preloader as `BepInEx.Preloader.dll`, while BepInEx 6
+/// (the IL2CPP/Unity.Mono line used by packs such as BepInExPack_GTFO) ships
+/// `BepInEx.Preloader.Core.dll` plus a runtime-specific entry point instead.
+pub(crate) fn core_directory_has_preloader(core_dir: &std::path::Path) -> bool {
+    const PRELOADERS: [&str; 4] = [
+        "BepInEx.Preloader.dll",
+        "BepInEx.Preloader.Core.dll",
+        "BepInEx.Unity.IL2CPP.dll",
+        "BepInEx.Unity.Mono.Preloader.dll",
+    ];
+    if let Some(found) = PRELOADERS.iter().find(|name| core_dir.join(name).is_file()) {
+        log::debug!(
+            "[runtime_health] Preloader found: {} in {:?}",
+            found,
+            core_dir
+        );
+        return true;
+    }
+    // No preloader is the single most common cause of a stuck "incomplete"
+    // runtime, so record what the folder actually holds - a pack shipping an
+    // unknown layout is indistinguishable from a genuinely empty core here.
+    log::debug!(
+        "[runtime_health] No preloader in {:?} (looked for {:?}); core contains: {:?}",
+        core_dir,
+        PRELOADERS,
+        list_directory_entries(core_dir, 40)
+    );
+    false
+}
+
+/// Directory listing for diagnostics, capped so a `core` folder full of DLLs
+/// cannot flood the log.
+fn list_directory_entries(dir: &std::path::Path, limit: usize) -> Vec<String> {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return vec![format!("<unreadable or missing: {}>", dir.display())];
+    };
+    let mut names = entries
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.file_name().to_string_lossy().to_string())
+        .collect::<Vec<_>>();
+    names.sort();
+    let total = names.len();
+    names.truncate(limit);
+    if total > limit {
+        names.push(format!("... and {} more", total - limit));
+    }
+    names
+}
+
 fn inspect_windows_bepinex(game_path: &std::path::Path, vanilla: bool) -> RuntimeHealth {
     let disabled = vanilla && game_path.join("BepInEx_DISABLED").exists();
     let bep_dir = game_path.join(if disabled {
@@ -126,7 +184,7 @@ fn inspect_windows_bepinex(game_path: &std::path::Path, vanilla: bool) -> Runtim
     if !bep_dir.join("core").is_dir() {
         missing.push("core".to_string());
     }
-    if !bep_dir.join("core").join("BepInEx.Preloader.dll").is_file() {
+    if !core_directory_has_preloader(&bep_dir.join("core")) {
         missing.push("preloader".to_string());
     }
     let winhttp = if disabled {
@@ -148,7 +206,17 @@ pub async fn check_profile_runtime_health(
     platform: Option<String>,
 ) -> Result<RuntimeHealth, String> {
     let profile_platform = platform.unwrap_or_else(|| get_profile_platform(&app, &profile_id));
+    log::debug!(
+        "[runtime_health] Checking profile={} game={} platform={}",
+        profile_id,
+        game_identifier,
+        profile_platform
+    );
     if profile_platform != "mac" && profile_platform != "windows" {
+        log::debug!(
+            "[runtime_health] Platform {} is not runtime-managed; reporting unsupported",
+            profile_platform
+        );
         return Ok(RuntimeHealth {
             runtime: "bepinex".to_string(),
             status: "unsupported".to_string(),
@@ -163,6 +231,11 @@ pub async fn check_profile_runtime_health(
     )
     .await?
     else {
+        log::debug!(
+            "[runtime_health] No game path configured for {} ({}); reporting unconfigured",
+            game_identifier,
+            profile_platform
+        );
         return Ok(RuntimeHealth {
             runtime: "bepinex".to_string(),
             status: "unconfigured".to_string(),
@@ -173,6 +246,11 @@ pub async fn check_profile_runtime_health(
     let game_path = std::path::Path::new(&game_path_string);
 
     let vanilla = profile_is_vanilla(&app, &profile_id);
+    log::debug!(
+        "[runtime_health] Resolved game path {:?} (vanilla_profile={})",
+        game_path,
+        vanilla
+    );
     if is_outerwilds_identifier(&game_identifier) || is_outerwilds_game_path(game_path) {
         return Ok(inspect_owml(game_path, vanilla));
     }
@@ -258,6 +336,20 @@ mod tests {
         let result = inspect_windows_bepinex(&root, false);
         assert_eq!(result.status, "incomplete");
         assert_eq!(result.missing_components, vec!["preloader", "doorstop"]);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn windows_bepinex6_il2cpp_runtime_is_healthy() {
+        // BepInExPack_GTFO ships BepInEx 6: no BepInEx.Preloader.dll exists.
+        let root = test_dir("windows-bepinex6");
+        fs::create_dir_all(root.join("BepInEx/core")).unwrap();
+        fs::write(root.join("BepInEx/core/BepInEx.Preloader.Core.dll"), b"").unwrap();
+        fs::write(root.join("BepInEx/core/BepInEx.Unity.IL2CPP.dll"), b"").unwrap();
+        fs::write(root.join("winhttp.dll"), b"").unwrap();
+        let result = inspect_windows_bepinex(&root, false);
+        assert_eq!(result.status, "healthy");
+        assert!(result.missing_components.is_empty());
         fs::remove_dir_all(root).unwrap();
     }
 

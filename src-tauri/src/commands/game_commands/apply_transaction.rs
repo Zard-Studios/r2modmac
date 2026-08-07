@@ -282,11 +282,30 @@ pub async fn rollback_profile_apply_transaction(
     ];
     for backup_root in backup_roots {
         if backup_root.join(APPLY_MARKER).is_file() {
+            // A rollback discards everything installed since the snapshot, so a
+            // failed post-install check can silently undo a mod or runtime that
+            // did install correctly. Log it at info level: this is the step that
+            // makes an install "disappear".
+            log::info!(
+                "[apply_transaction] Rolling back profile {} ({}): restoring snapshot {:?}",
+                profile_id,
+                game_identifier,
+                backup_root
+            );
             restore_snapshot(&backup_root, &targets)?;
             fs::remove_dir_all(&backup_root).map_err(|error| error.to_string())?;
+            log::info!(
+                "[apply_transaction] Rollback complete for profile {}; game files are back at their pre-Apply state",
+                profile_id
+            );
             return Ok(true);
         }
     }
+    log::debug!(
+        "[apply_transaction] No rollback snapshot found for profile {} ({}); nothing to restore",
+        profile_id,
+        game_identifier
+    );
     Ok(false)
 }
 

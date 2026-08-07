@@ -774,9 +774,12 @@ pub async fn sync_profile_to_game(
             has_complete_macos_bepinex_runtime(runtime_game_path)
         }
     } else {
-        game_path.join("BepInEx").join("core").exists()
-            || game_path.join("BepInEx_DISABLED").join("core").exists()
+        windows_bepinex_runtime_is_installed(game_path)
     };
+    log::debug!(
+        "[sync_profile_to_game] bepinex_installed={} (BepInExPack is skipped from to_install when true)",
+        bepinex_installed
+    );
 
     let mut to_install: Vec<String> = desired_key_set
         .iter()
@@ -819,10 +822,23 @@ pub async fn sync_profile_to_game(
         .collect();
     to_install.sort();
 
+    // Names, not just counts: a mod silently absent from `to_install` is the
+    // failure mode that is impossible to diagnose from a count alone.
     log::debug!(
-        "[sync_profile_to_game] To remove: {:?}, To install: {:?}",
+        "[sync_profile_to_game] To remove ({}): {:?}",
         to_remove.len(),
-        to_install.len()
+        to_remove
+    );
+    log::debug!(
+        "[sync_profile_to_game] To install ({}): {:?}",
+        to_install.len(),
+        to_install
+    );
+    log::debug!(
+        "[sync_profile_to_game] Profile wants {} mods, kept {} manifests, dropping {} manifests",
+        desired_key_set.len(),
+        manifests_to_keep.len(),
+        manifests_to_remove.len()
     );
 
     // 5. Remove mods not in profile (we have the exact folder names from the tuple)
@@ -906,9 +922,43 @@ pub async fn sync_profile_to_game(
     }))
 }
 
+/// Whether a Windows/CrossOver game folder already carries a usable BepInEx.
+///
+/// Deleting BepInEx by hand routinely leaves an empty `BepInEx/core` behind, so
+/// a bare directory check would report the runtime as installed and make
+/// `to_install` skip BepInExPack forever - the runtime could then never be
+/// reinstalled from the app.
+fn windows_bepinex_runtime_is_installed(game_path: &std::path::Path) -> bool {
+    [
+        game_path.join("BepInEx").join("core"),
+        game_path.join("BepInEx_DISABLED").join("core"),
+    ]
+    .iter()
+    .any(|core_dir| super::runtime_health::core_directory_has_preloader(core_dir))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::ensure_finalize_ready;
+    use super::{ensure_finalize_ready, windows_bepinex_runtime_is_installed};
+
+    #[test]
+    fn empty_core_folder_does_not_count_as_an_installed_runtime() {
+        let root = std::env::temp_dir().join(format!(
+            "r2modmac-sync-bepinex-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let core = root.join("BepInEx/core");
+        std::fs::create_dir_all(&core).unwrap();
+        assert!(!windows_bepinex_runtime_is_installed(&root));
+
+        std::fs::write(core.join("BepInEx.Preloader.Core.dll"), b"").unwrap();
+        assert!(windows_bepinex_runtime_is_installed(&root));
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn analysis_phase_allows_missing_payloads() {

@@ -156,12 +156,10 @@ pub async fn fetch_community_images(
     refresh: Option<bool>,
 ) -> Result<std::collections::HashMap<String, String>, String> {
     let refresh = refresh.unwrap_or(true);
-    if let Some(cached) =
-        read_gz_json_cache::<std::collections::HashMap<String, String>>(
-            &app,
-            COMMUNITY_IMAGES_CACHE_FILE,
-        )
-    {
+    if let Some(cached) = read_gz_json_cache::<std::collections::HashMap<String, String>>(
+        &app,
+        COMMUNITY_IMAGES_CACHE_FILE,
+    ) {
         if refresh {
             let app_for_task = app.clone();
             tokio::spawn(async move {
@@ -1268,6 +1266,37 @@ pub async fn read_image(path: String) -> Result<Option<String>, String> {
     Ok(Some(format!("data:{};base64,{}", mime, base64_str)))
 }
 
+/// Breadth-limited recursive lookup for a file name below `dir`.
+#[cfg(target_os = "windows")]
+fn find_file_in_dir(
+    dir: &std::path::Path,
+    file_name: &str,
+    depth: usize,
+) -> Option<std::path::PathBuf> {
+    let entries = fs::read_dir(dir).ok()?;
+    let mut directories = Vec::new();
+    for entry in entries.filter_map(|entry| entry.ok()) {
+        let path = entry.path();
+        if path.is_file() {
+            if path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.eq_ignore_ascii_case(file_name))
+            {
+                return Some(path);
+            }
+        } else if path.is_dir() {
+            directories.push(path);
+        }
+    }
+    if depth == 0 {
+        return None;
+    }
+    directories
+        .into_iter()
+        .find_map(|child| find_file_in_dir(&child, file_name, depth - 1))
+}
+
 fn select_update_asset<'a>(
     assets: &'a [GithubAsset],
     os: &str,
@@ -1354,8 +1383,16 @@ pub async fn check_update(current_version: String) -> Result<UpdateInfo, String>
     let asset = select_update_asset(&release.assets, os, arch);
 
     log::debug!(
-        "[check_update] Selected asset: {:?}",
-        asset.map(|a| &a.name)
+        "[check_update] current={} latest={} is_newer={} selected_asset={:?} available_assets={:?}",
+        current_version,
+        clean_tag,
+        is_newer,
+        asset.map(|a| &a.name),
+        release
+            .assets
+            .iter()
+            .map(|a| a.name.as_str())
+            .collect::<Vec<_>>()
     );
 
     Ok(UpdateInfo {
@@ -1383,7 +1420,11 @@ pub async fn install_update(app: AppHandle, download_url: String) -> Result<(), 
     let filename = download_url.split('/').last().unwrap_or("update.bin");
     let file_path = temp_dir.join(filename);
 
-    log::debug!("[install_update] Downloading to {:?}", file_path);
+    log::info!(
+        "[install_update] Downloading {} to {:?}",
+        download_url,
+        file_path
+    );
 
     // Stream download to calculate progress
     use std::io::Write;
@@ -1426,6 +1467,12 @@ pub async fn install_update(app: AppHandle, download_url: String) -> Result<(), 
             downloaded, total_size
         ));
     }
+    log::debug!(
+        "[install_update] Downloaded {} bytes (advertised {}) to {:?}",
+        downloaded,
+        total_size,
+        file_path
+    );
 
     #[cfg(target_os = "windows")]
     {
@@ -1439,12 +1486,16 @@ pub async fn install_update(app: AppHandle, download_url: String) -> Result<(), 
                 temp_dir
             );
 
+            // Expand-Archive raises non-terminating errors, so PowerShell still
+            // exits 0 when extraction fails. Force a terminating error and a
+            // non-zero exit code so the real cause reaches the user instead of a
+            // bare "exe not found".
             let extract_output = Command::new("powershell")
                 .args([
                     "-NoProfile",
                     "-Command",
                     &format!(
-                        "Expand-Archive -LiteralPath '{}' -DestinationPath '{}' -Force",
+                        "$ErrorActionPreference='Stop'; try {{ Expand-Archive -LiteralPath '{}' -DestinationPath '{}' -Force }} catch {{ Write-Error $_; exit 1 }}",
                         file_path.to_string_lossy(),
                         temp_dir.to_string_lossy()
                     ),
@@ -1455,15 +1506,45 @@ pub async fn install_update(app: AppHandle, download_url: String) -> Result<(), 
             if !extract_output.status.success() {
                 return Err(format!(
                     "Zip extraction failed: {}",
-                    String::from_utf8_lossy(&extract_output.stderr)
+                    String::from_utf8_lossy(&extract_output.stderr).trim()
                 ));
             }
 
-            if !new_exe_path.exists() {
-                return Err(format!(
-                    "r2modmac.exe not found in extracted zip at {:?}",
-                    new_exe_path
-                ));
+            log::debug!(
+                "[install_update] Extraction finished; {:?} now contains: {:?}",
+                temp_dir,
+                fs::read_dir(&temp_dir)
+                    .map(|entries| entries
+                        .filter_map(|entry| entry.ok())
+                        .map(|entry| entry.file_name().to_string_lossy().to_string())
+                        .collect::<Vec<_>>())
+                    .unwrap_or_else(|error| vec![format!("<unreadable: {}>", error)])
+            );
+
+            // Older releases (and any future repackaging) may nest the binary in
+            // a folder, so fall back to a recursive lookup before giving up.
+            if !new_exe_path.is_file() {
+                match find_file_in_dir(&temp_dir, "r2modmac.exe", 4) {
+                    Some(found) => {
+                        fs::rename(&found, &new_exe_path).map_err(|e| {
+                            format!("Failed to move extracted r2modmac.exe into place: {}", e)
+                        })?;
+                    }
+                    None => {
+                        let stderr = String::from_utf8_lossy(&extract_output.stderr);
+                        return Err(format!(
+                            "r2modmac.exe was not found after extracting the update to {:?}. \
+                             The archive may have been blocked or the extracted file removed by \
+                             antivirus software. Extractor output: {}",
+                            temp_dir,
+                            if stderr.trim().is_empty() {
+                                "(none)"
+                            } else {
+                                stderr.trim()
+                            }
+                        ));
+                    }
+                }
             }
 
             let current_exe = std::env::current_exe().map_err(|e| e.to_string())?;

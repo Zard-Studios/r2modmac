@@ -3967,9 +3967,21 @@ async fn install_mod_bytes(
     // Smart detection: Check if this is BepInEx framework (not just "BepInExPack/" prefix)
     let cursor = std::io::Cursor::new(&runtime_bytes);
     let mut archive_for_detect = zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
-    let (mut is_bepinex_pack, _) = detect_bepinex_structure(&mut archive_for_detect);
+    let (mut is_bepinex_pack, detected_prefix) = detect_bepinex_structure(&mut archive_for_detect);
     let (mut has_macos_loader, mut has_windows_loader) =
         detect_bepinex_pack_platform(&mut archive_for_detect);
+    // Whether a package is treated as a loader pack decides between "extract to
+    // game root" and "extract into plugins/", so record the detection inputs.
+    log::debug!(
+        "[install_mod] Archive analysis for {}: is_bepinex_pack={} root_prefix={:?} macos_loader={} windows_loader={} target_is_macos={} entries={}",
+        mod_name,
+        is_bepinex_pack,
+        detected_prefix,
+        has_macos_loader,
+        has_windows_loader,
+        target_is_macos,
+        archive_for_detect.len()
+    );
     let mut macos_runtime_overlay_bytes: Option<Vec<u8>> = None;
     let runtime_compat_assets =
         prepare_ror2_crossover_newtonsoft_compat(game_dir, &mod_name, target_is_macos).await?;
@@ -4061,7 +4073,12 @@ async fn install_mod_bytes(
             return Err("Detected a macOS-only BepInEx pack. Please use a Windows/CrossOver-compatible pack for this profile.".to_string());
         }
 
-        log::debug!("[install_mod] Detected BepInExPack - installing to game root");
+        log::debug!(
+            "[install_mod] Detected BepInExPack - installing to game root {:?} (into_disabled_runtime={}, {} managed files)",
+            game_dir,
+            install_into_disabled_runtime,
+            managed_files.len()
+        );
         extract_bepinex_pack_to_root(
             &mut archive,
             game_dir,
@@ -4161,6 +4178,24 @@ async fn install_mod_bytes(
         if target_is_macos {
             dequarantine_recursive(game_dir);
         }
+    }
+
+    if is_bepinex_pack {
+        // Verify the loader landed where the health check will look for it, so a
+        // "successful" install that leaves an unusable runtime is visible here
+        // rather than only as a downstream repair loop.
+        let core_dir = game_dir
+            .join(if install_into_disabled_runtime {
+                "BepInEx_DISABLED"
+            } else {
+                "BepInEx"
+            })
+            .join("core");
+        log::debug!(
+            "[install_mod] Post-install runtime check at {:?}: preloader_present={}",
+            core_dir,
+            crate::commands::game_commands::runtime_health::core_directory_has_preloader(&core_dir)
+        );
     }
 
     log::debug!(
