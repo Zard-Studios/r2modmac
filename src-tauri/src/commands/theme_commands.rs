@@ -272,6 +272,12 @@ pub async fn import_theme_image(app: AppHandle, source_path: String) -> Result<S
         .unwrap_or_else(|| "background".to_string());
 
     let assets = theme_assets_dir(&app)?;
+
+    let bytes = std::fs::read(&source).map_err(|e| format!("Could not read the image: {}", e))?;
+    if let Some(existing) = find_identical_asset(&assets, &bytes) {
+        return Ok(format!("assets/{}", existing));
+    }
+
     let mut candidate = format!("{}.{}", stem, extension);
     let mut counter = 2;
     while assets.join(&candidate).exists() {
@@ -279,10 +285,36 @@ pub async fn import_theme_image(app: AppHandle, source_path: String) -> Result<S
         counter += 1;
     }
 
-    std::fs::copy(&source, assets.join(&candidate))
+    std::fs::write(assets.join(&candidate), &bytes)
         .map_err(|e| format!("Could not copy the image: {}", e))?;
 
     Ok(format!("assets/{}", candidate))
+}
+
+/// Find an already-imported asset holding exactly these bytes.
+///
+/// Picking the same picture twice — for a second theme, or after forgetting it
+/// was already imported — used to leave `wall.png` beside an identical
+/// `wall-2.png`, and the folder filled up with copies of the same wallpaper.
+/// Matching on content rather than on file name also catches the case where the
+/// same image arrives under a different name.
+///
+/// Size is checked first so the byte comparison only runs on real candidates,
+/// and entries are sorted so a folder with several identical copies always
+/// resolves to the same one instead of whatever order the filesystem returns.
+fn find_identical_asset(assets: &std::path::Path, bytes: &[u8]) -> Option<String> {
+    let mut names: Vec<String> = std::fs::read_dir(assets)
+        .ok()?
+        .flatten()
+        .filter(|entry| entry.metadata().ok().map(|m| m.len()) == Some(bytes.len() as u64))
+        .filter_map(|entry| entry.file_name().to_str().map(str::to_string))
+        .collect();
+    names.sort();
+    names.into_iter().find(|name| {
+        std::fs::read(assets.join(name))
+            .map(|found| found == bytes)
+            .unwrap_or(false)
+    })
 }
 
 /// Read a theme's background picture as a data URL for the webview.
@@ -747,5 +779,75 @@ media_ink     = "#ffffff"
     fn a_nameless_file_falls_back_to_its_file_name() {
         let summary = parse_theme("my-theme.toml".to_string(), "[colors]\naccent = \"#fff\"");
         assert_eq!(summary.name, "my-theme");
+    }
+}
+
+#[cfg(test)]
+mod theme_asset_reuse_tests {
+    use super::find_identical_asset;
+
+    fn temp_root(label: &str) -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "r2modmac-{}-{}-{}",
+            label,
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    #[test]
+    fn importing_the_same_picture_twice_reuses_the_first_copy() {
+        let assets = temp_root("theme-assets");
+        std::fs::write(assets.join("wall.png"), b"the same pixels").unwrap();
+
+        assert_eq!(
+            find_identical_asset(&assets, b"the same pixels").as_deref(),
+            Some("wall.png")
+        );
+
+        std::fs::remove_dir_all(&assets).ok();
+    }
+
+    #[test]
+    fn a_folder_already_holding_duplicates_resolves_to_one_of_them() {
+        // Folders that filled up before this existed still hold copies. Whichever
+        // is picked must be the same every time, or re-importing would rewrite
+        // the theme's path on each attempt.
+        let assets = temp_root("theme-assets-duplicates");
+        for name in ["wall-3.png", "wall.png", "wall-2.png"] {
+            std::fs::write(assets.join(name), b"the same pixels").unwrap();
+        }
+
+        assert_eq!(
+            find_identical_asset(&assets, b"the same pixels").as_deref(),
+            Some("wall-2.png"),
+            "sorted order decides, not the order the filesystem lists"
+        );
+
+        std::fs::remove_dir_all(&assets).ok();
+    }
+
+    #[test]
+    fn a_different_picture_of_the_same_size_is_not_reused() {
+        // Equal length is the cheap pre-filter; it must never stand in for a
+        // match on its own, or one wallpaper would silently replace another.
+        let assets = temp_root("theme-assets-collision");
+        std::fs::write(assets.join("wall.png"), b"first  wallpaper").unwrap();
+
+        assert_eq!(find_identical_asset(&assets, b"second wallpaper"), None);
+
+        std::fs::remove_dir_all(&assets).ok();
+    }
+
+    #[test]
+    fn an_empty_folder_yields_nothing_to_reuse() {
+        let assets = temp_root("theme-assets-empty");
+        assert_eq!(find_identical_asset(&assets, b"pixels"), None);
+        std::fs::remove_dir_all(&assets).ok();
     }
 }
