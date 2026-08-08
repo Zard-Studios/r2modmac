@@ -224,6 +224,14 @@ pub(crate) enum LaunchWaitOutcome {
     TimedOut,
 }
 
+const POLL_INTERVAL_MS: u64 = 250;
+
+/// Consecutive sightings required before a launch counts as done.
+///
+/// A cold Steam spawns short-lived helpers; believing the first sighting ended
+/// the wait while Steam was still booting. A real game survives the extra poll.
+const REQUIRED_CONSECUTIVE_STARTED_POLLS: u32 = 4;
+
 /// Wait for the game to appear, watching Steam for a reason it will not start.
 ///
 /// Polling Steam's own state while waiting means a blocked launch is reported
@@ -237,22 +245,39 @@ pub(crate) fn wait_for_launch_or_blocker(
     timeout_ms: u64,
     is_started: impl Fn() -> bool,
 ) -> LaunchWaitOutcome {
-    const POLL_INTERVAL_MS: u64 = 250;
     // Reading a 256 KB log tail every tick would be wasteful; Steam takes a
     // moment to write the prompt line anyway.
     const STEAM_CHECK_EVERY: u64 = 8;
 
     let attempts = std::cmp::max(1, timeout_ms / POLL_INTERVAL_MS);
+    let mut consecutive_sightings = 0u32;
+
     for attempt in 0..attempts {
         if is_started() {
-            return LaunchWaitOutcome::Started;
+            consecutive_sightings += 1;
+            if consecutive_sightings >= REQUIRED_CONSECUTIVE_STARTED_POLLS {
+                return LaunchWaitOutcome::Started;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(POLL_INTERVAL_MS));
+            continue;
         }
+
+        if consecutive_sightings > 0 {
+            log::debug!(
+                "[wait_for_launch_or_blocker] A process matching app {} disappeared after {} poll(s); it was not the game. Still waiting.",
+                app_id,
+                consecutive_sightings
+            );
+            consecutive_sightings = 0;
+        }
+
         if attempt > 0 && attempt % STEAM_CHECK_EVERY == 0 {
             if let Some(reason) = explain_stalled_launch(client_root, library_root, app_id) {
                 // Re-check the process first: the game may have started in the
                 // same tick, which beats a stale log line.
                 if is_started() {
-                    return LaunchWaitOutcome::Started;
+                    consecutive_sightings = 1;
+                    continue;
                 }
                 return LaunchWaitOutcome::Blocked(reason);
             }
@@ -336,6 +361,43 @@ mod tests {
             LaunchWaitOutcome::Blocked(reason) => assert!(reason.contains("updating"), "{reason}"),
             _ => panic!("expected Blocked"),
         }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A helper that appears and vanishes is not a launch.
+    #[test]
+    fn a_process_that_appears_then_vanishes_is_not_a_started_game() {
+        let root = fake_steam_root("1229490", 4, "");
+        let polls = std::cell::Cell::new(0u32);
+
+        let outcome = wait_for_launch_or_blocker(&root, &root, "1229490", 3_000, || {
+            let seen = polls.get();
+            polls.set(seen + 1);
+            // Present for the first two polls, then gone for good.
+            seen < 2
+        });
+
+        assert!(
+            matches!(outcome, LaunchWaitOutcome::TimedOut),
+            "a phantom must not end the wait"
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// …while a game that is actually up is still reported promptly.
+    #[test]
+    fn a_process_that_stays_up_ends_the_wait_quickly() {
+        let root = fake_steam_root("1229490", 4, "");
+        let started = std::time::Instant::now();
+
+        let outcome = wait_for_launch_or_blocker(&root, &root, "1229490", 60_000, || true);
+
+        assert!(matches!(outcome, LaunchWaitOutcome::Started));
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(5),
+            "confirming a real start must stay near-instant, took {:?}",
+            started.elapsed()
+        );
         std::fs::remove_dir_all(root).unwrap();
     }
 

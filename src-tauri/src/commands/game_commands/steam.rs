@@ -105,6 +105,24 @@ pub(super) enum WindowsLaunchPlan {
     SteamClientMissing,
 }
 
+/// Can we run this Windows executable ourselves, without Steam?
+///
+/// Natively on Windows, yes. Elsewhere only inside a compatibility prefix:
+/// outside one, Wine starts with no `WINEPREFIX` and the game exits at once —
+/// the "Play button does nothing" of issue #25.
+fn direct_launch_is_viable(game_path: &std::path::Path) -> bool {
+    #[cfg(windows)]
+    {
+        let _ = game_path;
+        true
+    }
+
+    #[cfg(not(windows))]
+    {
+        find_wine_prefix_root(game_path).is_some()
+    }
+}
+
 /// Decides how to launch a Windows game, given the Steam installs we know about.
 ///
 /// Kept free of `AppHandle` so the whole decision — including the layout from
@@ -201,11 +219,9 @@ pub(super) fn plan_windows_launch(
         return WindowsLaunchPlan::Direct;
     };
 
-    // A Steam game with no client. Inside a prefix the direct launch at least
-    // has a runtime around it and works for DRM-free titles; outside one, Wine
-    // would run it against the default prefix and it would exit on the spot —
-    // which is exactly the "Play button does nothing" of issue #25.
-    if find_wine_prefix_root(&canonical_game).is_none() {
+    // A Steam game with no client. Whether running the executable ourselves is
+    // still worth trying depends on the platform, not on Steam.
+    if !direct_launch_is_viable(&canonical_game) {
         log::warn!(
             "[plan_windows_launch] {:?} is a Steam install in library {:?}, but no Steam client was found and it lives outside any Wine prefix. Known roots: {:?}",
             canonical_game,
@@ -636,7 +652,10 @@ mod issue_25_launch_routing_tests {
         let client_root = world.steam_client(&bottle);
         let game_path = world.install_game(&client_root, "1966720", "Lethal Company", 4);
 
-        let target = steam_target(plan_windows_launch(std::slice::from_ref(&client_root), &game_path));
+        let target = steam_target(plan_windows_launch(
+            std::slice::from_ref(&client_root),
+            &game_path,
+        ));
 
         assert_eq!(target.app_id, "1966720");
         assert_eq!(canonical(&target.client_root), canonical(&client_root));
@@ -797,7 +816,10 @@ mod issue_25_launch_routing_tests {
         let library = world.library(&world.home.join("WindowsSteam"));
         let game_path = world.install_game(&library, "1966720", "Lethal Company", 4);
 
-        let target = steam_target(plan_windows_launch(std::slice::from_ref(&library), &game_path));
+        let target = steam_target(plan_windows_launch(
+            std::slice::from_ref(&library),
+            &game_path,
+        ));
 
         assert_eq!(canonical(&target.client_root), canonical(&library));
         assert_eq!(target.app_id, "1966720");
