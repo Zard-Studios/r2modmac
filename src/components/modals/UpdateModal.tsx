@@ -30,7 +30,7 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({ updateInfo, onClose, o
                         <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 flex-wrap">
                                 <h2 className="text-lg font-bold text-white">Update Available</h2>
-                                <span className="text-xs font-bold text-green-400 bg-green-400/10 px-2 py-0.5 rounded border border-green-400/20">
+                                <span className="text-xs font-bold text-fg-success bg-green-400/10 px-2 py-0.5 rounded border border-green-400/20">
                                     {updateInfo.version}
                                 </span>
                             </div>
@@ -44,7 +44,7 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({ updateInfo, onClose, o
                         className="prose prose-invert prose-sm max-w-none 
                                    prose-headings:text-white prose-headings:text-base prose-headings:mt-3 prose-headings:mb-2
                                    prose-p:my-1 prose-ul:my-1 prose-li:my-0.5
-                                   prose-a:text-green-400 hover:prose-a:text-green-300"
+                                   prose-a:text-fg-success hover:prose-a:text-fg-success"
                         dangerouslySetInnerHTML={getHtml()}
                     />
                 </div>

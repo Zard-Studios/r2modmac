@@ -186,7 +186,7 @@ export function SponsorSurface({ placement, visible, className = '' }: SponsorSu
             style={!enabled ? { opacity: 0, pointerEvents: 'none' } : undefined}
             aria-hidden={!isVisible}
         >
-            <div className={`pointer-events-auto flex w-auto max-w-[min(46rem,calc(100%-1rem))] min-w-0 origin-bottom items-center gap-2 rounded-lg border px-3 py-2 transition-[transform,background-color,border-color,box-shadow] duration-300 ease-out ${backgroundOpacity === 0 ? '' : 'backdrop-blur-[2px]'}`} style={{ transform: `scale(${scale / 100})`, backgroundColor: `rgb(31 41 55 / ${backgroundOpacity / 100})`, borderColor: `rgb(75 85 99 / ${backgroundOpacity / 100})`, boxShadow: backgroundOpacity === 0 ? 'none' : '0 10px 28px rgb(0 0 0 / 0.24)' }}>
+            <div className={`pointer-events-auto flex w-auto max-w-[min(46rem,calc(100%-1rem))] min-w-0 origin-bottom items-center gap-2 rounded-lg border px-3 py-2 transition-[transform,background-color,border-color,box-shadow] duration-300 ease-out ${backgroundOpacity === 0 ? '' : 'backdrop-blur-[2px]'}`} style={{ transform: `scale(${scale / 100})`, backgroundColor: `rgb(var(--r2-gray-800) / ${backgroundOpacity / 100})`, borderColor: `rgb(var(--r2-gray-700) / ${backgroundOpacity / 100})`, boxShadow: backgroundOpacity === 0 ? 'none' : '0 10px 28px rgb(0 0 0 / 0.24)' }}>
                 <span className="shrink-0 border-r border-gray-700 pr-2 text-[9px] font-semibold uppercase tracking-[0.14em] text-gray-500">Sponsored</span>
                 <p className="min-w-0 max-w-[min(36rem,55vw)] truncate text-sm text-gray-200" title={message.message}>{message.message}</p>
                 <div className="flex shrink-0 items-center gap-2">
@@ -196,7 +196,7 @@ export function SponsorSurface({ placement, visible, className = '' }: SponsorSu
                             onClick={() => {
                                 window.dispatchEvent(new CustomEvent('r2modmac:open-preferences'));
                             }}
-                            className="flex h-7 items-center rounded-md border border-blue-400/25 bg-blue-500/10 px-2.5 text-[11px] font-semibold text-blue-300 transition-colors hover:border-blue-400/40 hover:bg-blue-500/20 hover:text-blue-200"
+                            className="flex h-7 items-center rounded-md border border-blue-500/30 bg-blue-500/10 px-2.5 text-[11px] font-semibold text-fg-accent transition-colors hover:border-blue-500/50 hover:bg-blue-500/20"
                         >
                             Preferences ↗
                         </button>
@@ -206,7 +206,7 @@ export function SponsorSurface({ placement, visible, className = '' }: SponsorSu
                             onClick={() => {
                                 void import('@tauri-apps/plugin-shell').then(({ open }) => open(message.url!));
                             }}
-                            className="flex h-7 items-center rounded-md border border-blue-400/25 bg-blue-500/10 px-2.5 text-[11px] font-semibold text-blue-300 transition-colors hover:border-blue-400/40 hover:bg-blue-500/20 hover:text-blue-200"
+                            className="flex h-7 items-center rounded-md border border-blue-500/30 bg-blue-500/10 px-2.5 text-[11px] font-semibold text-fg-accent transition-colors hover:border-blue-500/50 hover:bg-blue-500/20"
                         >
                             Learn more ↗
                         </button>
@@ -214,7 +214,7 @@ export function SponsorSurface({ placement, visible, className = '' }: SponsorSu
                     <button
                         type="button"
                         onClick={handleDismiss}
-                        className="flex h-7 w-7 items-center justify-center rounded-md text-gray-500 transition-colors hover:bg-gray-700 hover:text-gray-200"
+                        className="flex h-7 w-7 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-gray-700 hover:text-white"
                         aria-label="Dismiss sponsored message"
                         title="Dismiss"
                     >

@@ -57,7 +57,7 @@ export const ModCard = memo(function ModCard({ mod, likesCount, onInstall, onUni
                 </div>
 
                 <div className="flex-1 min-w-0 flex flex-col justify-center">
-                    <h3 className="font-bold text-white text-lg truncate group-hover:text-blue-400 transition-colors">
+                    <h3 className="font-bold text-white text-lg truncate group-hover:text-fg-accent transition-colors">
                         {mod.name}
                     </h3>
                     <div className="flex items-center gap-2 text-xs text-gray-400">
@@ -70,7 +70,7 @@ export const ModCard = memo(function ModCard({ mod, likesCount, onInstall, onUni
                                         open(mod.website_url!);
                                     });
                                 }}
-                                className="hover:text-blue-400 transition-colors cursor-pointer"
+                                className="hover:text-fg-accent transition-colors cursor-pointer"
                             >
                                 Website ↗
                             </button>
@@ -134,7 +134,7 @@ export const ModCard = memo(function ModCard({ mod, likesCount, onInstall, onUni
                             ? 'bg-green-500/10 text-green-500 border border-green-500/20 cursor-default'
                             : installStatus === 'update_available'
                                 ? 'bg-yellow-600 hover:bg-yellow-500 text-white shadow-lg shadow-yellow-900/20 active:scale-95'
-                                : 'bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-900/20 active:scale-95'
+                                : 'bg-blue-600 hover:bg-accent-hover text-on-accent shadow-lg shadow-blue-900/20 active:scale-95'
                                 }`}
                         >
                             {installStatus === 'installed' ? installedLabel : installStatus === 'update_available' ? 'Update' : installLabel}

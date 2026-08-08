@@ -95,6 +95,7 @@ pub fn run() {
             commands::sponsor_commands::rotate_session_subject(app.handle());
 
             utils::volume_watcher::start_volume_watcher(app.handle().clone());
+            commands::theme_commands::start_theme_watcher(app.handle().clone());
 
             // Migrate old directories
             #[cfg(target_os = "windows")]
@@ -361,6 +362,15 @@ pub fn run() {
             commands::system_commands::install_update,
             commands::settings_commands::get_settings,
             commands::settings_commands::save_settings,
+            commands::theme_commands::list_themes,
+            commands::theme_commands::read_theme_source,
+            commands::theme_commands::write_theme,
+            commands::theme_commands::delete_theme,
+            commands::theme_commands::open_themes_folder,
+            commands::theme_commands::suggest_theme_file_name,
+            commands::theme_commands::set_active_theme,
+            commands::theme_commands::import_theme_image,
+            commands::theme_commands::read_theme_image,
             commands::sponsor_commands::request_sponsor,
             commands::sponsor_commands::acknowledge_sponsor_display,
             commands::sponsor_commands::dismiss_sponsor,

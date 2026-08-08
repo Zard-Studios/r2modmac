@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useAppStore } from '../../store/useAppStore';
 import { censorPath, uncensorPath } from '../../utils/pathCensorUtils';
 import { CensoredInput } from '../ui/PathCensor';
+import { Toggle } from '../ui/Toggle';
 import { revealInFileManagerLabel } from '../../utils/platformUtils';
 
 import type { ConfigFileInfo } from '../../tauriAdapter';
@@ -478,20 +479,11 @@ function EntryEditor({ entry, onChange, searchQuery }: EntryEditorProps) {
                 <div className="flex-shrink-0 w-56">
                     {entry.displayType === 'boolean' ? (
                         <div className="flex justify-end">
-                            <button
-                                onClick={() => onChange(entry.value === 'true' ? 'false' : 'true')}
-                                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                                    entry.value === 'true' ? 'bg-blue-600' : 'bg-gray-600'
-                                }`}
-                                role="switch"
-                                aria-checked={entry.value === 'true'}
-                            >
-                                <span
-                                    className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
-                                        entry.value === 'true' ? 'translate-x-6' : 'translate-x-1'
-                                    }`}
-                                />
-                            </button>
+                            <Toggle
+                                value={entry.value === 'true'}
+                                label={entry.key}
+                                onChange={(next) => onChange(next ? 'true' : 'false')}
+                            />
                         </div>
                     ) : entry.displayType === 'single-select' ? (
                         <select
@@ -538,7 +530,7 @@ function EntryEditor({ entry, onChange, searchQuery }: EntryEditorProps) {
                         Options: {showAllOptions ? optionsText : optionsText.substring(0, 150) + '...'}{' '}
                         <button
                             onClick={() => setShowAllOptions(!showAllOptions)}
-                            className="text-blue-400 hover:text-blue-300 font-semibold underline ml-1 cursor-pointer"
+                            className="text-fg-accent hover:text-fg-accent font-semibold underline ml-1 cursor-pointer"
                         >
                             {showAllOptions ? 'Show less' : 'Show all'}
                         </button>
@@ -559,7 +551,7 @@ function EntryEditor({ entry, onChange, searchQuery }: EntryEditorProps) {
                         {showAllMeta ? metaText : metaText.substring(0, 150) + '...'}{' '}
                         <button
                             onClick={() => setShowAllMeta(!showAllMeta)}
-                            className="text-blue-400 hover:text-blue-300 font-semibold underline ml-1 cursor-pointer"
+                            className="text-fg-accent hover:text-fg-accent font-semibold underline ml-1 cursor-pointer"
                         >
                             {showAllMeta ? 'Show less' : 'Show all'}
                         </button>
@@ -897,7 +889,7 @@ function TreeNodeView({
                     />
                 ) : (
                     <svg
-                        className={`h-3.5 w-3.5 flex-shrink-0 ${depth === 0 ? 'text-blue-400/70' : 'text-gray-500/60'}`}
+                        className={`h-3.5 w-3.5 flex-shrink-0 ${depth === 0 ? 'text-fg-accent/70' : 'text-gray-500/60'}`}
                         fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}
                     >
                         <path strokeLinecap="round" strokeLinejoin="round" d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
@@ -954,15 +946,15 @@ function TreeNodeView({
                                     : 'border-l-2 border-transparent hover:bg-gray-700/40'
                             }`}
                         >
-                            <span className={`flex-shrink-0 ${selectedFile?.relative_path === f.relative_path ? 'text-blue-400' : 'text-gray-500'}`}>
+                            <span className={`flex-shrink-0 ${selectedFile?.relative_path === f.relative_path ? 'text-fg-accent' : 'text-gray-500'}`}>
                                 <FileExtIcon name={f.name} className="h-3.5 w-3.5" />
                             </span>
                             <span className={`text-[11px] truncate ${
-                                selectedFile?.relative_path === f.relative_path ? 'text-blue-200 font-medium' : 'text-gray-300'
+                                selectedFile?.relative_path === f.relative_path ? 'text-fg-accent font-medium' : 'text-gray-300'
                             }`}>
                                 {f.name}
                                 {selectedFile?.relative_path === f.relative_path && isDirty && (
-                                    <span className="text-amber-400 ml-1">&#9679;</span>
+                                    <span className="text-fg-warning ml-1">&#9679;</span>
                                 )}
                             </span>
                         </button>
@@ -1605,7 +1597,7 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
     return (
         <div className="flex gap-0 h-[520px] min-h-0">
         {/* ── File Explorer Panel ──────────────────────────────────────────── */}
-            <div className="w-60 flex-shrink-0 border-r border-gray-700/80 flex flex-col bg-[#111827]/60">
+            <div className="w-60 flex-shrink-0 border-r border-gray-700/80 flex flex-col bg-gray-900/60">
                 {/* Search & Filter */}
                 <div className="p-2 border-b border-gray-700/80 flex-shrink-0 flex gap-1.5 items-center">
                     <div className="relative flex-1">
@@ -1655,21 +1647,21 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
                                     <span className="block text-[9px] uppercase font-bold text-gray-500 mb-1 px-1 tracking-wider">Search Target</span>
                                     <button
                                         onClick={() => setFilterTarget('both')}
-                                        className={`w-full text-left px-2 py-1 rounded flex items-center justify-between hover:bg-gray-700/60 ${filterTarget === 'both' ? 'text-blue-400 font-semibold' : ''}`}
+                                        className={`w-full text-left px-2 py-1 rounded flex items-center justify-between hover:bg-gray-700/60 ${filterTarget === 'both' ? 'text-fg-accent font-semibold' : ''}`}
                                     >
                                         Files & Settings
                                         {filterTarget === 'both' && <span className="text-[10px]">●</span>}
                                     </button>
                                     <button
                                         onClick={() => setFilterTarget('files')}
-                                        className={`w-full text-left px-2 py-1 rounded flex items-center justify-between hover:bg-gray-700/60 ${filterTarget === 'files' ? 'text-blue-400 font-semibold' : ''}`}
+                                        className={`w-full text-left px-2 py-1 rounded flex items-center justify-between hover:bg-gray-700/60 ${filterTarget === 'files' ? 'text-fg-accent font-semibold' : ''}`}
                                     >
                                         Files Only
                                         {filterTarget === 'files' && <span className="text-[10px]">●</span>}
                                     </button>
                                     <button
                                         onClick={() => setFilterTarget('settings')}
-                                        className={`w-full text-left px-2 py-1 rounded flex items-center justify-between hover:bg-gray-700/60 ${filterTarget === 'settings' ? 'text-blue-400 font-semibold' : ''}`}
+                                        className={`w-full text-left px-2 py-1 rounded flex items-center justify-between hover:bg-gray-700/60 ${filterTarget === 'settings' ? 'text-fg-accent font-semibold' : ''}`}
                                     >
                                         Settings Only
                                         {filterTarget === 'settings' && <span className="text-[10px]">●</span>}
@@ -1681,21 +1673,21 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
                                     <span className="block text-[9px] uppercase font-bold text-gray-500 mb-1 px-1 tracking-wider">File Type</span>
                                     <button
                                         onClick={() => toggleFileTypeFilter('cfg')}
-                                        className={`w-full text-left px-2 py-1 rounded flex items-center justify-between hover:bg-gray-700/60 ${fileTypeFilters.has('cfg') ? 'text-blue-400 font-semibold' : ''}`}
+                                        className={`w-full text-left px-2 py-1 rounded flex items-center justify-between hover:bg-gray-700/60 ${fileTypeFilters.has('cfg') ? 'text-fg-accent font-semibold' : ''}`}
                                     >
                                         Only Configs (.cfg)
                                         {fileTypeFilters.has('cfg') && <span className="text-[10px]">✔</span>}
                                     </button>
                                     <button
                                         onClick={() => toggleFileTypeFilter('json')}
-                                        className={`w-full text-left px-2 py-1 rounded flex items-center justify-between hover:bg-gray-700/60 ${fileTypeFilters.has('json') ? 'text-blue-400 font-semibold' : ''}`}
+                                        className={`w-full text-left px-2 py-1 rounded flex items-center justify-between hover:bg-gray-700/60 ${fileTypeFilters.has('json') ? 'text-fg-accent font-semibold' : ''}`}
                                     >
                                         Only JSON (.json)
                                         {fileTypeFilters.has('json') && <span className="text-[10px]">✔</span>}
                                     </button>
                                     <button
                                         onClick={() => toggleFileTypeFilter('text')}
-                                        className={`w-full text-left px-2 py-1 rounded flex items-center justify-between hover:bg-gray-700/60 ${fileTypeFilters.has('text') ? 'text-blue-400 font-semibold' : ''}`}
+                                        className={`w-full text-left px-2 py-1 rounded flex items-center justify-between hover:bg-gray-700/60 ${fileTypeFilters.has('text') ? 'text-fg-accent font-semibold' : ''}`}
                                     >
                                         Only Texts (.txt, .md)
                                         {fileTypeFilters.has('text') && <span className="text-[10px]">✔</span>}
@@ -1758,13 +1750,13 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
                             <div className="min-w-0">
                                 <p className="text-sm font-semibold text-white truncate">
                                     {selectedFile.name}
-                                    {isDirty && <span className="text-amber-400 ml-1 text-xs">● unsaved</span>}
+                                    {isDirty && <span className="text-fg-warning ml-1 text-xs">● unsaved</span>}
                                 </p>
                                 <p className="text-[10px] text-gray-500 truncate">{selectedFile.relative_path}</p>
                             </div>
                             <div className="flex items-center gap-2 flex-shrink-0 ml-3">
                                 {saveStatus === 'saved' && (
-                                    <span className="text-xs text-green-400 flex items-center gap-1">
+                                    <span className="text-xs text-fg-success flex items-center gap-1">
                                         <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 20 20">
                                             <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
                                         </svg>
@@ -1772,7 +1764,7 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
                                     </span>
                                 )}
                                 {saveStatus === 'error' && (
-                                    <span className="text-xs text-red-400">Save failed</span>
+                                    <span className="text-xs text-fg-danger">Save failed</span>
                                 )}
                                 {!isLargeFile && (!parsedCfg || forceRawView) && (
                                     <>
@@ -1837,7 +1829,7 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
                                         title={forceRawView ? "Switch to Structured Editor" : "Switch to Raw Text Editor"}
                                         className={`text-xs p-1.5 rounded-lg transition-colors flex items-center justify-center ${
                                             forceRawView
-                                                ? 'bg-blue-650/40 text-blue-400 border border-blue-500/40'
+                                                ? 'bg-blue-650/40 text-fg-accent border border-blue-500/40'
                                                 : 'text-gray-400 hover:text-white hover:bg-gray-700'
                                         }`}
                                     >
@@ -1912,7 +1904,7 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
                                         File too large to edit inside the app
                                     </h3>
                                     <p className="text-[11px] text-gray-500 leading-relaxed mb-6">
-                                        This file is <span className="text-amber-400 font-semibold">{Math.round(rawContent.length / 1024)} KB</span>. Editing large files inside the manager can freeze or crash the program.
+                                        This file is <span className="text-fg-warning font-semibold">{Math.round(rawContent.length / 1024)} KB</span>. Editing large files inside the manager can freeze or crash the program.
                                     </p>
                                     <div className="flex flex-col gap-2 w-full">
                                         <button
@@ -1927,7 +1919,7 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
                                                     console.error('Failed to open file externally', err);
                                                 }
                                             }}
-                                            className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-semibold transition-colors"
+                                            className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-500 text-on-accent rounded-lg text-xs font-semibold transition-colors"
                                         >
                                             <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                                                 <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
@@ -1948,7 +1940,7 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
                                             }}
                                             className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-gray-800 hover:bg-gray-750 text-gray-300 rounded-lg text-xs font-semibold border border-gray-700/80 transition-colors"
                                         >
-                                            <svg className="h-3.5 w-3.5 text-blue-400/80" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                                            <svg className="h-3.5 w-3.5 text-fg-accent/80" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                                                 <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" />
                                             </svg>
                                             {revealInFileManagerLabel()}
@@ -2030,7 +2022,7 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
                                                             style={{ height: '20px', lineHeight: '20px' }}
                                                             className={`pr-1 transition-colors duration-150 ${
                                                                 isErrorLine
-                                                                    ? 'text-red-400 font-bold bg-red-950/40 border-r-2 border-red-500'
+                                                                    ? 'text-fg-danger font-bold bg-red-950/40 border-r-2 border-red-500'
                                                                     : 'hover:text-gray-400'
                                                             }`}
                                                         >
@@ -2061,9 +2053,9 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
 
                                     {/* Error Banner at the Bottom */}
                                     {isJsonFile && jsonErrors.length > 0 && (
-                                        <div className="flex-shrink-0 px-4 py-3 bg-red-950/35 border-t border-red-500/25 text-red-200 text-xs flex flex-col gap-2 max-h-[120px] overflow-y-auto">
-                                            <div className="flex items-center gap-2 font-semibold text-red-300">
-                                                <svg className="h-4 w-4 text-red-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <div className="flex-shrink-0 px-4 py-3 bg-red-950/35 border-t border-red-500/25 text-fg-danger text-xs flex flex-col gap-2 max-h-[120px] overflow-y-auto">
+                                            <div className="flex items-center gap-2 font-semibold text-fg-danger">
+                                                <svg className="h-4 w-4 text-fg-danger flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                                                 </svg>
                                                 <span>JSON Syntax Errors ({jsonErrors.length}):</span>
@@ -2072,7 +2064,7 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
                                                 {jsonErrors.map((err, idx) => (
                                                     <li key={idx} className="leading-relaxed">
                                                         {err.message}{' '}
-                                                        <span className="text-red-400 font-mono font-semibold">
+                                                        <span className="text-fg-danger font-mono font-semibold">
                                                             (Line {err.line}{err.column ? `, Col ${err.column}` : ''})
                                                         </span>
                                                     </li>

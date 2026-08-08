@@ -321,7 +321,7 @@ export function ModDetailModal({
                 onClick={onClose}
             >
                 <div
-                    className="bg-gray-800 rounded-xl max-w-5xl w-full h-[90vh] flex flex-col border border-gray-700 shadow-2xl"
+                    className="bg-gray-800 rounded-xl max-w-5xl w-full h-[90vh] flex flex-col border border-gray-700 shadow-2xl overflow-hidden"
                     onClick={(e) => e.stopPropagation()}
                 >
                     {/* Header with Icon and Title */}
@@ -340,7 +340,7 @@ export function ModDetailModal({
                             )}
                             {mod.icon && (
                                 <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                                    <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <svg className="w-6 h-6 text-[#ffffff]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7" />
                                     </svg>
                                 </div>
@@ -354,7 +354,7 @@ export function ModDetailModal({
                                     <div className="flex min-w-0 items-center gap-2.5">
                                         <h2 className="truncate text-2xl font-bold leading-tight text-white">{mod.name}</h2>
                                         {showDeprecatedWarning && pkg.is_deprecated ? (
-                                            <span className="inline-flex flex-shrink-0 items-center gap-1 rounded-full border border-red-500/35 bg-red-950/55 px-2 py-0.5 text-[11px] font-semibold text-red-300">
+                                            <span className="inline-flex flex-shrink-0 items-center gap-1 rounded-full border border-red-500/35 bg-red-950/55 px-2 py-0.5 text-[11px] font-semibold text-fg-danger">
                                                 <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
                                                     <path fillRule="evenodd" d="M8.26 3.1c.76-1.36 2.72-1.36 3.48 0l6.52 11.6c.75 1.33-.21 2.98-1.74 2.98H3.48c-1.53 0-2.49-1.65-1.74-2.98L8.26 3.1ZM10 7.75a.75.75 0 0 1 .75.75v3a.75.75 0 0 1-1.5 0v-3a.75.75 0 0 1 .75-.75Zm0 7.25a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z" clipRule="evenodd" />
                                                 </svg>
@@ -376,7 +376,7 @@ export function ModDetailModal({
                                                     open(mod.website_url!);
                                                 });
                                             }}
-                                            className="flex items-center gap-1 text-sm text-blue-400 hover:text-blue-300 transition-colors mt-1"
+                                            className="flex items-center gap-1 text-sm text-fg-accent hover:text-fg-accent transition-colors mt-1"
                                         >
                                             Website
                                             <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -445,15 +445,15 @@ export function ModDetailModal({
                         </div>
                         <div className="flex items-center gap-2 text-xs">
                             {isSelectedInstalled ? (
-                                <span className="px-2 py-1 rounded-full bg-green-500/15 text-green-400 border border-green-500/30">
+                                <span className="px-2 py-1 rounded-full bg-green-500/15 text-fg-success border border-green-500/30">
                                     {installedLabel}
                                 </span>
                             ) : isSelectedLatest ? (
-                                <span className="px-2 py-1 rounded-full bg-blue-500/15 text-blue-300 border border-blue-500/30">
+                                <span className="px-2 py-1 rounded-full bg-blue-500/15 text-fg-accent border border-blue-500/30">
                                     Latest version
                                 </span>
                             ) : (
-                                <span className="px-2 py-1 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/30">
+                                <span className="px-2 py-1 rounded-full bg-amber-500/15 text-fg-warning border border-amber-500/30">
                                     Outdated version
                                 </span>
                             )}
@@ -467,13 +467,13 @@ export function ModDetailModal({
                                 key={tab}
                                 onClick={() => setActiveTab(tab)}
                                 className={`py-3 text-sm font-medium border-b-2 transition-colors capitalize flex items-center gap-2 ${activeTab === tab
-                                    ? 'text-blue-400 border-blue-400'
+                                    ? 'text-fg-accent border-blue-400'
                                     : 'text-gray-400 border-transparent hover:text-gray-200'
                                     }`}
                             >
                                 {tab}
                                 {tab === 'dependencies' && mod.dependencies?.length > 0 && (
-                                    <span className={`text-xs px-1.5 py-0.5 rounded-full ${activeTab === tab ? 'bg-blue-500/20 text-blue-300' : 'bg-gray-700 text-gray-400'}`}>
+                                    <span className={`text-xs px-1.5 py-0.5 rounded-full ${activeTab === tab ? 'bg-blue-500/20 text-fg-accent' : 'bg-gray-700 text-gray-400'}`}>
                                         {mod.dependencies.length}
                                     </span>
                                 )}
@@ -516,7 +516,7 @@ export function ModDetailModal({
                                     </div>
                                 ) : readmeContent ? (
                                     <div
-                                        className="prose prose-invert prose-sm max-w-none prose-headings:text-white prose-a:text-blue-400 hover:prose-a:text-blue-300 prose-img:rounded-lg break-words overflow-hidden"
+                                        className="prose prose-invert prose-sm max-w-none prose-headings:text-white prose-a:text-fg-accent hover:prose-a:text-fg-accent prose-img:rounded-lg break-words overflow-hidden"
                                         dangerouslySetInnerHTML={{ __html: readmeContent }}
                                     />
                                 ) : (
@@ -536,7 +536,7 @@ export function ModDetailModal({
                                     </div>
                                 ) : changelogContent ? (
                                     <div
-                                        className="prose prose-invert prose-sm max-w-none prose-headings:text-white prose-a:text-blue-400 hover:prose-a:text-blue-300 break-words overflow-hidden"
+                                        className="prose prose-invert prose-sm max-w-none prose-headings:text-white prose-a:text-fg-accent hover:prose-a:text-fg-accent break-words overflow-hidden"
                                         dangerouslySetInnerHTML={{ __html: changelogContent }}
                                     />
                                 ) : (
@@ -570,7 +570,7 @@ export function ModDetailModal({
                                                                 v{dep.versions[0]?.version_number}
                                                             </span>
                                                             {installedMods.some(m => m.fullName.startsWith(dep.full_name)) && (
-                                                                <span className="bg-green-500/20 text-green-400 px-1.5 py-0.5 rounded text-xs font-medium">
+                                                                <span className="bg-green-500/20 text-fg-success px-1.5 py-0.5 rounded text-xs font-medium">
                                                                     {installedLabel}
                                                                 </span>
                                                             )}

@@ -3,6 +3,7 @@ import { Menu, MenuItem } from '@tauri-apps/api/menu';
 import type { Profile } from '../../types/profile';
 import type { CommunityPlatformInfo } from '../../types/thunderstore';
 import { Button, HoverMarquee } from '../ui';
+import { Toggle } from '../ui/Toggle';
 import { PlatformPicker } from './PlatformPicker';
 import { revealInFileManagerLabel } from '../../utils/platformUtils';
 import { getProfileAvatarGradient } from '../../utils/profileAvatar';
@@ -269,7 +270,7 @@ export function ProfileList({
                             }}
                         >
                             <div className="w-16 h-16 bg-gray-900 rounded-full flex items-center justify-center mb-4 group-hover:bg-blue-500/20 transition-colors">
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-gray-500 group-hover:text-blue-400 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-gray-500 group-hover:text-fg-accent transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
                                 </svg>
                             </div>
@@ -295,7 +296,7 @@ export function ProfileList({
                             onClick={onBrowseMods}
                         >
                             <div className="w-16 h-16 bg-gray-900 rounded-full flex items-center justify-center mb-4 group-hover:bg-green-500/20 transition-colors">
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-gray-500 group-hover:text-green-400 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-gray-500 group-hover:text-fg-success transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                                 </svg>
                             </div>
@@ -392,7 +393,7 @@ export function ProfileList({
                                         className="w-16 h-16 rounded-2xl mb-4 flex-shrink-0 object-cover bg-gray-800 shadow-md"
                                     />
                                 ) : (
-                                    <div style={{ backgroundImage: getProfileAvatarGradient(profile.name, profile.id) }} className="w-16 h-16 rounded-2xl mb-4 flex-shrink-0 flex items-center justify-center text-2xl font-bold text-white shadow-md">
+                                    <div style={{ backgroundImage: getProfileAvatarGradient(profile.name, profile.id) }} className="w-16 h-16 rounded-2xl mb-4 flex-shrink-0 flex items-center justify-center text-2xl font-bold text-[#ffffff] shadow-md">
                                         {getFirstLetter(profile.name)}
                                     </div>
                                 )}
@@ -458,12 +459,11 @@ export function ProfileList({
                                         <span className={`text-sm font-semibold transition-colors ${selectedPlatform === 'mac' ? 'text-white' : 'text-gray-400'}`}>
                                             Force MacOS
                                         </span>
-                                        <button
-                                            type="button"
-                                            className={`relative w-12 h-6 rounded-full transition-colors flex-shrink-0 ${selectedPlatform === 'mac' ? 'bg-blue-600' : 'bg-gray-700'}`}
-                                        >
-                                            <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${selectedPlatform === 'mac' ? 'translate-x-6' : 'translate-x-0'}`}></span>
-                                        </button>
+                                        <Toggle
+                                            value={selectedPlatform === 'mac'}
+                                            label="Force MacOS structure"
+                                            onChange={(next) => setSelectedPlatform(next ? 'mac' : 'windows')}
+                                        />
                                     </div>
                                 )}
                             </div>
@@ -640,7 +640,7 @@ export function ProfileList({
                                             className="w-24 h-24 rounded-full object-cover border-4 border-gray-700 group-hover:border-blue-500 transition-colors"
                                         />
                                     ) : (
-                                        <div style={{ backgroundImage: getProfileAvatarGradient(editName, editingProfile.id) }} className="w-24 h-24 rounded-full flex items-center justify-center text-4xl font-bold text-white border-4 border-gray-700 group-hover:border-blue-500 transition-colors">
+                                        <div style={{ backgroundImage: getProfileAvatarGradient(editName, editingProfile.id) }} className="w-24 h-24 rounded-full flex items-center justify-center text-4xl font-bold text-[#ffffff] border-4 border-gray-700 group-hover:border-blue-500 transition-colors">
                                             {getFirstLetter(editName)}
                                         </div>
                                     )}
@@ -655,7 +655,7 @@ export function ProfileList({
                                     <button
                                         type="button"
                                         onClick={handleRemoveImage}
-                                        className="text-xs text-red-400 hover:text-red-300 hover:underline"
+                                        className="text-xs text-fg-danger hover:text-fg-danger hover:underline"
                                     >
                                         Remove Custom Image
                                     </button>

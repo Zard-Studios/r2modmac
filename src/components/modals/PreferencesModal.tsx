@@ -1,7 +1,10 @@
 import { useState, useEffect } from 'react';
 import { Button } from '../ui';
+import { Toggle } from '../ui/Toggle';
 import { HeartIcon } from '../LikeStat';
 import { DefaultGamePickerModal } from './DefaultGamePickerModal';
+import { ThemeEditorModal } from './ThemeEditorModal';
+import { useThemeStore } from '../../store/useThemeStore';
 import type { Community, CommunityPlatformInfo } from '../../types/thunderstore';
 
 export interface PreferencesSettings {
@@ -35,33 +38,25 @@ interface PreferencesModalProps {
     onCheckForUpdates: () => Promise<void>;
 }
 
-function Toggle({ value, onChange, label }: { value: boolean; onChange: (next: boolean) => void; label?: string }) {
-    return (
-        <button
-            type="button"
-            onClick={() => onChange(!value)}
-            className={`relative w-11 h-6 rounded-full transition-colors duration-200 ease-in-out flex-shrink-0 focus:outline-none focus:ring-2 focus:ring-blue-500/50 ${value ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'
-                }`}
-            aria-pressed={value}
-            aria-label={label}
-        >
-            <span
-                className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow-[0_2px_5px_rgba(0,0,0,0.2)] transition-transform duration-200 ease-[cubic-bezier(0.4,0,0.2,1)] ${value ? 'translate-x-5' : 'translate-x-0'
-                    }`}
-            />
-        </button>
-    );
-}
-
 function IconBox({ children, colorClass }: { children: React.ReactNode; colorClass: string }) {
     return (
-        <div className={`w-9 h-9 rounded-xl flex items-center justify-center bg-gray-700 border border-gray-600 flex-shrink-0 ${colorClass}`}>
+        <div className={`w-9 h-9 rounded-xl flex items-center justify-center bg-gray-700/60 border border-gray-700 flex-shrink-0 ${colorClass}`}>
             {children}
         </div>
     );
 }
 
-function RowIcon({ kind }: { kind: 'install' | 'version' | 'parallel' | 'apply' | 'logs' | 'layout' | 'warning' | 'cache' | 'stream' | 'update' | 'support' | 'folder' | 'game' | 'profile' }) {
+function RowIcon({ kind }: { kind: 'install' | 'version' | 'parallel' | 'apply' | 'logs' | 'layout' | 'warning' | 'cache' | 'stream' | 'update' | 'support' | 'folder' | 'game' | 'profile' | 'theme' }) {
+    if (kind === 'theme') return (
+        <IconBox colorClass="text-pink-400">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 3a9 9 0 000 18h1.5a2 2 0 001.6-3.2 2 2 0 011.6-3.2H19a2 2 0 002-2A9 9 0 0012 3z" />
+                <circle cx="7.5" cy="12" r="1.1" fill="currentColor" stroke="none" />
+                <circle cx="10" cy="8" r="1.1" fill="currentColor" stroke="none" />
+                <circle cx="14.5" cy="8" r="1.1" fill="currentColor" stroke="none" />
+            </svg>
+        </IconBox>
+    );
     if (kind === 'profile') return (
         <IconBox colorClass="text-purple-400">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -70,7 +65,7 @@ function RowIcon({ kind }: { kind: 'install' | 'version' | 'parallel' | 'apply' 
         </IconBox>
     );
     if (kind === 'install') return (
-        <IconBox colorClass="text-blue-400">
+        <IconBox colorClass="text-fg-accent">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-5l-4 4m0 0l-4-4m4 4V4" />
             </svg>
@@ -91,7 +86,7 @@ function RowIcon({ kind }: { kind: 'install' | 'version' | 'parallel' | 'apply' 
         </IconBox>
     );
     if (kind === 'apply') return (
-        <IconBox colorClass="text-emerald-400">
+        <IconBox colorClass="text-fg-success">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M5 13l4 4L19 7" />
             </svg>
@@ -112,14 +107,14 @@ function RowIcon({ kind }: { kind: 'install' | 'version' | 'parallel' | 'apply' 
         </IconBox>
     );
     if (kind === 'warning') return (
-        <IconBox colorClass="text-amber-400">
+        <IconBox colorClass="text-fg-warning">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v2m0 4h.01m-7.938 4h15.876c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L2.33 16c-.77 1.333.192 3 1.732 3z" />
             </svg>
         </IconBox>
     );
     if (kind === 'update') return (
-        <IconBox colorClass="text-green-400">
+        <IconBox colorClass="text-fg-success">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
             </svg>
@@ -152,7 +147,7 @@ function RowIcon({ kind }: { kind: 'install' | 'version' | 'parallel' | 'apply' 
         </IconBox>
     );
     return (
-        <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-red-500/10 border border-red-500/20 text-red-400 flex-shrink-0">
+        <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-red-500/10 border border-red-500/20 text-fg-danger flex-shrink-0">
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
             </svg>
@@ -188,6 +183,11 @@ export default function PreferencesModal({
     const [defaultGame, setDefaultGame] = useState<string | null>(settings.default_game ?? null);
     const [defaultProfile, setDefaultProfile] = useState<string | null>(settings.default_profile ?? null);
     const [showGamePicker, setShowGamePicker] = useState(false);
+    const [showThemeEditor, setShowThemeEditor] = useState(false);
+    const themes = useThemeStore((s) => s.themes);
+    const activeThemeFileName = useThemeStore((s) => s.activeFileName);
+    const activeThemeName =
+        themes.find((t) => t.file_name === activeThemeFileName)?.name ?? 'Default';
     const [pickerInitialStep, setPickerInitialStep] = useState<'game' | 'profile'>('game');
     const defaultGameName = communities.find(c => c.identifier === defaultGame)?.name ?? null;
     const [restoringWarnings, setRestoringWarnings] = useState(false);
@@ -335,10 +335,39 @@ export default function PreferencesModal({
                                             setCheckingUpdates(false);
                                         }
                                     }}
-                                    className="px-4 py-2 rounded-xl text-[13px] font-medium transition-all duration-200 shrink-0 bg-green-600/10 hover:bg-green-600/20 active:bg-green-600/30 text-green-400 hover:text-green-300 active:text-green-200 border border-green-600/30 hover:border-green-600/40 active:border-green-600/50 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    className="px-4 py-2 rounded-xl text-[13px] font-medium transition-all duration-200 shrink-0 bg-green-600/10 hover:bg-green-600/20 active:bg-green-600/30 text-fg-success hover:text-fg-success active:text-fg-success border border-green-600/30 hover:border-green-600/40 active:border-green-600/50 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
                                     {checkingUpdates ? 'Checking...' : 'Check updates'}
                                 </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Appearance Section */}
+                    <div className="space-y-3">
+                        <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-widest px-1">Appearance</h3>
+
+                        <div className="bg-gray-800 border border-gray-700 rounded-2xl divide-y divide-gray-700/50 overflow-hidden">
+                            <div className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-gray-750">
+                                <div className="flex items-center gap-4">
+                                    <RowIcon kind="theme" />
+                                    <div>
+                                        <p className="text-[15px] font-medium text-white">Theme</p>
+                                        <p className="text-[13px] text-gray-400 mt-0.5 leading-snug">Customise the background, surfaces, text and accent colours.</p>
+                                    </div>
+                                </div>
+                                <div className="flex shrink-0 items-center gap-3">
+                                    <span className="text-[13px] text-gray-400 max-w-[200px] truncate text-right">
+                                        {activeThemeName}
+                                    </span>
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowThemeEditor(true)}
+                                        className="rounded-lg border border-gray-600 px-4 py-2 text-[13px] font-medium text-gray-200 transition-colors hover:border-gray-500 hover:bg-gray-700"
+                                    >
+                                        Customise
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -553,11 +582,39 @@ export default function PreferencesModal({
                                     <div className="space-y-4 border-t border-gray-700/50 p-4">
                                         <label className="block text-[13px] text-gray-400">
                                             <span className="mb-1 flex items-center justify-between"><span>Ad size</span><span className="tabular-nums text-gray-300">{sponsoredMessagesScale}%</span></span>
-                                            <input type="range" min="70" max="100" step="1" value={sponsoredMessagesScale} onChange={(event) => { const value = Number(event.target.value); setSponsoredMessagesScale(value); window.dispatchEvent(new CustomEvent('r2modmac:sponsor-preferences', { detail: { enabled: sponsoredMessagesEnabled, scale: value, opacity: sponsoredMessagesOpacity } })); }} style={{ background: `linear-gradient(to right, #2563eb ${((sponsoredMessagesScale - 70) / 30) * 100}%, #374151 ${((sponsoredMessagesScale - 70) / 30) * 100}%)` }} className="h-2 w-full cursor-pointer appearance-none rounded-full border border-gray-600/70 [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:appearance-none [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-2 [&::-moz-range-thumb]:border-blue-200 [&::-moz-range-thumb]:bg-white [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-blue-200 [&::-webkit-slider-thumb]:bg-white" aria-label="Sponsored message size" />
+                                            <input
+                                                type="range"
+                                                min="70"
+                                                max="100"
+                                                step="1"
+                                                value={sponsoredMessagesScale}
+                                                onChange={(event) => {
+                                                    const value = Number(event.target.value);
+                                                    setSponsoredMessagesScale(value);
+                                                    window.dispatchEvent(new CustomEvent('r2modmac:sponsor-preferences', { detail: { enabled: sponsoredMessagesEnabled, scale: value, opacity: sponsoredMessagesOpacity } }));
+                                                }}
+                                                style={{ background: `linear-gradient(to right, rgb(var(--r2-blue-600)) ${((sponsoredMessagesScale - 70) / 30) * 100}%, rgb(var(--r2-gray-700)) ${((sponsoredMessagesScale - 70) / 30) * 100}%)` }}
+                                                className="h-2 w-full cursor-pointer appearance-none rounded-full border border-gray-600/70 [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:appearance-none [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border [&::-moz-range-thumb]:border-gray-400 [&::-moz-range-thumb]:bg-[#ffffff] [&::-moz-range-thumb]:shadow-sm [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border [&::-webkit-slider-thumb]:border-gray-400 [&::-webkit-slider-thumb]:bg-[#ffffff] [&::-webkit-slider-thumb]:shadow-sm"
+                                                aria-label="Sponsored message size"
+                                            />
                                         </label>
                                         <label className="block text-[13px] text-gray-400">
                                             <span className="mb-1 flex items-center justify-between"><span>Background opacity</span><span className="tabular-nums text-gray-300">{sponsoredMessagesOpacity}%</span></span>
-                                            <input type="range" min="0" max="100" step="1" value={sponsoredMessagesOpacity} onChange={(event) => { const value = Number(event.target.value); setSponsoredMessagesOpacity(value); window.dispatchEvent(new CustomEvent('r2modmac:sponsor-preferences', { detail: { enabled: sponsoredMessagesEnabled, scale: sponsoredMessagesScale, opacity: value } })); }} style={{ background: `linear-gradient(to right, #2563eb ${sponsoredMessagesOpacity}%, #374151 ${sponsoredMessagesOpacity}%)` }} className="h-2 w-full cursor-pointer appearance-none rounded-full border border-gray-600/70 [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:appearance-none [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-2 [&::-moz-range-thumb]:border-blue-200 [&::-moz-range-thumb]:bg-white [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-blue-200 [&::-webkit-slider-thumb]:bg-white" aria-label="Sponsored message background opacity" />
+                                            <input
+                                                type="range"
+                                                min="0"
+                                                max="100"
+                                                step="1"
+                                                value={sponsoredMessagesOpacity}
+                                                onChange={(event) => {
+                                                    const value = Number(event.target.value);
+                                                    setSponsoredMessagesOpacity(value);
+                                                    window.dispatchEvent(new CustomEvent('r2modmac:sponsor-preferences', { detail: { enabled: sponsoredMessagesEnabled, scale: sponsoredMessagesScale, opacity: value } }));
+                                                }}
+                                                style={{ background: `linear-gradient(to right, rgb(var(--r2-blue-600)) ${sponsoredMessagesOpacity}%, rgb(var(--r2-gray-700)) ${sponsoredMessagesOpacity}%)` }}
+                                                className="h-2 w-full cursor-pointer appearance-none rounded-full border border-gray-600/70 [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:appearance-none [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border [&::-moz-range-thumb]:border-gray-400 [&::-moz-range-thumb]:bg-[#ffffff] [&::-moz-range-thumb]:shadow-sm [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border [&::-webkit-slider-thumb]:border-gray-400 [&::-webkit-slider-thumb]:bg-[#ffffff] [&::-webkit-slider-thumb]:shadow-sm"
+                                                aria-label="Sponsored message background opacity"
+                                            />
                                         </label>
                                     </div>
                                 </div>
@@ -570,7 +627,7 @@ export default function PreferencesModal({
                             onClick={() => {
                                 void import('@tauri-apps/plugin-shell').then(({ open }) => open('https://github.com/Zard-Studios/r2modmac/blob/main/docs/sponsored-messages.md'));
                             }}
-                            className="px-1 text-[13px] font-medium text-blue-400 transition-colors hover:text-blue-300"
+                            className="px-1 text-[13px] font-medium text-fg-accent transition-colors hover:text-fg-accent"
                         >
                             Learn more about sponsored messages ↗
                         </button>
@@ -612,8 +669,8 @@ export default function PreferencesModal({
                                         }
                                     }}
                                     className={`px-4 py-2 rounded-xl text-[13px] font-medium transition-all duration-200 ease-in-out flex-shrink-0 ${hasHiddenGuideWarnings
-                                        ? 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 border border-amber-500/30'
-                                        : 'bg-gray-900 text-gray-600 border border-gray-800 cursor-not-allowed'
+                                        ? 'bg-amber-500/10 hover:bg-amber-500/20 text-fg-warning border border-amber-500/30'
+                                        : 'bg-gray-700/40 text-gray-400 border border-gray-700 cursor-not-allowed opacity-50'
                                         }`}
                                 >
                                     {restoringWarnings ? 'Restoring...' : 'Show again'}
@@ -683,7 +740,7 @@ export default function PreferencesModal({
                                             window.location.reload();
                                         }
                                     }}
-                                    className="px-4 py-2 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-500 hover:text-red-400 text-[13px] font-semibold border border-red-500/30 hover:border-red-500/50 transition-all duration-200 shrink-0 flex items-center justify-center gap-2"
+                                    className="px-4 py-2 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-500 hover:text-fg-danger text-[13px] font-semibold border border-red-500/30 hover:border-red-500/50 transition-all duration-200 shrink-0 flex items-center justify-center gap-2"
                                 >
                                     Clear cache
                                 </button>
@@ -723,6 +780,10 @@ export default function PreferencesModal({
                 setDefaultGame(gameId);
                 setDefaultProfile(profileName ?? null);
             }}
+        />
+        <ThemeEditorModal
+            isOpen={showThemeEditor}
+            onClose={() => setShowThemeEditor(false)}
         />
         </>
     );

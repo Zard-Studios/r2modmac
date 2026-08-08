@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { IElectronAPI } from './types/electron';
+import type { IElectronAPI, ThemeSummary } from './types/electron';
 import type { Profile } from './types/profile';
 import type { Community, Package, CommunityPlatformInfo } from './types/thunderstore';
 
@@ -242,6 +242,16 @@ export const tauriAPI: IElectronAPI = {
     },
     openAppLogsFolder: async () => invoke('open_app_logs_folder'),
     setVerboseLogging: async (enabled: boolean) => invoke('set_verbose_logging', { enabled }),
+
+    listThemes: async () => invoke<ThemeSummary[]>('list_themes'),
+    readThemeSource: async (fileName: string) => invoke<string>('read_theme_source', { fileName }),
+    writeTheme: async (fileName: string, content: string) => invoke('write_theme', { fileName, content }),
+    deleteTheme: async (fileName: string) => invoke('delete_theme', { fileName }),
+    openThemesFolder: async () => invoke('open_themes_folder'),
+    suggestThemeFileName: async (name: string) => invoke<string>('suggest_theme_file_name', { name }),
+    setActiveTheme: async (fileName: string | null) => invoke('set_active_theme', { fileName }),
+    importThemeImage: async (sourcePath: string) => invoke<string>('import_theme_image', { sourcePath }),
+    readThemeImage: async (relativePath: string) => invoke<string | null>('read_theme_image', { relativePath }),
 };
 
 /** Metadata about a config file inside a profile directory. */

@@ -66,11 +66,11 @@ export function UpdateAllModal({ isOpen, updates, isUpdating, onClose, onConfirm
                                 <div className="flex items-center gap-2 text-xs text-gray-400">
                                     <span>v{mod.versionNumber}</span>
                                     <span aria-hidden="true">→</span>
-                                    <span className="text-amber-300">v{version.version_number}</span>
+                                    <span className="text-fg-warning">v{version.version_number}</span>
                                     {!mod.enabled ? <span className="rounded bg-gray-700 px-1.5 py-0.5 text-[10px] uppercase">Disabled</span> : null}
                                 </div>
                             </div>
-                            <svg className="h-4 w-4 flex-shrink-0 text-gray-500 transition-[color,transform] group-hover:translate-x-0.5 group-hover:text-blue-300" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                            <svg className="h-4 w-4 flex-shrink-0 text-gray-500 transition-[color,transform] group-hover:translate-x-0.5 group-hover:text-fg-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="m9 18 6-6-6-6" />
                             </svg>
                         </button>
@@ -90,7 +90,7 @@ export function UpdateAllModal({ isOpen, updates, isUpdating, onClose, onConfirm
                         type="button"
                         onClick={onConfirm}
                         disabled={isUpdating || updates.length === 0}
-                        className="rounded-xl border border-blue-500 bg-blue-600 px-4 py-2.5 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                        className="rounded-xl border border-blue-500 bg-blue-600 px-4 py-2.5 text-sm font-bold text-on-accent disabled:cursor-not-allowed disabled:opacity-50"
                     >
                         {isUpdating ? 'Preparing…' : `Update all (${updates.length})`}
                     </button>

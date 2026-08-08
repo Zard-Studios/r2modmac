@@ -32,7 +32,7 @@ export function UninstallModal({
 
     return (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
-            <div className="bg-[#1e293b] rounded-xl max-w-lg w-full border border-slate-700 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="bg-slate-800 rounded-xl max-w-lg w-full border border-slate-700 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
                 <div className="p-6">
                     <div className="flex items-start gap-4 mb-6">
                         <div className="w-16 h-16 rounded-lg bg-slate-800 flex-shrink-0 overflow-hidden border border-slate-700 shadow-sm relative">
@@ -122,11 +122,11 @@ export function UninstallModal({
                         {allDepsCount > orphanCount && (
                             <button
                                 onClick={onWithAllDeps}
-                                className="w-full p-4 bg-red-500/10 hover:bg-red-500/20 text-red-200 rounded-lg font-medium transition-all text-left border border-red-500/20 hover:border-red-500/30 group"
+                                className="w-full p-4 bg-red-500/10 hover:bg-red-500/20 text-fg-danger rounded-lg font-medium transition-all text-left border border-red-500/20 hover:border-red-500/30 group"
                             >
                                 <div className="flex items-center justify-between mb-1">
-                                    <span className="text-base font-semibold text-red-400 group-hover:text-red-300">Remove + ALL dependencies</span>
-                                    <span className="bg-red-900/40 px-2 py-0.5 rounded text-xs font-bold text-red-400 group-hover:bg-red-900/60 transition-colors border border-red-500/20">{allDepsCount}</span>
+                                    <span className="text-base font-semibold text-fg-danger group-hover:text-fg-danger">Remove + ALL dependencies</span>
+                                    <span className="bg-red-900/40 px-2 py-0.5 rounded text-xs font-bold text-fg-danger group-hover:bg-red-900/60 transition-colors border border-red-500/20">{allDepsCount}</span>
                                 </div>
                                 <div className="flex items-center gap-1.5 mt-0.5">
                                     <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-amber-500">
@@ -134,14 +134,14 @@ export function UninstallModal({
                                         <line x1="12" y1="8" x2="12" y2="12"></line>
                                         <line x1="12" y1="16" x2="12.01" y2="16"></line>
                                     </svg>
-                                    <p className="text-xs text-red-400/80 group-hover:text-red-300">May break other mods</p>
+                                    <p className="text-xs text-fg-danger/80 group-hover:text-fg-danger">May break other mods</p>
                                 </div>
                             </button>
                         )}
                     </div>
                 </div>
 
-                <div className="bg-[#1e293b] p-4 flex justify-end">
+                <div className="bg-slate-800 p-4 flex justify-end">
                     <Button variant="ghost" onClick={onCancel}>
                         Cancel
                     </Button>

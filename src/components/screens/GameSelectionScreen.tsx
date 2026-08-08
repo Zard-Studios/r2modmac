@@ -79,7 +79,7 @@ export function GameSelectionScreen({
         });
 
     return (
-        <div className="relative flex h-full min-h-0 w-full bg-gray-900">
+        <div className="r2-app-backdrop relative flex h-full min-h-0 w-full bg-gray-900">
             <div className="h-full w-full overflow-y-auto p-8 pb-32">
                 <div className="max-w-7xl mx-auto w-full min-h-full flex flex-col">
                 <div className="text-center mb-10">
@@ -108,17 +108,17 @@ export function GameSelectionScreen({
                                     autoFocus
                                 />
 
-                                <div className="absolute right-1 top-1/2 -translate-y-1/2 flex bg-gray-800 rounded-lg p-1 border border-gray-700 overflow-hidden" title="Platform Filter">
+                                <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex bg-gray-900/60 rounded-lg p-1 border border-gray-700/60 backdrop-blur-sm overflow-hidden" title="Platform Filter">
                                     {/* Sliding Background */}
                                     <div
-                                        className={`absolute top-1 left-1 w-9 h-9 bg-gray-600 rounded-md transition-transform duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${showWindowsGame && !showMacGame ? 'translate-x-0' : 'translate-x-9'}`}
+                                        className={`absolute top-1 left-1 w-9 h-9 bg-gray-700/90 rounded-md border border-gray-600/50 shadow-sm transition-transform duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${showWindowsGame && !showMacGame ? 'translate-x-0' : 'translate-x-9'}`}
                                     />
                                     <button
                                         onClick={() => {
                                             setShowWindowsGame(true);
                                             setShowMacGame(false);
                                         }}
-                                        className={`relative z-10 w-9 h-9 rounded-md items-center justify-center flex transition-colors ${showWindowsGame && !showMacGame ? 'text-white' : 'text-gray-400 hover:text-white'}`}
+                                        className={`relative z-10 w-9 h-9 rounded-md items-center justify-center flex transition-colors ${showWindowsGame && !showMacGame ? 'text-white font-bold' : 'text-gray-400 hover:text-white'}`}
                                         title="Windows Games Only"
                                     >
                                         <svg xmlns="http://www.w3.org/2000/svg" className="w-[14px] h-[14px]" viewBox="0 0 24 24" fill="currentColor">
@@ -130,7 +130,7 @@ export function GameSelectionScreen({
                                             setShowMacGame(true);
                                             setShowWindowsGame(false);
                                         }}
-                                        className={`relative z-10 w-9 h-9 rounded-md items-center justify-center flex transition-colors ${!showWindowsGame && showMacGame ? 'text-white' : 'text-gray-400 hover:text-white'}`}
+                                        className={`relative z-10 w-9 h-9 rounded-md items-center justify-center flex transition-colors ${!showWindowsGame && showMacGame ? 'text-white font-bold' : 'text-gray-400 hover:text-white'}`}
                                         title="macOS Games Only"
                                     >
                                         <svg xmlns="http://www.w3.org/2000/svg" className="w-[12px] h-[14px]" viewBox="0 0 384 512" fill="currentColor">
@@ -142,7 +142,7 @@ export function GameSelectionScreen({
 
                             <button
                                 onClick={onOpenPreferences}
-                                className="h-[52px] w-[52px] bg-gray-800 border border-gray-700 rounded-xl hover:bg-gray-700 hover:border-gray-600 transition-all text-gray-400 hover:text-white shadow-lg flex-none flex items-center justify-center"
+                                className="h-[52px] w-[52px] bg-gray-800 border border-gray-700 rounded-xl hover:bg-gray-700 hover:border-gray-600 active:scale-95 transition-all text-gray-400 hover:text-white shadow-lg flex-none flex items-center justify-center"
                                 title="Preferences"
                             >
                                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

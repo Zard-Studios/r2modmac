@@ -10,6 +10,7 @@ import { ProfileList } from './components/profiles/ProfileList';
 import { ProfileSidebar } from './components/profiles/ProfileSidebar';
 import { useProfileStore } from './store/useProfileStore';
 import { useAppStore } from './store/useAppStore';
+import { useThemeStore } from './store/useThemeStore';
 import type { CommunityPlatformInfo, Package, PackageVersion } from './types/thunderstore';
 import { getVersion } from '@tauri-apps/api/app';
 import { invoke } from '@tauri-apps/api/core';
@@ -354,6 +355,8 @@ function App() {
   } = useProfileStore()
   // App State Store
   const { communities, communityImages, communityPlatforms, streamMode, setCommunities, setCommunityImages, setCommunityPlatforms, setStreamMode, setUsername } = useAppStore();
+  const hydrateTheme = useThemeStore((s) => s.hydrate);
+  const loadThemes = useThemeStore((s) => s.loadThemes);
 
   const [selectedCommunity, setSelectedCommunity] = useState<string | null>(null)
   const activeProfile = profiles.find((profile) => profile.id === activeProfileId) ?? null
@@ -783,6 +786,9 @@ function App() {
       setDefaultProfile(s.default_profile ?? null);
       startupDefaultGameRef.current = s.default_game ?? null;
       startupDefaultProfileRef.current = s.default_profile ?? null;
+      // Paint the saved theme as early as the settings arrive, so the window
+      // settles into its colours instead of changing them under the user.
+      void hydrateTheme(s.active_theme ?? null);
 
       // Skipping straight to a game: fetch only that game's essentials
       // (cache-only, no network). Otherwise: full catalog load as before.
@@ -808,6 +814,12 @@ function App() {
       setStorageVolumeEventCount((count) => count + 1);
     });
 
+    // A theme edited in an external editor repaints the app on save, which is
+    // what makes hand-editing the TOML a first-class way to work.
+    const unlistenThemes = listen('themes-changed', () => {
+      void loadThemes();
+    });
+
     const unlistenSteamLaunchOptionsRestart = listen('steam-launch-options-restart', () => {
       steamRestartingRef.current = true;
       setIsSteamRestarting(true);
@@ -820,6 +832,7 @@ function App() {
     return () => {
       unlistenPrefs.then(fn => fn());
       unlistenStorageVolumes.then(fn => fn());
+      unlistenThemes.then(fn => fn());
       unlistenSteamLaunchOptionsRestart.then(fn => fn());
     };
   }, [])
@@ -2275,7 +2288,7 @@ function App() {
     const selectedGameCover = selectedGame ? communityImages[selectedGame.identifier] : undefined;
 
     content = (
-      <div className="flex flex-col h-full bg-gray-900 overflow-hidden">
+      <div className="r2-app-backdrop flex flex-col h-full bg-gray-900 overflow-hidden">
         <div className="p-4 border-b border-gray-800 sticky top-0 bg-gray-900 z-10 relative overflow-hidden">
           <div className="absolute inset-0 bg-gray-900" />
           {selectedGameCover && (
@@ -2525,7 +2538,7 @@ function App() {
     );
 
     const main = (
-      <div className="flex-1 flex flex-col min-w-0 bg-gray-900 h-full">
+      <div className="r2-app-backdrop flex-1 flex flex-col min-w-0 bg-gray-900 h-full">
         <div className="px-[clamp(1rem,3vw,50px)] py-5 border-b border-gray-800 flex flex-wrap items-center justify-between gap-4 flex-shrink-0">
           <div className="flex shrink-0 items-center gap-4">
             {isBrowsingMode && (
@@ -2616,7 +2629,7 @@ function App() {
 
   // WRAPPER
   return (
-    <div className="h-screen w-screen flex flex-col bg-gray-900 overflow-hidden">
+    <div className="r2-app-backdrop h-screen w-screen flex flex-col bg-gray-900 overflow-hidden">
       {/* Scrollable Content Area */}
       <div className="flex-1 overflow-hidden relative">
         {content}
@@ -2629,8 +2642,8 @@ function App() {
           }`}>
             <div className={`mx-auto mb-4 h-12 w-12 rounded-xl border flex items-center justify-center transition-colors duration-200 ${
               isCustomModDragValid
-                ? 'bg-blue-500/15 border-blue-400/30 text-blue-300'
-                : 'bg-red-500/15 border-red-500/30 text-red-400'
+                ? 'bg-blue-500/15 border-blue-400/30 text-fg-accent'
+                : 'bg-red-500/15 border-red-500/30 text-fg-danger'
             }`}>
               {isCustomModDragValid ? (
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
@@ -2643,7 +2656,7 @@ function App() {
                 </svg>
               )}
             </div>
-            <div className={`text-lg font-bold transition-colors duration-200 ${isCustomModDragValid ? 'text-white' : 'text-red-400'}`}>
+            <div className={`text-lg font-bold transition-colors duration-200 ${isCustomModDragValid ? 'text-white' : 'text-fg-danger'}`}>
               {isCustomModDragValid ? 'Drop Custom Mod' : 'Invalid File Type'}
             </div>
             <div className="mt-1 text-sm text-gray-400">
@@ -2664,7 +2677,7 @@ function App() {
           title="Show download progress"
         >
           <div className="flex items-center gap-3">
-            <div className="relative flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-blue-500/15 text-blue-300">
+            <div className="relative flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-blue-500/15 text-fg-accent">
               <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                 <defs>
                   <mask id="background-download-glyph-mask" maskUnits="userSpaceOnUse" x="0" y="0" width="24" height="24">
@@ -2706,7 +2719,7 @@ function App() {
             <div className="min-w-0 flex-1">
               <div className="flex items-center justify-between gap-2">
                 <span className="truncate text-sm font-semibold text-white">Applying in background</span>
-                <span className="shrink-0 text-xs tabular-nums text-blue-300">{Math.round(progressState.progress)}%</span>
+                <span className="shrink-0 text-xs tabular-nums text-fg-accent">{Math.round(progressState.progress)}%</span>
               </div>
               <div className="mt-0.5 truncate text-xs text-gray-400">{progressState.currentTask}</div>
             </div>

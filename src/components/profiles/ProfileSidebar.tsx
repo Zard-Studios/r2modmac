@@ -447,13 +447,16 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                 void onLaunchProfile();
             }}
             disabled={isLaunching || isApplying || isSteamRestarting || launchActionBlocked}
-            className={`w-14 flex items-center justify-center rounded-xl text-white border shadow-sm ${(isLaunching || isApplying || isSteamRestarting)
-                ? 'bg-gray-700 border-gray-600 cursor-wait opacity-70'
+            // The glyph takes the ink of whichever fill is under it. A single
+            // `text-white` washed out on green once the theme's text colour
+            // stopped being white.
+            className={`w-14 flex items-center justify-center rounded-xl border shadow-sm ${(isLaunching || isApplying || isSteamRestarting)
+                ? 'bg-gray-700 border-gray-600 text-on-surface cursor-wait opacity-70'
                 : launchActionBlocked
-                    ? 'bg-gray-700 border-gray-600 cursor-not-allowed opacity-60'
+                    ? 'bg-gray-700 border-gray-600 text-on-surface cursor-not-allowed opacity-60'
                     : isGameRunning
-                        ? 'bg-red-600 border-red-500'
-                        : 'bg-green-600 border-green-500'
+                        ? 'bg-red-600 border-red-500 text-on-danger'
+                        : 'bg-green-600 border-green-500 text-on-success'
                 }`}
             title={launchActionTitle}
         >
@@ -593,7 +596,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
     const syncSummaryIndicators = (
         <span className="flex min-w-0 items-center gap-2" title={pendingChangeSummary} aria-label={pendingChangeSummary}>
             {pendingChangeCounts.update ? (
-                <span className="inline-flex items-center gap-1 text-amber-300">
+                <span className="inline-flex items-center gap-1 text-fg-warning">
                     <svg className="h-4 w-4" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
                         <path d="M8.75 2.75a.75.75 0 0 0-1.5 0v5.69L5.03 6.22a.75.75 0 0 0-1.06 1.06l3.5 3.5a.75.75 0 0 0 1.06 0l3.5-3.5a.75.75 0 0 0-1.06-1.06L8.75 8.44V2.75Z" />
                         <path d="M3.5 9.75a.75.75 0 0 0-1.5 0v1.5A2.75 2.75 0 0 0 4.75 14h6.5A2.75 2.75 0 0 0 14 11.25v-1.5a.75.75 0 0 0-1.5 0v1.5c0 .69-.56 1.25-1.25 1.25h-6.5c-.69 0-1.25-.56-1.25-1.25v-1.5Z" />
@@ -611,7 +614,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                 </span>
             ) : null}
             {pendingChangeCounts.enable ? (
-                <span className="inline-flex items-center gap-1 text-emerald-300">
+                <span className="inline-flex items-center gap-1 text-fg-success">
                     <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                     </svg>
@@ -619,7 +622,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                 </span>
             ) : null}
             {pendingChangeCounts.disable ? (
-                <span className="inline-flex items-center gap-1 text-yellow-300">
+                <span className="inline-flex items-center gap-1 text-fg-warning">
                     <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
                     </svg>
@@ -627,7 +630,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                 </span>
             ) : null}
             {pendingChangeCounts.remove ? (
-                <span className="inline-flex items-center gap-1 text-red-300">
+                <span className="inline-flex items-center gap-1 text-fg-danger">
                     <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 0 0-1 1v3M4 7h16" />
                     </svg>
@@ -664,7 +667,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                                 else await onRevertPending(confirmation.ids);
                                 setSyncSelectedIds([]);
                                 setSyncSelectionAnchorId(null);
-                            }} className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white">{syncConfirmation.kind === 'sync' ? 'Sync' : 'Revert'}</button>
+                            }} className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-on-accent">{syncConfirmation.kind === 'sync' ? 'Sync' : 'Revert'}</button>
                         </div>
                     </div>
                 </div>
@@ -688,7 +691,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                             className={`w-12 h-12 rounded-xl shadow-lg object-cover bg-gray-800 ${activeProfile?.is_vanilla ? 'grayscale' : ''}`}
                         />
                     ) : (
-                        <div style={{ backgroundImage: getProfileAvatarGradient(activeProfile?.name || '', activeProfile?.id) }} className={`w-12 h-12 rounded-xl shadow-lg flex items-center justify-center text-xl font-bold text-white ${activeProfile?.is_vanilla ? 'grayscale' : ''}`}>
+                        <div style={{ backgroundImage: getProfileAvatarGradient(activeProfile?.name || '', activeProfile?.id) }} className={`w-12 h-12 rounded-xl shadow-lg flex items-center justify-center text-xl font-bold text-[#ffffff] ${activeProfile?.is_vanilla ? 'grayscale' : ''}`}>
                             {getFirstLetter(activeProfile?.name)}
                         </div>
                     )}
@@ -799,24 +802,24 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
 
             {runtimeHealth && !runtimeQueuedForSync && ['missing', 'incomplete', 'unconfigured'].includes(runtimeHealth.status) && (
                 <div className="profile-sidebar-motion-item [--sidebar-motion-order:2] mx-4 mb-2 flex items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2.5">
-                    <svg className="h-4 w-4 flex-shrink-0 text-amber-400" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                    <svg className="h-4 w-4 flex-shrink-0 text-fg-warning" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
                         <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l6.518 11.597c.75 1.334-.213 2.98-1.742 2.98H3.48c-1.53 0-2.493-1.646-1.743-2.98L8.257 3.1zM11 14a1 1 0 10-2 0 1 1 0 002 0zm-1-6a1 1 0 00-1 1v3a1 1 0 102 0V9a1 1 0 00-1-1z" clipRule="evenodd" />
                     </svg>
                     <div className="min-w-0 flex-1">
-                        <div className="truncate text-xs font-medium text-amber-200">
+                        <div className="truncate text-xs font-medium text-fg-warning">
                             {runtimeHealth.status === 'unconfigured'
                                 ? 'Game path not configured'
                                 : `${runtimeHealth.runtime === 'bepinex' ? 'BepInEx' : runtimeHealth.runtime === 'owml' ? 'OWML' : runtimeHealth.runtime === 'returnofmodding' ? 'ReturnOfModding' : 'Lovely'} runtime ${runtimeHealth.status}`}
                         </div>
                         {runtimeHealth.missingComponents.length > 0 ? (
-                            <div className="truncate text-[10px] text-amber-300/70">Missing: {runtimeHealth.missingComponents.join(', ')}</div>
+                            <div className="truncate text-[10px] text-fg-warning/70">Missing: {runtimeHealth.missingComponents.join(', ')}</div>
                         ) : null}
                     </div>
                     <button
                         type="button"
                         onClick={runtimeHealth.status === 'unconfigured' ? onOpenSettings : () => { void onRepairRuntime(); }}
                         disabled={isRepairingRuntime || (runtimeHealth.status !== 'unconfigured' && !runtimeHealth.repairable)}
-                        className="flex-shrink-0 rounded-lg border border-amber-500/35 bg-amber-500/15 px-2.5 py-1.5 text-xs font-medium text-amber-200 disabled:opacity-50"
+                        className="flex-shrink-0 rounded-lg border border-amber-500/35 bg-amber-500/15 px-2.5 py-1.5 text-xs font-medium text-fg-warning disabled:opacity-50"
                     >
                         {runtimeHealth.status === 'unconfigured' ? 'Settings' : isRepairingRuntime ? 'Repairing…' : 'Repair'}
                     </button>
@@ -840,7 +843,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                             <button key={tab} type="button" role="tab" aria-controls="profile-mod-view-panel"
                                 onClick={() => changeModView(tab)} aria-selected={modView === tab}
                                 className={`relative z-10 min-w-0 flex-1 whitespace-nowrap rounded-md px-1 py-1.5 transition-colors duration-200 ${modView === tab
-                                    ? tab === 'updates' ? 'text-amber-300' : tab === 'sync' ? 'text-sky-300' : 'text-white'
+                                    ? tab === 'updates' ? 'text-fg-warning' : tab === 'sync' ? 'text-sky-300' : 'text-white'
                                     : 'text-gray-400 hover:text-gray-200'}`}>
                                 {tab === 'all' ? `All ${activeProfile?.mods.length ?? 0}` : tab === 'updates' ? `Updates ${profileUpdates.length}` : `Sync ${pendingSyncCount}`}
                             </button>
@@ -860,15 +863,15 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                     <div className="space-y-2 px-2 pb-2">
                         {activeProfile?.apply_interrupted && !isApplying ? (
                             <button type="button" onClick={() => onInstallToGame()}
-                                className="flex w-full items-start gap-2.5 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-left text-xs text-amber-200">
-                                <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center text-amber-300" aria-hidden="true">
+                                className="flex w-full items-start gap-2.5 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-left text-xs text-fg-warning">
+                                <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center text-fg-warning" aria-hidden="true">
                                     <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M12 9v2m0 4h.01m-7.938 4h15.876c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L2.33 16c-.77 1.333.192 3 1.732 3z" />
                                     </svg>
                                 </span>
                                 <span className="min-w-0 flex-1">
                                     <span className="block font-bold">Apply was interrupted</span>
-                                    <span className="block text-[10px] text-amber-300/70">Resume Apply, or revert pending changes below.</span>
+                                    <span className="block text-[10px] text-fg-warning/70">Resume Apply, or revert pending changes below.</span>
                                 </span>
                             </button>
                         ) : null}
@@ -889,7 +892,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                             <button type="button" disabled={isApplying || !!activeProfile?.apply_interrupted} onClick={() => {
                                 const ids = syncSelectedIds.length ? syncSelectedIds : pendingEntries.map(entry => entry.id);
                                 setSyncConfirmation({ kind: 'sync', ids });
-                            }} className="rounded-lg bg-blue-600 px-2.5 py-1.5 text-[11px] font-bold text-white disabled:opacity-40">Sync{syncSelectedIds.length || pendingSyncCount < 2 ? '' : ' all'}</button>
+                            }} className="rounded-lg bg-blue-600 px-2.5 py-1.5 text-[11px] font-bold text-on-accent disabled:opacity-40">Sync{syncSelectedIds.length || pendingSyncCount < 2 ? '' : ' all'}</button>
                         </div>
                         {pendingEntries.map(entry => {
                             const baseline = entry.mod.sync_baseline;
@@ -927,17 +930,17 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                                                 <HoverMarquee
                                                     text={statusLabel}
                                                     lazy
-                                                    className={`text-xs ${syncStatus === 'failed' ? 'text-red-300' : syncStatus === 'ready' ? 'text-emerald-300' : 'text-sky-300'}`}
+                                                    className={`text-xs ${syncStatus === 'failed' ? 'text-fg-danger' : syncStatus === 'ready' ? 'text-fg-success' : 'text-sky-300'}`}
                                                 />
                                             ) : null}
-                                            {!entry.revertable ? <span className="block truncate text-[10px] text-amber-400">Previous state could not be verified</span> : null}
+                                            {!entry.revertable ? <span className="block truncate text-[10px] text-fg-warning">Previous state could not be verified</span> : null}
                                         </div>
                                     </div>
                                     <div className="flex shrink-0 items-center gap-1.5">
                                         <button type="button"
                                             onClick={event => { event.stopPropagation(); setSyncConfirmation({ kind: 'revert', ids: [entry.id] }); }}
                                             disabled={isApplying || !entry.revertable}
-                                            className="flex h-8 w-8 items-center justify-center rounded-lg border border-gray-700 text-gray-400 transition-colors hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-300 disabled:opacity-30"
+                                            className="flex h-8 w-8 items-center justify-center rounded-lg border border-gray-700 text-gray-400 transition-colors hover:border-red-500/40 hover:bg-red-500/10 hover:text-fg-danger disabled:opacity-30"
                                             title="Revert this change" aria-label={`Revert ${entry.mod.displayName || entry.mod.fullName}`}>
                                             <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -948,7 +951,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                                             disabled={isApplying || !!activeProfile?.apply_interrupted || syncStatus === 'ready'}
                                             title={syncStatus === 'syncing' ? 'Syncing this change' : syncStatus === 'failed' ? 'Retry this change' : syncStatus === 'ready' ? 'Ready for finalization' : 'Sync this change'}
                                             aria-label={syncStatus === 'syncing' ? 'Syncing this change' : syncStatus === 'failed' ? 'Retry this change' : syncStatus === 'ready' ? 'Ready for finalization' : 'Sync this change'}
-                                            className={`flex h-8 w-8 items-center justify-center rounded-lg transition-colors disabled:cursor-wait ${syncStatus === 'failed' ? 'bg-red-500/15 text-red-200 hover:bg-red-500/25' : syncStatus === 'ready' ? 'bg-emerald-500/10 text-emerald-300' : 'bg-blue-600 text-white hover:bg-blue-500'} disabled:opacity-60`}>
+                                            className={`flex h-8 w-8 items-center justify-center rounded-lg transition-colors disabled:cursor-wait ${syncStatus === 'failed' ? 'bg-red-500/15 text-fg-danger hover:bg-red-500/25' : syncStatus === 'ready' ? 'bg-emerald-500/10 text-fg-success' : 'bg-blue-600 text-white hover:bg-blue-500'} disabled:opacity-60`}>
                                             <span className={syncStatus === 'syncing' ? 'animate-spin' : ''}>
                                                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v6h6M20 20v-6h-6M5.6 15a7 7 0 0011.9 2M18.4 9A7 7 0 006.5 7" />
@@ -965,9 +968,9 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                     <button
                         type="button"
                         onClick={() => onUpdateAll(profileUpdates)}
-                        className="profile-update-action-enter group/update-all mx-2 mb-1 flex w-[calc(100%-16px)] items-center gap-2.5 rounded-lg border border-amber-500/35 bg-amber-500/10 px-2.5 py-2 text-left text-amber-200 transition-[background-color,border-color,transform] duration-200 hover:border-amber-400/60 hover:bg-amber-500/15 active:scale-[0.985]"
+                        className="profile-update-action-enter group/update-all mx-2 mb-1 flex w-[calc(100%-16px)] items-center gap-2.5 rounded-lg border border-amber-500/35 bg-amber-500/10 px-2.5 py-2 text-left text-fg-warning transition-[background-color,border-color,transform] duration-200 hover:border-amber-400/60 hover:bg-amber-500/15 active:scale-[0.985]"
                     >
-                        <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md bg-amber-400/10 text-amber-300">
+                        <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md bg-amber-400/10 text-fg-warning">
                             <svg className="h-4 w-4" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
                                 <path d="M8.75 2.75a.75.75 0 0 0-1.5 0v5.69L5.03 6.22a.75.75 0 0 0-1.06 1.06l3.5 3.5a.75.75 0 0 0 1.06 0l3.5-3.5a.75.75 0 0 0-1.06-1.06L8.75 8.44V2.75Z" />
                                 <path d="M3.5 9.75a.75.75 0 0 0-1.5 0v1.5A2.75 2.75 0 0 0 4.75 14h6.5A2.75 2.75 0 0 0 14 11.25v-1.5a.75.75 0 0 0-1.5 0v1.5c0 .69-.56 1.25-1.25 1.25h-6.5c-.69 0-1.25-.56-1.25-1.25v-1.5Z" />
@@ -976,7 +979,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                         <span className="min-w-0 flex-1">
                             <span className="block text-xs font-bold">Update all {profileUpdates.length} mods</span>
                         </span>
-                        <svg className="h-4 w-4 flex-shrink-0 text-amber-300/70 transition-transform duration-200 group-hover/update-all:translate-x-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        <svg className="h-4 w-4 flex-shrink-0 text-fg-warning/70 transition-transform duration-200 group-hover/update-all:translate-x-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="m9 18 6-6-6-6" />
                         </svg>
                     </button>
@@ -1024,7 +1027,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                                 )}
                                 {showDeprecatedWarnings && pkg?.is_deprecated ? (
                                     <span
-                                        className="absolute right-0 top-0 z-20 flex h-5 w-5 items-center justify-center rounded-bl-lg bg-red-950/90 text-red-300 shadow-[-1px_1px_5px_rgba(0,0,0,0.35)] backdrop-blur-sm"
+                                        className="absolute right-0 top-0 z-20 flex h-5 w-5 items-center justify-center rounded-bl-lg bg-red-950/90 text-fg-danger shadow-[-1px_1px_5px_rgba(0,0,0,0.35)] backdrop-blur-sm"
                                         title="Deprecated mod"
                                         aria-label="Deprecated mod"
                                     >
@@ -1043,7 +1046,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                                         className={`text-sm font-medium transition-colors ${mod.enabled ? 'text-gray-200 group-hover:text-white' : 'text-gray-500 line-through'}`}
                                     />
                                     {mod.source === 'local' && (
-                                        <span className="text-[10px] px-1.5 py-0.5 rounded-full border border-blue-500/25 bg-blue-500/10 text-blue-300">
+                                        <span className="text-[10px] px-1.5 py-0.5 rounded-full border border-blue-500/25 bg-blue-500/10 text-fg-accent">
                                             Custom
                                         </span>
                                     )}
@@ -1052,7 +1055,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                                     <span className="truncate">
                                         v{mod.versionNumber}
                                         {renderedModView === 'updates' && update ? (
-                                            <span className="text-amber-300"> → v{update.version.version_number}</span>
+                                            <span className="text-fg-warning"> → v{update.version.version_number}</span>
                                         ) : null}
                                     </span>
                                     {!legacyInstallMode && mod.pending_sync && (
@@ -1069,7 +1072,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                                     )}
                                     {hasUpdate && (
                                         <span
-                                            className="inline-flex flex-shrink-0 items-center text-amber-400"
+                                            className="inline-flex flex-shrink-0 items-center text-fg-warning"
                                             title={`Update available: v${latestVersion}. Open details to update.`}
                                         >
                                             <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
@@ -1102,7 +1105,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                                         void handleToggleSingleMod(mod);
                                     }}
                                     className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md transition-colors ${mod.enabled
-                                        ? 'text-gray-400 hover:text-yellow-400 hover:bg-yellow-400/10'
+                                        ? 'text-gray-400 hover:text-fg-warning hover:bg-yellow-400/10'
                                         : 'text-yellow-500 bg-yellow-500/10 hover:bg-yellow-500/20'
                                         }`}
                                     title={mod.enabled ? 'Disable Mod' : 'Enable Mod'}
@@ -1116,7 +1119,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                                         e.stopPropagation();
                                         onOpenModFolder(activeProfile!.id, mod.fullName);
                                     }}
-                                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-blue-400/10 hover:text-blue-400"
+                                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-blue-400/10 hover:text-fg-accent"
                                     title="Locate in Finder"
                                 >
                                     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1128,7 +1131,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                                         e.stopPropagation();
                                         await onUninstallMod(mod);
                                     }}
-                                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-red-400/10 hover:text-red-400"
+                                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-red-400/10 hover:text-fg-danger"
                                     title="Uninstall"
                                 >
                                     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1201,10 +1204,12 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                         <button
                             onClick={() => onInstallToGame()}
                             disabled={isApplying}
-                            className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-white border shadow-sm ${
+                            // Ink follows the fill, and the glyph inherits it via
+                            // currentColor — so icon and label always agree.
+                            className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl border shadow-sm ${
                                 isApplying
-                                    ? 'bg-gray-700 border-gray-600 cursor-wait opacity-70'
-                                    : 'bg-blue-600 border-blue-500'
+                                    ? 'bg-gray-700 border-gray-600 text-on-surface cursor-wait opacity-70'
+                                    : 'bg-blue-600 border-blue-500 text-on-accent'
                             }`}
                             title={activeProfile.apply_interrupted
                                 ? 'Resume the interrupted profile apply'
@@ -1237,7 +1242,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                     <div className="grid grid-cols-2 gap-2">
                         <button
                             onClick={() => { void handleBulkDisableSelected(); }}
-                            className="flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-yellow-500/10 hover:bg-yellow-500/20 text-yellow-300 transition-colors text-xs font-medium border border-yellow-500/30"
+                            className="flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-yellow-500/10 hover:bg-yellow-500/20 text-fg-warning transition-colors text-xs font-medium border border-yellow-500/30"
                             title={`${bulkActionLabel} ${selectedMods.length} selected mod(s)`}
                         >
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1247,7 +1252,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                         </button>
                         <button
                             onClick={() => { void handleBulkDeleteSelected(); }}
-                            className="flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-300 transition-colors text-xs font-medium border border-red-500/30"
+                            className="flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-fg-danger transition-colors text-xs font-medium border border-red-500/30"
                             title={`Delete ${selectedMods.length} selected mod(s)`}
                         >
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1299,7 +1304,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                                         className="w-24 h-24 rounded-full object-cover border-4 border-gray-700 group-hover:border-blue-500 transition-colors"
                                     />
                                 ) : (
-                                    <div style={{ backgroundImage: getProfileAvatarGradient(activeProfile.name, activeProfile.id) }} className="w-24 h-24 rounded-full flex items-center justify-center text-4xl font-bold text-white border-4 border-gray-700 group-hover:border-blue-500 transition-colors">
+                                    <div style={{ backgroundImage: getProfileAvatarGradient(activeProfile.name, activeProfile.id) }} className="w-24 h-24 rounded-full flex items-center justify-center text-4xl font-bold text-[#ffffff] border-4 border-gray-700 group-hover:border-blue-500 transition-colors">
                                         {getFirstLetter(activeProfile.name)}
                                     </div>
                                 )}
@@ -1314,7 +1319,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                                 <button
                                     type="button"
                                     onClick={handleRemoveImage}
-                                    className="text-xs text-red-400 hover:text-red-300 hover:underline"
+                                    className="text-xs text-fg-danger hover:text-fg-danger hover:underline"
                                 >
                                     Remove Custom Image
                                 </button>

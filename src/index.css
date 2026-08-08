@@ -2,6 +2,357 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── Theme tokens ─────────────────────────────────────────────────────────────
+   Every `gray-*`, `blue-*` and `white` Tailwind utility in the app resolves
+   through these variables (see tailwind.config.js). The values below are
+   Tailwind's own defaults, so with no theme applied the UI is unchanged.
+   A custom theme overrides them at runtime on <html>; nothing else moves.
+   Channels are space-separated RGB so `<alpha-value>` modifiers keep working. */
+:root {
+  /* gray */
+  --r2-gray-50: 249 250 251;
+  --r2-gray-100: 243 244 246;
+  --r2-gray-200: 229 231 235;
+  --r2-gray-300: 209 213 219;
+  --r2-gray-400: 156 163 175;
+  --r2-gray-500: 107 114 128;
+  --r2-gray-600: 75 85 99;
+  --r2-gray-700: 55 65 81;
+  --r2-gray-800: 31 41 55;
+  --r2-gray-900: 17 24 39;
+  --r2-gray-950: 3 7 18;
+  /* slate */
+  --r2-slate-50: 248 250 252;
+  --r2-slate-100: 241 245 249;
+  --r2-slate-200: 226 232 240;
+  --r2-slate-300: 203 213 225;
+  --r2-slate-400: 148 163 184;
+  --r2-slate-500: 100 116 139;
+  --r2-slate-600: 71 85 105;
+  --r2-slate-700: 51 65 85;
+  --r2-slate-800: 30 41 59;
+  --r2-slate-900: 15 23 42;
+  --r2-slate-950: 2 6 23;
+  /* blue */
+  --r2-blue-50: 239 246 255;
+  --r2-blue-100: 219 234 254;
+  --r2-blue-200: 191 219 254;
+  --r2-blue-300: 147 197 253;
+  --r2-blue-400: 96 165 250;
+  --r2-blue-500: 59 130 246;
+  --r2-blue-600: 37 99 235;
+  --r2-blue-700: 29 78 216;
+  --r2-blue-800: 30 64 175;
+  --r2-blue-900: 30 58 138;
+  --r2-blue-950: 23 37 84;
+  /* red */
+  --r2-red-50: 254 242 242;
+  --r2-red-100: 254 226 226;
+  --r2-red-200: 254 202 202;
+  --r2-red-300: 252 165 165;
+  --r2-red-400: 248 113 113;
+  --r2-red-500: 239 68 68;
+  --r2-red-600: 220 38 38;
+  --r2-red-700: 185 28 28;
+  --r2-red-800: 153 27 27;
+  --r2-red-900: 127 29 29;
+  --r2-red-950: 69 10 10;
+  /* amber */
+  --r2-amber-50: 255 251 235;
+  --r2-amber-100: 254 243 199;
+  --r2-amber-200: 253 230 138;
+  --r2-amber-300: 252 211 77;
+  --r2-amber-400: 251 191 36;
+  --r2-amber-500: 245 158 11;
+  --r2-amber-600: 217 119 6;
+  --r2-amber-700: 180 83 9;
+  --r2-amber-800: 146 64 14;
+  --r2-amber-900: 120 53 15;
+  --r2-amber-950: 69 26 3;
+  /* yellow */
+  --r2-yellow-50: 254 252 232;
+  --r2-yellow-100: 254 249 195;
+  --r2-yellow-200: 254 240 138;
+  --r2-yellow-300: 253 224 71;
+  --r2-yellow-400: 250 204 21;
+  --r2-yellow-500: 234 179 8;
+  --r2-yellow-600: 202 138 4;
+  --r2-yellow-700: 161 98 7;
+  --r2-yellow-800: 133 77 14;
+  --r2-yellow-900: 113 63 18;
+  --r2-yellow-950: 66 32 6;
+  /* green */
+  --r2-green-50: 240 253 244;
+  --r2-green-100: 220 252 231;
+  --r2-green-200: 187 247 208;
+  --r2-green-300: 134 239 172;
+  --r2-green-400: 74 222 128;
+  --r2-green-500: 34 197 94;
+  --r2-green-600: 22 163 74;
+  --r2-green-700: 21 128 61;
+  --r2-green-800: 22 101 52;
+  --r2-green-900: 20 83 45;
+  --r2-green-950: 5 46 22;
+  /* emerald */
+  --r2-emerald-50: 236 253 245;
+  --r2-emerald-100: 209 250 229;
+  --r2-emerald-200: 167 243 208;
+  --r2-emerald-300: 110 231 183;
+  --r2-emerald-400: 52 211 153;
+  --r2-emerald-500: 16 185 129;
+  --r2-emerald-600: 5 150 105;
+  --r2-emerald-700: 4 120 87;
+  --r2-emerald-800: 6 95 70;
+  --r2-emerald-900: 6 78 59;
+  --r2-emerald-950: 2 44 34;
+  /* purple */
+  --r2-purple-50: 250 245 255;
+  --r2-purple-100: 243 232 255;
+  --r2-purple-200: 233 213 255;
+  --r2-purple-300: 216 180 254;
+  --r2-purple-400: 192 132 252;
+  --r2-purple-500: 168 85 247;
+  --r2-purple-600: 147 51 234;
+  --r2-purple-700: 126 34 206;
+  --r2-purple-800: 107 33 168;
+  --r2-purple-900: 88 28 135;
+  --r2-purple-950: 59 7 100;
+  /* cyan */
+  --r2-cyan-50: 236 254 255;
+  --r2-cyan-100: 207 250 254;
+  --r2-cyan-200: 165 243 252;
+  --r2-cyan-300: 103 232 249;
+  --r2-cyan-400: 34 211 238;
+  --r2-cyan-500: 6 182 212;
+  --r2-cyan-600: 8 145 178;
+  --r2-cyan-700: 14 116 144;
+  --r2-cyan-800: 21 94 117;
+  --r2-cyan-900: 22 78 99;
+  --r2-cyan-950: 8 51 68;
+  /* violet */
+  --r2-violet-50: 245 243 255;
+  --r2-violet-100: 237 233 254;
+  --r2-violet-200: 221 214 254;
+  --r2-violet-300: 196 181 253;
+  --r2-violet-400: 167 139 250;
+  --r2-violet-500: 139 92 246;
+  --r2-violet-600: 124 58 237;
+  --r2-violet-700: 109 40 217;
+  --r2-violet-800: 91 33 182;
+  --r2-violet-900: 76 29 149;
+  --r2-violet-950: 46 16 101;
+  /* sky */
+  --r2-sky-50: 240 249 255;
+  --r2-sky-100: 224 242 254;
+  --r2-sky-200: 186 230 253;
+  --r2-sky-300: 125 211 252;
+  --r2-sky-400: 56 189 248;
+  --r2-sky-500: 14 165 233;
+  --r2-sky-600: 2 132 199;
+  --r2-sky-700: 3 105 161;
+  --r2-sky-800: 7 89 133;
+  --r2-sky-900: 12 74 110;
+  --r2-sky-950: 8 47 73;
+  /* indigo */
+  --r2-indigo-50: 238 242 255;
+  --r2-indigo-100: 224 231 255;
+  --r2-indigo-200: 199 210 254;
+  --r2-indigo-300: 165 180 252;
+  --r2-indigo-400: 129 140 248;
+  --r2-indigo-500: 99 102 241;
+  --r2-indigo-600: 79 70 229;
+  --r2-indigo-700: 67 56 202;
+  --r2-indigo-800: 55 48 163;
+  --r2-indigo-900: 49 46 129;
+  --r2-indigo-950: 30 27 75;
+  /* fuchsia */
+  --r2-fuchsia-50: 253 244 255;
+  --r2-fuchsia-100: 250 232 255;
+  --r2-fuchsia-200: 245 208 254;
+  --r2-fuchsia-300: 240 171 252;
+  --r2-fuchsia-400: 232 121 249;
+  --r2-fuchsia-500: 217 70 239;
+  --r2-fuchsia-600: 192 38 211;
+  --r2-fuchsia-700: 162 28 175;
+  --r2-fuchsia-800: 134 25 143;
+  --r2-fuchsia-900: 112 26 117;
+  --r2-fuchsia-950: 74 4 78;
+  /* rose */
+  --r2-rose-50: 255 241 242;
+  --r2-rose-100: 255 228 230;
+  --r2-rose-200: 254 205 211;
+  --r2-rose-300: 253 164 175;
+  --r2-rose-400: 251 113 133;
+  --r2-rose-500: 244 63 94;
+  --r2-rose-600: 225 29 72;
+  --r2-rose-700: 190 18 60;
+  --r2-rose-800: 159 18 57;
+  --r2-rose-900: 136 19 55;
+  --r2-rose-950: 76 5 25;
+  /* orange */
+  --r2-orange-50: 255 247 237;
+  --r2-orange-100: 255 237 213;
+  --r2-orange-200: 254 215 170;
+  --r2-orange-300: 253 186 116;
+  --r2-orange-400: 251 146 60;
+  --r2-orange-500: 249 115 22;
+  --r2-orange-600: 234 88 12;
+  --r2-orange-700: 194 65 12;
+  --r2-orange-800: 154 52 18;
+  --r2-orange-900: 124 45 18;
+  --r2-orange-950: 67 20 7;
+  /* teal */
+  --r2-teal-50: 240 253 250;
+  --r2-teal-100: 204 251 241;
+  --r2-teal-200: 153 246 228;
+  --r2-teal-300: 94 234 212;
+  --r2-teal-400: 45 212 191;
+  --r2-teal-500: 20 184 166;
+  --r2-teal-600: 13 148 136;
+  --r2-teal-700: 15 118 110;
+  --r2-teal-800: 17 94 89;
+  --r2-teal-900: 19 78 74;
+  --r2-teal-950: 4 47 46;
+  /* pink */
+  --r2-pink-50: 253 242 248;
+  --r2-pink-100: 252 231 243;
+  --r2-pink-200: 251 207 232;
+  --r2-pink-300: 249 168 212;
+  --r2-pink-400: 244 114 182;
+  --r2-pink-500: 236 72 153;
+  --r2-pink-600: 219 39 119;
+  --r2-pink-700: 190 24 93;
+  --r2-pink-800: 157 23 77;
+  --r2-pink-900: 131 24 67;
+  --r2-pink-950: 80 7 36;
+  /* lime */
+  --r2-lime-50: 247 254 231;
+  --r2-lime-100: 236 252 203;
+  --r2-lime-200: 217 249 157;
+  --r2-lime-300: 190 242 100;
+  --r2-lime-400: 163 230 53;
+  --r2-lime-500: 132 204 22;
+  --r2-lime-600: 101 163 13;
+  --r2-lime-700: 77 124 15;
+  --r2-lime-800: 63 98 18;
+  --r2-lime-900: 54 83 20;
+  --r2-lime-950: 26 46 5;
+  /* text */
+  --r2-white: 255 255 255;
+  /* Label on an accent fill — white by default, matching today's buttons. */
+  --r2-on-accent: 255 255 255;
+  /* Chrome over cover art. A near-black scrim with white icons by default,
+     because artwork is arbitrary — but a theme can set both. */
+  --r2-scrim: 9 9 11;
+  --r2-on-media: 255 255 255;
+  /* Labels on the other filled controls. White by default, matching today's
+     buttons; a theme resolves each against the fill it sits on. */
+  --r2-on-surface: 255 255 255;
+  --r2-on-danger: 255 255 255;
+  --r2-on-warning: 255 255 255;
+  --r2-on-success: 255 255 255;
+  /* Hover colors */
+  --r2-accent-hover: 37 99 235;
+  --r2-surface-hover: 55 65 81;
+  /* Status text on a panel. Defaults are the shades the dark UI already used
+     (blue-400, red-400, amber-400, green-400), so nothing moves until a theme
+     is applied. */
+  --r2-fg-accent: 96 165 250;
+  --r2-fg-danger: 248 113 113;
+  --r2-fg-warning: 251 191 36;
+  --r2-fg-success: 74 222 128;
+}
+
+/* ── Background picture ───────────────────────────────────────────────────────
+   Only active while a theme supplies one. The picture sits behind everything on
+   a fixed layer; the app's own background is painted back over it at
+   --r2-background-veil, so the user's opacity slider reads as "how much
+   picture" while panels and text keep an opaque surface to sit on. */
+:root[data-r2-background-image] body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  background-image: var(--r2-background-image);
+  background-size: var(--r2-background-size, cover);
+  background-position: var(--r2-background-position, 50% 50%);
+  background-repeat: var(--r2-background-repeat, no-repeat);
+  filter: blur(var(--r2-background-blur, 0px));
+  /* GPU acceleration and overscan so blur cannot reveal the edges of the picture. */
+  will-change: transform, filter;
+  transform: scale(1.06) translateZ(0);
+  pointer-events: none;
+}
+
+:root[data-r2-background-image] body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background-color: rgb(var(--r2-gray-900) / var(--r2-background-veil, 0.65));
+  pointer-events: none;
+}
+
+/* Let the picture through the app's own backdrop.
+   Only the three full-height shells opt in, via .r2-app-backdrop. An earlier
+   version made every .bg-gray-900 transparent, which also hollowed out modals,
+   their headers and the text inputs — the picture showed straight through the
+   dialogs. Panels stay opaque so text keeps something solid to sit on. */
+:root[data-r2-background-image] body {
+  background-color: transparent;
+}
+
+:root[data-r2-background-image] .r2-app-backdrop {
+  background-color: transparent;
+}
+
+/* ── Theme change cross-fade ──────────────────────────────────────────────────
+   Swapping a theme rewrites ~100 custom properties at once, which lands as a
+   hard cut. The fix is a View Transition: the browser snapshots the window
+   before and after and cross-fades the two in the compositor — one GPU
+   operation, independent of how many elements changed.
+
+   The obvious alternative, a transition on every element, was tried and is
+   what made the swap crawl: it asks the engine to animate thousands of nodes
+   at once, which on a full window drops enough frames that the animation is
+   never seen at all.
+
+   Live edits in the theme editor deliberately do not animate: dragging a
+   colour picker through a 260ms fade would smear rather than track the cursor. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 260ms;
+  animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Freeze every element's own transition for the instant the palette changes.
+   Components carry their own `transition-colors` for hover feedback, and those
+   also fire when the custom properties move — each with its own duration and
+   delay, so the theme arrived in a ripple, element by element, and the work of
+   animating thousands of nodes at once is what made it lag.
+
+   Switching them off costs nothing (it removes animation work rather than
+   adding it), makes the palette land in a single frame, and leaves the
+   cross-fade above as the one thing actually animating. */
+:root.r2-theme-swapping *,
+:root.r2-theme-swapping *::before,
+:root.r2-theme-swapping *::after {
+  transition: none !important;
+  animation-duration: 0s !important;
+}
+
+/* The snapshots are the whole window; nothing should intercept clicks. */
+::view-transition-group(root) {
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation: none;
+  }
+}
+
 :root {
   font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
   line-height: 1.5;
@@ -21,7 +372,7 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
-  background-color: #111827;
+  background-color: rgb(var(--r2-gray-900));
   /* gray-900 */
   user-select: none;
   -webkit-user-select: none;

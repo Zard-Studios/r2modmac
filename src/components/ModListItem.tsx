@@ -55,7 +55,7 @@ export const ModListItem = memo(function ModListItem({ mod, likesCount, onInstal
             {/* Info */}
             <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 mb-0.5">
-                    <h3 className="font-bold text-white text-base truncate group-hover:text-blue-400 transition-colors">
+                    <h3 className="font-bold text-white text-base truncate group-hover:text-fg-accent transition-colors">
                         {mod.name}
                     </h3>
                     <span className="bg-gray-700/50 px-1.5 py-0.5 rounded text-xs text-gray-400">v{mod.version_number}</span>
@@ -67,7 +67,7 @@ export const ModListItem = memo(function ModListItem({ mod, likesCount, onInstal
                                     open(mod.website_url!);
                                 });
                             }}
-                            className="text-gray-500 hover:text-blue-400 transition-colors"
+                            className="text-gray-500 hover:text-fg-accent transition-colors"
                             title="Open Website"
                         >
                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -133,7 +133,7 @@ export const ModListItem = memo(function ModListItem({ mod, likesCount, onInstal
                             ? 'bg-green-500/10 text-green-500 border border-green-500/20 cursor-default'
                             : installStatus === 'update_available'
                                 ? 'bg-yellow-600 hover:bg-yellow-500 text-white shadow-lg shadow-yellow-900/20 active:scale-95'
-                                : 'bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-900/20 active:scale-95'
+                                : 'bg-blue-600 hover:bg-accent-hover text-on-accent shadow-lg shadow-blue-900/20 active:scale-95'
                             }`}
                     >
                         {installStatus === 'installed' ? installedLabel : installStatus === 'update_available' ? 'Update' : installLabel}

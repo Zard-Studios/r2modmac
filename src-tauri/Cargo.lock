@@ -3252,6 +3252,7 @@ dependencies = [
  "tauri-plugin-log",
  "tauri-plugin-shell",
  "tokio",
+ "toml 0.9.8",
  "url",
  "urlencoding",
  "uuid",

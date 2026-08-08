@@ -277,7 +277,7 @@ export function DefaultGamePickerModal({
                             <div className="flex items-center gap-3">
                                 <h2 className="text-xl font-bold text-white tracking-tight">Choose Default Game</h2>
                                 {currentValueName ? (
-                                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-500/10 text-fg-accent border border-blue-500/20">
                                         Current: {currentValueName}
                                     </span>
                                 ) : (
@@ -357,10 +357,10 @@ export function DefaultGamePickerModal({
                                     <button
                                         type="button"
                                         onClick={() => { handleGameSelect(currentValue); }}
-                                        className="h-[52px] px-4 bg-red-500/10 hover:bg-red-500/20 active:bg-red-500/30 text-red-400 hover:text-red-300 active:text-red-200 border border-red-500/30 hover:border-red-500/50 rounded-xl shadow-lg flex-none flex items-center justify-center gap-2 text-sm font-semibold transition-all duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] transform active:scale-95 animate-[profile-update-action-enter_220ms_cubic-bezier(0.22,1,0.36,1)]"
+                                        className="h-[52px] px-4 bg-red-500/10 hover:bg-red-500/20 active:bg-red-500/30 text-fg-danger hover:text-fg-danger active:text-fg-danger border border-red-500/30 hover:border-red-500/50 rounded-xl shadow-lg flex-none flex items-center justify-center gap-2 text-sm font-semibold transition-all duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] transform active:scale-95 animate-[profile-update-action-enter_220ms_cubic-bezier(0.22,1,0.36,1)]"
                                         title="Clear default game"
                                     >
-                                        <svg className="w-5 h-5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <svg className="w-5 h-5 text-fg-danger" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
                                         </svg>
                                         <span>Clear default</span>
@@ -450,7 +450,7 @@ export function DefaultGamePickerModal({
                                             ) : (
                                                 <div
                                                     style={{ backgroundImage: getProfileAvatarGradient(profile.name, profile.id) }}
-                                                    className="w-16 h-16 rounded-2xl mb-4 flex-shrink-0 flex items-center justify-center text-2xl font-bold text-white shadow-md"
+                                                    className="w-16 h-16 rounded-2xl mb-4 flex-shrink-0 flex items-center justify-center text-2xl font-bold text-[#ffffff] shadow-md"
                                                 >
                                                     {getFirstLetter(profile.name)}
                                                 </div>

@@ -11,6 +11,7 @@ export interface AppSettings {
     favorite_games: string[];
     default_game?: string | null;
     default_profile?: string | null;
+    active_theme?: string | null;
     game_paths: Record<string, string>;
     legacy_install_mode?: boolean;
     ask_version_before_install?: boolean;
@@ -36,6 +37,34 @@ export interface SponsorMessage {
 }
 
 export type SponsorPlacement = 'preferences-support' | 'home-support' | 'profile-selector-support' | 'catalog-support';
+
+/** A theme file on disk, as parsed by the backend. */
+export interface ThemeSummary {
+    /** Identifies the theme; also what `AppSettings.active_theme` stores. */
+    file_name: string;
+    name: string;
+    author?: string | null;
+    /** Only the colours the file actually defines; the rest fall back. */
+    colors: Partial<Record<
+        'background' | 'surface' | 'surface_hover' | 'border' | 'text' | 'text_muted' | 'accent' | 'accent_hover'
+        | 'danger' | 'warning' | 'success'
+        | 'on_accent' | 'on_surface' | 'on_danger' | 'on_warning' | 'on_success' | 'icon'
+        | 'media_scrim' | 'media_ink',
+        string
+    >>;
+    background_image?: {
+        path?: string | null;
+        opacity?: number | null;
+        blur?: number | null;
+        fit?: 'cover' | 'contain' | 'fill' | 'tile' | 'center' | null;
+        offset_x?: number | null;
+        offset_y?: number | null;
+        tile_scale?: number | null;
+    } | null;
+    options?: { auto_contrast?: boolean | null } | null;
+    /** Set when the file could not be parsed, so the UI can say why. */
+    error?: string | null;
+}
 
 export interface RuntimeHealth {
     runtime: 'bepinex' | 'owml' | 'lovely' | 'returnofmodding';
@@ -151,6 +180,15 @@ export interface IElectronAPI {
     openProfileConfigFile: (profileId: string, relativePath: string, root?: string) => Promise<void>;
     openAppLogsFolder: () => Promise<void>;
     setVerboseLogging: (enabled: boolean) => Promise<void>;
+    listThemes: () => Promise<ThemeSummary[]>;
+    readThemeSource: (fileName: string) => Promise<string>;
+    writeTheme: (fileName: string, content: string) => Promise<void>;
+    deleteTheme: (fileName: string) => Promise<void>;
+    openThemesFolder: () => Promise<void>;
+    suggestThemeFileName: (name: string) => Promise<string>;
+    setActiveTheme: (fileName: string | null) => Promise<void>;
+    importThemeImage: (sourcePath: string) => Promise<string>;
+    readThemeImage: (relativePath: string) => Promise<string | null>;
 }
 
 export interface UpdateInfo {

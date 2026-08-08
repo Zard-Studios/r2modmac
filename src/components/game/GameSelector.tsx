@@ -95,7 +95,7 @@ const GameCard = memo(function GameCard({
             onClick={() => onSelect(community.identifier)}
             className={`group relative flex flex-col rounded-xl overflow-hidden text-left border ${isSelected
                 ? 'ring-2 ring-blue-500 border-transparent shadow-md shadow-blue-500/20 scale-[1.02] hover:scale-[1.04] hover:-translate-y-1'
-                : 'border-gray-800 hover:border-gray-600 hover:shadow-lg hover:shadow-black/30 hover:-translate-y-1'
+                : 'border-gray-700/80 hover:border-gray-500 hover:shadow-xl hover:-translate-y-1'
                 } transition-all duration-300 transform-gpu`}
         >
             {/* contain:paint — browser can skip painting off-screen subtrees */}
@@ -107,16 +107,16 @@ const GameCard = memo(function GameCard({
                 ) : null}
 
                 <div className="absolute inset-0 flex items-center justify-center">
-                    <span className="text-4xl font-black text-white/20 select-none transform group-hover:scale-110 transition-transform duration-500">
+                    <span className="text-4xl font-black text-on-media/20 select-none transform group-hover:scale-110 transition-transform duration-500">
                         {getInitials(community.name)}
                     </span>
                 </div>
 
-                <div className="absolute inset-x-0 bottom-0 h-2/3 bg-gradient-to-t from-gray-900 via-gray-900/60 to-transparent opacity-0 group-hover:opacity-90 transition-opacity duration-300 z-20 pointer-events-none" />
+                <div className="absolute inset-x-0 bottom-0 h-2/3 bg-gradient-to-t from-scrim via-scrim/60 to-transparent opacity-0 group-hover:opacity-90 transition-opacity duration-300 z-20 pointer-events-none" />
 
-                {/* Platform badge — solid dark bg replaces backdrop-blur-md. */}
+                {/* Platform badge — fixed scrim: it sits on cover art, not on a surface. */}
                 <div className="absolute top-2 right-2 flex flex-col gap-1 z-30 pointer-events-none items-end">
-                    <div className={`bg-[rgba(0,0,0,0.72)] text-white p-1 rounded-full shadow-lg border border-white/10 flex items-center justify-center gap-2 h-7 ${isMacCompatible ? 'px-2' : 'w-7 px-0'}`}>
+                    <div className={`bg-scrim/75 text-on-media p-1 rounded-full shadow-lg border border-on-media/15 backdrop-blur-sm flex items-center justify-center gap-2 h-7 ${isMacCompatible ? 'px-2' : 'w-7 px-0'}`}>
                         {isWindowsCompatible && (
                             <span title="Windows Compatible" className="flex items-center justify-center w-3.5 h-3.5 shrink-0">
                                 <svg xmlns="http://www.w3.org/2000/svg" className="w-[14px] h-[14px] shrink-0" viewBox="0 0 24 24" fill="currentColor">
@@ -126,7 +126,7 @@ const GameCard = memo(function GameCard({
                         )}
                         {isMacCompatible && (
                             <>
-                                {isWindowsCompatible && <div className="w-[1px] h-3.5 bg-white/20 shrink-0" />}
+                                {isWindowsCompatible && <div className="w-[1px] h-3.5 bg-on-media/25 shrink-0" />}
                                 <span title="MacOS Compatible" className="flex items-center justify-center w-3 h-3.5 shrink-0">
                                     <svg xmlns="http://www.w3.org/2000/svg" className="w-[12px] h-[14px] shrink-0" viewBox="0 0 384 512" fill="currentColor">
                                         <path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zm-56.6-164.2c27.3-32.4 24.8-61.9 24-72.5-24.1 1.4-52 16.4-67.9 34.9-17.5 19.8-27.8 44.3-25.6 71.9 26.1 2 49.9-11.4 69.5-34.3z" />
@@ -136,7 +136,7 @@ const GameCard = memo(function GameCard({
                         )}
                     </div>
                     {isSelected && (
-                        <div className="bg-blue-500 text-white p-1 rounded-full shadow-lg border border-blue-400 z-30 shrink-0">
+                        <div className="bg-blue-500 text-on-accent p-1 rounded-full shadow-lg border border-blue-400 z-30 shrink-0">
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 shrink-0" viewBox="0 0 20 20" fill="currentColor">
                                 <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
                             </svg>
@@ -144,13 +144,13 @@ const GameCard = memo(function GameCard({
                     )}
                 </div>
 
-                {/* Favorite star — solid bg replaces backdrop-blur-sm */}
+                {/* Favorite star — fixed scrim, for the same reason as the platform badge. */}
                 <div
-                    className={`absolute top-2 left-2 p-1.5 rounded-full transition-[opacity,transform,background-color] duration-200 z-20 ${isFavorite
-                        ? 'bg-black/50 text-yellow-400 opacity-100 hover:scale-110'
+                    className={`absolute top-2 left-2 p-1.5 rounded-full transition-all duration-200 z-20 shadow-md ${isFavorite
+                        ? 'bg-scrim/70 border border-on-media/15 backdrop-blur-sm text-yellow-400 opacity-100 hover:scale-110'
                         : showFavoriteAlways
-                            ? 'bg-black/30 text-gray-400 opacity-100 hover:scale-110 hover:text-white hover:bg-blue-500/50'
-                            : 'bg-black/30 text-gray-400 opacity-0 group-hover:opacity-100 hover:text-white hover:bg-blue-500/50'
+                            ? 'bg-scrim/55 border border-on-media/10 backdrop-blur-sm text-on-media/80 opacity-100 hover:scale-110 hover:text-yellow-400 hover:border-yellow-400/50'
+                            : 'bg-scrim/55 border border-on-media/10 backdrop-blur-sm text-on-media/80 opacity-0 group-hover:opacity-100 hover:text-yellow-400 hover:border-yellow-400/50 hover:scale-110'
                         }`}
                     onClick={(e) => onToggleFavorite(community.identifier, e)}
                     title={isFavorite ? "Remove from favorites" : "Add to favorites"}
@@ -162,7 +162,7 @@ const GameCard = memo(function GameCard({
             </div>
 
             <div className="absolute bottom-0 left-0 right-0 p-3 z-30 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none">
-                <h3 className="font-bold text-sm leading-tight line-clamp-2 text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)]">
+                <h3 className="font-bold text-sm leading-tight line-clamp-2 text-on-media drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)]">
                     {community.name}
                 </h3>
             </div>

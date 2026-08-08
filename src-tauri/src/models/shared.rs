@@ -183,6 +183,11 @@ pub struct Settings {
     /// skipping profile selection too. Meaningless without `default_game` set.
     #[serde(default)]
     pub default_profile: Option<String>,
+    /// File name of the theme in `<app-data>/themes/` to paint the UI with.
+    /// `None` means the stock palette, which is why it is also the default:
+    /// an untouched install looks exactly as it did before themes existed.
+    #[serde(default)]
+    pub active_theme: Option<String>,
 }
 
 impl Settings {
@@ -211,6 +216,7 @@ impl Settings {
             verbose_logging: false,
             default_game: None,
             default_profile: None,
+            active_theme: None,
         }
     }
 }
@@ -347,14 +353,90 @@ pub fn get_owml_dir(game_path: &std::path::Path) -> Option<std::path::PathBuf> {
     None
 }
 
+/// Walks up from `path` to the Wine/CrossOver prefix root that contains it
+/// (the directory holding `drive_c`), if any.
+pub fn find_wine_prefix_root(path: &Path) -> Option<PathBuf> {
+    for ancestor in path.ancestors() {
+        let is_drive_c = ancestor
+            .file_name()
+            .and_then(|value| value.to_str())
+            .map(|value| value.eq_ignore_ascii_case("drive_c"))
+            .unwrap_or(false);
+        if is_drive_c {
+            return ancestor.parent().map(|parent| parent.to_path_buf());
+        }
+    }
+    None
+}
+
+/// Translates a Windows path as seen from inside a prefix (`Z:\Users\me\Games`)
+/// into the host path it actually points at.
+///
+/// A Steam client running inside a bottle records its library folders in
+/// Windows form, and those libraries very often live outside the bottle — on a
+/// drive letter that `dosdevices` symlinks back to a normal macOS directory.
+/// Without this translation those libraries are invisible to us, and a game
+/// installed in one looks like it has no Steam behind it at all.
+pub fn map_wine_path_to_native_path(prefix_root: &Path, windows_path: &str) -> Option<PathBuf> {
+    let trimmed = windows_path.trim();
+    let mut chars = trimmed.chars();
+    let drive = chars.next()?;
+    if !drive.is_ascii_alphabetic() || chars.next()? != ':' {
+        return None;
+    }
+
+    let dosdevices = prefix_root.join("dosdevices");
+    let mut base = [
+        dosdevices.join(format!("{}:", drive.to_ascii_lowercase())),
+        dosdevices.join(format!("{}:", drive.to_ascii_uppercase())),
+    ]
+    .into_iter()
+    .find_map(|link| std::fs::canonicalize(&link).ok());
+
+    if base.is_none() && drive.eq_ignore_ascii_case(&'c') {
+        let drive_c = prefix_root.join("drive_c");
+        if drive_c.is_dir() {
+            base = Some(drive_c);
+        }
+    }
+
+    let mut resolved = base?;
+    // The .vdf escapes separators, so a single segment can arrive as `\\`.
+    // Splitting on both separators and dropping empties normalises that.
+    for segment in trimmed[2..].split(['\\', '/']) {
+        match segment {
+            "" | "." => continue,
+            ".." => return None,
+            segment => resolved.push(segment),
+        }
+    }
+    Some(resolved)
+}
+
 pub fn get_steam_library_folders(steam_path: &std::path::Path) -> Vec<std::path::PathBuf> {
     let mut folders = vec![steam_path.to_path_buf()];
     let library_folders_path = steam_path.join("steamapps").join("libraryfolders.vdf");
     if library_folders_path.exists() {
         if let Ok(content) = std::fs::read_to_string(&library_folders_path) {
+            let prefix_root = find_wine_prefix_root(steam_path);
             let re = regex::Regex::new(r#""path"\s+"([^"]+)""#).unwrap();
             for cap in re.captures_iter(&content) {
-                folders.push(std::path::PathBuf::from(&cap[1]));
+                let raw = &cap[1];
+                let folder = std::path::PathBuf::from(raw);
+                let resolved = if folder.exists() {
+                    Some(folder)
+                } else {
+                    prefix_root
+                        .as_deref()
+                        .and_then(|prefix| map_wine_path_to_native_path(prefix, raw))
+                        .filter(|path| path.exists())
+                };
+
+                if let Some(resolved) = resolved {
+                    if !folders.contains(&resolved) {
+                        folders.push(resolved);
+                    }
+                }
             }
         }
     }
@@ -487,6 +569,112 @@ pub fn detect_bepinex_structure<R: std::io::Read + std::io::Seek>(
     }
 
     (is_bepinex, root_prefix)
+}
+
+#[cfg(test)]
+mod bottle_steam_library_tests {
+    use super::{get_steam_library_folders, map_wine_path_to_native_path};
+
+    fn temp_root(label: &str) -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "r2modmac-{}-{}-{}",
+            label,
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    /// A CrossOver-shaped bottle whose `Z:` maps to the host filesystem root.
+    fn fake_bottle(root: &std::path::Path) -> std::path::PathBuf {
+        let prefix_root = root.join("Bottles").join("Steam");
+        std::fs::create_dir_all(prefix_root.join("drive_c")).unwrap();
+        std::fs::create_dir_all(prefix_root.join("dosdevices")).unwrap();
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink("../drive_c", prefix_root.join("dosdevices/c:")).unwrap();
+            std::os::unix::fs::symlink("/", prefix_root.join("dosdevices/z:")).unwrap();
+        }
+        prefix_root
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn z_drive_paths_resolve_back_to_the_host_filesystem() {
+        let root = temp_root("winepath");
+        let prefix_root = fake_bottle(&root);
+        let library = root.join("WindowsSteam");
+        std::fs::create_dir_all(&library).unwrap();
+
+        let windows_path = format!("Z:{}", library.to_string_lossy().replace('/', "\\"));
+        let resolved = map_wine_path_to_native_path(&prefix_root, &windows_path)
+            .expect("Z: path must resolve through dosdevices");
+
+        assert_eq!(
+            std::fs::canonicalize(resolved).unwrap(),
+            std::fs::canonicalize(&library).unwrap()
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn c_drive_paths_resolve_inside_the_prefix() {
+        let root = temp_root("winepathc");
+        let prefix_root = fake_bottle(&root);
+        let steam_dir = prefix_root.join("drive_c/Program Files (x86)/Steam");
+        std::fs::create_dir_all(&steam_dir).unwrap();
+
+        let resolved =
+            map_wine_path_to_native_path(&prefix_root, "C:\\Program Files (x86)\\Steam").unwrap();
+
+        assert_eq!(
+            std::fs::canonicalize(resolved).unwrap(),
+            std::fs::canonicalize(&steam_dir).unwrap()
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn secondary_library_outside_the_bottle_is_discovered() {
+        // The layout from issue #25: Steam lives in a CrossOver bottle while the
+        // games live in a plain folder in the user's home, which the bottle sees
+        // as a Z: path. Without translation that library is invisible and the
+        // game looks like it has no Steam behind it.
+        let root = temp_root("libfolders");
+        let prefix_root = fake_bottle(&root);
+        let steam_root = prefix_root.join("drive_c/Program Files (x86)/Steam");
+        std::fs::create_dir_all(steam_root.join("steamapps")).unwrap();
+
+        let library = root.join("WindowsSteam");
+        std::fs::create_dir_all(library.join("steamapps/common")).unwrap();
+
+        let windows_library = library.to_string_lossy().replace('/', "\\");
+        std::fs::write(
+            steam_root.join("steamapps/libraryfolders.vdf"),
+            format!(
+                "\"libraryfolders\"\n{{\n\t\"0\"\n\t{{\n\t\t\"path\"\t\t\"C:\\\\Program Files (x86)\\\\Steam\"\n\t}}\n\t\"1\"\n\t{{\n\t\t\"path\"\t\t\"Z:{}\"\n\t}}\n}}",
+                windows_library.replace('\\', "\\\\")
+            ),
+        )
+        .unwrap();
+
+        let folders = get_steam_library_folders(&steam_root);
+        let canonical_library = std::fs::canonicalize(&library).unwrap();
+        assert!(
+            folders
+                .iter()
+                .any(|folder| std::fs::canonicalize(folder).ok() == Some(canonical_library.clone())),
+            "expected the Z: library in {:?}",
+            folders
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }
 
 #[cfg(test)]

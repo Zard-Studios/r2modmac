@@ -173,7 +173,7 @@ export function Layout({ sidebar, main, isSidebarOpen, onToggleSidebar }: Layout
     return (
         <div
             ref={layoutRef}
-            className={`flex h-full bg-gray-900 text-white relative ${isResizing ? 'cursor-col-resize select-none' : ''}`}
+            className={`r2-app-backdrop flex h-full bg-gray-900 text-white relative ${isResizing ? 'cursor-col-resize select-none' : ''}`}
         >
             {/* Sidebar, resize handle & toggle - Only render if sidebar exists */}
             {sidebar ? (

@@ -11,3 +11,4 @@ pub mod settings_commands;
 pub mod sponsor_commands;
 #[path = "secure_system_commands.rs"]
 pub mod system_commands;
+pub mod theme_commands;

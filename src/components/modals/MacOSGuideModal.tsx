@@ -46,12 +46,12 @@ export const MacOSGuideModal: React.FC<MacOSGuideModalProps> = ({ isOpen, onClos
                 <div className="p-6 overflow-y-auto space-y-6">
 
                     <div className="bg-blue-900/20 border border-blue-500/30 rounded-lg p-4 flex gap-3">
-                        <div className="text-blue-400 mt-1">
+                        <div className="text-fg-accent mt-1">
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
                                 <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
                             </svg>
                         </div>
-                        <div className="text-sm text-blue-200">
+                        <div className="text-sm text-fg-accent">
                             <p className="font-semibold mb-1">One-time Setup Required</p>
                             <p>To load mods on macOS, you must set a Steam launch option that injects BepInEx via <code className="bg-blue-900/50 px-1.5 py-0.5 rounded text-blue-100 font-mono text-xs">run_bepinex.sh</code> under Rosetta. This only needs to be done once per game.</p>
                             <p className="mt-2 text-blue-100/90">Supported cases are native macOS Unity <code className="bg-blue-900/50 px-1.5 py-0.5 rounded text-blue-100 font-mono text-xs">.app</code> builds with an <code className="bg-blue-900/50 px-1.5 py-0.5 rounded text-blue-100 font-mono text-xs">x86_64</code> executable slice. Windows builds running through Wine/CrossOver need a Windows profile instead.</p>
@@ -65,7 +65,7 @@ export const MacOSGuideModal: React.FC<MacOSGuideModalProps> = ({ isOpen, onClos
                             <li>Right-click the game → <strong>"Properties"</strong></li>
                             <li>Go to the <strong>"General"</strong> tab</li>
                             <li>In the <strong>"Launch Options"</strong> field, paste exactly:
-                                <div className="mt-2 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 font-mono text-xs text-green-400 select-all">
+                                <div className="mt-2 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 font-mono text-xs text-fg-success select-all">
                                     /usr/bin/arch -x86_64 /bin/sh "run_bepinex.sh" %command%
                                 </div>
                             </li>
@@ -100,7 +100,7 @@ export const MacOSGuideModal: React.FC<MacOSGuideModalProps> = ({ isOpen, onClos
                     </label>
                     <button
                         onClick={handleClose}
-                        className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-medium transition-colors shadow-lg shadow-blue-900/20"
+                        className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-on-accent rounded-lg font-medium transition-colors shadow-lg shadow-blue-900/20"
                     >
                         Done
                     </button>
