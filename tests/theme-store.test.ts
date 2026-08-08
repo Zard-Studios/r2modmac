@@ -59,6 +59,7 @@ function installFakeEnvironment() {
             if (m) colors[m[1]] = m[2];
         }
         const nameMatch = /^name = "([^"]*)"/m.exec(toml);
+        const authorMatch = /^author = "([^"]*)"/m.exec(toml);
         const imageSection = toml.split('[background_image]')[1];
         const pathMatch = imageSection ? /^path\s*=\s*"([^"]+)"/m.exec(imageSection) : null;
         const str = (k: string) =>
@@ -70,7 +71,7 @@ function installFakeEnvironment() {
         return {
             file_name: name,
             name: nameMatch?.[1] ?? name.replace('.toml', ''),
-            author: null,
+            author: authorMatch ? authorMatch[1] : null,
             colors,
             background_image: pathMatch
                 ? {
@@ -317,4 +318,26 @@ test('the picture layout survives a save and reload, field for field', async () 
 
     assert.deepEqual(reloaded.backgroundImage, theme.backgroundImage);
     assert.ok(env.files.has('mine.toml'));
+});
+
+// The TOML editor writes raw text; everything downstream has to carry the author
+// through, or the colour view keeps the old value and writes it back over the file
+// at the next save — which is how a rename kept silently reverting.
+test('an author-only edit still reaches the loaded theme', async () => {
+    const env = installFakeEnvironment();
+    const store = await freshStore();
+    const { themeToToml, normalizeTheme } = await import('../src/utils/theme.ts');
+    const { summaryToTheme } = await import(`../src/store/useThemeStore.ts?author=${Math.random()}`);
+
+    const base = normalizeTheme({ ...findPreset(`${BUILTIN_PREFIX}nord`)!, author: 'Zard Studios' });
+    await window.ipcRenderer.writeTheme('mine.toml', themeToToml(base));
+    await store.getState().loadThemes();
+
+    // Rewrite by hand, changing nothing but the author — the case that failed.
+    const edited = (env.files.get('mine.toml')!).toml.replace('"Zard Studios"', '"Zard Studio"');
+    await window.ipcRenderer.writeTheme('mine.toml', edited);
+    const [summary] = await store.getState().loadThemes();
+
+    assert.equal(summary.author, 'Zard Studio', 'the file kept the edit');
+    assert.equal(summaryToTheme(summary).author, 'Zard Studio', 'and the app read it back');
 });

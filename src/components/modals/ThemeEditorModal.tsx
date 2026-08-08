@@ -572,11 +572,11 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
      * the editor alone, and one that did change it (someone editing the TOML in
      * another window) is picked up.
      */
-    const signature = builtin
-        ? `builtin:${builtin.id}`
-        : file
-          ? JSON.stringify([file.file_name, file.name, file.colors, file.background_image])
-          : 'none';
+    // The whole summary, not a chosen subset: listing the interesting fields by
+    // hand meant an edit to one that had been forgotten — the author — never
+    // rebuilt the draft, so the colour view kept the stale value and wrote it
+    // back over the file on the next save.
+    const signature = builtin ? `builtin:${builtin.id}` : file ? JSON.stringify(file) : 'none';
 
     const [draftSignature, setDraftSignature] = useState<string | null>(null);
 
@@ -673,7 +673,10 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
     );
 
     const handleSave = useCallback(async () => {
-        if (!draft || !editable || !selectedId) return;
+        // `dirty` matters: this rewrites the file from the parsed model, so
+        // firing it when nothing changed discards comments, ordering and any
+        // key the app does not model — exactly what hand-editing preserves.
+        if (!draft || !editable || !selectedId || !dirty) return;
         setSaving(true);
         try {
             await window.ipcRenderer.writeTheme(selectedId, themeToToml(draft));
@@ -690,7 +693,7 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
         } finally {
             setSaving(false);
         }
-    }, [draft, editable, selectedId, loadThemes, setPreview]);
+    }, [draft, editable, selectedId, dirty, loadThemes, setPreview]);
 
     /** Copy whatever is selected into a new, editable file. */
     const handleDuplicate = useCallback(async () => {
@@ -768,13 +771,18 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
         if (!isOpen) return;
         const onKeyDown = (e: KeyboardEvent) => {
             if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
+                // The file editor has its own Cmd+S. This listener is on the
+                // document, so without the guard both fired on one keystroke:
+                // the editor wrote the edited text and this wrote the model
+                // back over it, and the edit appeared to revert on reopening.
+                if (view === 'toml') return;
                 e.preventDefault();
                 void handleSave();
             }
         };
         document.addEventListener('keydown', onKeyDown);
         return () => document.removeEventListener('keydown', onKeyDown);
-    }, [isOpen, handleSave]);
+    }, [isOpen, handleSave, view]);
 
     const warnings = useMemo(() => (draft ? findContrastWarnings(draft.colors) : []), [draft]);
     const autoContrast = draft?.options?.autoContrast ?? DEFAULT_THEME_OPTIONS.autoContrast;
