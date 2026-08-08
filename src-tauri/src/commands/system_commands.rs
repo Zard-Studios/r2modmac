@@ -97,12 +97,94 @@ async fn fetch_community_images_live() -> Result<std::collections::HashMap<Strin
 
     let mut images = extract_community_images_from_html(&html)?;
 
+    // The listing page stops at 300 entries while the API keeps growing, so the
+    // newest communities never appear on it and end up with no cover at all.
+    // Their own pages do carry one, so the gap is closed from there.
+    fill_missing_community_images(&mut images).await;
+
     // Inject Outer Wilds cover image (not on Thunderstore CDN).
     images.entry("outerwilds".to_string()).or_insert_with(|| {
         "https://i.ibb.co/xKCBqXM7/apps-7475-67120997535715720-38c3e502-0019-4560-826e-634bbaf5cb4b.jpg".to_string()
     });
 
     Ok(images)
+}
+
+/// How many community pages a single refresh will fetch to fill gaps.
+///
+/// Only the communities past the listing page's limit are normally missing — a
+/// handful. The cap exists so that a change at Thunderstore that broke the main
+/// scrape entirely would degrade to a few requests rather than three hundred.
+const MAX_COMMUNITY_PAGE_LOOKUPS: usize = 40;
+
+/// Fetch covers, one community page at a time, for whatever the listing missed.
+///
+/// The obvious shortcut — deriving `assets/<id>/<id>-cover-360x480.webp` — was
+/// measured against the live site and matches only 255 of 299 communities, so
+/// the filename genuinely cannot be assumed. Reading each page is slower but
+/// right.
+async fn fill_missing_community_images(images: &mut HashMap<String, String>) {
+    let communities = match fetch_communities_live().await {
+        Ok(list) => list,
+        Err(e) => {
+            log::warn!("[fetch_community_images] Could not list communities: {}", e);
+            return;
+        }
+    };
+
+    let missing: Vec<String> = communities
+        .iter()
+        .filter_map(|c| c.get("identifier").and_then(|v| v.as_str()))
+        .map(|id| id.trim().to_ascii_lowercase())
+        .filter(|id| !id.is_empty() && !images.contains_key(id))
+        .take(MAX_COMMUNITY_PAGE_LOOKUPS)
+        .collect();
+
+    if missing.is_empty() {
+        return;
+    }
+    log::debug!(
+        "[fetch_community_images] {} communities missing a cover; reading their pages",
+        missing.len()
+    );
+
+    for id in missing {
+        let url = format!("https://thunderstore.io/c/{}/", id);
+        let Ok(resp) = reqwest::get(&url).await else {
+            continue;
+        };
+        let Ok(page) = resp.text().await else {
+            continue;
+        };
+        if let Some(cover) = extract_cover_from_community_page(&page, &id) {
+            insert_community_image(images, &id, &cover, true);
+        }
+    }
+}
+
+/// Pick the cover out of one community's own page.
+///
+/// The page also carries a wide background and a square icon for the same
+/// community, so the choice is narrowed to assets under that community's own
+/// path and then left to the usual cover preference.
+fn extract_cover_from_community_page(html: &str, community_id: &str) -> Option<String> {
+    let prefix = format!("https://gcdn.thunderstore.io/assets/{}/", community_id);
+    let re = regex::Regex::new(r#"https://gcdn\.thunderstore\.io/[^"'\\\s<>]+"#).ok()?;
+
+    let mut fallback = None;
+    for m in re.find_iter(html) {
+        let url = m.as_str();
+        if !url.starts_with(&prefix) {
+            continue;
+        }
+        if looks_like_community_cover(url) {
+            return Some(url.to_string());
+        }
+        if fallback.is_none() && is_usable_community_image(url) {
+            fallback = Some(url.to_string());
+        }
+    }
+    fallback
 }
 
 /// The game list (name/identifier), used both for the home screen and to
@@ -1786,6 +1868,34 @@ pub fn compare_versions(v1: &str, v2: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_community_page_yields_its_cover_and_not_its_backdrop() {
+        // Shape taken from the live pages of the two communities that the
+        // listing page stops short of: it carries a wide backdrop, a square
+        // icon and the cover, all under the same asset path.
+        let page = r#"
+            <img src="https://gcdn.thunderstore.io/assets/inside-the-backrooms/inside-the-backrooms-bg-1920x620.webp">
+            <img src="https://gcdn.thunderstore.io/assets/inside-the-backrooms/inside-the-backrooms-icon-192x192.webp">
+            <img src="https://gcdn.thunderstore.io/assets/inside-the-backrooms/inside-the-backrooms-cover-360x480.webp">
+            <img src="https://gcdn.thunderstore.io/live/repository/icons/BepInEx-BepInExPack-5.4.2305.png">
+        "#;
+
+        let cover = extract_cover_from_community_page(page, "inside-the-backrooms")
+            .expect("expected a cover");
+        assert!(cover.ends_with("inside-the-backrooms-cover-360x480.webp"), "{}", cover);
+    }
+
+    #[test]
+    fn another_community_asset_is_never_borrowed() {
+        // Community pages list mod icons and can mention neighbours; a cover
+        // must come from the community being looked up, not from whatever CDN
+        // URL happens to appear first.
+        let page = r#"
+            <img src="https://gcdn.thunderstore.io/assets/some-other-game/some-other-game-cover-360x480.webp">
+        "#;
+        assert!(extract_cover_from_community_page(page, "modulus-factory-automation").is_none());
+    }
     use super::*;
 
     fn release_asset(name: &str) -> GithubAsset {
