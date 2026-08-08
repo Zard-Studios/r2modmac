@@ -1291,8 +1291,14 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
             </div>
             {/* Edit Profile Modal (Local) */}
             {isEditing && activeProfile && (
-                <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-                    <div className="bg-gray-800 rounded-xl p-6 max-w-md w-full border border-gray-700 shadow-2xl">
+                <div
+                    className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+                    onClick={() => setIsEditing(false)}
+                >
+                    <div
+                        className="bg-gray-800 rounded-xl p-6 max-w-md w-full border border-gray-700 shadow-2xl"
+                        onClick={(e) => e.stopPropagation()}
+                    >
                         <h2 className="text-2xl font-bold text-white mb-4">Edit Profile</h2>
 
                         <div className="flex justify-center mb-6">

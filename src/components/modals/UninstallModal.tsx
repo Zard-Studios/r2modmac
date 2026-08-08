@@ -31,8 +31,14 @@ export function UninstallModal({
     const orphanNames = new Set(orphanDeps.map((dep) => dep.name.toLowerCase()));
 
     return (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
-            <div className="bg-slate-800 rounded-xl max-w-lg w-full border border-slate-700 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+        <div
+            className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[60] p-4"
+            onClick={onCancel}
+        >
+            <div
+                className="bg-slate-800 rounded-xl max-w-lg w-full border border-slate-700 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
+                onClick={(e) => e.stopPropagation()}
+            >
                 <div className="p-6">
                     <div className="flex items-start gap-4 mb-6">
                         <div className="w-16 h-16 rounded-lg bg-slate-800 flex-shrink-0 overflow-hidden border border-slate-700 shadow-sm relative">

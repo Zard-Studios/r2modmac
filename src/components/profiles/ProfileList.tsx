@@ -446,8 +446,17 @@ export function ProfileList({
             {/* Create Profile Modal */}
             {
                 isCreating && (
-                    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-                        <div className="bg-gray-800 rounded-xl p-6 max-w-md w-full border border-gray-700 shadow-2xl relative">
+                    <div
+                        className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+                        onClick={() => {
+                            setIsCreating(false);
+                            setSelectedPlatform('windows');
+                        }}
+                    >
+                        <div
+                            className="bg-gray-800 rounded-xl p-6 max-w-md w-full border border-gray-700 shadow-2xl relative"
+                            onClick={(e) => e.stopPropagation()}
+                        >
                             <div className="flex justify-between items-start mb-4">
                                 <h2 className="text-2xl font-bold text-white">Create New Profile</h2>
                                 {!isMacCompatible && (
@@ -511,8 +520,14 @@ export function ProfileList({
             {/* Import Profile Modal */}
             {
                 isImporting && (
-                    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-                        <div className="bg-gray-800 rounded-xl p-6 max-w-md w-full border border-gray-700 shadow-2xl">
+                    <div
+                        className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+                        onClick={() => setIsImporting(false)}
+                    >
+                        <div
+                            className="bg-gray-800 rounded-xl p-6 max-w-md w-full border border-gray-700 shadow-2xl"
+                            onClick={(e) => e.stopPropagation()}
+                        >
                             <h2 className="text-2xl font-bold text-white mb-4">Import Profile</h2>
 
                             <div className="space-y-4">
@@ -589,8 +604,17 @@ export function ProfileList({
             {/* Import Platform Picker - shown after code/file is ready, but only for Mac-compatible games */}
             {
                 pendingImport !== null && (
-                    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-                        <div className="bg-gray-800 rounded-xl p-6 max-w-md w-full border border-gray-700 shadow-2xl">
+                    <div
+                        className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+                        onClick={() => {
+                            setPendingImport(null);
+                            setImportCode('');
+                        }}
+                    >
+                        <div
+                            className="bg-gray-800 rounded-xl p-6 max-w-md w-full border border-gray-700 shadow-2xl"
+                            onClick={(e) => e.stopPropagation()}
+                        >
                             <h2 className="text-2xl font-bold text-white mb-2">Choose Platform</h2>
                             <p className="text-gray-400 text-sm mb-6">Select which platform you want to use this profile on.</p>
 
@@ -627,8 +651,14 @@ export function ProfileList({
             {/* Edit Profile Modal */}
             {
                 editingProfile && (
-                    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-                        <div className="bg-gray-800 rounded-xl p-6 max-w-md w-full border border-gray-700 shadow-2xl">
+                    <div
+                        className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+                        onClick={() => setEditingProfile(null)}
+                    >
+                        <div
+                            className="bg-gray-800 rounded-xl p-6 max-w-md w-full border border-gray-700 shadow-2xl"
+                            onClick={(e) => e.stopPropagation()}
+                        >
                             <h2 className="text-2xl font-bold text-white mb-4">Edit Profile</h2>
 
                             <div className="flex justify-center mb-6">

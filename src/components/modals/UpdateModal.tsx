@@ -17,8 +17,15 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({ updateInfo, onClose, o
     };
 
     return (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-3">
-            <div className="bg-gray-800 rounded-xl max-w-xl w-full border border-gray-700 shadow-2xl flex flex-col" style={{ maxHeight: 'calc(100vh - 48px)' }}>
+        <div
+            className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-3"
+            onClick={onClose}
+        >
+            <div
+                className="bg-gray-800 rounded-xl max-w-xl w-full border border-gray-700 shadow-2xl flex flex-col"
+                style={{ maxHeight: 'calc(100vh - 48px)' }}
+                onClick={(e) => e.stopPropagation()}
+            >
                 {/* Compact Header */}
                 <div className="flex-shrink-0 p-4 border-b border-gray-700 bg-gradient-to-br from-gray-900 to-gray-800 rounded-t-xl">
                     <div className="flex items-center gap-3">
