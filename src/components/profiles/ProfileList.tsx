@@ -9,6 +9,9 @@ import { revealInFileManagerLabel } from '../../utils/platformUtils';
 import { getProfileAvatarGradient, getProfileInitial } from '../../utils/profileAvatar';
 import { SponsorSurface } from '../sponsors/SponsorSurface';
 import { KeyboardShortcuts } from '../KeyboardShortcuts';
+import { useCommandSource } from '../../store/useCommandStore';
+import { formatAccelerator } from '../../utils/keybinds';
+import { useKeybindStore } from '../../store/useKeybindStore';
 
 interface ProfileListProps {
     profiles: Profile[];
@@ -20,6 +23,13 @@ interface ProfileListProps {
     onImportProfile: (code: string, platform: 'windows' | 'mac') => void;
     onImportFile: (path: string, platform: 'windows' | 'mac') => void;
     onBrowseMods: () => void;
+    /** Opens the app-wide search, for the keyboard shortcut. */
+    onOpenSearch: () => void;
+    /**
+     * Opens the search narrowed to profiles, for the magnifier on this page.
+     * Deliberately not the same thing: a control sitting among the profile
+     * buttons has to mean profiles.
+     */
     onFindProfile: () => void;
     onDeleteProfile: (profileId: string, gameIdentifier?: string) => void;
     onUpdateProfile: (profileId: string, updates: Partial<Profile>) => void;
@@ -36,6 +46,7 @@ export function ProfileList({
     onImportProfile,
     onImportFile,
     onBrowseMods,
+    onOpenSearch,
     onFindProfile,
     onDeleteProfile,
     onUpdateProfile,
@@ -87,6 +98,35 @@ export function ProfileList({
         return () => window.removeEventListener('keydown', onKeyDown, true);
     }, [editingProfile, isCreating, isImporting, pendingImport]);
 
+    const keybinds = useKeybindStore((state) => state.keybinds);
+
+    // Same reason as the shortcuts below: these open this component's own
+    // forms, which nothing above it can reach.
+    useCommandSource('profile-list', () => [
+        {
+            id: 'action:new-profile',
+            title: 'New profile',
+            subtitle: `for ${selectedGameIdentifier}`,
+            group: 'Actions',
+            icon: 'plus',
+            slash: 'new',
+            hint: formatAccelerator(keybinds['new-profile']),
+            run: () => {
+                setSelectedPlatform('windows');
+                setIsCreating(true);
+            },
+        },
+        {
+            id: 'action:import-profile',
+            title: 'Import profile',
+            subtitle: 'From a code or a file',
+            group: 'Actions',
+            icon: 'copy',
+            slash: 'import',
+            run: () => setIsImporting(true),
+        },
+    ]);
+
     // Rendered here rather than in App because "new profile" opens this
     // component's own form; nothing above it can reach that state.
     const shortcuts = (
@@ -97,7 +137,7 @@ export function ProfileList({
                     setSelectedPlatform('windows');
                     setIsCreating(true);
                 },
-                'find-profile': onFindProfile,
+                'open-search': onOpenSearch,
             }}
         />
     );

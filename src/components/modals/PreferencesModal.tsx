@@ -30,6 +30,11 @@ export interface PreferencesSettings {
 
 interface PreferencesModalProps {
     isOpen: boolean;
+    /**
+     * Opened straight away on arrival, so a command can land on the panel it
+     * names rather than on Preferences with the panel one click further on.
+     */
+    initialPanel?: 'theme' | 'keybinds' | null;
     onClose: () => void;
     settings: PreferencesSettings;
     communities: Community[];
@@ -169,6 +174,7 @@ function RowIcon({ kind }: { kind: 'install' | 'version' | 'parallel' | 'apply' 
 
 export default function PreferencesModal({
     isOpen,
+    initialPanel = null,
     onClose,
     settings,
     communities,
@@ -233,6 +239,8 @@ export default function PreferencesModal({
             setDefaultGame(settings.default_game ?? null);
             setDefaultProfile(settings.default_profile ?? null);
             setKeybinds(resolveKeybinds(settings.keybinds));
+            setShowThemeEditor(initialPanel === 'theme');
+            setShowKeybinds(initialPanel === 'keybinds');
         } else {
             setIsVisible(false);
         }

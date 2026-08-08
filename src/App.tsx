@@ -7,10 +7,13 @@ import { GameSelectionScreen } from './components/screens/GameSelectionScreen'
 import { SearchBar } from './components/SearchBar'
 import { VirtualizedModGrid } from './components/VirtualizedModGrid'
 import { ProfileList } from './components/profiles/ProfileList'
-import { ProfileFinder } from './components/profiles/ProfileFinder'
+import { CommandPalette } from './components/CommandPalette'
+import { CommandSource } from './components/CommandSource'
 import { KeyboardShortcuts } from './components/KeyboardShortcuts'
+import { useCommandSource, useCommandStore } from './store/useCommandStore'
+import type { CommandItem } from './utils/commandPalette'
 import { useKeybindStore } from './store/useKeybindStore';
-import { overridesFromKeybinds } from './utils/keybinds';
+import { formatAccelerator, overridesFromKeybinds } from './utils/keybinds';
 import { ProfileSidebar } from './components/profiles/ProfileSidebar';
 import { useProfileStore } from './store/useProfileStore';
 import { useAppStore } from './store/useAppStore';
@@ -310,8 +313,10 @@ function App() {
   const [showUpdateModal, setShowUpdateModal] = useState(false)
   const [launchIssue, setLaunchIssue] = useState<LaunchIssue | null>(null)
   const [showPreferences, setShowPreferences] = useState(false)
-  const [showProfileFinder, setShowProfileFinder] = useState(false)
   const activeKeybinds = useKeybindStore((state) => state.keybinds)
+  const openPalette = useCommandStore((state) => state.open)
+  // Which panel Preferences should land on, when a command names one.
+  const [preferencesPanel, setPreferencesPanel] = useState<'theme' | 'keybinds' | null>(null)
   const [legacyInstallMode, setLegacyInstallMode] = useState(false)
   const [askVersionBeforeInstall, setAskVersionBeforeInstall] = useState(false)
   const [installInParallel, setInstallInParallel] = useState(true)
@@ -1129,6 +1134,99 @@ function App() {
     setIsBrowsingMode(false);
     selectProfile(profileId);
   };
+
+  // Everything reachable regardless of where the user is standing: the games
+  // list, every profile, and the panels that would otherwise take several
+  // clicks. Registered from here because these are App's own to perform.
+  useCommandSource('app', () => {
+    const games: CommandItem[] = communities.map((community) => ({
+      id: `game:${community.identifier}`,
+      title: community.name,
+      subtitle: community.identifier,
+      group: 'Games',
+      icon: 'game',
+      current: community.identifier === selectedCommunity,
+      run: () => {
+        selectProfile('');
+        setIsBrowsingMode(false);
+        setSelectedCommunity(community.identifier);
+      },
+    }));
+
+    const profileItems: CommandItem[] = profiles.map((profile) => {
+      const game = communities.find((c) => c.identifier === profile.gameIdentifier);
+      return {
+        id: `profile:${profile.id}`,
+        title: profile.name,
+        // A profile name means little on its own once several games are in
+        // play, so the game it belongs to travels with it.
+        subtitle: game?.name ?? profile.gameIdentifier,
+        group: 'Profiles',
+        icon: 'profile',
+        current: profile.id === activeProfileId,
+        run: () => {
+          setSelectedCommunity(profile.gameIdentifier);
+          handleSelectProfile(profile.id);
+        },
+      };
+    });
+
+    const settings: CommandItem[] = [
+      {
+        id: 'settings:preferences',
+        title: 'Preferences',
+        group: 'Settings',
+        icon: 'settings',
+        slash: 'preferences',
+        run: () => {
+          setPreferencesPanel(null);
+          setShowPreferences(true);
+        },
+      },
+      {
+        id: 'settings:theme',
+        title: 'Theme',
+        subtitle: 'Colours, background image and presets',
+        group: 'Settings',
+        icon: 'theme',
+        slash: 'theme',
+        run: () => {
+          setPreferencesPanel('theme');
+          setShowPreferences(true);
+        },
+      },
+      {
+        id: 'settings:shortcuts',
+        title: 'Keyboard shortcuts',
+        group: 'Settings',
+        icon: 'keyboard',
+        slash: 'shortcuts',
+        run: () => {
+          setPreferencesPanel('keybinds');
+          setShowPreferences(true);
+        },
+      },
+      {
+        id: 'settings:paths',
+        title: 'Game paths and setup',
+        group: 'Settings',
+        icon: 'settings',
+        slash: 'settings',
+        run: () => setShowSettings(true),
+      },
+      {
+        id: 'settings:browse',
+        title: 'Browse mods',
+        subtitle: 'Explore the catalogue without a profile',
+        group: 'Settings',
+        icon: 'browse',
+        slash: 'browse',
+        run: () => setIsBrowsingMode(true),
+      },
+    ];
+
+    return [...profileItems, ...games, ...settings];
+  });
 
   const loadMorePackages = useCallback(() => {
     if (!selectedCommunity || isFetchingNextPage || loadingMods) return;
@@ -2184,9 +2282,9 @@ function App() {
         return;
       }
 
-      // The finder closes itself; without this the same Escape would also step
+      // The palette closes itself; without this the same Escape would also step
       // back out of the profile behind it.
-      if (showProfileFinder) {
+      if (useCommandStore.getState().isOpen) {
         return;
       }
 
@@ -2267,7 +2365,6 @@ function App() {
     showCrossOverGuide,
     showExportModal,
     showPreferences,
-    showProfileFinder,
     showSettings,
     showUpdateModal,
     uninstallModalState.isOpen,
@@ -2342,7 +2439,8 @@ function App() {
           onImportProfile={handleImportProfile}
           onImportFile={handleImportFile}
           onBrowseMods={() => setIsBrowsingMode(true)}
-          onFindProfile={() => setShowProfileFinder(true)}
+          onOpenSearch={() => openPalette()}
+          onFindProfile={() => openPalette('Profiles')}
           onDeleteProfile={deleteProfile}
           onUpdateProfile={updateProfile}
           onToggleVanilla={handleToggleProfileVanilla}
@@ -2353,6 +2451,7 @@ function App() {
     // STEP 3: MOD MANAGEMENT
     const currentCommunity = communities.find(c => c.identifier === selectedCommunity);
     const profileNeedsSync = !!activeProfile?.apply_interrupted || !!activeProfile?.needs_sync || !!activeProfile?.mods.some((mod) => mod.pending_sync);
+
     const markActiveProfileUsed = () => {
       if (!activeProfile) return;
       updateProfile(activeProfile.id, { lastUsed: Date.now() });
@@ -2361,6 +2460,7 @@ function App() {
     const handleLaunchModdedDirect = async () => {
       if (!activeProfile) return;
       if (profileActionLockRef.current || applyInFlightRef.current) return;
+
       if (activeProfile.is_vanilla) {
         await window.ipcRenderer.alert('Mods Disabled', 'Enable the profile before launching the modded game.');
         return;
@@ -2478,6 +2578,73 @@ function App() {
 
     // Rendered beside the sidebar because these handlers only exist in this
     // branch — there is nothing to apply or launch without an open profile.
+    // The same actions the shortcuts fire, reachable by name and by slash for
+    // anyone who would rather type than remember a combination.
+    const gameCommands = (
+      <CommandSource
+        id="profile"
+        items={() => activeProfile ? [
+          {
+            id: 'action:apply',
+            title: 'Apply mods to game',
+            subtitle: activeProfile.name,
+            group: 'Actions',
+            icon: 'apply',
+            slash: 'apply',
+            hint: formatAccelerator(activeKeybinds['apply-mods']),
+            run: () => { void handleInstallToGameRequest(); },
+          },
+          {
+            id: 'action:launch',
+            title: 'Launch game (modded)',
+            subtitle: activeProfile.name,
+            group: 'Actions',
+            icon: 'play',
+            slash: 'launch',
+            hint: formatAccelerator(activeKeybinds['launch-modded']),
+            run: () => { void handleLaunchModdedDirect(); },
+          },
+          {
+            id: 'action:launch-vanilla',
+            title: 'Launch game (unmodded)',
+            group: 'Actions',
+            icon: 'play',
+            slash: 'vanilla',
+            hint: formatAccelerator(activeKeybinds['launch-vanilla']),
+            run: () => { void handleLaunchVanillaDirect(); },
+          },
+          {
+            id: 'action:stop',
+            title: 'Quit game',
+            group: 'Actions',
+            icon: 'stop',
+            slash: 'quit',
+            hint: formatAccelerator(activeKeybinds['stop-game']),
+            run: () => { void handleStopProfileDirect(); },
+          },
+          {
+            id: 'action:duplicate',
+            title: 'Duplicate profile',
+            subtitle: activeProfile.name,
+            group: 'Actions',
+            icon: 'copy',
+            slash: 'duplicate',
+            hint: formatAccelerator(activeKeybinds['duplicate-profile']),
+            run: () => { void handleDuplicateActiveProfile(); },
+          },
+          {
+            id: 'action:export',
+            title: 'Export profile',
+            subtitle: activeProfile.name,
+            group: 'Actions',
+            icon: 'copy',
+            slash: 'export',
+            run: () => setShowExportModal(true),
+          },
+        ] : []}
+      />
+    );
+
     const gameShortcuts = (
       <KeyboardShortcuts
         enabled={!showSettings && !showPreferences && !showExportModal && !showUpdateModal && !selectedMod}
@@ -2486,7 +2653,7 @@ function App() {
           'launch-modded': () => { void handleLaunchModdedDirect(); },
           'launch-vanilla': () => { void handleLaunchVanillaDirect(); },
           'stop-game': () => { void handleStopProfileDirect(); },
-          'find-profile': () => setShowProfileFinder(true),
+          'open-search': () => openPalette(),
           'duplicate-profile': () => { void handleDuplicateActiveProfile(); },
         }}
       />
@@ -2672,6 +2839,7 @@ function App() {
     );
 
     content = <>
+      {gameCommands}
       {gameShortcuts}
       <Layout
       sidebar={isBrowsingMode ? null : sidebar}
@@ -2690,16 +2858,7 @@ function App() {
         {content}
       </div>
 
-      <ProfileFinder
-        isOpen={showProfileFinder}
-        profiles={profiles.filter((profile) => profile.gameIdentifier === selectedCommunity)}
-        activeProfileId={activeProfileId}
-        onSelect={(profileId) => {
-          setShowProfileFinder(false);
-          handleSelectProfile(profileId);
-        }}
-        onClose={() => setShowProfileFinder(false)}
-      />
+      <CommandPalette />
 
       {isCustomModDragActive && (
         <div className="fixed inset-0 z-[55] bg-black/55 backdrop-blur-sm flex items-center justify-center pointer-events-none p-6">
@@ -2844,6 +3003,7 @@ function App() {
         hideCrossOverGuide={hideCrossOverGuide}
         setHideCrossOverGuide={setHideCrossOverGuide}
         showPreferences={showPreferences}
+        preferencesInitialPanel={preferencesPanel}
         setShowPreferences={setShowPreferences}
         preferences={{
           legacy_install_mode: legacyInstallMode,

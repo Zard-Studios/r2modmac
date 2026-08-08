@@ -43,6 +43,7 @@ export interface AppModalsProps {
     hideCrossOverGuide: boolean;
     setHideCrossOverGuide: (hide: boolean) => void;
     showPreferences: boolean;
+    preferencesInitialPanel?: 'theme' | 'keybinds' | null;
     setShowPreferences: (show: boolean) => void;
     preferences: PreferencesSettings;
     communities: Community[];
@@ -69,7 +70,7 @@ export function AppModals({
     showExportModal, setShowExportModal, handleExportCode, handleExportFile,
     showUpdateModal, setShowUpdateModal, updateInfo,
     showCrossOverGuide, setShowCrossOverGuide, hideCrossOverGuide, setHideCrossOverGuide,
-    showPreferences, setShowPreferences, preferences, communities, communityImages, communityPlatforms, onSavePreferences, onSponsorPreferencesChange,
+    showPreferences, preferencesInitialPanel, setShowPreferences, preferences, communities, communityImages, communityPlatforms, onSavePreferences, onSponsorPreferencesChange,
     hasHiddenGuideWarnings, onRestoreGuideWarnings, onSetGuideHidden,
     legacyInstallMode,
     onCheckForUpdates,
@@ -222,6 +223,7 @@ export function AppModals({
 
             <PreferencesModal
                 isOpen={showPreferences}
+                initialPanel={preferencesInitialPanel}
                 onClose={() => setShowPreferences(false)}
                 settings={preferences}
                 communities={communities}

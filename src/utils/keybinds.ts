@@ -33,7 +33,7 @@ export type KeybindActionId =
     | 'stop-game'
     | 'new-profile'
     | 'duplicate-profile'
-    | 'find-profile'
+    | 'open-search'
     | 'search-mods';
 
 export interface KeybindAction {
@@ -97,9 +97,9 @@ export const KEYBIND_ACTIONS: readonly KeybindAction[] = [
         defaultAccelerator: 'Mod+D',
     },
     {
-        id: 'find-profile',
-        label: 'Find profile',
-        description: 'Search profiles and jump to one, from anywhere.',
+        id: 'open-search',
+        label: 'Search',
+        description: 'Find games, profiles, settings and commands from anywhere.',
         group: 'Profiles',
         defaultAccelerator: 'Mod+F',
     },
@@ -312,6 +312,18 @@ export function formatAccelerator(
 // ── Resolving what is actually bound ─────────────────────────────────────────
 
 /**
+ * Actions that were renamed, so a rebind saved under the old name survives.
+ *
+ * Without this the override would be dropped as unrecognised and the user would
+ * silently get the default back — which is exactly the sort of quiet loss the
+ * override-only storage was meant to avoid.
+ */
+const RENAMED_ACTIONS: Record<string, KeybindActionId> = {
+    // The profile finder grew into a search across the whole app.
+    'find-profile': 'open-search',
+};
+
+/**
  * Fold the user's overrides onto the defaults.
  *
  * Anything unrecognised is dropped rather than trusted: the settings file is
@@ -323,8 +335,20 @@ export function resolveKeybinds(
     platform: Platform = detectPlatform()
 ): KeybindMap {
     const resolved = { ...DEFAULT_KEYBINDS };
+
+    // Old names are folded in first so a file carrying both spellings resolves
+    // to the current one, whatever order the keys happen to sit in.
+    const byAction: Record<string, string> = {};
+    for (const [key, value] of Object.entries(overrides ?? {})) {
+        const renamed = RENAMED_ACTIONS[key];
+        if (renamed) byAction[renamed] = value;
+    }
+    for (const [key, value] of Object.entries(overrides ?? {})) {
+        if (!RENAMED_ACTIONS[key]) byAction[key] = value;
+    }
+
     for (const action of KEYBIND_ACTIONS) {
-        const override = overrides?.[action.id];
+        const override = byAction[action.id];
         if (override === undefined) continue;
         if (override === '') {
             resolved[action.id] = '';
@@ -373,40 +397,4 @@ export function actionForEvent(
     if (!accelerator) return null;
     const match = KEYBIND_ACTIONS.find((action) => keybinds[action.id] === accelerator);
     return match?.id ?? null;
-}
-
-// ── Fuzzy matching, for the profile finder ───────────────────────────────────
-
-/**
- * Score `candidate` against a subsequence `query`, or null when it does not
- * match at all.
- *
- * Higher is better. Runs of adjacent characters and matches at a word boundary
- * score more, so typing "bl" puts "Best Lethal" above "Bumbling", which is what
- * someone reaching for a profile by initials expects.
- */
-export function fuzzyScore(query: string, candidate: string): number | null {
-    if (!query) return 0;
-
-    const needle = query.toLowerCase();
-    const haystack = candidate.toLowerCase();
-
-    let score = 0;
-    let cursor = 0;
-    let previousIndex = -1;
-
-    for (const character of needle) {
-        const index = haystack.indexOf(character, cursor);
-        if (index === -1) return null;
-
-        if (index === previousIndex + 1) score += 8;
-        if (index === 0 || /[\s\-_/.]/.test(haystack[index - 1])) score += 5;
-        score -= Math.min(index - cursor, 6);
-
-        previousIndex = index;
-        cursor = index + 1;
-    }
-
-    // Prefer the tighter of two equally-ordered matches.
-    return score - Math.max(0, candidate.length - query.length) * 0.05;
 }

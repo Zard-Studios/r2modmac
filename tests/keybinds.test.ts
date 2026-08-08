@@ -8,7 +8,6 @@ import {
     actionForEvent,
     findKeybindConflicts,
     formatAccelerator,
-    fuzzyScore,
     isUsableAccelerator,
     normalizeAccelerator,
     overridesFromKeybinds,
@@ -212,33 +211,20 @@ test('a settings file written on one platform still means something on the other
     assert.equal(resolveKeybinds(overrides, 'other')['launch-modded'], 'Mod+Shift+L');
 });
 
-// ── Fuzzy find ───────────────────────────────────────────────────────────────
-
-test('initials find a profile', () => {
-    assert.notEqual(fuzzyScore('bl', 'Best Lethal'), null);
-    assert.equal(fuzzyScore('zq', 'Best Lethal'), null);
+test('a shortcut rebound under an old action name is not lost to a rename', () => {
+    // The profile finder became a search across the whole app. Someone who had
+    // moved it off Cmd+F should still find it where they put it.
+    const resolved = resolveKeybinds({ 'find-profile': 'Mod+Shift+K' }, 'apple');
+    assert.equal(resolved['open-search'], 'Mod+Shift+K');
 });
 
-test('characters have to appear in order', () => {
-    assert.equal(fuzzyScore('lb', 'Best Lethal'), null);
-});
-
-test('word starts beat letters buried mid-word', () => {
-    const atWordStart = fuzzyScore('bl', 'Best Lethal')!;
-    const buried = fuzzyScore('bl', 'Bumbling')!;
-    assert.ok(atWordStart > buried, `${atWordStart} should beat ${buried}`);
-});
-
-test('an adjacent run beats the same letters scattered', () => {
-    const adjacent = fuzzyScore('mod', 'Modded')!;
-    const scattered = fuzzyScore('mod', 'My Old Default')!;
-    assert.ok(adjacent > scattered, `${adjacent} should beat ${scattered}`);
-});
-
-test('an empty query matches everything so the list starts whole', () => {
-    assert.equal(fuzzyScore('', 'anything'), 0);
-});
-
-test('matching ignores case', () => {
-    assert.notEqual(fuzzyScore('LETHAL', 'best lethal'), null);
+test('the current name wins when a settings file carries both', () => {
+    // Whichever order the keys sit in: object iteration order must not decide
+    // which of the two spellings the user ends up with.
+    for (const overrides of [
+        { 'find-profile': 'Mod+Shift+K', 'open-search': 'Mod+Shift+J' },
+        { 'open-search': 'Mod+Shift+J', 'find-profile': 'Mod+Shift+K' },
+    ]) {
+        assert.equal(resolveKeybinds(overrides, 'apple')['open-search'], 'Mod+Shift+J');
+    }
 });
