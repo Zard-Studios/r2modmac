@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { Button } from '../ui';
+import {
+    EMPTY_HISTORY,
+    pushEdit,
+    stepBack,
+    stepForward,
+    type EditorHistory,
+} from '../../utils/editorHistory';
 
 /**
  * The theme file, edited as text.
@@ -26,6 +33,8 @@ interface ThemeTomlEditorProps {
 
 const LINE_HEIGHT = 20;
 
+
+
 export function ThemeTomlEditor({
     fileName,
     readOnlySource,
@@ -42,10 +51,7 @@ export function ThemeTomlEditor({
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     // State rather than a ref: the undo and redo buttons enable and disable
     // from these, and a ref would not re-render to update them.
-    const [history, setHistory] = useState<{ undo: string[]; redo: string[] }>({
-        undo: [],
-        redo: [],
-    });
+    const [history, setHistory] = useState<EditorHistory>(EMPTY_HISTORY);
 
     const dirty = editable && source !== savedSource;
 
@@ -55,7 +61,7 @@ export function ThemeTomlEditor({
     const [loadedFor, setLoadedFor] = useState<string | null | undefined>(undefined);
     if (fileName !== loadedFor) {
         setLoadedFor(fileName);
-        setHistory({ undo: [], redo: [] });
+        setHistory(EMPTY_HISTORY);
         setError(null);
         setSource('');
         setSavedSource('');
@@ -87,43 +93,27 @@ export function ThemeTomlEditor({
     const shown = fileName ? (loading ? '' : source) : (readOnlySource ?? '');
     const lineCount = shown.split('\n').length || 1;
 
-    /** Record the previous text so undo has something to go back to. */
-    const edit = useCallback((next: string) => {
-        setSource((prev) => {
-            if (prev === next) return prev;
-            setHistory((h) => ({
-                // Bounded, so a long session cannot grow without limit.
-                undo: [...h.undo, prev].slice(-200),
-                // A fresh edit invalidates anything that had been undone.
-                redo: [],
-            }));
-            return next;
-        });
-    }, []);
+    /** Apply one history move to both pieces of state. */
+    const applyMove = useCallback(
+        (move: { history: EditorHistory; source: string }) => {
+            setHistory(move.history);
+            setSource(move.source);
+        },
+        []
+    );
 
-    const undo = useCallback(() => {
-        setHistory((h) => {
-            if (h.undo.length === 0) return h;
-            const previous = h.undo[h.undo.length - 1];
-            setSource((current) => {
-                setHistory((inner) => ({ ...inner, redo: [...inner.redo, current] }));
-                return previous;
-            });
-            return { undo: h.undo.slice(0, -1), redo: h.redo };
-        });
-    }, []);
-
-    const redo = useCallback(() => {
-        setHistory((h) => {
-            if (h.redo.length === 0) return h;
-            const next = h.redo[h.redo.length - 1];
-            setSource((current) => {
-                setHistory((inner) => ({ ...inner, undo: [...inner.undo, current] }));
-                return next;
-            });
-            return { undo: h.undo, redo: h.redo.slice(0, -1) };
-        });
-    }, []);
+    const edit = useCallback(
+        (next: string) => applyMove(pushEdit(history, source, next)),
+        [applyMove, history, source]
+    );
+    const undo = useCallback(
+        () => applyMove(stepBack(history, source)),
+        [applyMove, history, source]
+    );
+    const redo = useCallback(
+        () => applyMove(stepForward(history, source)),
+        [applyMove, history, source]
+    );
 
     const save = useCallback(async () => {
         if (!fileName || !editable || !dirty) return;

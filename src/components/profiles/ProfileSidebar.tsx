@@ -951,7 +951,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                                             disabled={isApplying || !!activeProfile?.apply_interrupted || syncStatus === 'ready'}
                                             title={syncStatus === 'syncing' ? 'Syncing this change' : syncStatus === 'failed' ? 'Retry this change' : syncStatus === 'ready' ? 'Ready for finalization' : 'Sync this change'}
                                             aria-label={syncStatus === 'syncing' ? 'Syncing this change' : syncStatus === 'failed' ? 'Retry this change' : syncStatus === 'ready' ? 'Ready for finalization' : 'Sync this change'}
-                                            className={`flex h-8 w-8 items-center justify-center rounded-lg transition-colors disabled:cursor-wait ${syncStatus === 'failed' ? 'bg-red-500/15 text-fg-danger hover:bg-red-500/25' : syncStatus === 'ready' ? 'bg-emerald-500/10 text-fg-success' : 'bg-blue-600 text-white hover:bg-blue-500'} disabled:opacity-60`}>
+                                            className={`flex h-8 w-8 items-center justify-center rounded-lg transition-colors disabled:cursor-wait ${syncStatus === 'failed' ? 'bg-red-500/15 text-fg-danger hover:bg-red-500/25' : syncStatus === 'ready' ? 'bg-emerald-500/10 text-fg-success' : 'bg-blue-600 text-on-accent hover:bg-blue-500'} disabled:opacity-60`}>
                                             <span className={syncStatus === 'syncing' ? 'animate-spin' : ''}>
                                                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v6h6M20 20v-6h-6M5.6 15a7 7 0 0011.9 2M18.4 9A7 7 0 006.5 7" />
@@ -1091,7 +1091,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                                         event.stopPropagation();
                                         void onUpdateMod(update.pkg, activeProfile?.id, update.version);
                                     }}
-                                    className="absolute right-2 top-1/2 z-20 -translate-y-1/2 rounded-lg bg-yellow-600 px-3 py-1.5 text-xs font-bold text-white shadow-lg shadow-yellow-900/20 transition-all duration-200 hover:bg-yellow-500 active:scale-95"
+                                    className="absolute right-2 top-1/2 z-20 -translate-y-1/2 rounded-lg bg-yellow-600 px-3 py-1.5 text-xs font-bold text-on-warning shadow-lg shadow-yellow-900/20 transition-all duration-200 hover:bg-yellow-500 active:scale-95"
                                 >
                                     Update
                                 </button>

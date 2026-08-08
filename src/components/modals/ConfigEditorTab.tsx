@@ -1630,7 +1630,7 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
                             title="Filter Options"
                             className={`flex items-center justify-center p-1.5 rounded-md border text-xs transition-colors flex-shrink-0 ${
                                 isFilterOpen || isAnyFilterActive()
-                                    ? 'bg-blue-600 border-blue-500 text-white shadow-sm'
+                                    ? 'bg-blue-600 border-blue-500 text-on-accent shadow-sm'
                                     : 'bg-gray-800 border-gray-700/70 text-gray-400 hover:text-white hover:bg-gray-700'
                             }`}
                         >
@@ -1871,7 +1871,7 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
                                         disabled={!isDirty || isSaving}
                                         className={`text-xs font-medium px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 ${
                                             isDirty && !isSaving
-                                                ? 'bg-blue-600 hover:bg-blue-500 text-white'
+                                                ? 'bg-blue-600 hover:bg-blue-500 text-on-accent'
                                                 : 'bg-gray-700 text-gray-500 cursor-not-allowed'
                                         }`}
                                     >

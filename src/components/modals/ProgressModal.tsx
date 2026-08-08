@@ -115,7 +115,7 @@ export function ProgressModal({
                             type="button"
                             onClick={onCancel}
                             disabled={isCancelling}
-                            className="rounded-lg bg-red-600 px-5 py-2 text-sm font-semibold text-white hover:bg-red-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                            className="rounded-lg bg-red-600 px-5 py-2 text-sm font-semibold text-on-danger hover:bg-red-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                         >
                             {isCancelling ? 'Stopping...' : 'Stop'}
                         </button>

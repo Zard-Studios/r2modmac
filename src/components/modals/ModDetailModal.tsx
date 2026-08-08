@@ -609,7 +609,7 @@ export function ModDetailModal({
                                     onClick={() => {
                                         onUninstall();
                                     }}
-                                    className="p-2 rounded-lg bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white transition-all duration-200 border border-red-500/20 flex-shrink-0"
+                                    className="p-2 rounded-lg bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-on-danger transition-all duration-200 border border-red-500/20 flex-shrink-0"
                                     title="Uninstall"
                                 >
                                     <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -632,8 +632,8 @@ export function ModDetailModal({
                                 className={`flex-1 px-4 py-2.5 rounded-lg font-semibold transition-colors ${isSelectedInstalled
                                     ? 'bg-green-500/10 text-green-500 border border-green-500/20 cursor-default'
                                     : hasUpdate || isInstalled
-                                    ? 'bg-amber-500 hover:bg-amber-600 text-white'
-                                    : 'bg-blue-600 hover:bg-blue-500 text-white'
+                                    ? 'bg-amber-500 hover:bg-amber-600 text-on-warning'
+                                    : 'bg-blue-600 hover:bg-blue-500 text-on-accent'
                                     }`}
                             >
                                 {isSelectedInstalled ? installedLabel : isInstalled ? `Update to v${mod.version_number}` : `${installActionLabel} v${mod.version_number}`}

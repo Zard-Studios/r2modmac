@@ -73,7 +73,7 @@ export function FilterPopover({ options, onChange, availableCategories }: Filter
             <button
                 onClick={() => setIsOpen(!isOpen)}
                 className={`flex items-center justify-center p-3 rounded-lg border transition-colors ${isOpen
-                    ? 'bg-blue-600 border-blue-500 text-white'
+                    ? 'bg-blue-600 border-blue-500 text-on-accent'
                     : 'bg-gray-800 border-gray-700 text-gray-300 hover:text-white hover:bg-gray-700'
                     }`}
             >
@@ -160,7 +160,7 @@ export function FilterPopover({ options, onChange, availableCategories }: Filter
                                         <button
                                             key={tag}
                                             onClick={() => toggleSpecialTag(tag)}
-                                            className="px-3 py-1.5 rounded-full text-sm font-medium bg-red-600 text-white shadow-lg flex items-center gap-1"
+                                            className="px-3 py-1.5 rounded-full text-sm font-medium bg-red-600 text-on-danger shadow-lg flex items-center gap-1"
                                         >
                                             #{tag}
                                             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

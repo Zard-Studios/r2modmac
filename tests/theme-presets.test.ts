@@ -79,10 +79,15 @@ test('status text is readable on every preset, light or dark', () => {
 });
 
 test('every preset produces a readable button label', () => {
+    // 2.6, not the 3:1 of the bold-text guideline. A filled button carries a
+    // light label in light and dark themes alike, and at 3 the rule flipped on
+    // hairline differences: Claudio Dark's coral measures 2.81 against its
+    // cream text, and falling to near-black lettering there reads as a mistake
+    // whatever it scores. Anything genuinely lost still gives way.
     for (const preset of THEME_PRESETS) {
         const label = resolveOnAccent(preset.colors);
         const ratio = contrastRatio(label, preset.colors.accent);
-        assert.ok(ratio >= 3, `${preset.name}: label on accent is ${ratio.toFixed(2)}:1`);
+        assert.ok(ratio >= 2.6, `${preset.name}: label on accent is ${ratio.toFixed(2)}:1`);
     }
 });
 
@@ -298,4 +303,29 @@ test('built-in ids are told apart from theme file names', () => {
     assert.ok(!isBuiltinId(null));
     assert.equal(findPreset('nord.toml'), null);
     assert.equal(findPreset(null), null);
+});
+
+test('every filled control in every preset carries a readable label', () => {
+    // Found the hard way: the Update button kept a fixed `text-white` while the
+    // engine had an `on-warning` token nobody had wired to it, so on Dracula it
+    // sat at 1.37:1 — pale text on pale yellow. This checks each fill the app
+    // actually paints, rather than trusting that every call site was converted.
+    for (const preset of THEME_PRESETS) {
+        const p = resolveTheme(normalizeTheme(preset));
+        const fills: Array<[string, string, string]> = [
+            ['accent', p.on.accent, p.blue[600]],
+            ['secondary', p.on.surface, p.gray[700]],
+            ['danger', p.on.danger, p.red[600]],
+            ['warning', p.on.warning, p.yellow[600]],
+            ['warning (amber)', p.on.warning, p.amber[600]],
+            ['success', p.on.success, p.green[600]],
+        ];
+        for (const [name, ink, fill] of fills) {
+            const ratio = contrastRatio(ink, fill);
+            assert.ok(
+                ratio >= 2.6,
+                `${preset.name}: ${name} label is ${ratio.toFixed(2)}:1 on ${fill}`
+            );
+        }
+    }
 });

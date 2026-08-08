@@ -705,7 +705,16 @@ export function resolveOnFill(
     const textIsLighter = luminance(colors.text) > luminance(colors.background);
     const lightColor = textIsLighter ? colors.text : colors.background;
     const darkColor = textIsLighter ? colors.background : colors.text;
-    return contrastRatio(lightColor, fill) >= 3 ? lightColor : darkColor;
+
+    // The light label is preferred: a filled, saturated button carries light
+    // text in light and dark themes alike, and a set of buttons that each
+    // solved its own contrast problem in isolation would not look like a set.
+    //
+    // The floor sits at 2.6 rather than the 3:1 of the bold-text guideline. At
+    // 3 the rule flipped on hairline differences — a coral accent measuring
+    // 2.81 fell to near-black lettering, which reads as a mistake however it
+    // scores. Below 2.6 the light label really is lost, and it gives way.
+    return contrastRatio(lightColor, fill) >= 2.6 ? lightColor : darkColor;
 }
 
 /**

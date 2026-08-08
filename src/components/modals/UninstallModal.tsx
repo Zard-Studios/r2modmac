@@ -114,11 +114,11 @@ export function UninstallModal({
                         {orphanCount > 0 && (
                             <button
                                 onClick={onWithOrphans}
-                                className="w-full p-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-medium transition-all text-left group shadow-lg shadow-indigo-900/20"
+                                className="w-full p-4 bg-indigo-600 hover:bg-indigo-500 text-[#ffffff] rounded-lg font-medium transition-all text-left group shadow-lg shadow-indigo-900/20"
                             >
                                 <div className="flex items-center justify-between mb-1">
                                     <span className="text-base font-semibold">Remove + unused dependencies</span>
-                                    <span className="bg-indigo-500/80 px-2 py-0.5 rounded text-xs font-bold text-white group-hover:bg-indigo-400 transition-colors">{orphanCount}</span>
+                                    <span className="bg-indigo-500/80 px-2 py-0.5 rounded text-xs font-bold text-[#ffffff] group-hover:bg-indigo-400 transition-colors">{orphanCount}</span>
                                 </div>
                                 <p className="text-xs text-indigo-200 group-hover:text-indigo-100">Recommended: Cleans up unused files</p>
                             </button>

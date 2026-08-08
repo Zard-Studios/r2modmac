@@ -112,7 +112,7 @@ export const ModListItem = memo(function ModListItem({ mod, likesCount, onInstal
                                 e.stopPropagation();
                                 onUninstall();
                             }}
-                            className="p-2 rounded-lg bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white transition-all duration-200 border border-red-500/20"
+                            className="p-2 rounded-lg bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-on-danger transition-all duration-200 border border-red-500/20"
                             title="Uninstall"
                         >
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -132,7 +132,7 @@ export const ModListItem = memo(function ModListItem({ mod, likesCount, onInstal
                         className={`mod-list-action-button px-4 py-1.5 rounded-lg text-sm font-semibold transition-all duration-200 min-w-[90px] text-center ${installStatus === 'installed'
                             ? 'bg-green-500/10 text-green-500 border border-green-500/20 cursor-default'
                             : installStatus === 'update_available'
-                                ? 'bg-yellow-600 hover:bg-yellow-500 text-white shadow-lg shadow-yellow-900/20 active:scale-95'
+                                ? 'bg-yellow-600 hover:bg-yellow-500 text-on-warning shadow-lg shadow-yellow-900/20 active:scale-95'
                                 : 'bg-blue-600 hover:bg-accent-hover text-on-accent shadow-lg shadow-blue-900/20 active:scale-95'
                             }`}
                     >

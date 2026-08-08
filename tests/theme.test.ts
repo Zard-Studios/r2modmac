@@ -656,3 +656,14 @@ test('stretch distorts to the window while cover crops to it', () => {
     assert.equal(withFit('cover'), 'cover');
     assert.equal(withFit('contain'), 'contain');
 });
+
+test('the author travels with the theme through the file format', () => {
+    // The sidebar groups by author, so it has to survive a save and reload —
+    // otherwise a set of themes scatters the moment the app restarts.
+    const toml = themeToToml({ ...LIGHT, author: 'Fede' });
+    assert.match(toml, /^author = "Fede"$/m);
+    assert.equal(normalizeTheme({ name: 'X', author: '  Fede  ', colors: {} }).author, 'Fede');
+    // Blank is dropped rather than stored as an empty group name.
+    assert.equal(normalizeTheme({ name: 'X', author: '   ', colors: {} }).author, undefined);
+    assert.ok(!themeToToml(LIGHT).includes('author'));
+});

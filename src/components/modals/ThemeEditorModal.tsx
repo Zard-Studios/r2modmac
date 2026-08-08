@@ -539,6 +539,7 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
     const [draft, setDraft] = useState<Theme | null>(null);
     const [dirty, setDirty] = useState(false);
     const [view, setView] = useState<'colours' | 'toml'>('colours');
+    const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
     const [saving, setSaving] = useState(false);
     const [busy, setBusy] = useState(false);
     const [imageUrl, setImageUrl] = useState<string | null>(null);
@@ -841,44 +842,111 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
     // The sidebar depends only on the files and the selection, never on the
     // draft. Held apart so dragging a colour or a background slider — which
     // rewrites the draft every frame — does not rebuild the whole list with it.
-    const themeList = useMemo(
-        () => (
-            <>
-                <div className="space-y-2">
-                    <p className="px-1 text-[11px] font-semibold uppercase tracking-wider text-gray-400">
-                        Built in
-                    </p>
-                    {themeButton(null, 'Default', DEFAULT_THEME.colors, 'The stock r2modmac look')}
-                    {builtins
-                        .filter((b) => b.id !== 'builtin:default')
-                        .map((b) => themeButton(b.id, b.name, b.colors, b.origin))}
-                </div>
+    /**
+     * The list, grouped and collapsible.
+     *
+     * Built-ins go in one group; your own themes are grouped by the author
+     * written in the file, so a set shared by one person stays together instead
+     * of scattering through one long alphabetical list. Anything without an
+     * author falls into "Unattributed" rather than being hidden.
+     */
+    const groupedThemes = useMemo(() => {
+        const byAuthor = new Map<string, ThemeSummary[]>();
+        for (const t of themes) {
+            const author = t.author?.trim() || 'Unattributed';
+            const list = byAuthor.get(author);
+            if (list) list.push(t);
+            else byAuthor.set(author, [t]);
+        }
+        // Named authors first, alphabetically; the unattributed pile last.
+        return [...byAuthor.entries()].sort(([a], [b]) => {
+            if (a === 'Unattributed') return 1;
+            if (b === 'Unattributed') return -1;
+            return a.localeCompare(b);
+        });
+    }, [themes]);
 
-                <div className="space-y-2">
-                    <p className="px-1 text-[11px] font-semibold uppercase tracking-wider text-gray-400">
-                        Yours
-                    </p>
-                    {themes.length === 0 && (
-                        <p className="px-1 text-[11px] leading-relaxed text-gray-400">
-                            None yet. Duplicate a built-in theme to start your own.
-                        </p>
-                    )}
-                    {themes.map((t) =>
-                        themeButton(
-                            t.file_name,
-                            t.name,
-                            listColors.get(t.file_name) ?? DEFAULT_THEME.colors,
-                            t.author ? `by ${t.author}` : null,
-                            t.error
-                        )
-                    )}
+    const themeList = useMemo(() => {
+        const group = (
+            id: string,
+            label: string,
+            count: number,
+            children: React.ReactNode
+        ) => {
+            const open = !collapsedGroups.has(id);
+            return (
+                <div key={id} className="space-y-2">
+                    <button
+                        type="button"
+                        onClick={() =>
+                            setCollapsedGroups((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(id)) next.delete(id);
+                                else next.add(id);
+                                return next;
+                            })
+                        }
+                        aria-expanded={open}
+                        className="flex w-full items-center gap-1.5 rounded-md px-1 py-0.5 text-left transition-colors hover:bg-gray-800"
+                    >
+                        <svg
+                            className={`h-3 w-3 shrink-0 text-gray-400 transition-transform duration-150 ${open ? '' : '-rotate-90'}`}
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                            aria-hidden="true"
+                        >
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
+                        </svg>
+                        <span className="min-w-0 flex-1 truncate text-[11px] font-semibold uppercase tracking-wider text-gray-400">
+                            {label}
+                        </span>
+                        <span className="shrink-0 text-[10px] text-gray-400">{count}</span>
+                    </button>
+                    {open && <div className="space-y-2">{children}</div>}
                 </div>
+            );
+        };
+
+        return (
+            <>
+                {group(
+                    'built-in',
+                    'Built in',
+                    builtins.length,
+                    <>
+                        {themeButton(null, 'Default', DEFAULT_THEME.colors, 'The stock r2modmac look')}
+                        {builtins
+                            .filter((b) => b.id !== 'builtin:default')
+                            .map((b) => themeButton(b.id, b.name, b.colors, b.origin))}
+                    </>
+                )}
+
+                {themes.length === 0 && (
+                    <p className="px-1 text-[11px] leading-relaxed text-gray-400">
+                        None yet. Duplicate a built-in theme to start your own.
+                    </p>
+                )}
+
+                {groupedThemes.map(([author, list]) =>
+                    group(
+                        `author:${author}`,
+                        author,
+                        list.length,
+                        list.map((t) =>
+                            themeButton(
+                                t.file_name,
+                                t.name,
+                                listColors.get(t.file_name) ?? DEFAULT_THEME.colors,
+                                null,
+                                t.error
+                            )
+                        )
+                    )
+                )}
             </>
-        ),
-        // themeButton closes over the selection and the dirty flag; both change
-        // rarely, unlike the draft.
-        [builtins, themes, listColors, selectedId, dirty]
-    );
+        );
+    }, [builtins, themes, groupedThemes, listColors, selectedId, dirty, collapsedGroups]);
 
     if (!isOpen) return null;
 
@@ -952,13 +1020,28 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
                         ) : (
                             <>
                                 <div className="flex shrink-0 items-center justify-between gap-4 border-b border-gray-800 px-6 py-4">
-                                    <input
-                                        value={draft.name}
-                                        disabled={!editable}
-                                        onChange={(e) => { setDraft({ ...draft, name: e.target.value }); setDirty(true); }}
-                                        aria-label="Theme name"
-                                        className="min-w-0 flex-1 rounded-lg border border-transparent bg-transparent px-2 py-1 text-[17px] font-semibold text-white transition-colors hover:border-gray-700 focus:border-blue-500 focus:bg-gray-800 focus:outline-none disabled:hover:border-transparent"
-                                    />
+                                    <div className="flex min-w-0 flex-1 flex-col">
+                                        <input
+                                            value={draft.name}
+                                            disabled={!editable}
+                                            onChange={(e) => { setDraft({ ...draft, name: e.target.value }); setDirty(true); }}
+                                            aria-label="Theme name"
+                                            className="min-w-0 rounded-lg border border-transparent bg-transparent px-2 py-1 text-[17px] font-semibold text-white transition-colors hover:border-gray-700 focus:border-blue-500 focus:bg-gray-800 focus:outline-none disabled:hover:border-transparent"
+                                        />
+                                        {/* The author is what the sidebar groups by, so it is
+                                            edited right beside the name rather than buried. */}
+                                        <input
+                                            value={draft.author ?? ''}
+                                            disabled={!editable}
+                                            placeholder="Author — groups your themes in the list"
+                                            onChange={(e) => {
+                                                setDraft({ ...draft, author: e.target.value || undefined });
+                                                setDirty(true);
+                                            }}
+                                            aria-label="Theme author"
+                                            className="min-w-0 rounded-lg border border-transparent bg-transparent px-2 py-0.5 text-[12px] text-gray-400 transition-colors placeholder:text-gray-400/60 hover:border-gray-700 focus:border-blue-500 focus:bg-gray-800 focus:outline-none disabled:hover:border-transparent"
+                                        />
+                                    </div>
                                     {/* A pencil rather than a labelled tab: this is a
                                         mode switch into the file itself, not a second
                                         view of the same controls. */}
