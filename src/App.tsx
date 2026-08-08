@@ -2152,14 +2152,16 @@ function App() {
     };
   }, [handleInstallToGameRequest]);
 
-  const handleToggleProfileVanilla = async (profileId: string, newVanillaState: boolean) => {
-    if (profileActionLockRef.current || applyInFlightRef.current) return;
+  /** Resolves true when the profile really ended up in the requested state. */
+  const handleToggleProfileVanilla = async (profileId: string, newVanillaState: boolean): Promise<boolean> => {
+    if (profileActionLockRef.current || applyInFlightRef.current) return false;
     const profile = profiles.find((p) => p.id === profileId);
-    if (!profile) return;
+    if (!profile) return false;
 
     const disabledMods = profile.mods.filter((m) => !m.enabled).map((m) => m.fullName);
     const hadPendingSync = !!profile.needs_sync || profile.mods.some((m) => m.pending_sync);
 
+    let succeeded = false;
     profileActionLockRef.current = true;
     applyInFlightRef.current = true;
     setIsApplyingToGame(true);
@@ -2187,6 +2189,7 @@ function App() {
         is_vanilla: newVanillaState,
         needs_sync: hadPendingSync,
       });
+      succeeded = true;
     } catch (error: any) {
       updateProfile(profileId, { is_vanilla: !newVanillaState });
       await window.ipcRenderer.alert(
@@ -2199,6 +2202,8 @@ function App() {
       profileActionLockRef.current = false;
       setIsApplyingToGame(false);
     }
+
+    return succeeded;
   };
 
   const handleSavePreferences = async (newSettings: PreferencesSettings) => {
@@ -2450,8 +2455,6 @@ function App() {
   } else {
     // STEP 3: MOD MANAGEMENT
     const currentCommunity = communities.find(c => c.identifier === selectedCommunity);
-    const profileNeedsSync = !!activeProfile?.apply_interrupted || !!activeProfile?.needs_sync || !!activeProfile?.mods.some((mod) => mod.pending_sync);
-
     const markActiveProfileUsed = () => {
       if (!activeProfile) return;
       updateProfile(activeProfile.id, { lastUsed: Date.now() });
@@ -2461,14 +2464,22 @@ function App() {
       if (!activeProfile) return;
       if (profileActionLockRef.current || applyInFlightRef.current) return;
 
-      if (activeProfile.is_vanilla) {
-        await window.ipcRenderer.alert('Mods Disabled', 'Enable the profile before launching the modded game.');
+      // "Launch modded" says what it will do, so a switched-off profile is
+      // switched back on rather than refused. The toggle takes the lock itself,
+      // which is why it runs before this handler claims it.
+      if (activeProfile.is_vanilla && !(await handleToggleProfileVanilla(activeProfile.id, false))) {
         return;
       }
-      if (profileNeedsSync) {
+
+      // Re-read after the toggle: switching back on reinstalls the mods, so the
+      // sync state from this render may no longer be the truth.
+      const current = useProfileStore.getState().profiles.find((p) => p.id === activeProfile.id);
+      const needsSync = !!current?.apply_interrupted || !!current?.needs_sync
+        || !!current?.mods.some((mod) => mod.pending_sync);
+      if (needsSync) {
         await window.ipcRenderer.alert(
-          activeProfile.apply_interrupted ? 'Resume Apply Required' : 'Apply Required',
-          activeProfile.apply_interrupted
+          current?.apply_interrupted ? 'Resume Apply Required' : 'Apply Required',
+          current?.apply_interrupted
             ? 'This profile has an interrupted apply. Click “Resume Apply” before launching.'
             : 'This profile has unapplied changes. Click “Apply to Game” before launching.'
         );
@@ -2504,6 +2515,13 @@ function App() {
     const handleLaunchVanillaDirect = async () => {
       if (!activeProfile) return;
       if (profileActionLockRef.current || applyInFlightRef.current) return;
+
+      // Launching unmodded means the mods have to actually leave the game
+      // folder, not merely be skipped — otherwise the run is only unmodded in
+      // name. Same lock ordering as above.
+      if (!activeProfile.is_vanilla && !(await handleToggleProfileVanilla(activeProfile.id, true))) {
+        return;
+      }
 
       try {
         profileActionLockRef.current = true;

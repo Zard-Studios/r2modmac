@@ -143,7 +143,7 @@ interface ProfileSidebarProps {
     onImportCustomMod?: () => void;
     onOpenSettings: () => void;
     onUpdateProfile: (profileId: string, updates: Partial<Profile>) => void;
-    onToggleVanilla: (profileId: string, newVanillaState: boolean) => Promise<void> | void;
+    onToggleVanilla: (profileId: string, newVanillaState: boolean) => Promise<unknown> | void;
     onUpdateMod: (pkg: Package, profileId?: string, version?: Package['versions'][number]) => Promise<void> | void;
     onUpdateAll: (updates: ProfileModUpdate[]) => void;
     onSyncPending: (ids: string[]) => Promise<void> | void;
