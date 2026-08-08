@@ -7,10 +7,24 @@
  * already in place instead of silently missing from everyone's saved settings.
  *
  * A combination is written as modifiers joined by `+` and ending in one key:
- * `Mod+Shift+R`. `Mod` is Command, kept as its own word so the string stays
- * readable in the settings file. Order is canonical, so two spellings of the
- * same combination compare equal.
+ * `Mod+Shift+R`. `Mod` is the platform's command modifier — Command on macOS,
+ * Control on Windows and Linux — so one stored string means the right key
+ * everywhere and a settings file stays portable between machines. Order is
+ * canonical, so two spellings of the same combination compare equal.
  */
+
+/**
+ * Which key `Mod` stands for. Passed explicitly rather than read from the
+ * environment inside each function, so both platforms can be exercised from
+ * whichever machine happens to be running the tests.
+ */
+export type Platform = 'apple' | 'other';
+
+export function detectPlatform(): Platform {
+    // Matches how the rest of the app sniffs the platform (see platformUtils).
+    if (typeof navigator === 'undefined') return 'apple';
+    return navigator.userAgent.includes('Mac') ? 'apple' : 'other';
+}
 
 export type KeybindActionId =
     | 'apply-mods'
@@ -155,28 +169,46 @@ function keyNameFromCode(code: string): string | null {
  * *prints* modifiers in the opposite order, which is a display concern only.
  */
 const STORAGE_ORDER = ['Mod', 'Ctrl', 'Alt', 'Shift'] as const;
-const DISPLAY_ORDER = ['Ctrl', 'Alt', 'Shift', 'Mod'] as const;
+
+/**
+ * Display order differs by platform: macOS ends on Command (⌃⌥⇧⌘R) while
+ * Windows and Linux lead with Control (Ctrl+Alt+Shift+R).
+ */
+const DISPLAY_ORDER: Record<Platform, readonly string[]> = {
+    apple: ['Ctrl', 'Alt', 'Shift', 'Mod'],
+    other: ['Mod', 'Ctrl', 'Alt', 'Shift'],
+};
 
 /**
  * The combination a key event represents, or null if the event is a modifier on
  * its own — holding Command is not yet a shortcut.
  */
 export function acceleratorFromEvent(
-    event: Pick<KeyboardEvent, 'code' | 'ctrlKey' | 'altKey' | 'shiftKey' | 'metaKey'>
+    event: Pick<KeyboardEvent, 'code' | 'ctrlKey' | 'altKey' | 'shiftKey' | 'metaKey'>,
+    platform: Platform = detectPlatform()
 ): string | null {
     const key = keyNameFromCode(event.code);
     if (!key) return null;
 
     const held = new Set<string>();
-    if (event.metaKey) held.add('Mod');
-    if (event.ctrlKey) held.add('Ctrl');
+    // Off macOS the command modifier *is* Control, so Control produces `Mod`
+    // and there is no separate `Ctrl` to record.
+    if (platform === 'apple') {
+        if (event.metaKey) held.add('Mod');
+        if (event.ctrlKey) held.add('Ctrl');
+    } else if (event.ctrlKey) {
+        held.add('Mod');
+    }
     if (event.altKey) held.add('Alt');
     if (event.shiftKey) held.add('Shift');
     return [...STORAGE_ORDER.filter((m) => held.has(m)), key].join('+');
 }
 
 /** Put a hand-written combination into canonical order so it compares equal. */
-export function normalizeAccelerator(accelerator: string): string | null {
+export function normalizeAccelerator(
+    accelerator: string,
+    platform: Platform = detectPlatform()
+): string | null {
     const tokens = accelerator
         .split('+')
         .map((t) => t.trim())
@@ -200,6 +232,10 @@ export function normalizeAccelerator(accelerator: string): string | null {
     );
     if (modifiers.has('')) return null;
 
+    // One physical key cannot appear twice: off macOS, Control and the command
+    // modifier are the same key, so `Ctrl+R` and `Mod+R` are one shortcut.
+    if (platform !== 'apple' && modifiers.delete('Ctrl')) modifiers.add('Mod');
+
     return [...STORAGE_ORDER.filter((m) => modifiers.has(m)), canonicalKey].join('+');
 }
 
@@ -209,8 +245,11 @@ export function normalizeAccelerator(accelerator: string): string | null {
  * Something has to hold the key apart from ordinary typing, so a bare letter is
  * refused. Function keys carry no character and stand alone safely.
  */
-export function isUsableAccelerator(accelerator: string): boolean {
-    const canonical = normalizeAccelerator(accelerator);
+export function isUsableAccelerator(
+    accelerator: string,
+    platform: Platform = detectPlatform()
+): boolean {
+    const canonical = normalizeAccelerator(accelerator, platform);
     if (!canonical) return false;
     const parts = canonical.split('+');
     if (parts.length > 1) return true;
@@ -219,7 +258,8 @@ export function isUsableAccelerator(accelerator: string): boolean {
 
 // ── Display ──────────────────────────────────────────────────────────────────
 
-const SYMBOLS: Record<string, string> = {
+/** macOS prints modifiers as glyphs and runs them together: `⇧⌘R`. */
+const APPLE_SYMBOLS: Record<string, string> = {
     Mod: '⌘',
     Ctrl: '⌃',
     Alt: '⌥',
@@ -236,16 +276,37 @@ const SYMBOLS: Record<string, string> = {
     Space: '␣',
 };
 
-/** Render a combination the way macOS menus do: `Mod+Shift+R` → `⇧⌘R`. */
-export function formatAccelerator(accelerator: string): string {
-    const canonical = normalizeAccelerator(accelerator);
+/** Windows and Linux spell them out and join with `+`: `Ctrl+Shift+R`. */
+const OTHER_NAMES: Record<string, string> = {
+    Mod: 'Ctrl',
+    Alt: 'Alt',
+    Shift: 'Shift',
+    Up: '↑',
+    Down: '↓',
+    Left: '←',
+    Right: '→',
+};
+
+/**
+ * Render a combination the way the platform's own menus do — `⇧⌘R` on macOS,
+ * `Ctrl+Shift+R` elsewhere. Printing glyphs for keys a Windows keyboard does
+ * not have would leave the panel describing a machine the user is not on.
+ */
+export function formatAccelerator(
+    accelerator: string,
+    platform: Platform = detectPlatform()
+): string {
+    const canonical = normalizeAccelerator(accelerator, platform);
     if (!canonical) return '';
     const parts = canonical.split('+');
     const key = parts[parts.length - 1];
     const held = new Set(parts.slice(0, -1));
-    return [...DISPLAY_ORDER.filter((m) => held.has(m)), key]
-        .map((part) => SYMBOLS[part] ?? part)
-        .join('');
+    const ordered = [...DISPLAY_ORDER[platform].filter((m) => held.has(m)), key];
+
+    if (platform === 'apple') {
+        return ordered.map((part) => APPLE_SYMBOLS[part] ?? part).join('');
+    }
+    return ordered.map((part) => OTHER_NAMES[part] ?? part).join('+');
 }
 
 // ── Resolving what is actually bound ─────────────────────────────────────────
@@ -257,7 +318,10 @@ export function formatAccelerator(accelerator: string): string {
  * hand-editable, and a stale action id from an older version must not leave a
  * shortcut bound to nothing.
  */
-export function resolveKeybinds(overrides: Record<string, string> | null | undefined): KeybindMap {
+export function resolveKeybinds(
+    overrides: Record<string, string> | null | undefined,
+    platform: Platform = detectPlatform()
+): KeybindMap {
     const resolved = { ...DEFAULT_KEYBINDS };
     for (const action of KEYBIND_ACTIONS) {
         const override = overrides?.[action.id];
@@ -266,8 +330,8 @@ export function resolveKeybinds(overrides: Record<string, string> | null | undef
             resolved[action.id] = '';
             continue;
         }
-        const canonical = normalizeAccelerator(override);
-        if (canonical && isUsableAccelerator(canonical)) resolved[action.id] = canonical;
+        const canonical = normalizeAccelerator(override, platform);
+        if (canonical && isUsableAccelerator(canonical, platform)) resolved[action.id] = canonical;
     }
     return resolved;
 }
@@ -302,9 +366,10 @@ export function findKeybindConflicts(keybinds: KeybindMap): Map<string, KeybindA
 /** The action a key event triggers, if any. */
 export function actionForEvent(
     event: Pick<KeyboardEvent, 'code' | 'ctrlKey' | 'altKey' | 'shiftKey' | 'metaKey'>,
-    keybinds: KeybindMap
+    keybinds: KeybindMap,
+    platform: Platform = detectPlatform()
 ): KeybindActionId | null {
-    const accelerator = acceleratorFromEvent(event);
+    const accelerator = acceleratorFromEvent(event, platform);
     if (!accelerator) return null;
     const match = KEYBIND_ACTIONS.find((action) => keybinds[action.id] === accelerator);
     return match?.id ?? null;
