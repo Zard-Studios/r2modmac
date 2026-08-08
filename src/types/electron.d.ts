@@ -27,6 +27,8 @@ export interface AppSettings {
     sponsored_messages_enabled?: boolean;
     sponsored_messages_scale?: number;
     sponsored_messages_background_opacity?: number;
+    /** Only the shortcuts the user changed; see `src/utils/keybinds.ts`. */
+    keybinds?: Record<string, string>;
 }
 
 export interface SponsorMessage {
@@ -140,6 +142,8 @@ export interface IElectronAPI {
     openModFolder: (profileId: string, modName: string, gameIdentifier: string, platform?: 'windows' | 'mac') => Promise<void>;
     exportProfile: (profileId: string) => Promise<any>;
     deleteProfileFolder: (profileId: string, gameIdentifier?: string, platform?: 'windows' | 'mac') => Promise<boolean>;
+    /** Resolves false when the source profile has no folder on disk yet. */
+    duplicateProfileFolder: (sourceProfileId: string, newProfileId: string) => Promise<boolean>;
     getSettings: () => Promise<AppSettings>;
     saveSettings: (settings: AppSettings) => Promise<void>;
     requestSponsor: (placement?: SponsorPlacement) => Promise<SponsorMessage | null>;

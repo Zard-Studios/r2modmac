@@ -188,6 +188,15 @@ pub struct Settings {
     /// an untouched install looks exactly as it did before themes existed.
     #[serde(default)]
     pub active_theme: Option<String>,
+    /// Keyboard shortcuts the user changed, as action id → combination.
+    ///
+    /// Only the overrides are stored; the defaults live in the frontend
+    /// (`src/utils/keybinds.ts`). A map rather than a field per action, so a
+    /// shortcut added in a later version needs no migration here — and so an
+    /// action this build does not know about is carried through untouched
+    /// rather than dropped on the next save.
+    #[serde(default)]
+    pub keybinds: HashMap<String, String>,
 }
 
 impl Settings {
@@ -217,6 +226,7 @@ impl Settings {
             default_game: None,
             default_profile: None,
             active_theme: None,
+            keybinds: HashMap::new(),
         }
     }
 }
@@ -701,5 +711,40 @@ mod default_game_and_profile_settings_tests {
         let settings: Settings = serde_json::from_str(json).unwrap();
         assert_eq!(settings.default_game, None);
         assert_eq!(settings.default_profile, None);
+    }
+}
+
+#[cfg(test)]
+mod settings_keybind_tests {
+    use super::Settings;
+
+    #[test]
+    fn settings_written_before_shortcuts_existed_still_load() {
+        // Every field is optional on read, so an older settings.json must not
+        // fail to parse and reset the user's whole configuration.
+        let older = r#"{"steam_path":null,"game_paths":{}}"#;
+        let settings: Settings = serde_json::from_str(older).unwrap();
+        assert!(settings.keybinds.is_empty());
+    }
+
+    #[test]
+    fn a_shortcut_for_an_action_this_build_does_not_know_is_kept() {
+        // The map is carried verbatim, so downgrading and saving again does not
+        // quietly discard a shortcut a newer version had bound.
+        let stored = r#"{"steam_path":null,"game_paths":{},
+            "keybinds":{"launch-modded":"Mod+Shift+L","from-the-future":"Mod+K"}}"#;
+        let settings: Settings = serde_json::from_str(stored).unwrap();
+
+        let round_tripped: Settings =
+            serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+
+        assert_eq!(
+            round_tripped.keybinds.get("launch-modded").map(String::as_str),
+            Some("Mod+Shift+L")
+        );
+        assert_eq!(
+            round_tripped.keybinds.get("from-the-future").map(String::as_str),
+            Some("Mod+K")
+        );
     }
 }

@@ -1,4 +1,4 @@
-import type { Package, PackageVersion } from '../types/thunderstore';
+import type { Package, PackageVersion } from '../types/thunderstore.ts';
 
 const VERSION_SUFFIX = /-(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)$/;
 

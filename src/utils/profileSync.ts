@@ -3,8 +3,8 @@ import type {
     InstalledModSnapshot,
     PendingSyncKind,
     Profile,
-} from '../types/profile';
-import { parsePackageReference } from './modVersioning';
+} from '../types/profile.ts';
+import { parsePackageReference } from './modVersioning.ts';
 import type { RuntimeHealth } from '../types/electron';
 
 export interface ProfileSyncInspectionMod {

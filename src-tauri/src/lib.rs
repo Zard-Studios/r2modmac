@@ -344,6 +344,7 @@ pub fn run() {
             commands::profile_commands::get_profiles,
             commands::profile_commands::save_profiles,
             commands::profile_commands::delete_profile_folder,
+            commands::profile_commands::duplicate_profile_folder,
             commands::profile_commands::open_profile_folder,
             commands::profile_commands::clear_profile_cache,
             commands::profile_commands::toggle_profile_vanilla_mode,

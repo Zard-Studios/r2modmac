@@ -6,20 +6,9 @@ import { Button, HoverMarquee } from '../ui';
 import { Toggle } from '../ui/Toggle';
 import { PlatformPicker } from './PlatformPicker';
 import { revealInFileManagerLabel } from '../../utils/platformUtils';
-import { getProfileAvatarGradient } from '../../utils/profileAvatar';
+import { getProfileAvatarGradient, getProfileInitial } from '../../utils/profileAvatar';
 import { SponsorSurface } from '../sponsors/SponsorSurface';
-
-function getFirstLetter(name: string): string {
-    if (!name) return '';
-    try {
-        const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
-        const segments = segmenter.segment(name);
-        const firstSegment = [...segments][0]?.segment;
-        return firstSegment ? firstSegment.toUpperCase() : '';
-    } catch {
-        return ([...name][0] || '').toUpperCase();
-    }
-}
+import { KeyboardShortcuts } from '../KeyboardShortcuts';
 
 interface ProfileListProps {
     profiles: Profile[];
@@ -31,6 +20,7 @@ interface ProfileListProps {
     onImportProfile: (code: string, platform: 'windows' | 'mac') => void;
     onImportFile: (path: string, platform: 'windows' | 'mac') => void;
     onBrowseMods: () => void;
+    onFindProfile: () => void;
     onDeleteProfile: (profileId: string, gameIdentifier?: string) => void;
     onUpdateProfile: (profileId: string, updates: Partial<Profile>) => void;
     onToggleVanilla: (profileId: string, newVanillaState: boolean) => void;
@@ -46,6 +36,7 @@ export function ProfileList({
     onImportProfile,
     onImportFile,
     onBrowseMods,
+    onFindProfile,
     onDeleteProfile,
     onUpdateProfile,
     onToggleVanilla
@@ -95,6 +86,21 @@ export function ProfileList({
         window.addEventListener('keydown', onKeyDown, true);
         return () => window.removeEventListener('keydown', onKeyDown, true);
     }, [editingProfile, isCreating, isImporting, pendingImport]);
+
+    // Rendered here rather than in App because "new profile" opens this
+    // component's own form; nothing above it can reach that state.
+    const shortcuts = (
+        <KeyboardShortcuts
+            enabled={!isCreating && !isImporting && !editingProfile && !pendingImport && !isBusy}
+            handlers={{
+                'new-profile': () => {
+                    setSelectedPlatform('windows');
+                    setIsCreating(true);
+                },
+                'find-profile': onFindProfile,
+            }}
+        />
+    );
 
     const filteredProfiles = profiles.filter(p => p.gameIdentifier === selectedGameIdentifier);
     const isMacCompatible = selectedGamePlatform?.mac ?? false;
@@ -214,6 +220,7 @@ export function ProfileList({
 
     return (
         <div className="relative flex-1 min-h-0">
+            {shortcuts}
             <div className="h-full overflow-y-auto p-8 pb-32">
             <div className="max-w-4xl mx-auto">
                 <div className="flex items-start justify-between gap-6 mb-8">
@@ -223,6 +230,20 @@ export function ProfileList({
                     </div>
                     {hasProfilesForGame && (
                         <div className="flex items-center gap-1.5 rounded-full border border-gray-700 bg-gray-800/85 p-1 shadow-sm backdrop-blur-sm shrink-0">
+                            {/* The magnifier sits with the other profile
+                                controls, so it has to mean searching profiles.
+                                It used to open the mod catalogue, which is why
+                                Browse Mods below no longer wears this icon. */}
+                            <button
+                                onClick={onFindProfile}
+                                className="w-10 h-10 rounded-full flex items-center justify-center text-gray-300 hover:text-white hover:bg-gray-500/15 hover:border-gray-500/30 border border-transparent transition-colors"
+                                title="Find Profile"
+                                aria-label="Find Profile"
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                                </svg>
+                            </button>
                             <button
                                 onClick={() => {
                                     setSelectedPlatform('windows');
@@ -253,7 +274,7 @@ export function ProfileList({
                                 aria-label="Browse Mods"
                             >
                                 <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 5.5A1.5 1.5 0 015.5 4h3A1.5 1.5 0 0110 5.5v3A1.5 1.5 0 018.5 10h-3A1.5 1.5 0 014 8.5v-3zm10 0A1.5 1.5 0 0115.5 4h3A1.5 1.5 0 0120 5.5v3A1.5 1.5 0 0118.5 10h-3A1.5 1.5 0 0114 8.5v-3zM4 15.5A1.5 1.5 0 015.5 14h3A1.5 1.5 0 0110 15.5v3A1.5 1.5 0 018.5 20h-3A1.5 1.5 0 014 18.5v-3zm10 0A1.5 1.5 0 0115.5 14h3a1.5 1.5 0 011.5 1.5v3a1.5 1.5 0 01-1.5 1.5h-3a1.5 1.5 0 01-1.5-1.5v-3z" />
                                 </svg>
                             </button>
                         </div>
@@ -297,7 +318,7 @@ export function ProfileList({
                         >
                             <div className="w-16 h-16 bg-gray-900 rounded-full flex items-center justify-center mb-4 group-hover:bg-green-500/20 transition-colors">
                                 <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-gray-500 group-hover:text-fg-success transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 5.5A1.5 1.5 0 015.5 4h3A1.5 1.5 0 0110 5.5v3A1.5 1.5 0 018.5 10h-3A1.5 1.5 0 014 8.5v-3zm10 0A1.5 1.5 0 0115.5 4h3A1.5 1.5 0 0120 5.5v3A1.5 1.5 0 0118.5 10h-3A1.5 1.5 0 0114 8.5v-3zM4 15.5A1.5 1.5 0 015.5 14h3A1.5 1.5 0 0110 15.5v3A1.5 1.5 0 018.5 20h-3A1.5 1.5 0 014 18.5v-3zm10 0A1.5 1.5 0 0115.5 14h3a1.5 1.5 0 011.5 1.5v3a1.5 1.5 0 01-1.5 1.5h-3a1.5 1.5 0 01-1.5-1.5v-3z" />
                                 </svg>
                             </div>
                             <h3 className="text-lg font-bold text-white mb-1">Browse Mods</h3>
@@ -394,7 +415,7 @@ export function ProfileList({
                                     />
                                 ) : (
                                     <div style={{ backgroundImage: getProfileAvatarGradient(profile.name, profile.id) }} className="w-16 h-16 rounded-2xl mb-4 flex-shrink-0 flex items-center justify-center text-2xl font-bold text-[#ffffff] shadow-md">
-                                        {getFirstLetter(profile.name)}
+                                        {getProfileInitial(profile.name)}
                                     </div>
                                 )}
 
@@ -671,7 +692,7 @@ export function ProfileList({
                                         />
                                     ) : (
                                         <div style={{ backgroundImage: getProfileAvatarGradient(editName, editingProfile.id) }} className="w-24 h-24 rounded-full flex items-center justify-center text-4xl font-bold text-[#ffffff] border-4 border-gray-700 group-hover:border-blue-500 transition-colors">
-                                            {getFirstLetter(editName)}
+                                            {getProfileInitial(editName)}
                                         </div>
                                     )}
                                     <div className="absolute inset-0 bg-black/50 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">

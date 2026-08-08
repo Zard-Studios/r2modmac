@@ -153,6 +153,7 @@ export const tauriAPI: IElectronAPI = {
         }
     },
     deleteProfileFolder: async (profileId, gameIdentifier?, platform?) => invoke<boolean>('delete_profile_folder', { profileId, gameIdentifier, platform }),
+    duplicateProfileFolder: async (sourceProfileId, newProfileId) => invoke<boolean>('duplicate_profile_folder', { sourceProfileId, newProfileId }),
     getSettings: async () => invoke('get_settings'),
     saveSettings: async (settings) => invoke('save_settings', { settings }),
     requestSponsor: async (placement) => invoke('request_sponsor', { placement }),

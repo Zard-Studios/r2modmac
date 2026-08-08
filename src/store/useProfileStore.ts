@@ -5,9 +5,9 @@ import type {
     ProfileDistribution,
     ProfileLaunchMode,
     ProfilePlatform
-} from '../types/profile';
-import { getProfileModKey, inferPendingSyncKind, restoreInstalledMod, snapshotInstalledMod } from '../utils/profileSync';
-import { packageIdentityKey } from '../utils/modVersioning';
+} from '../types/profile.ts';
+import { getProfileModKey, inferPendingSyncKind, restoreInstalledMod, snapshotInstalledMod } from '../utils/profileSync.ts';
+import { packageIdentityKey } from '../utils/modVersioning.ts';
 
 // Debounced save to prevent rapid-fire file writes causing race conditions
 let saveTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -89,6 +89,22 @@ const normalizeProfile = (profile: Profile): Profile => {
     };
 };
 
+/**
+ * "Modded" → "Modded copy" → "Modded copy 2", skipping names already taken.
+ *
+ * Names are what the user navigates by, so a duplicate that silently shares one
+ * would make the two indistinguishable in the list.
+ */
+const nextCopyName = (name: string, profiles: Profile[]): string => {
+    const taken = new Set(profiles.map((profile) => profile.name));
+    const base = `${name} copy`;
+    if (!taken.has(base)) return base;
+    for (let suffix = 2; ; suffix += 1) {
+        const candidate = `${base} ${suffix}`;
+        if (!taken.has(candidate)) return candidate;
+    }
+};
+
 interface ProfileState {
     profiles: Profile[];
     activeProfileId: string | null;
@@ -100,6 +116,8 @@ interface ProfileState {
         platform?: ProfilePlatform,
         distribution?: ProfileDistribution
     ) => string;
+    /** Resolves the new profile's id, or null if the source is gone. */
+    duplicateProfile: (profileId: string) => Promise<string | null>;
     selectProfile: (profileId: string) => void;
     deleteProfile: (profileId: string, gameIdentifier?: string) => Promise<void>;
     updateProfile: (profileId: string, updates: Partial<Profile>) => void;
@@ -140,6 +158,41 @@ export const useProfileStore = create<ProfileState>((set) => ({
         });
 
         return newProfile.id;
+    },
+
+    duplicateProfile: async (profileId) => {
+        const source = useProfileStore.getState().profiles.find((p) => p.id === profileId);
+        if (!source) return null;
+
+        const newId = crypto.randomUUID();
+
+        // The folder is copied before the record exists, so a failed copy leaves
+        // nothing behind rather than a profile pointing at mods that are not
+        // there. A profile never applied has no folder yet, and false here just
+        // means there was nothing to copy.
+        await window.ipcRenderer.duplicateProfileFolder(source.id, newId);
+
+        const copy = normalizeProfile({
+            ...source,
+            id: newId,
+            name: nextCopyName(source.name, useProfileStore.getState().profiles),
+            mods: source.mods.map((mod) => ({ ...mod })),
+            // The duplicate has not been written into the game folder, whatever
+            // state the original was in.
+            needs_sync: source.mods.length > 0,
+            apply_interrupted: false,
+            pending_removals: [],
+            dateCreated: Date.now(),
+            lastUsed: 0,
+        });
+
+        set((state) => {
+            const updatedProfiles = [...state.profiles, copy];
+            debouncedSaveProfiles(updatedProfiles);
+            return { profiles: updatedProfiles };
+        });
+
+        return copy.id;
     },
 
     selectProfile: (profileId) => set({ activeProfileId: profileId }),

@@ -6,7 +6,11 @@ import { FilterPopover } from './components/FilterPopover'
 import { GameSelectionScreen } from './components/screens/GameSelectionScreen'
 import { SearchBar } from './components/SearchBar'
 import { VirtualizedModGrid } from './components/VirtualizedModGrid'
-import { ProfileList } from './components/profiles/ProfileList';
+import { ProfileList } from './components/profiles/ProfileList'
+import { ProfileFinder } from './components/profiles/ProfileFinder'
+import { KeyboardShortcuts } from './components/KeyboardShortcuts'
+import { useKeybindStore } from './store/useKeybindStore';
+import { overridesFromKeybinds } from './utils/keybinds';
 import { ProfileSidebar } from './components/profiles/ProfileSidebar';
 import { useProfileStore } from './store/useProfileStore';
 import { useAppStore } from './store/useAppStore';
@@ -306,6 +310,8 @@ function App() {
   const [showUpdateModal, setShowUpdateModal] = useState(false)
   const [launchIssue, setLaunchIssue] = useState<LaunchIssue | null>(null)
   const [showPreferences, setShowPreferences] = useState(false)
+  const [showProfileFinder, setShowProfileFinder] = useState(false)
+  const activeKeybinds = useKeybindStore((state) => state.keybinds)
   const [legacyInstallMode, setLegacyInstallMode] = useState(false)
   const [askVersionBeforeInstall, setAskVersionBeforeInstall] = useState(false)
   const [installInParallel, setInstallInParallel] = useState(true)
@@ -343,6 +349,7 @@ function App() {
   const {
     profiles,
     createProfile,
+    duplicateProfile,
     loadProfiles,
     activeProfileId,
     selectProfile,
@@ -784,6 +791,7 @@ function App() {
       setStreamMode(!!s.stream_mode);
       setDefaultGame(s.default_game ?? null);
       setDefaultProfile(s.default_profile ?? null);
+      useKeybindStore.getState().hydrate(s.keybinds);
       startupDefaultGameRef.current = s.default_game ?? null;
       startupDefaultProfileRef.current = s.default_profile ?? null;
       // Paint the saved theme as early as the settings arrive, so the window
@@ -2112,6 +2120,7 @@ function App() {
     setStreamMode(newSettings.stream_mode);
     setDefaultGame(newSettings.default_game);
     setDefaultProfile(newSettings.default_profile ?? null);
+    useKeybindStore.getState().hydrate(newSettings.keybinds);
 
     const currentSettings = await window.ipcRenderer.getSettings();
     await window.ipcRenderer.saveSettings({
@@ -2130,6 +2139,7 @@ function App() {
       default_game: newSettings.default_game,
       default_profile: newSettings.default_profile ?? null,
       stream_mode: newSettings.stream_mode,
+      keybinds: newSettings.keybinds ?? {},
     });
   };
 
@@ -2171,6 +2181,12 @@ function App() {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) {
+        return;
+      }
+
+      // The finder closes itself; without this the same Escape would also step
+      // back out of the profile behind it.
+      if (showProfileFinder) {
         return;
       }
 
@@ -2251,6 +2267,7 @@ function App() {
     showCrossOverGuide,
     showExportModal,
     showPreferences,
+    showProfileFinder,
     showSettings,
     showUpdateModal,
     uninstallModalState.isOpen,
@@ -2325,6 +2342,7 @@ function App() {
           onImportProfile={handleImportProfile}
           onImportFile={handleImportFile}
           onBrowseMods={() => setIsBrowsingMode(true)}
+          onFindProfile={() => setShowProfileFinder(true)}
           onDeleteProfile={deleteProfile}
           onUpdateProfile={updateProfile}
           onToggleVanilla={handleToggleProfileVanilla}
@@ -2419,6 +2437,24 @@ function App() {
       await handleLaunchModdedDirect();
     };
 
+    const handleDuplicateActiveProfile = async () => {
+      if (!activeProfile) return;
+      if (profileActionLockRef.current || applyInFlightRef.current) return;
+
+      try {
+        profileActionLockRef.current = true;
+        const newId = await duplicateProfile(activeProfile.id);
+        if (newId) handleSelectProfile(newId);
+      } catch (error: any) {
+        await window.ipcRenderer.alert(
+          'Duplicate Failed',
+          String(error?.message || error || 'Failed to duplicate the profile.')
+        );
+      } finally {
+        profileActionLockRef.current = false;
+      }
+    };
+
     const handleStopProfileDirect = async () => {
       if (!activeProfile) return;
       if (profileActionLockRef.current || applyInFlightRef.current) return;
@@ -2439,6 +2475,22 @@ function App() {
         setIsStoppingProfile(false);
       }
     };
+
+    // Rendered beside the sidebar because these handlers only exist in this
+    // branch — there is nothing to apply or launch without an open profile.
+    const gameShortcuts = (
+      <KeyboardShortcuts
+        enabled={!showSettings && !showPreferences && !showExportModal && !showUpdateModal && !selectedMod}
+        handlers={{
+          'apply-mods': () => { void handleInstallToGameRequest(); },
+          'launch-modded': () => { void handleLaunchModdedDirect(); },
+          'launch-vanilla': () => { void handleLaunchVanillaDirect(); },
+          'stop-game': () => { void handleStopProfileDirect(); },
+          'find-profile': () => setShowProfileFinder(true),
+          'duplicate-profile': () => { void handleDuplicateActiveProfile(); },
+        }}
+      />
+    );
 
     const sidebar = (
       <ProfileSidebar
@@ -2619,12 +2671,15 @@ function App() {
       </div>
     );
 
-    content = <Layout
+    content = <>
+      {gameShortcuts}
+      <Layout
       sidebar={isBrowsingMode ? null : sidebar}
       main={main}
       isSidebarOpen={isBrowsingMode ? false : isSidebarOpen}
       onToggleSidebar={() => !isBrowsingMode && setIsSidebarOpen(!isSidebarOpen)}
-    />;
+      />
+    </>;
   }
 
   // WRAPPER
@@ -2634,6 +2689,17 @@ function App() {
       <div className="flex-1 overflow-hidden relative">
         {content}
       </div>
+
+      <ProfileFinder
+        isOpen={showProfileFinder}
+        profiles={profiles.filter((profile) => profile.gameIdentifier === selectedCommunity)}
+        activeProfileId={activeProfileId}
+        onSelect={(profileId) => {
+          setShowProfileFinder(false);
+          handleSelectProfile(profileId);
+        }}
+        onClose={() => setShowProfileFinder(false)}
+      />
 
       {isCustomModDragActive && (
         <div className="fixed inset-0 z-[55] bg-black/55 backdrop-blur-sm flex items-center justify-center pointer-events-none p-6">
@@ -2794,6 +2860,7 @@ function App() {
           stream_mode: streamMode,
           default_game: defaultGame,
           default_profile: defaultProfile,
+          keybinds: overridesFromKeybinds(activeKeybinds),
         }}
         communities={communities}
         communityImages={communityImages}

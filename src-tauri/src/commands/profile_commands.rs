@@ -98,6 +98,60 @@ pub async fn save_profiles(
     Ok(true)
 }
 
+/// Copy a profile's own folder so the duplicate starts with the same mod files.
+///
+/// The profile record is created on the frontend; this only mirrors what lives
+/// on disk under `profiles/<id>`. A profile that has never been applied has no
+/// folder yet, which is not an error — the duplicate simply starts empty.
+#[command]
+pub async fn duplicate_profile_folder(
+    app: AppHandle,
+    source_profile_id: String,
+    new_profile_id: String,
+) -> Result<bool, String> {
+    let profiles_dir = crate::utils::paths::app_data_dir(&app)
+        .map_err(|e| format!("Failed to resolve the app data directory: {}", e))?
+        .join("profiles");
+
+    // Ids come from the frontend and are used as directory names, so anything
+    // carrying path structure is refused rather than normalised.
+    let source = profiles_dir.join(safe_profile_dir_name(&source_profile_id)?);
+    let destination = profiles_dir.join(safe_profile_dir_name(&new_profile_id)?);
+
+    if !source.exists() {
+        return Ok(false);
+    }
+    if destination.exists() {
+        return Err(format!(
+            "A profile folder named {} already exists",
+            new_profile_id
+        ));
+    }
+
+    let result = tokio::task::spawn_blocking(move || copy_dir_recursive(&source, &destination))
+        .await
+        .map_err(|e| format!("Task join error: {}", e))?;
+
+    match result {
+        Ok(()) => Ok(true),
+        Err(e) => Err(format!("Could not copy the profile folder: {}", e)),
+    }
+}
+
+/// Reduce a profile id to a single safe directory name.
+fn safe_profile_dir_name(raw: &str) -> Result<String, String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err("Profile id is empty".to_string());
+    }
+
+    let mut components = Path::new(trimmed).components();
+    match (components.next(), components.next()) {
+        (Some(Component::Normal(value)), None) => Ok(value.to_string_lossy().to_string()),
+        _ => Err(format!("Invalid profile id: {}", raw)),
+    }
+}
+
 #[command]
 pub async fn delete_profile_folder(
     app: AppHandle,

@@ -4,6 +4,7 @@ import type { Profile, InstalledMod } from '../../types/profile';
 import type { RuntimeHealth } from '../../types/electron';
 import type { ProfileModUpdate } from '../../hooks/useModActions';
 import { Button, HoverMarquee } from '../ui';
+import { KeyboardShortcuts } from '../KeyboardShortcuts';
 import { compareVersions, hasNewerVersion, latestVersionNumber, parsePackageReference } from '../../utils/modVersioning';
 import { hasPendingRuntimeInstall, restoreInstalledMod } from '../../utils/profileSync';
 import { getProfileAvatarGradient } from '../../utils/profileAvatar';
@@ -190,6 +191,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
     onRepairRuntime,
 }) => {
     const [searchQuery, setSearchQuery] = useState('');
+    const searchInputRef = useRef<HTMLInputElement>(null);
     const [isEditing, setIsEditing] = useState(false);
     const [editName, setEditName] = useState('');
     const [selectedModIds, setSelectedModIds] = useState<string[]>([]);
@@ -762,6 +764,16 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                 </div>
             </div>
 
+            {/* The field lives here, so the shortcut that focuses it does too. */}
+            <KeyboardShortcuts
+                handlers={{
+                    'search-mods': () => {
+                        searchInputRef.current?.focus();
+                        searchInputRef.current?.select();
+                    },
+                }}
+            />
+
             {/* Local Mod Search */}
             <div className="profile-sidebar-motion-item [--sidebar-motion-order:1] px-4 pt-4 pb-2">
                 <div className="flex gap-2">
@@ -772,6 +784,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                             </svg>
                         </div>
                         <input
+                            ref={searchInputRef}
                             type="text"
                             value={searchQuery}
                             onChange={(e) => {

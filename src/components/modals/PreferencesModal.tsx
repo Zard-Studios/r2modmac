@@ -4,6 +4,8 @@ import { Toggle } from '../ui/Toggle';
 import { HeartIcon } from '../LikeStat';
 import { DefaultGamePickerModal } from './DefaultGamePickerModal';
 import { ThemeEditorModal } from './ThemeEditorModal';
+import { KeybindsModal } from './KeybindsModal';
+import { formatAccelerator, overridesFromKeybinds, resolveKeybinds, type KeybindMap } from '../../utils/keybinds';
 import { useThemeStore } from '../../store/useThemeStore';
 import type { Community, CommunityPlatformInfo } from '../../types/thunderstore';
 
@@ -22,6 +24,8 @@ export interface PreferencesSettings {
     sponsored_messages_background_opacity: number;
     default_game: string | null;
     default_profile?: string | null;
+    /** Only the shortcuts the user changed; see `src/utils/keybinds.ts`. */
+    keybinds?: Record<string, string>;
 }
 
 interface PreferencesModalProps {
@@ -46,7 +50,15 @@ function IconBox({ children, colorClass }: { children: React.ReactNode; colorCla
     );
 }
 
-function RowIcon({ kind }: { kind: 'install' | 'version' | 'parallel' | 'apply' | 'logs' | 'layout' | 'warning' | 'cache' | 'stream' | 'update' | 'support' | 'folder' | 'game' | 'profile' | 'theme' }) {
+function RowIcon({ kind }: { kind: 'install' | 'version' | 'parallel' | 'apply' | 'logs' | 'layout' | 'warning' | 'cache' | 'stream' | 'update' | 'support' | 'folder' | 'game' | 'profile' | 'theme' | 'keyboard' }) {
+    if (kind === 'keyboard') return (
+        <IconBox colorClass="text-amber-400">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <rect x="2.5" y="6" width="19" height="12" rx="2" strokeWidth={1.5} />
+                <path strokeLinecap="round" strokeWidth={1.5} d="M6 9.5h.01M9.5 9.5h.01M13 9.5h.01M16.5 9.5h.01M6 12.75h.01M9.5 12.75h.01M13 12.75h.01M16.5 12.75h.01M8 15.5h8" />
+            </svg>
+        </IconBox>
+    );
     if (kind === 'theme') return (
         <IconBox colorClass="text-pink-400">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -184,6 +196,8 @@ export default function PreferencesModal({
     const [defaultProfile, setDefaultProfile] = useState<string | null>(settings.default_profile ?? null);
     const [showGamePicker, setShowGamePicker] = useState(false);
     const [showThemeEditor, setShowThemeEditor] = useState(false);
+    const [showKeybinds, setShowKeybinds] = useState(false);
+    const [keybinds, setKeybinds] = useState<KeybindMap>(() => resolveKeybinds(settings.keybinds));
     const themes = useThemeStore((s) => s.themes);
     const activeThemeFileName = useThemeStore((s) => s.activeFileName);
     const activeThemeName =
@@ -218,6 +232,7 @@ export default function PreferencesModal({
             setSponsoredMessagesOpacity(settings.sponsored_messages_background_opacity ?? 80);
             setDefaultGame(settings.default_game ?? null);
             setDefaultProfile(settings.default_profile ?? null);
+            setKeybinds(resolveKeybinds(settings.keybinds));
         } else {
             setIsVisible(false);
         }
@@ -273,6 +288,7 @@ export default function PreferencesModal({
             sponsored_messages_background_opacity: sponsoredMessagesOpacity,
             default_game: defaultGame,
             default_profile: defaultProfile,
+            keybinds: overridesFromKeybinds(keybinds),
         });
         onClose();
     };
@@ -363,6 +379,41 @@ export default function PreferencesModal({
                                     <button
                                         type="button"
                                         onClick={() => setShowThemeEditor(true)}
+                                        className="rounded-lg border border-gray-600 px-4 py-2 text-[13px] font-medium text-gray-200 transition-colors hover:border-gray-500 hover:bg-gray-700"
+                                    >
+                                        Customise
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Keyboard Section */}
+                    <div className="space-y-3">
+                        <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-widest px-1">Keyboard</h3>
+
+                        <div className="bg-gray-800 border border-gray-700 rounded-2xl overflow-hidden">
+                            <div className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-gray-750">
+                                <div className="flex items-center gap-4">
+                                    <RowIcon kind="keyboard" />
+                                    <div>
+                                        <p className="text-[15px] font-medium text-white">Keyboard shortcuts</p>
+                                        <p className="text-[13px] text-gray-400 mt-0.5 leading-snug">
+                                            Launch, apply and switch profiles without reaching for the mouse.
+                                        </p>
+                                    </div>
+                                </div>
+                                <div className="flex shrink-0 items-center gap-3">
+                                    {/* The one people reach for most, so the row
+                                        says something without being opened. */}
+                                    <span className="text-[13px] text-gray-400">
+                                        {keybinds['launch-modded']
+                                            ? `Launch ${formatAccelerator(keybinds['launch-modded'])}`
+                                            : 'Customised'}
+                                    </span>
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowKeybinds(true)}
                                         className="rounded-lg border border-gray-600 px-4 py-2 text-[13px] font-medium text-gray-200 transition-colors hover:border-gray-500 hover:bg-gray-700"
                                     >
                                         Customise
@@ -781,6 +832,13 @@ export default function PreferencesModal({
                 setDefaultProfile(profileName ?? null);
             }}
         />
+        <KeybindsModal
+            isOpen={showKeybinds}
+            keybinds={keybinds}
+            onChange={setKeybinds}
+            onClose={() => setShowKeybinds(false)}
+        />
+
         <ThemeEditorModal
             isOpen={showThemeEditor}
             onClose={() => setShowThemeEditor(false)}

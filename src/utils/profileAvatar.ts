@@ -44,3 +44,20 @@ export const getProfileAvatarGradient = (profileName: string, fallbackId = ''): 
     gradientCache.set(key, gradient);
     return gradient;
 };
+
+/**
+ * The single character shown on a profile's avatar.
+ *
+ * Grapheme-aware, so a name starting with an emoji or a combining mark shows
+ * the whole character rather than half of it.
+ */
+export const getProfileInitial = (name: string): string => {
+    if (!name) return '';
+    try {
+        const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+        const first = [...segmenter.segment(name)][0]?.segment;
+        return first ? first.toUpperCase() : '';
+    } catch {
+        return ([...name][0] || '').toUpperCase();
+    }
+};
