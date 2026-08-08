@@ -179,13 +179,21 @@ pub(crate) fn read_console_log_tail(steam_root: &Path) -> Option<String> {
 ///
 /// Called after the game process fails to appear, so the user gets the actual
 /// reason instead of a bare timeout.
-pub(crate) fn explain_stalled_launch(steam_root: &Path, app_id: &str) -> Option<String> {
-    if let Some(flags) = read_state_flags(steam_root, app_id) {
+///
+/// `client_root` is the Steam install that owns the logs; `library_root` is the
+/// library folder holding the game's appmanifest. They are the same directory
+/// only when the game lives in the client's own library.
+pub(crate) fn explain_stalled_launch(
+    client_root: &Path,
+    library_root: &Path,
+    app_id: &str,
+) -> Option<String> {
+    if let Some(flags) = read_state_flags(library_root, app_id) {
         if let Some(blocker) = describe_state_blocker(flags) {
             return Some(blocker);
         }
     }
-    if let Some(log) = read_console_log_tail(steam_root) {
+    if let Some(log) = read_console_log_tail(client_root) {
         if let Some(prompt) = pending_user_prompt_for_app(&log, app_id) {
             return Some(prompt);
         }
@@ -194,7 +202,7 @@ pub(crate) fn explain_stalled_launch(steam_root: &Path, app_id: &str) -> Option<
     // Fallback: check native macOS Steam log if different from steam_root
     if let Some(home) = dirs::home_dir() {
         let mac_steam_root = home.join("Library/Application Support/Steam");
-        if mac_steam_root != steam_root && mac_steam_root.exists() {
+        if mac_steam_root != client_root && mac_steam_root.exists() {
             if let Some(log) = read_console_log_tail(&mac_steam_root) {
                 if let Some(prompt) = pending_user_prompt_for_app(&log, app_id) {
                     return Some(prompt);
@@ -223,7 +231,8 @@ pub(crate) enum LaunchWaitOutcome {
 /// a Steam Cloud conflict shows up within a couple of seconds, so there is no
 /// reason to make the user stare at a spinner for a minute first.
 pub(crate) fn wait_for_launch_or_blocker(
-    steam_root: &Path,
+    client_root: &Path,
+    library_root: &Path,
     app_id: &str,
     timeout_ms: u64,
     is_started: impl Fn() -> bool,
@@ -239,7 +248,7 @@ pub(crate) fn wait_for_launch_or_blocker(
             return LaunchWaitOutcome::Started;
         }
         if attempt > 0 && attempt % STEAM_CHECK_EVERY == 0 {
-            if let Some(reason) = explain_stalled_launch(steam_root, app_id) {
+            if let Some(reason) = explain_stalled_launch(client_root, library_root, app_id) {
                 // Re-check the process first: the game may have started in the
                 // same tick, which beats a stale log line.
                 if is_started() {
@@ -254,7 +263,7 @@ pub(crate) fn wait_for_launch_or_blocker(
     if is_started() {
         return LaunchWaitOutcome::Started;
     }
-    match explain_stalled_launch(steam_root, app_id) {
+    match explain_stalled_launch(client_root, library_root, app_id) {
         Some(reason) => LaunchWaitOutcome::Blocked(reason),
         None => LaunchWaitOutcome::TimedOut,
     }
@@ -292,7 +301,7 @@ mod tests {
     #[test]
     fn wait_reports_started_without_consulting_steam() {
         let root = fake_steam_root("1229490", 4, "");
-        let outcome = wait_for_launch_or_blocker(&root, "1229490", 5_000, || true);
+        let outcome = wait_for_launch_or_blocker(&root, &root, "1229490", 5_000, || true);
         assert!(matches!(outcome, LaunchWaitOutcome::Started));
         std::fs::remove_dir_all(root).unwrap();
     }
@@ -304,7 +313,7 @@ mod tests {
         let started = std::time::Instant::now();
         // A generous deadline: the point is that it returns as soon as Steam's
         // state is readable, not that it waits it out.
-        let outcome = wait_for_launch_or_blocker(&root, "3527290", 60_000, || false);
+        let outcome = wait_for_launch_or_blocker(&root, &root, "3527290", 60_000, || false);
         let elapsed = started.elapsed();
         match outcome {
             LaunchWaitOutcome::Blocked(reason) => {
@@ -323,7 +332,7 @@ mod tests {
     fn wait_reports_a_pending_update_as_blocked() {
         // StateFlags 1030 — PEAK's observed state with a pending download.
         let root = fake_steam_root("3527290", 1030, "");
-        match wait_for_launch_or_blocker(&root, "3527290", 30_000, || false) {
+        match wait_for_launch_or_blocker(&root, &root, "3527290", 30_000, || false) {
             LaunchWaitOutcome::Blocked(reason) => assert!(reason.contains("updating"), "{reason}"),
             _ => panic!("expected Blocked"),
         }
@@ -333,7 +342,7 @@ mod tests {
     #[test]
     fn wait_times_out_when_steam_reports_nothing() {
         let root = fake_steam_root("1229490", 4, "");
-        let outcome = wait_for_launch_or_blocker(&root, "1229490", 1_000, || false);
+        let outcome = wait_for_launch_or_blocker(&root, &root, "1229490", 1_000, || false);
         assert!(matches!(outcome, LaunchWaitOutcome::TimedOut));
         std::fs::remove_dir_all(root).unwrap();
     }
@@ -344,7 +353,7 @@ mod tests {
         // otherwise a leftover line would fail a launch that actually worked.
         let log = "[20:07:37] GameAction [AppID 3527290, ActionID 1] : LaunchApp waiting for user response to SynchronizingCloud \"pendingcloudsessions\"\n";
         let root = fake_steam_root("3527290", 4, log);
-        let outcome = wait_for_launch_or_blocker(&root, "3527290", 10_000, || true);
+        let outcome = wait_for_launch_or_blocker(&root, &root, "3527290", 10_000, || true);
         assert!(matches!(outcome, LaunchWaitOutcome::Started));
         std::fs::remove_dir_all(root).unwrap();
     }

@@ -48,5 +48,10 @@ export function describeLaunchIssue(raw: string): LaunchIssue {
     if (lower.includes('did not start') || lower.includes('was not running')) {
         return { title: 'Game Did Not Start', message, pointsAtSteam: true };
     }
+    // Not a Steam-side condition: Steam is fine, we just cannot see which
+    // client owns the game, so the fix is in r2modmac's own Settings.
+    if (lower.includes('could not find the windows steam client')) {
+        return { title: 'Steam Client Not Found', message, pointsAtSteam: false };
+    }
     return { title: "Game Launch Failed", message, pointsAtSteam: false };
 }

@@ -146,9 +146,9 @@ pub(crate) fn launch_windows_direct_game_with_working_dir(
     Ok(())
 }
 
-pub(crate) fn launch_windows_steam_game(
-    app: &AppHandle,
+pub(super) fn launch_windows_steam_game(
     game_path: &std::path::Path,
+    target: &SteamLaunchTarget,
 ) -> Result<(), String> {
     let executable_path = find_pe_game_executable_path(game_path).ok_or_else(|| {
         "Could not find a Windows game executable in the selected folder.".to_string()
@@ -163,10 +163,9 @@ pub(crate) fn launch_windows_steam_game(
         return Err("Game is already running.".to_string());
     }
 
-    let steam_root = find_matching_steam_root_for_game_path(app, game_path, true)
-        .ok_or_else(|| "Could not match this Windows game to a Steam installation.".to_string())?;
-    let app_id = find_steam_app_id_for_game_path(&steam_root, game_path)
-        .ok_or_else(|| "Could not determine the Steam app ID for this Windows game.".to_string())?;
+    let steam_root = target.client_root.clone();
+    let library_root = target.library_root.clone();
+    let app_id = target.app_id.clone();
     let steam_executable = steam_root.join("steam.exe");
     if !steam_executable.exists() {
         return Err(format!(
@@ -179,7 +178,7 @@ pub(crate) fn launch_windows_steam_game(
     // the game — a pending update or a paused download parks it indefinitely.
     // Report that up front rather than letting the caller wait for a timeout.
     if let Some(flags) =
-        crate::commands::game_commands::steam_state::read_state_flags(&steam_root, &app_id)
+        crate::commands::game_commands::steam_state::read_state_flags(&library_root, &app_id)
     {
         if let Some(blocker) =
             crate::commands::game_commands::steam_state::describe_state_blocker(flags)
@@ -228,6 +227,7 @@ pub(crate) fn launch_windows_steam_game(
                         let timeout_ms = if steam_was_running { 60_000 } else { 180_000 };
                         match crate::commands::game_commands::steam_state::wait_for_launch_or_blocker(
                             &steam_root,
+                            &library_root,
                             &app_id,
                             timeout_ms,
                             || is_process_running_for_patterns(&process_patterns),
@@ -312,6 +312,7 @@ pub(crate) fn launch_windows_steam_game(
     let timeout_ms = if steam_was_running { 60_000 } else { 180_000 };
     match crate::commands::game_commands::steam_state::wait_for_launch_or_blocker(
         &steam_root,
+        &library_root,
         &app_id,
         timeout_ms,
         || is_process_running_for_patterns(&process_patterns),
@@ -370,10 +371,19 @@ pub(crate) fn launch_windows_game(
     app: &AppHandle,
     game_path: &std::path::Path,
 ) -> Result<(), String> {
-    let distribution = infer_distribution_from_game_path(app, game_path, true);
-    if distribution == "steam" && can_launch_via_steam_for_game_path(app, game_path, true) {
-        return launch_windows_steam_game(app, game_path);
-    }
+    let steam_roots = get_steam_roots_for_platform(app, true);
+    log::info!(
+        "[launch_windows_game] Planning launch of {:?}. Known Windows Steam roots: {:?}",
+        game_path,
+        steam_roots
+    );
 
-    launch_windows_direct_game(game_path)
+    match plan_windows_launch(&steam_roots, game_path) {
+        WindowsLaunchPlan::ViaSteam(target) => launch_windows_steam_game(game_path, &target),
+        WindowsLaunchPlan::Direct => launch_windows_direct_game(game_path),
+        WindowsLaunchPlan::SteamClientMissing => Err(
+            "This game is installed through Steam, but r2modmac could not find the Windows Steam client that owns it. Set the Windows Steam directory (the folder that contains steam.exe, inside your CrossOver/Wine bottle) in Settings and try again."
+                .to_string(),
+        ),
+    }
 }

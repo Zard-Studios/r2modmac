@@ -66,3 +66,13 @@ test('an empty error never renders a blank dialog', () => {
     assert.equal(issue.message, 'The game could not be started.');
     assert.ok(issue.title.length > 0);
 });
+
+test('a Steam game with no reachable client points at Settings, not at Steam', () => {
+    // Issue #25: the game lives in a Steam library outside the bottle, so the
+    // client that owns it cannot be matched. Steam has nothing to fix here.
+    const issue = describeLaunchIssue(
+        'This game is installed through Steam, but r2modmac could not find the Windows Steam client that owns it. Set the Windows Steam directory (the folder that contains steam.exe, inside your CrossOver/Wine bottle) in Settings and try again.'
+    );
+    assert.equal(issue.title, 'Steam Client Not Found');
+    assert.equal(issue.pointsAtSteam, false);
+});

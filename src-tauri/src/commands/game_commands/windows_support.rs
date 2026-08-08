@@ -78,20 +78,6 @@ pub(crate) fn find_pe_game_executable_path(
     candidates.into_iter().next()
 }
 
-pub(crate) fn find_wine_prefix_root(path: &std::path::Path) -> Option<std::path::PathBuf> {
-    for ancestor in path.ancestors() {
-        let is_drive_c = ancestor
-            .file_name()
-            .and_then(|value| value.to_str())
-            .map(|value| value.eq_ignore_ascii_case("drive_c"))
-            .unwrap_or(false);
-        if is_drive_c {
-            return ancestor.parent().map(|parent| parent.to_path_buf());
-        }
-    }
-    None
-}
-
 pub(crate) fn find_host_compat_runner_binary(
     prefix_root: Option<&std::path::Path>,
     executable_path: &std::path::Path,
