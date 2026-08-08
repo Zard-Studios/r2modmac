@@ -23,8 +23,6 @@ interface ProfileListProps {
     onImportProfile: (code: string, platform: 'windows' | 'mac') => void;
     onImportFile: (path: string, platform: 'windows' | 'mac') => void;
     onBrowseMods: () => void;
-    /** Opens the app-wide search, for the keyboard shortcut. */
-    onOpenSearch: () => void;
     /**
      * Opens the search narrowed to profiles, for the magnifier on this page.
      * Deliberately not the same thing: a control sitting among the profile
@@ -46,7 +44,6 @@ export function ProfileList({
     onImportProfile,
     onImportFile,
     onBrowseMods,
-    onOpenSearch,
     onFindProfile,
     onDeleteProfile,
     onUpdateProfile,
@@ -137,7 +134,6 @@ export function ProfileList({
                     setSelectedPlatform('windows');
                     setIsCreating(true);
                 },
-                'open-search': onOpenSearch,
             }}
         />
     );

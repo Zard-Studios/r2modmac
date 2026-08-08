@@ -387,6 +387,39 @@ export function findKeybindConflicts(keybinds: KeybindMap): Map<string, KeybindA
     return new Map([...byAccelerator].filter(([, ids]) => ids.length > 1));
 }
 
+/**
+ * Combinations that belong to the text field the caret is in.
+ *
+ * Everything else is let through while typing: on a desktop app Command-R
+ * still means "launch" with the cursor in a search box. Only the editing
+ * gestures have to stay with the field, or a shortcut would quietly break
+ * select-all and paste.
+ */
+const TEXT_EDITING_ACCELERATORS = new Set([
+    'Mod+A',
+    'Mod+C',
+    'Mod+V',
+    'Mod+X',
+    'Mod+Z',
+    'Mod+Shift+Z',
+    'Mod+Y',
+    'Mod+Left',
+    'Mod+Right',
+    'Mod+Up',
+    'Mod+Down',
+    'Mod+Backspace',
+    'Mod+Delete',
+]);
+
+/** Whether a combination must be left to the focused text field. */
+export function isTextEditingAccelerator(
+    accelerator: string,
+    platform: Platform = detectPlatform()
+): boolean {
+    const canonical = normalizeAccelerator(accelerator, platform);
+    return canonical !== null && TEXT_EDITING_ACCELERATORS.has(canonical);
+}
+
 /** The action a key event triggers, if any. */
 export function actionForEvent(
     event: Pick<KeyboardEvent, 'code' | 'ctrlKey' | 'altKey' | 'shiftKey' | 'metaKey'>,

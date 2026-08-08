@@ -315,6 +315,7 @@ function App() {
   const [showPreferences, setShowPreferences] = useState(false)
   const activeKeybinds = useKeybindStore((state) => state.keybinds)
   const openPalette = useCommandStore((state) => state.open)
+  const togglePalette = useCommandStore((state) => state.toggle)
   // Which panel Preferences should land on, when a command names one.
   const [preferencesPanel, setPreferencesPanel] = useState<'theme' | 'keybinds' | null>(null)
   const [legacyInstallMode, setLegacyInstallMode] = useState(false)
@@ -2444,7 +2445,6 @@ function App() {
           onImportProfile={handleImportProfile}
           onImportFile={handleImportFile}
           onBrowseMods={() => setIsBrowsingMode(true)}
-          onOpenSearch={() => openPalette()}
           onFindProfile={() => openPalette('Profiles')}
           onDeleteProfile={deleteProfile}
           onUpdateProfile={updateProfile}
@@ -2671,7 +2671,6 @@ function App() {
           'launch-modded': () => { void handleLaunchModdedDirect(); },
           'launch-vanilla': () => { void handleLaunchVanillaDirect(); },
           'stop-game': () => { void handleStopProfileDirect(); },
-          'open-search': () => openPalette(),
           'duplicate-profile': () => { void handleDuplicateActiveProfile(); },
         }}
       />
@@ -2875,6 +2874,13 @@ function App() {
       <div className="flex-1 overflow-hidden relative">
         {content}
       </div>
+
+      {/* Mounted here rather than per screen: search has to answer on the game
+          list too, where none of the view-scoped listeners exist. */}
+      <KeyboardShortcuts
+        enabled={!showSettings && !showPreferences && !showExportModal && !showUpdateModal}
+        handlers={{ 'open-search': () => togglePalette() }}
+      />
 
       <CommandPalette />
 

@@ -8,6 +8,7 @@ import {
     actionForEvent,
     findKeybindConflicts,
     formatAccelerator,
+    isTextEditingAccelerator,
     isUsableAccelerator,
     normalizeAccelerator,
     overridesFromKeybinds,
@@ -227,4 +228,30 @@ test('the current name wins when a settings file carries both', () => {
     ]) {
         assert.equal(resolveKeybinds(overrides, 'apple')['open-search'], 'Mod+Shift+J');
     }
+});
+
+// ── Shortcuts while a text field has focus ───────────────────────────────────
+
+test('the editing gestures stay with the focused field', () => {
+    for (const combination of ['Mod+A', 'Mod+C', 'Mod+V', 'Mod+X', 'Mod+Z', 'Mod+Shift+Z', 'Mod+Left']) {
+        assert.equal(isTextEditingAccelerator(combination, 'apple'), true, combination);
+    }
+});
+
+test('every other shortcut still works with the caret in a field', () => {
+    // The game list focuses its search box on arrival, so a rule that gave up
+    // on every shortcut inside a text field would leave search unreachable
+    // exactly where it is most useful.
+    for (const action of KEYBIND_ACTIONS) {
+        assert.equal(
+            isTextEditingAccelerator(action.defaultAccelerator, 'apple'),
+            false,
+            `${action.id} (${action.defaultAccelerator}) must survive a focused field`
+        );
+    }
+});
+
+test('the editing gestures are recognised on Windows and Linux too', () => {
+    assert.equal(isTextEditingAccelerator('Ctrl+A', 'other'), true);
+    assert.equal(isTextEditingAccelerator('Ctrl+R', 'other'), false);
 });

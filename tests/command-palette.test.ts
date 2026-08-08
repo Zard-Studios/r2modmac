@@ -173,3 +173,12 @@ test('a scoped search matches a slash as an ordinary character', () => {
 test('a scoped search with no match yields nothing rather than falling back', () => {
     assert.deepEqual(buildSections(catalogue, 'lethal', 'Profiles'), []);
 });
+
+test('an item with no title does not take the whole search down', () => {
+    // Real game lists contain the occasional entry with nothing readable on it.
+    const messy = [
+        item({ id: 'g1', title: undefined as unknown as string }),
+        item({ id: 'g2', title: 'Lethal Company' }),
+    ];
+    assert.deepEqual(flattenSections(buildSections(messy, 'lethal')).map((i) => i.title), ['Lethal Company']);
+});

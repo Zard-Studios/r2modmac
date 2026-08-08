@@ -172,21 +172,20 @@ export function CommandPalette() {
                 onClick={(e) => e.stopPropagation()}
             >
                 <div className="flex shrink-0 items-center gap-3 border-b border-gray-800 px-5 py-4">
-                    {slashMode ? (
-                        <span className="flex h-5 w-5 shrink-0 items-center justify-center text-[15px] font-semibold text-fg-accent">
-                            /
-                        </span>
-                    ) : (
-                        <svg
-                            className={`h-5 w-5 shrink-0 transition-colors ${query ? 'text-blue-500' : 'text-gray-500'}`}
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth={2}
-                            viewBox="0 0 24 24"
-                        >
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                        </svg>
-                    )}
+                    {/* One magnifier, tinted when the query has turned into a
+                        command. Swapping it for a slash glyph put a second
+                        slash beside the one being typed. */}
+                    <svg
+                        className={`h-5 w-5 shrink-0 transition-colors ${
+                            slashMode ? 'text-fg-accent' : query ? 'text-blue-500' : 'text-gray-500'
+                        }`}
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth={2}
+                        viewBox="0 0 24 24"
+                    >
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    </svg>
                     <input
                         ref={inputRef}
                         value={query}

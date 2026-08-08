@@ -15,6 +15,8 @@ interface CommandState {
     scope: CommandGroup | null;
     open: (scope?: CommandGroup) => void;
     close: () => void;
+    /** What the shortcut does: the same key that opened it puts it away. */
+    toggle: (scope?: CommandGroup) => void;
 
     /** Providers by source id, in registration order. */
     providers: Record<string, CommandProvider>;
@@ -35,6 +37,8 @@ export const useCommandStore = create<CommandState>((set) => ({
     scope: null,
     open: (scope) => set({ isOpen: true, scope: scope ?? null }),
     close: () => set({ isOpen: false }),
+    toggle: (scope) =>
+        set((state) => (state.isOpen ? { isOpen: false } : { isOpen: true, scope: scope ?? null })),
 
     providers: {},
     setProvider: (id, provider) =>
@@ -72,8 +76,12 @@ export function collectCommands(providers: Record<string, CommandProvider>): Com
     return Object.values(providers).flatMap((provider) => {
         try {
             return provider();
-        } catch {
-            // One broken source must not take the whole palette down with it.
+        } catch (error) {
+            // One broken source must not take the whole palette down with it —
+            // but it must not disappear quietly either. Swallowing this once
+            // turned a crash into a palette that simply found nothing, which is
+            // far harder to diagnose than the error itself.
+            console.error('[command-palette] a source failed to build its items', error);
             return [];
         }
     });

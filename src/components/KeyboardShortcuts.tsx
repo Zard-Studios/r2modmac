@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 
 import { useKeybindStore } from '../store/useKeybindStore';
-import { actionForEvent, type KeybindActionId } from '../utils/keybinds';
+import { acceleratorFromEvent, actionForEvent, isTextEditingAccelerator, type KeybindActionId } from '../utils/keybinds';
 
 type Handlers = Partial<Record<KeybindActionId, () => void>>;
 
@@ -36,18 +36,21 @@ export function KeyboardShortcuts({ handlers, enabled = true }: KeyboardShortcut
         const onKeyDown = (event: KeyboardEvent) => {
             if (event.defaultPrevented) return;
 
-            // Typing comes first. Every shortcut carries a modifier, but ⌘A and
-            // friends still belong to the field the caret is in.
+            // Only the editing gestures are surrendered to a focused field.
+            // Bailing out of every shortcut instead would strand the ones that
+            // matter most on screens whose search box takes focus on arrival —
+            // the game list being exactly that.
             const target = event.target as HTMLElement | null;
-            if (
-                target &&
+            const inTextField =
+                !!target &&
                 (target.tagName === 'INPUT' ||
                     target.tagName === 'TEXTAREA' ||
                     target.tagName === 'SELECT' ||
-                    target.isContentEditable)
-            ) {
-                return;
-            }
+                    target.isContentEditable);
+
+            const accelerator = acceleratorFromEvent(event);
+            if (!accelerator) return;
+            if (inTextField && isTextEditingAccelerator(accelerator)) return;
 
             const action = actionForEvent(event, keybinds);
             if (!action) return;

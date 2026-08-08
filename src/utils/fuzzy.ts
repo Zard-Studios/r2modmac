@@ -14,8 +14,11 @@
  * score more, so typing "bl" puts "Best Lethal" above "Bumbling", which is what
  * someone reaching for a profile by initials expects.
  */
-export function fuzzyScore(query: string, candidate: string): number | null {
+export function fuzzyScore(query: string, candidate: string | null | undefined): number | null {
     if (!query) return 0;
+    // Games come from Thunderstore, which does not promise every entry has a
+    // readable name. One missing string must not take the search down.
+    if (typeof candidate !== 'string' || candidate === '') return null;
 
     const needle = query.toLowerCase();
     const haystack = candidate.toLowerCase();

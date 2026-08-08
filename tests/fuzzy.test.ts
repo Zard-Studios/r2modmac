@@ -36,3 +36,15 @@ test('an empty query matches everything so the list starts whole', () => {
 test('matching ignores case', () => {
     assert.notEqual(fuzzyScore('LETHAL', 'best lethal'), null);
 });
+
+test('a candidate with no name is skipped rather than throwing', () => {
+    // Games come from Thunderstore, which does not promise every entry carries
+    // a readable name. One missing string used to take the whole search down.
+    assert.equal(fuzzyScore('lethal', undefined), null);
+    assert.equal(fuzzyScore('lethal', null), null);
+    assert.equal(fuzzyScore('lethal', ''), null);
+});
+
+test('an empty query still matches a nameless candidate as nothing', () => {
+    assert.equal(fuzzyScore('', undefined), 0);
+});
