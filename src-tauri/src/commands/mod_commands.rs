@@ -6975,3 +6975,169 @@ mod tests {
         assert_eq!(res, std::path::PathBuf::from("doorstop_config.ini"));
     }
 }
+
+#[cfg(test)]
+mod extraction_characterisation_tests {
+    use super::*;
+    use std::io::{Cursor, Write};
+
+    /// Locks in what extraction actually puts on disk.
+    ///
+    /// These exist so the install path can be moved off the async runtime
+    /// without changing what lands in the game folder. They describe the
+    /// current behaviour deliberately: if a refactor changes any of it, that is
+    /// the signal, not a test to be adjusted.
+    fn zip_fixture(entries: &[(&str, &[u8])]) -> Vec<u8> {
+        let mut bytes = Cursor::new(Vec::new());
+        {
+            let mut writer = zip::ZipWriter::new(&mut bytes);
+            let options = zip::write::FileOptions::default();
+            for (name, content) in entries {
+                writer.start_file(*name, options).unwrap();
+                writer.write_all(content).unwrap();
+            }
+            writer.finish().unwrap();
+        }
+        bytes.into_inner()
+    }
+
+    fn temp_root(label: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "r2modmac-extract-{label}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn archive(bytes: &[u8]) -> zip::ZipArchive<Cursor<&[u8]>> {
+        zip::ZipArchive::new(Cursor::new(bytes)).unwrap()
+    }
+
+    /// Every file written under `root`, relative and sorted.
+    fn files_under(root: &std::path::Path) -> Vec<String> {
+        let mut found: Vec<String> = walkdir::WalkDir::new(root)
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_type().is_file())
+            .map(|e| {
+                e.path()
+                    .strip_prefix(root)
+                    .unwrap()
+                    .to_string_lossy()
+                    .replace('\\', "/")
+            })
+            .collect();
+        found.sort();
+        found
+    }
+
+    #[test]
+    fn a_regular_mod_lands_under_its_own_plugin_folder() {
+        let root = temp_root("regular");
+        let bytes = zip_fixture(&[
+            ("manifest.json", br#"{"version_number":"1.0.0"}"#),
+            ("icon.png", b"icon"),
+            ("README.md", b"readme"),
+            ("Plugin.dll", b"plugin"),
+        ]);
+
+        extract_regular_mod_to_root(&mut archive(&bytes), &root, "Someone-ModA", false).unwrap();
+
+        let written = files_under(&root);
+        assert!(
+            written.iter().all(|p| p.contains("Someone-ModA")),
+            "everything belongs to the mod's own folder: {written:?}"
+        );
+        assert!(
+            written.iter().any(|p| p.ends_with("Plugin.dll")),
+            "the plugin itself was written: {written:?}"
+        );
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn the_disabled_runtime_variant_writes_somewhere_else_entirely() {
+        // Installing into a switched-off profile must not touch the live tree.
+        let live = temp_root("live");
+        let disabled = temp_root("disabled");
+        let bytes = zip_fixture(&[("Plugin.dll", b"plugin")]);
+
+        extract_regular_mod_to_root(&mut archive(&bytes), &live, "Someone-ModA", false).unwrap();
+        extract_regular_mod_to_root(&mut archive(&bytes), &disabled, "Someone-ModA", true).unwrap();
+
+        assert_ne!(
+            files_under(&live),
+            files_under(&disabled),
+            "the two runtimes must not resolve to the same path"
+        );
+
+        fs::remove_dir_all(&live).ok();
+        fs::remove_dir_all(&disabled).ok();
+    }
+
+    #[test]
+    fn an_entry_climbing_out_of_the_archive_cannot_escape_the_target() {
+        // A hostile archive is the one case where being wrong writes into the
+        // user's filesystem, so this is a requirement rather than a record of
+        // current behaviour.
+        let root = temp_root("slip");
+        let outside = root.parent().unwrap().join("r2modmac-escaped-marker.txt");
+        let _ = fs::remove_file(&outside);
+
+        let bytes = zip_fixture(&[
+            ("../r2modmac-escaped-marker.txt", b"escaped"),
+            ("Plugin.dll", b"plugin"),
+        ]);
+        extract_regular_mod_to_root(&mut archive(&bytes), &root, "Someone-ModA", false).unwrap();
+
+        assert!(!outside.exists(), "the entry escaped to {outside:?}");
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn the_manifest_lists_exactly_what_extraction_wrote() {
+        // The manifest is what removal walks later. If the two disagree, an
+        // uninstall leaves files behind or deletes something it should not.
+        let root = temp_root("manifest");
+        let bytes = zip_fixture(&[
+            ("manifest.json", br#"{"version_number":"1.0.0"}"#),
+            ("Plugin.dll", b"plugin"),
+            ("assets/data.bundle", b"bundle"),
+        ]);
+
+        extract_regular_mod_to_root(&mut archive(&bytes), &root, "Someone-ModA", false).unwrap();
+        let listed = collect_regular_mod_files(&mut archive(&bytes), "Someone-ModA").unwrap();
+
+        let mut listed: Vec<String> = listed
+            .iter()
+            .map(|p| p.to_string_lossy().replace('\\', "/"))
+            .collect();
+        listed.sort();
+
+        assert_eq!(listed, files_under(&root));
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn extracting_a_directory_replaces_whatever_was_there() {
+        let root = temp_root("replace");
+        let target = root.join("payload");
+        fs::create_dir_all(&target).unwrap();
+        fs::write(target.join("stale.txt"), b"from a previous version").unwrap();
+
+        let bytes = zip_fixture(&[("fresh.txt", b"new")]);
+        extract_zip_directory_to_target(&mut archive(&bytes), &target).unwrap();
+
+        assert_eq!(files_under(&target), vec!["fresh.txt".to_string()]);
+
+        fs::remove_dir_all(&root).ok();
+    }
+}

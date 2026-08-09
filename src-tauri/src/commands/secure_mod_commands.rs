@@ -6,6 +6,7 @@ use std::fs;
 use std::io::Read;
 use std::path::{Component, Path};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::OnceLock;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 
@@ -222,6 +223,30 @@ fn validate_archive(path: &Path, mod_name: &str) -> Result<(), String> {
 
     Ok(())
 }
+/// The client this command downloads with.
+///
+/// Shared rather than built per install: a fresh client is a fresh connection
+/// pool, so every mod in a batch paid for its own TCP and TLS handshake instead
+/// of reusing the one the mod before it had already opened. The settings are
+/// exactly the ones that were here before, so nothing about timeouts or
+/// redirects changes — only that the pool now survives between installs.
+static INSTALL_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+
+fn install_client() -> Result<&'static reqwest::Client, String> {
+    if let Some(client) = INSTALL_CLIENT.get() {
+        return Ok(client);
+    }
+    let client = reqwest::Client::builder()
+        .user_agent(APP_USER_AGENT)
+        .connect_timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(300))
+        .redirect(reqwest::redirect::Policy::limited(10))
+        .pool_max_idle_per_host(8)
+        .build()
+        .map_err(|error| error.to_string())?;
+    Ok(INSTALL_CLIENT.get_or_init(|| client))
+}
+
 
 #[tauri::command]
 pub async fn install_mod(
@@ -235,13 +260,7 @@ pub async fn install_mod(
     validate_standard_https_url(&download_url)?;
     validate_single_path_component(&mod_name, "package name")?;
 
-    let client = reqwest::Client::builder()
-        .user_agent(APP_USER_AGENT)
-        .connect_timeout(Duration::from_secs(10))
-        .timeout(Duration::from_secs(300))
-        .redirect(reqwest::redirect::Policy::limited(10))
-        .build()
-        .map_err(|error| error.to_string())?;
+    let client = install_client()?;
     let cache_dir = crate::utils::paths::app_cache_dir(&app).map_err(|error| error.to_string())?;
     let progress_app = app.clone();
     let progress_mod_name = mod_name.clone();
