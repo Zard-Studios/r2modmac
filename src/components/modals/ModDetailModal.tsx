@@ -482,7 +482,7 @@ export function ModDetailModal({
                     </div>
 
                     {/* Scrollable Content */}
-                    <div className="overflow-y-auto flex-1 p-6 min-h-0 bg-gray-850">
+                    <div className="overflow-y-auto flex-1 p-6 min-h-0 bg-gray-900">
                         <style>{`
                         .prose details {
                             background-color: rgba(31, 41, 55, 0.5);

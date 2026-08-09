@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 
+import { Button, Checkbox } from '../ui';
+
 interface MacOSGuideModalProps {
     isOpen: boolean;
     onClose: () => void;
@@ -52,7 +54,7 @@ export const MacOSGuideModal: React.FC<MacOSGuideModalProps> = ({ isOpen, onClos
                 {/* Content */}
                 <div className="p-6 overflow-y-auto space-y-6">
 
-                    <div className="bg-blue-900/20 border border-blue-500/30 rounded-lg p-4 flex gap-3">
+                    <div className="flex gap-3 rounded-lg border border-blue-500/30 bg-blue-500/10 p-4">
                         <div className="text-fg-accent mt-1">
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
                                 <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
@@ -60,8 +62,8 @@ export const MacOSGuideModal: React.FC<MacOSGuideModalProps> = ({ isOpen, onClos
                         </div>
                         <div className="text-sm text-fg-accent">
                             <p className="font-semibold mb-1">One-time Setup Required</p>
-                            <p>To load mods on macOS, you must set a Steam launch option that injects BepInEx via <code className="bg-blue-900/50 px-1.5 py-0.5 rounded text-blue-100 font-mono text-xs">run_bepinex.sh</code> under Rosetta. This only needs to be done once per game.</p>
-                            <p className="mt-2 text-blue-100/90">Supported cases are native macOS Unity <code className="bg-blue-900/50 px-1.5 py-0.5 rounded text-blue-100 font-mono text-xs">.app</code> builds with an <code className="bg-blue-900/50 px-1.5 py-0.5 rounded text-blue-100 font-mono text-xs">x86_64</code> executable slice. Windows builds running through Wine/CrossOver need a Windows profile instead.</p>
+                            <p>To load mods on macOS, you must set a Steam launch option that injects BepInEx via <code className="rounded border border-blue-500/20 bg-blue-500/15 px-1.5 py-0.5 font-mono text-xs text-fg-accent">run_bepinex.sh</code> under Rosetta. This only needs to be done once per game.</p>
+                            <p className="mt-2 text-gray-300">Supported cases are native macOS Unity <code className="rounded border border-blue-500/20 bg-blue-500/15 px-1.5 py-0.5 font-mono text-xs text-fg-accent">.app</code> builds with an <code className="rounded border border-blue-500/20 bg-blue-500/15 px-1.5 py-0.5 font-mono text-xs text-fg-accent">x86_64</code> executable slice. Windows builds running through Wine/CrossOver need a Windows profile instead.</p>
                         </div>
                     </div>
 
@@ -77,9 +79,9 @@ export const MacOSGuideModal: React.FC<MacOSGuideModalProps> = ({ isOpen, onClos
                                 </div>
                             </li>
                             <li>Click <strong>OK</strong> to save</li>
-                            <li className="text-white font-bold bg-blue-900/30 px-2 py-0.5 rounded mt-2 border border-blue-500/30">Finally, launch the game via Steam!</li>
+                            <li className="mt-2 rounded border border-blue-500/30 bg-blue-500/10 px-2 py-0.5 font-bold text-fg-accent">Finally, launch the game via Steam!</li>
                         </ol>
-                        <p className="text-xs text-yellow-500/80 mt-3">
+                        <p className="mt-3 text-xs text-fg-warning">
                             ⚠️ <strong>Note:</strong> Even on Apple Silicon (M1/M2/M3), Rosetta (<code className="font-mono text-xs">arch -x86_64</code>) is required because BepInEx's doorstop library is x86_64 only. The game itself may run natively, but BepInEx cannot.
                         </p>
                     </div>
@@ -95,22 +97,9 @@ export const MacOSGuideModal: React.FC<MacOSGuideModalProps> = ({ isOpen, onClos
                 </div>
 
                 {/* Footer */}
-                <div className="p-5 border-t border-gray-800 bg-gray-900/50 flex items-center justify-between">
-                    <label className="flex items-center gap-2 text-sm text-gray-400 hover:text-gray-300 cursor-pointer">
-                        <input
-                            type="checkbox"
-                            checked={dontShowAgain}
-                            onChange={(e) => setDontShowAgain(e.target.checked)}
-                            className="w-4 h-4 rounded border-gray-600 bg-gray-800 text-blue-600 focus:ring-2 focus:ring-blue-500 focus:ring-offset-0"
-                        />
-                        <span>Don't show again</span>
-                    </label>
-                    <button
-                        onClick={handleClose}
-                        className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-on-accent rounded-lg font-medium transition-colors shadow-lg shadow-blue-900/20"
-                    >
-                        Done
-                    </button>
+                <div className="flex items-center justify-between border-t border-gray-800 bg-gray-900 p-5">
+                    <Checkbox checked={dontShowAgain} onChange={setDontShowAgain} label="Don't show again" />
+                    <Button onClick={handleClose} size="lg">Done</Button>
                 </div>
 
             </div>

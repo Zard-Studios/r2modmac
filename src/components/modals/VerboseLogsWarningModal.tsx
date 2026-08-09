@@ -1,6 +1,6 @@
 import { useState } from 'react';
 
-import { Button } from '../ui';
+import { Button, Checkbox } from '../ui';
 import { AppIcon } from '../ui/icons';
 import { Toggle } from '../ui/Toggle';
 
@@ -95,7 +95,7 @@ export function VerboseLogsWarningModal({
                         />
                     </div>
 
-                    <div className="flex items-center justify-between gap-4 rounded-xl border border-gray-800 bg-gray-850 px-4 py-3">
+                    <div className="flex items-center justify-between gap-4 rounded-xl border border-gray-800 bg-gray-900 px-4 py-3">
                         <div>
                             <p className="text-sm font-medium text-white">Free log storage</p>
                             <p className="mt-0.5 text-xs text-gray-400">Clear the existing diagnostic logs without changing the option above.</p>
@@ -112,16 +112,8 @@ export function VerboseLogsWarningModal({
                     </div>
                 </div>
 
-                <div className="flex items-center justify-between gap-4 border-t border-gray-800 bg-gray-900/50 p-5">
-                    <label className="flex cursor-pointer items-center gap-2 text-sm text-gray-400 hover:text-gray-300">
-                        <input
-                            type="checkbox"
-                            checked={dontShowAgain}
-                            onChange={(event) => setDontShowAgain(event.target.checked)}
-                            className="h-4 w-4 rounded border-gray-600 bg-gray-800 text-blue-600 focus:ring-2 focus:ring-blue-500 focus:ring-offset-0"
-                        />
-                        <span>Don't show again</span>
-                    </label>
+                <div className="flex items-center justify-between gap-4 border-t border-gray-800 bg-gray-900 p-5">
+                    <Checkbox checked={dontShowAgain} onChange={setDontShowAgain} label="Don't show again" />
                     <Button type="button" variant="primary" onClick={close}>Done</Button>
                 </div>
             </div>

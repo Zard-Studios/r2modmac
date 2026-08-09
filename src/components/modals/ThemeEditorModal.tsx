@@ -104,7 +104,7 @@ const ColorRow = memo(function ColorRow({
     };
 
     return (
-        <div className={`p-4 flex items-center justify-between gap-4 transition-colors hover:bg-gray-750 ${disabled ? 'opacity-60' : ''}`}>
+        <div className={`p-4 flex items-center justify-between gap-4 transition-colors hover:bg-surface-hover ${disabled ? 'opacity-60' : ''}`}>
             <div className="flex items-center gap-3.5 min-w-0">
                 <div className="shrink-0">
                     {disabled ? (
@@ -444,7 +444,8 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
     }, [applyVisualEdit]);
 
     const surpriseMe = useCallback(() => {
-        applyVisualEdit((theme) => {
+        if (!draft) return;
+        const next = (() => {
             const hue = Math.floor(Math.random() * 360);
             const accentHue = (hue + 105 + Math.floor(Math.random() * 150)) % 360;
             const light = Math.random() < 0.22;
@@ -477,16 +478,21 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
                 };
 
             return {
-                ...theme,
+                ...draft,
                 colors: {
-                    ...theme.colors,
+                    ...draft.colors,
                     ...colors,
                     media_scrim: light ? '#111827' : colors.background,
                     media_ink: '#ffffff',
                 },
             };
-        });
-    }, [applyVisualEdit]);
+        })();
+        applyVisualEdit(() => next);
+        // Surprise is a discrete action, not a continuous drag: one global
+        // repaint lets the user judge the palette in the real app without the
+        // colour picker's per-frame cost.
+        setPreview(next);
+    }, [applyVisualEdit, draft, setPreview]);
 
     const updateImage = useCallback((patch: Partial<NonNullable<Theme['backgroundImage']>>, record = true) => {
         applyVisualEdit((theme) => {
@@ -1165,7 +1171,7 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
                                         ))}
 
                                         {/* Auto-contrast Toggle */}
-                                        <div className={`p-4 flex items-center justify-between gap-4 transition-colors hover:bg-gray-750 ${!editable ? 'opacity-60' : ''}`}>
+                                        <div className={`p-4 flex items-center justify-between gap-4 transition-colors hover:bg-surface-hover ${!editable ? 'opacity-60' : ''}`}>
                                             <div>
                                                 <p className="text-[15px] font-medium text-white">Readable labels</p>
                                                 <p className="text-[13px] text-gray-400 mt-0.5 leading-snug">

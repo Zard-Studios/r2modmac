@@ -154,7 +154,7 @@ export function UiPreviewLab({ isOpen, onClose }: { isOpen: boolean; onClose: ()
                                         key={preview.id}
                                         type="button"
                                         onClick={() => setActivePreview(preview.id)}
-                                        className="group flex items-center gap-4 rounded-2xl border border-gray-700 bg-gray-800 p-4 text-left transition-all hover:border-gray-600 hover:bg-gray-750 active:scale-[0.985]"
+                                        className="group flex items-center gap-4 rounded-2xl border border-gray-700 bg-gray-800 p-4 text-left transition-all hover:border-gray-600 hover:bg-surface-hover active:scale-[0.985]"
                                     >
                                         <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-gray-700 bg-gray-900 ${preview.tone}`}>
                                             <AppIcon name={preview.icon} className="h-5 w-5" />

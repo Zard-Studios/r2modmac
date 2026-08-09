@@ -29,7 +29,7 @@ export const ModListItem = memo(function ModListItem({ mod, likesCount, onInstal
 
     return (
         <div
-            className="mod-list-item flex items-center gap-4 p-3 bg-gray-800 border border-gray-700 rounded-lg hover:border-blue-500/50 hover:bg-gray-750 transition-[border-color,background-color] cursor-pointer group"
+            className="mod-list-item flex items-center gap-4 p-3 bg-gray-800 border border-gray-700 rounded-lg hover:border-blue-500/50 hover:bg-surface-hover transition-[border-color,background-color] cursor-pointer group"
             onClick={onClick}
         >
             {/* Icon */}

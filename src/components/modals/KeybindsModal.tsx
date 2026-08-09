@@ -197,7 +197,7 @@ export function KeybindsModal({ isOpen, keybinds, onChange, onClose }: KeybindsM
                                     return (
                                         <div
                                             key={action.id}
-                                            className="flex items-center justify-between gap-4 px-3.5 py-3 transition-colors hover:bg-gray-750"
+                                            className="flex items-center justify-between gap-4 px-3.5 py-3 transition-colors hover:bg-surface-hover"
                                         >
                                             <div className="flex min-w-0 items-center gap-3">
                                                 <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-700 bg-gray-900 text-gray-400">
