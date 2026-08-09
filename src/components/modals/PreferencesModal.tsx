@@ -254,6 +254,7 @@ export default function PreferencesModal({
     const handleKeybindsClose = () => {
         onSave(currentSettings());
         setShowKeybinds(false);
+        if (initialPanel === 'keybinds') onClose();
     };
 
     const persistSponsorPreferences = (enabled: boolean) => {
@@ -272,6 +273,25 @@ export default function PreferencesModal({
         }
         supportHeartClicks.current = recentClicks;
     };
+
+    // Spotlight destinations are panels in their own right. Mounting the full
+    // Preferences modal behind them creates two backdrops and, when settings
+    // are persisted, can immediately reopen the child that was just closed.
+    // A direct Spotlight launch therefore owns the whole modal layer.
+    if (initialPanel === 'keybinds') {
+        return (
+            <KeybindsModal
+                isOpen={isOpen}
+                keybinds={keybinds}
+                onChange={setKeybinds}
+                onClose={handleKeybindsClose}
+            />
+        );
+    }
+
+    if (initialPanel === 'theme') {
+        return <ThemeEditorModal isOpen={isOpen} onClose={onClose} />;
+    }
 
     return (
         <>
