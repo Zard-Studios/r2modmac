@@ -71,7 +71,10 @@ export interface ThemeSummary {
         offset_y?: number | null;
         tile_scale?: number | null;
     } | null;
-    options?: { auto_contrast?: boolean | null } | null;
+    options?: {
+        auto_contrast?: boolean | null;
+        interface_blur?: number | null;
+    } | null;
     /** Set when the file could not be parsed, so the UI can say why. */
     error?: string | null;
 }

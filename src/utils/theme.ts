@@ -111,9 +111,11 @@ export interface ThemeOptions {
      * control back to whoever wants to place every colour by hand.
      */
     autoContrast: boolean;
+    /** Blur behind the app's translucent interface, in pixels (0–40). */
+    interfaceBlur?: number;
 }
 
-export const DEFAULT_THEME_OPTIONS: ThemeOptions = { autoContrast: true };
+export const DEFAULT_THEME_OPTIONS: ThemeOptions = { autoContrast: true, interfaceBlur: 0 };
 
 export interface Theme {
     name: string;
@@ -1102,7 +1104,10 @@ export interface StyleTarget {
  * corner and stale in another.
  */
 export function themeStyleVariables(theme: Theme): Record<string, string> {
-    return paletteVars(resolveTheme(theme));
+    return {
+        ...paletteVars(resolveTheme(theme)),
+        [`${VAR_PREFIX}interface-blur`]: `${clamp(theme.options?.interfaceBlur ?? 0, 0, 40)}px`,
+    };
 }
 
 
@@ -1164,6 +1169,7 @@ export function applyTheme(
         for (const name of Object.keys(paletteVars(resolveTheme(DEFAULT_THEME)))) {
             root.style.removeProperty(name);
         }
+        clearInterfaceBlur(root);
         clearBackgroundImage(root);
         return;
     }
@@ -1171,7 +1177,25 @@ export function applyTheme(
     for (const [name, value] of Object.entries(vars)) {
         root.style.setProperty(name, value);
     }
+    applyInterfaceBlur(theme, root);
     applyBackgroundImage(theme, root, backgroundImageUrl);
+}
+
+const INTERFACE_BLUR_ATTRIBUTE = 'data-r2-interface-blur';
+
+function clearInterfaceBlur(root: StyleTarget): void {
+    root.style.removeProperty(`${VAR_PREFIX}interface-blur`);
+    root.removeAttribute?.(INTERFACE_BLUR_ATTRIBUTE);
+}
+
+function applyInterfaceBlur(theme: Theme, root: StyleTarget): void {
+    const blur = clamp(theme.options?.interfaceBlur ?? 0, 0, 40);
+    if (blur <= 0) {
+        clearInterfaceBlur(root);
+        return;
+    }
+    root.style.setProperty(`${VAR_PREFIX}interface-blur`, `${blur}px`);
+    root.setAttribute?.(INTERFACE_BLUR_ATTRIBUTE, '');
 }
 
 /** Marks the document as carrying a picture, which index.css keys off. */
@@ -1303,7 +1327,9 @@ export function themeToToml(theme: Theme): string {
         '# Pick label colours per button so text stays readable on every fill.',
         '# Turn off to use the single text colour everywhere and place each',
         '# colour by hand.',
-        `auto_contrast = ${options.autoContrast}`
+        `auto_contrast = ${options.autoContrast}`,
+        '# Glass blur behind translucent interface surfaces; 0 disables it.',
+        `interface_blur = ${Math.round(clamp(options.interfaceBlur ?? 0, 0, 40))}`
     );
 
     if (theme.backgroundImage) {
@@ -1378,6 +1404,11 @@ export function normalizeTheme(
                 typeof rawOptions?.autoContrast === 'boolean'
                     ? rawOptions.autoContrast
                     : DEFAULT_THEME_OPTIONS.autoContrast,
+            interfaceBlur: clamp(
+                numberOr(rawOptions?.interfaceBlur, DEFAULT_THEME_OPTIONS.interfaceBlur ?? 0),
+                0,
+                40
+            ),
         },
         // A picture entry without a path is meaningless, so it is dropped
         // rather than kept as a half-configured background.

@@ -125,6 +125,10 @@ pub struct ThemeOptions {
     /// on, so themes written before the option existed keep working.
     #[serde(default)]
     pub auto_contrast: Option<bool>,
+    /// Blur behind the app's translucent interface. Zero keeps the compositor
+    /// filter entirely disabled.
+    #[serde(default)]
+    pub interface_blur: Option<f32>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -731,6 +735,24 @@ tile_scale = 40
         assert_eq!(image.offset_x, Some(25.0));
         assert_eq!(image.offset_y, Some(75.0));
         assert_eq!(image.tile_scale, Some(40.0));
+    }
+
+    #[test]
+    fn interface_blur_is_parsed_from_theme_options() {
+        let summary = parse_theme(
+            "glass.toml".to_string(),
+            r##"
+name = "Glass"
+[colors]
+accent = "#88c0d0"
+[options]
+auto_contrast = true
+interface_blur = 24
+"##,
+        );
+        let options = summary.options.expect("expected theme options");
+        assert_eq!(options.auto_contrast, Some(true));
+        assert_eq!(options.interface_blur, Some(24.0));
     }
 
     #[test]

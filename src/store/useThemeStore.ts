@@ -11,10 +11,15 @@ export function summaryToTheme(summary: ThemeSummary): Theme {
         author: summary.author ?? undefined,
         colors: summary.colors,
         opacity: summary.opacity ?? undefined,
-        options:
-            typeof summary.options?.auto_contrast === 'boolean'
-                ? { autoContrast: summary.options.auto_contrast }
-                : undefined,
+        options: summary.options
+            ? {
+                autoContrast:
+                    typeof summary.options.auto_contrast === 'boolean'
+                        ? summary.options.auto_contrast
+                        : true,
+                interfaceBlur: summary.options.interface_blur ?? 0,
+            }
+            : undefined,
         // Spread rather than list the fields. Copying them by hand is how the
         // layout settings kept reverting: the backend gained `fit` and the
         // offsets, and this function quietly dropped them on the way past.

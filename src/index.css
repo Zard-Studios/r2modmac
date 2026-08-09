@@ -309,6 +309,14 @@
   background-color: transparent;
 }
 
+/* One compositor layer for the whole interface is deliberately cheaper than
+   adding backdrop-filter to every translucent card. The attribute is absent at
+   0px, so the default path creates no filter layer at all. */
+:root[data-r2-interface-blur] .r2-app-backdrop {
+  -webkit-backdrop-filter: blur(var(--r2-interface-blur));
+  backdrop-filter: blur(var(--r2-interface-blur));
+}
+
 .theme-background-canvas {
   transition: opacity 220ms cubic-bezier(0.22, 1, 0.36, 1);
   will-change: opacity;

@@ -721,6 +721,7 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
 
     const warnings = useMemo(() => (draft ? findContrastWarnings(draft.colors) : []), [draft]);
     const autoContrast = draft?.options?.autoContrast ?? DEFAULT_THEME_OPTIONS.autoContrast;
+    const interfaceBlur = draft?.options?.interfaceBlur ?? DEFAULT_THEME_OPTIONS.interfaceBlur ?? 0;
 
     // Active sample game for cover preview
     const activeGame = useMemo(() => {
@@ -739,10 +740,19 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
     // inside answers to an unsaved change at once. Scoping a hand-picked subset
     // to one card left the rest reading the *applied* theme, which is why some
     // elements moved with the opacity slider and others sat still.
-    const draftStyle = useMemo(
-        () => (draft ? (themeStyleVariables(draft) as CSSProperties) : undefined),
-        [draft]
-    );
+    const draftStyle = useMemo(() => {
+        if (!draft) return undefined;
+        const blur = Math.max(0, Math.min(40, draft.options?.interfaceBlur ?? 0));
+        return {
+            ...themeStyleVariables(draft),
+            ...(blur > 0
+                ? {
+                    WebkitBackdropFilter: `blur(${blur}px)`,
+                    backdropFilter: `blur(${blur}px)`,
+                }
+                : {}),
+        } as CSSProperties;
+    }, [draft]);
 
     // Filter themes for sidebar
     const filteredThemes = useMemo(() => {
@@ -1189,6 +1199,39 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
                                                 onInteractionEnd={endVisualGesture}
                                             />
                                         ))}
+                                        <div className="p-4">
+                                            <div className="mb-2 flex items-baseline justify-between gap-4">
+                                                <div>
+                                                    <p className="text-[15px] font-medium text-white">Interface blur</p>
+                                                    <p className="mt-0.5 text-[13px] leading-snug text-gray-400">
+                                                        Softens content behind translucent surfaces.
+                                                    </p>
+                                                </div>
+                                                <span className="shrink-0 font-mono text-[12px] text-gray-300">
+                                                    {Math.round(interfaceBlur)}px
+                                                </span>
+                                            </div>
+                                            <Slider
+                                                ariaLabel="Interface blur"
+                                                value={interfaceBlur}
+                                                min={0}
+                                                max={40}
+                                                step={1}
+                                                disabled={!editable}
+                                                onPreviewStart={beginVisualGesture}
+                                                onPreviewEnd={endVisualGesture}
+                                                onChange={(value) => applyVisualEdit((theme) => ({
+                                                    ...theme,
+                                                    options: {
+                                                        ...theme.options,
+                                                        autoContrast:
+                                                            theme.options?.autoContrast
+                                                            ?? DEFAULT_THEME_OPTIONS.autoContrast,
+                                                        interfaceBlur: value,
+                                                    },
+                                                }), false)}
+                                            />
+                                        </div>
                                     </div>
                                 </div>
 
@@ -1226,7 +1269,10 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
                                                 disabled={!editable}
                                                 label="Readable labels"
                                                 onChange={(next) => {
-                                                    applyVisualEdit((theme) => ({ ...theme, options: { autoContrast: next } }));
+                                                    applyVisualEdit((theme) => ({
+                                                        ...theme,
+                                                        options: { ...theme.options, autoContrast: next },
+                                                    }));
                                                 }}
                                             />
                                         </div>

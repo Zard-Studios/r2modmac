@@ -391,6 +391,43 @@ test('the option survives a round trip through the file format', () => {
     );
 });
 
+test('interface blur is bounded, serialised, and free when disabled', () => {
+    const disabled = normalizeTheme({
+        ...LIGHT,
+        options: { autoContrast: true, interfaceBlur: -4 },
+    });
+    const enabled = normalizeTheme({
+        ...LIGHT,
+        options: { autoContrast: true, interfaceBlur: 80 },
+    });
+    assert.equal(disabled.options?.interfaceBlur, 0);
+    assert.equal(enabled.options?.interfaceBlur, 40);
+    assert.match(themeToToml(enabled), /^interface_blur = 40$/m);
+
+    const props = new Map<string, string>();
+    const attributes = new Map<string, string>();
+    const root: StyleTarget = {
+        style: {
+            setProperty: (name, value) => { props.set(name, value); },
+            removeProperty: (name) => { props.delete(name); },
+        },
+        setAttribute: (name, value) => { attributes.set(name, value); },
+        removeAttribute: (name) => { attributes.delete(name); },
+    };
+
+    applyTheme(disabled, root);
+    assert.equal(props.has('--r2-interface-blur'), false);
+    assert.equal(attributes.has('data-r2-interface-blur'), false);
+
+    applyTheme(enabled, root);
+    assert.equal(props.get('--r2-interface-blur'), '40px');
+    assert.equal(attributes.has('data-r2-interface-blur'), true);
+
+    applyTheme(disabled, root);
+    assert.equal(props.has('--r2-interface-blur'), false);
+    assert.equal(attributes.has('data-r2-interface-blur'), false);
+});
+
 // ── Applying and clearing ────────────────────────────────────────────────────
 
 test('applying a theme writes every token the palette depends on', () => {

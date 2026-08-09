@@ -68,6 +68,9 @@ function installFakeEnvironment() {
             if (m) opacity[m[1]] = Number(m[2]);
         }
         const imageSection = toml.split('[background_image]')[1];
+        const optionsSection = toml.split('[options]')[1]?.split(/^\[/m)[0] ?? '';
+        const autoContrastMatch = /^auto_contrast\s*=\s*(true|false)/m.exec(optionsSection);
+        const interfaceBlurMatch = /^interface_blur\s*=\s*([0-9.]+)/m.exec(optionsSection);
         const pathMatch = imageSection ? /^path\s*=\s*"([^"]+)"/m.exec(imageSection) : null;
         const str = (k: string) =>
             imageSection ? new RegExp(`^${k}\\s*=\\s*"([^"]+)"`, 'm').exec(imageSection)?.[1] : undefined;
@@ -81,6 +84,10 @@ function installFakeEnvironment() {
             author: authorMatch ? authorMatch[1] : null,
             colors,
             opacity: Object.keys(opacity).length > 0 ? opacity : null,
+            options: {
+                auto_contrast: autoContrastMatch ? autoContrastMatch[1] === 'true' : null,
+                interface_blur: interfaceBlurMatch ? Number(interfaceBlurMatch[1]) : null,
+            },
             background_image: pathMatch
                 ? {
                       path: pathMatch[1],
