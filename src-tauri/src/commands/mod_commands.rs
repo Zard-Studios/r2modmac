@@ -5196,9 +5196,13 @@ pub async fn fetch_packages(
 
         // Try to load from disk cache first
         if let Some(cache) = load_packages_from_disk(&app, &game_id) {
+            // Consumed rather than cloned: the cache is not needed afterwards,
+            // and cloning held two full copies of the package list at once —
+            // tens of MB for a large community, at the exact moment the game is
+            // being opened.
             let mut all_packages = Vec::new();
-            for chunk in &cache.chunks {
-                all_packages.extend(chunk.packages.clone());
+            for chunk in cache.chunks {
+                all_packages.extend(chunk.packages);
             }
             let count = all_packages.len();
             log::debug!(
@@ -5729,6 +5733,8 @@ pub async fn fetch_packages(
 
     // 1. Try to load from chunk-level disk cache first
     if let Some(cache) = load_packages_from_disk(&app, &game_id) {
+        // Cloned, unlike the path above: the background index check below still
+        // needs these chunks, so one of the two has to hold its own copy.
         let mut all_packages = Vec::new();
         for chunk in &cache.chunks {
             all_packages.extend(chunk.packages.clone());
