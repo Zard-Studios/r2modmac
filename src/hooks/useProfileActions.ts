@@ -185,10 +185,27 @@ export function useProfileActions({
         try {
             const code = await window.ipcRenderer.shareProfile(activeProfileId);
             setProgressState(prev => ({ ...prev, progress: 100, currentTask: 'Done!' }));
+
+            // Attempted here rather than inside the timeout below. Writing to the
+            // clipboard needs recent user activation, and half a second of
+            // waiting is enough to lose it — so the write was being refused
+            // while the message still promised it had worked. Awaited too: it
+            // returns a promise, and ignoring it meant the failure was silent.
+            let copied = false;
+            try {
+                await navigator.clipboard.writeText(code);
+                copied = true;
+            } catch (clipboardError) {
+                console.warn('[share-profile] clipboard refused the code', clipboardError);
+            }
+
             setTimeout(() => {
                 setProgressState(prev => ({ ...prev, isOpen: false }));
-                navigator.clipboard.writeText(code);
-                alert(`Profile Code Generated: ${code}\n\nCopied to clipboard!`);
+                alert(
+                    copied
+                        ? `Profile Code Generated: ${code}\n\nCopied to clipboard!`
+                        : `Profile Code Generated: ${code}\n\nCould not copy it automatically — copy it from here before closing.`
+                );
             }, 500);
         } catch (e: any) {
             setProgressState(prev => ({ ...prev, isOpen: false }));

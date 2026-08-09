@@ -128,13 +128,41 @@ pub async fn duplicate_profile_folder(
         ));
     }
 
-    let result = tokio::task::spawn_blocking(move || copy_dir_recursive(&source, &destination))
+    let copy_destination = destination.clone();
+    let result = tokio::task::spawn_blocking(move || copy_dir_recursive(&source, &copy_destination))
         .await
         .map_err(|e| format!("Task join error: {}", e))?;
 
     match result {
-        Ok(()) => Ok(true),
+        Ok(()) => {
+            forget_applied_game_files(&destination);
+            Ok(true)
+        }
         Err(e) => Err(format!("Could not copy the profile folder: {}", e)),
+    }
+}
+
+/// Drop a copied profile's record of what it put in the game folder.
+///
+/// `manifests/game` is how a profile knows which files in the *game* directory
+/// belong to it, and deleting a profile uses it to take those files away again.
+/// Copying it hands the duplicate a claim on files it never wrote: delete the
+/// copy and the original's applied mods vanish from the game, while the original
+/// still believes itself in sync — so nothing looks wrong until the next Apply
+/// reinstalls everything from scratch.
+///
+/// A fresh duplicate has been applied to nothing, so it starts owning nothing.
+/// Everything else about the profile — its mods, its caches — is copied as before.
+fn forget_applied_game_files(profile_dir: &Path) {
+    let claims = profile_dir.join(".r2modmac").join("manifests").join("game");
+    if claims.exists() {
+        if let Err(e) = fs::remove_dir_all(&claims) {
+            log::warn!(
+                "[duplicate_profile] could not clear the copied game manifests at {:?}: {}",
+                claims,
+                e
+            );
+        }
     }
 }
 
@@ -1057,5 +1085,81 @@ mod config_editor_tests {
         assert!(files.is_empty());
         let _ = fs::remove_dir_all(root);
         let _ = fs::remove_dir_all(outside);
+    }
+}
+
+#[cfg(test)]
+mod duplicate_profile_claim_tests {
+    use super::forget_applied_game_files;
+    use std::fs;
+
+    fn temp_profile(label: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "r2modmac-dup-{label}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(dir.join(".r2modmac").join("manifests").join("game")).unwrap();
+        fs::write(
+            dir.join(".r2modmac")
+                .join("manifests")
+                .join("game")
+                .join("Someone-ModA.json"),
+            b"{}",
+        )
+        .unwrap();
+        dir
+    }
+
+    #[test]
+    fn a_duplicate_gives_up_the_claim_on_files_it_never_wrote() {
+        // The claim is what deleting a profile uses to take files back out of
+        // the game folder. Left on a copy, deleting the copy strips the
+        // original's applied mods out from under it.
+        let profile = temp_profile("claim");
+        forget_applied_game_files(&profile);
+
+        assert!(
+            !profile.join(".r2modmac/manifests/game").exists(),
+            "the copied claim on the game folder is gone"
+        );
+
+        fs::remove_dir_all(&profile).ok();
+    }
+
+    #[test]
+    fn everything_else_about_the_profile_survives() {
+        let profile = temp_profile("rest");
+        fs::create_dir_all(profile.join("BepInEx/plugins")).unwrap();
+        fs::write(profile.join("BepInEx/plugins/Plugin.dll"), b"plugin").unwrap();
+        fs::write(profile.join(".r2modmac/state.json"), b"{}").unwrap();
+
+        forget_applied_game_files(&profile);
+
+        assert!(profile.join("BepInEx/plugins/Plugin.dll").exists());
+        assert!(profile.join(".r2modmac/state.json").exists());
+
+        fs::remove_dir_all(&profile).ok();
+    }
+
+    #[test]
+    fn a_profile_that_never_applied_anything_is_left_alone() {
+        let profile = std::env::temp_dir().join(format!(
+            "r2modmac-dup-empty-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&profile).unwrap();
+
+        forget_applied_game_files(&profile);
+
+        assert!(profile.exists(), "no claim to clear is not an error");
+        fs::remove_dir_all(&profile).ok();
     }
 }
