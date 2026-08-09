@@ -1,4 +1,12 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import {
+    memo,
+    useCallback,
+    useEffect,
+    useMemo,
+    useRef,
+    useState,
+    type CSSProperties,
+} from 'react';
 
 import { Button } from '../ui';
 import { Slider } from '../ui/Slider';
@@ -80,6 +88,7 @@ const ColorRow = memo(function ColorRow({
     onOpacityChange,
     onInteractionStart,
     onInteractionEnd,
+    portalTarget,
     disabled,
 }: {
     colorKey: keyof ThemeColors;
@@ -90,6 +99,7 @@ const ColorRow = memo(function ColorRow({
     onOpacityChange: (key: keyof ThemeColors, next: number) => void;
     onInteractionStart: () => void;
     onInteractionEnd: () => void;
+    portalTarget?: Element | null;
     disabled: boolean;
 }) {
     const meta = THEME_COLOR_META[colorKey];
@@ -125,6 +135,7 @@ const ColorRow = memo(function ColorRow({
                             onOpacityChange={(next) => onOpacityChange(colorKey, next)}
                             onInteractionStart={onInteractionStart}
                             onInteractionEnd={onInteractionEnd}
+                            portalTarget={portalTarget}
                         />
                     )}
                 </div>
@@ -362,6 +373,7 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
     const [backgroundPreviewControl, setBackgroundPreviewControl] = useState<
         'sizing' | 'tile-scale' | 'opacity' | 'blur' | 'offset-x' | 'offset-y' | null
     >(null);
+    const [previewRoot, setPreviewRoot] = useState<HTMLDivElement | null>(null);
 
     const selectedId = activeFileName;
     const builtins = useMemo(() => allBuiltinThemes(), []);
@@ -785,7 +797,11 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div
+            ref={setPreviewRoot}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            style={draftStyle}
+        >
             {draft?.backgroundImage && (
                 <BackgroundCanvas
                     theme={draft}
@@ -1072,7 +1088,7 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
                                 </Button>
                             </div>
                         ) : view === 'colours' ? (
-                            <div className="min-h-0 flex-1 overflow-y-auto p-7 space-y-8 bg-gray-900 scrollbar-thin" style={draftStyle}>
+                            <div className="min-h-0 flex-1 overflow-y-auto p-7 space-y-8 bg-gray-900 scrollbar-thin">
                                 {!editable && (
                                     <div className="flex items-center justify-between gap-4 rounded-2xl border border-fg-accent/30 bg-fg-accent/10 p-4">
                                         <p className="text-[13px] text-fg-accent">
@@ -1149,6 +1165,7 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
                                                             onOpacityChange={updateOpacity}
                                                             onInteractionStart={beginVisualGesture}
                                                             onInteractionEnd={endVisualGesture}
+                                                            portalTarget={previewRoot}
                                                         />
                                                     ))}
                                                 </div>
@@ -1197,6 +1214,7 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
                                                 onOpacityChange={updateOpacity}
                                                 onInteractionStart={beginVisualGesture}
                                                 onInteractionEnd={endVisualGesture}
+                                                portalTarget={previewRoot}
                                             />
                                         ))}
                                         <div className="p-4">
@@ -1253,6 +1271,7 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
                                                 onOpacityChange={updateOpacity}
                                                 onInteractionStart={beginVisualGesture}
                                                 onInteractionEnd={endVisualGesture}
+                                                portalTarget={previewRoot}
                                             />
                                         ))}
 
@@ -1289,6 +1308,7 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
                                                 onOpacityChange={updateOpacity}
                                                 onInteractionStart={beginVisualGesture}
                                                 onInteractionEnd={endVisualGesture}
+                                                portalTarget={previewRoot}
                                             />
                                         ))}
                                     </div>
@@ -1312,6 +1332,7 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
                                                 onOpacityChange={updateOpacity}
                                                 onInteractionStart={beginVisualGesture}
                                                 onInteractionEnd={endVisualGesture}
+                                                portalTarget={previewRoot}
                                             />
                                         ))}
                                     </div>
@@ -1335,6 +1356,7 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
                                                 onOpacityChange={updateOpacity}
                                                 onInteractionStart={beginVisualGesture}
                                                 onInteractionEnd={endVisualGesture}
+                                                portalTarget={previewRoot}
                                             />
                                         ))}
                                     </div>

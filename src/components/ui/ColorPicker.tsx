@@ -340,6 +340,8 @@ function PickerBody({
 
 interface ColorFieldProps extends ColorPickerProps {
     label: string;
+    /** Keep the portal inside a locally themed preview when one is provided. */
+    portalTarget?: Element | null;
 }
 
 /** A swatch that opens the picker in a popover anchored beneath it. */
@@ -352,6 +354,7 @@ export function ColorField({
     label,
     onInteractionStart,
     onInteractionEnd,
+    portalTarget,
 }: ColorFieldProps) {
     const [open, setOpen] = useState(false);
     const [position, setPosition] = useState<{ top: number; left: number } | null>(null);
@@ -442,7 +445,7 @@ export function ColorField({
                         onInteractionEnd={onInteractionEnd}
                     />
                 </div>,
-                document.body
+                portalTarget ?? document.body
             )}
         </>
     );
