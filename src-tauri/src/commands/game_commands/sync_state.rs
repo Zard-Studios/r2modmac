@@ -42,6 +42,13 @@ fn runtime_name(game_identifier: &str) -> &'static str {
     }
 }
 
+fn manifest_files_present(target_root: &Path, files: &[String]) -> bool {
+    files.iter().any(|relative| {
+        let path = target_root.join(relative);
+        path.exists() || path.is_symlink()
+    })
+}
+
 #[tauri::command]
 pub async fn inspect_profile_sync_state(
     app: AppHandle,
@@ -106,15 +113,19 @@ pub async fn inspect_profile_sync_state(
             continue;
         }
         let key = stored.manifest.mod_key.to_ascii_lowercase();
+        let full_name = stored.manifest.mod_full_name;
+        let version_number = extract_version_number_from_full_name(&full_name);
+        let files_present = manifest_files_present(&target_root, &stored.manifest.files);
+        // A manifest records what this profile used to own; it is not evidence
+        // that those files still exist. Reporting stale manifests as installed
+        // made a deleted runtime look synchronized and prevented the frontend
+        // from creating any Sync entries.
+        if !files_present {
+            continue;
+        }
         if !seen.insert(key.clone()) {
             continue;
         }
-        let full_name = stored.manifest.mod_full_name;
-        let version_number = extract_version_number_from_full_name(&full_name);
-        let files_present = stored.manifest.files.iter().any(|relative| {
-            let path = target_root.join(relative);
-            path.exists() || path.is_symlink()
-        });
         let enabled = profile_enabled.get(&key).copied().or(Some(files_present));
         mods.push(ProfileSyncInspectionMod {
             package_key: key,
@@ -134,7 +145,21 @@ pub async fn inspect_profile_sync_state(
 
 #[cfg(test)]
 mod tests {
-    use super::runtime_name;
+    use super::{manifest_files_present, runtime_name};
+    use std::fs;
+
+    fn temp_root(label: &str) -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "r2modmac-sync-inspection-{label}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        root
+    }
 
     #[test]
     fn identifies_supported_runtime_families() {
@@ -142,5 +167,25 @@ mod tests {
         assert_eq!(runtime_name("balatro"), "lovely");
         assert_eq!(runtime_name("risk-of-rain-returns"), "returnofmodding");
         assert_eq!(runtime_name("lethal-company"), "bepinex");
+    }
+
+    #[test]
+    fn a_stale_manifest_does_not_claim_deleted_game_files() {
+        let root = temp_root("missing");
+        let files = vec!["BepInEx/plugins/Someone-ModA/Plugin.dll".to_string()];
+
+        assert!(!manifest_files_present(&root, &files));
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn an_existing_manifest_file_is_reported_as_installed() {
+        let root = temp_root("present");
+        let relative = "BepInEx/plugins/Someone-ModA/Plugin.dll";
+        fs::create_dir_all(root.join("BepInEx/plugins/Someone-ModA")).unwrap();
+        fs::write(root.join(relative), b"plugin").unwrap();
+
+        assert!(manifest_files_present(&root, &[relative.to_string()]));
+        fs::remove_dir_all(root).ok();
     }
 }

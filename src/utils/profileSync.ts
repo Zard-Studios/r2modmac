@@ -83,8 +83,49 @@ export const migratePendingSyncBaselines = (
     const desiredKeys = new Set(profile.mods.map(mod => getProfileModKey(mod.fullName)));
 
     const mods = profile.mods.map(mod => {
-        if (!mod.pending_sync || mod.sync_baseline !== undefined) return mod;
         const inspected = inspectedByKey.get(getProfileModKey(mod.fullName));
+
+        // `needs_sync` can also mean that the game directory changed outside
+        // the normal staging flow (for example, deleting another profile
+        // removes the shared runtime and its mods). In that case there are no
+        // per-mod flags yet: build them from the inspection so the Sync tab
+        // reflects the real difference instead of showing an empty banner.
+        if (!mod.pending_sync) {
+            if (!profile.needs_sync) return mod;
+            if (!inspected) {
+                if (!mod.enabled) return mod;
+                return {
+                    ...mod,
+                    pending_sync: true,
+                    sync_baseline: null,
+                    pending_sync_kind: 'add' as const,
+                    pending_sync_status: 'queued' as const,
+                    pending_sync_error: undefined,
+                };
+            }
+
+            const baseline: InstalledModSnapshot = {
+                ...snapshotInstalledMod(mod),
+                fullName: inspected.fullName,
+                versionNumber: inspected.versionNumber || mod.versionNumber,
+                enabled: inspected.enabled ?? mod.synced_enabled ?? mod.enabled,
+            };
+            const versionChanged = baseline.fullName !== mod.fullName
+                || baseline.versionNumber !== mod.versionNumber;
+            const enabledChanged = baseline.enabled !== mod.enabled;
+            if (!versionChanged && !enabledChanged) return mod;
+
+            return {
+                ...mod,
+                pending_sync: true,
+                sync_baseline: baseline,
+                pending_sync_kind: inferPendingSyncKind(mod, baseline),
+                pending_sync_status: 'queued' as const,
+                pending_sync_error: undefined,
+            };
+        }
+
+        if (mod.sync_baseline !== undefined) return mod;
         if (!inspected) {
             return { ...mod, sync_baseline: null, pending_sync_kind: 'add' as const, pending_sync_status: mod.pending_sync_status || 'queued' as const };
         }
