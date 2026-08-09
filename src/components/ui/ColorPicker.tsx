@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { sliderKnobOffset } from './sliderGeometry';
 
 import { isValidHex, normalizeHex, parseHex } from '../../utils/theme';
 
@@ -278,7 +279,10 @@ function PickerBody({
                         />
                         <span
                             className="pointer-events-none absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[#ffffff] shadow-[0_0_0_1px_rgba(0,0,0,0.5)]"
-                            style={{ left: `${opacity * 100}%`, backgroundColor: value }}
+                            // Shares the app slider's geometry: a knob placed at a
+                            // plain share of the width hangs half outside at both
+                            // ends, since it travels between its own half-widths.
+                            style={{ left: sliderKnobOffset(opacity), backgroundColor: value }}
                         />
                     </div>
                 </div>

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Button } from '../ui';
 import { Toggle } from '../ui/Toggle';
+import { Slider } from '../ui/Slider';
 import { AppIcon, type IconName } from '../ui/icons';
 import { DefaultGamePickerModal } from './DefaultGamePickerModal';
 import { ThemeEditorModal } from './ThemeEditorModal';
@@ -601,38 +602,26 @@ export default function PreferencesModal({
                                     <div className="space-y-4 border-t border-gray-700/50 p-4">
                                         <label className="block text-[13px] text-gray-400">
                                             <span className="mb-1 flex items-center justify-between"><span>Ad size</span><span className="tabular-nums text-gray-300">{sponsoredMessagesScale}%</span></span>
-                                            <input
-                                                type="range"
-                                                min="70"
-                                                max="100"
-                                                step="1"
+                                            <Slider
+                                                ariaLabel="Sponsored message size"
                                                 value={sponsoredMessagesScale}
-                                                onChange={(event) => {
-                                                    const value = Number(event.target.value);
+                                                min={70} max={100} step={1}
+                                                onChange={(value) => {
                                                     setSponsoredMessagesScale(value);
                                                     window.dispatchEvent(new CustomEvent('r2modmac:sponsor-preferences', { detail: { enabled: sponsoredMessagesEnabled, scale: value, opacity: sponsoredMessagesOpacity } }));
                                                 }}
-                                                style={{ background: `linear-gradient(to right, rgb(var(--r2-blue-600) / var(--r2-blue-600-alpha, 1)) ${((sponsoredMessagesScale - 70) / 30) * 100}%, rgb(var(--r2-gray-700) / var(--r2-gray-700-alpha, 1)) ${((sponsoredMessagesScale - 70) / 30) * 100}%)` }}
-                                                className="h-2 w-full cursor-pointer appearance-none rounded-full border border-gray-600/70 [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:appearance-none [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border [&::-moz-range-thumb]:border-gray-400 [&::-moz-range-thumb]:bg-[#ffffff] [&::-moz-range-thumb]:shadow-sm [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border [&::-webkit-slider-thumb]:border-gray-400 [&::-webkit-slider-thumb]:bg-[#ffffff] [&::-webkit-slider-thumb]:shadow-sm"
-                                                aria-label="Sponsored message size"
                                             />
                                         </label>
                                         <label className="block text-[13px] text-gray-400">
                                             <span className="mb-1 flex items-center justify-between"><span>Background opacity</span><span className="tabular-nums text-gray-300">{sponsoredMessagesOpacity}%</span></span>
-                                            <input
-                                                type="range"
-                                                min="0"
-                                                max="100"
-                                                step="1"
+                                            <Slider
+                                                ariaLabel="Sponsored message background opacity"
                                                 value={sponsoredMessagesOpacity}
-                                                onChange={(event) => {
-                                                    const value = Number(event.target.value);
+                                                min={0} max={100} step={1}
+                                                onChange={(value) => {
                                                     setSponsoredMessagesOpacity(value);
                                                     window.dispatchEvent(new CustomEvent('r2modmac:sponsor-preferences', { detail: { enabled: sponsoredMessagesEnabled, scale: sponsoredMessagesScale, opacity: value } }));
                                                 }}
-                                                style={{ background: `linear-gradient(to right, rgb(var(--r2-blue-600) / var(--r2-blue-600-alpha, 1)) ${sponsoredMessagesOpacity}%, rgb(var(--r2-gray-700) / var(--r2-gray-700-alpha, 1)) ${sponsoredMessagesOpacity}%)` }}
-                                                className="h-2 w-full cursor-pointer appearance-none rounded-full border border-gray-600/70 [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:appearance-none [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border [&::-moz-range-thumb]:border-gray-400 [&::-moz-range-thumb]:bg-[#ffffff] [&::-moz-range-thumb]:shadow-sm [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border [&::-webkit-slider-thumb]:border-gray-400 [&::-webkit-slider-thumb]:bg-[#ffffff] [&::-webkit-slider-thumb]:shadow-sm"
-                                                aria-label="Sponsored message background opacity"
                                             />
                                         </label>
                                     </div>
