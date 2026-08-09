@@ -869,6 +869,26 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                 </div>
             )}
 
+            {/* Deleting any profile takes BepInEx out of the *game* folder,
+                whichever profile put it there, so the survivors stop being
+                applied without touching their own state. `needs_sync` records
+                that — but it was recorded and never shown anywhere the user
+                looks, which is worse than not recording it: the sidebar sat
+                silent while the game was empty. It says so now. */}
+            {activeProfile?.needs_sync && pendingSyncCount === 0 && (activeProfile?.mods.length ?? 0) > 0 && (
+                <div className="profile-sidebar-motion-item [--sidebar-motion-order:2] mx-4 mb-2 flex items-center gap-2 rounded-xl border border-sky-500/30 bg-sky-500/10 px-3 py-2.5">
+                    <svg className="h-4 w-4 flex-shrink-0 text-sky-400" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9 9a1 1 0 012 0v4a1 1 0 11-2 0V9zm1-4a1 1 0 100 2 1 1 0 000-2z" clipRule="evenodd" />
+                    </svg>
+                    <div className="min-w-0 flex-1">
+                        <div className="truncate text-xs font-medium text-sky-300">Not applied to the game</div>
+                        <div className="truncate text-[10px] text-sky-300/70">
+                            This profile&apos;s mods are not in the game folder right now.
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* Mod List */}
             <div className="profile-sidebar-motion-item [--sidebar-motion-order:2] flex min-h-0 flex-1 flex-col">
                 {availableTabs.length > 1 ? <div className={`px-4 py-2 text-xs font-bold transition-[filter,opacity] duration-300 ${activeProfile?.is_vanilla ? 'grayscale opacity-75' : ''}`}>
