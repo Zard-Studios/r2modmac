@@ -278,9 +278,12 @@
   background-position: var(--r2-background-position, 50% 50%);
   background-repeat: var(--r2-background-repeat, no-repeat);
   filter: blur(var(--r2-background-blur, 0px));
-  /* GPU acceleration and overscan so blur cannot reveal the edges of the picture. */
+  /* GPU acceleration, plus overscan so blur cannot reveal the edges of the
+     picture. The overscan only applies when there is blur to hide: enlarging
+     the layer unconditionally also enlarged a "contain" picture past the point
+     where it fits, quietly cropping the very edges the mode promises to keep. */
   will-change: transform, filter;
-  transform: scale(1.06) translateZ(0);
+  transform: scale(var(--r2-background-scale, 1)) translateZ(0);
   pointer-events: none;
 }
 

@@ -89,6 +89,13 @@ export const GameCard = memo(function GameCard({
     const isWindowsCompatible = platform?.windows ?? true;
     const isMacCompatible = platform?.mac ?? false;
     const showFavoriteAlways = searchQuery.trim().length > 0;
+    // The badges below blur whatever is behind them, and that backdrop is the
+    // cover art. Swapping the artwork on a card that stays mounted — which is
+    // what the theme editor's preview picker does — leaves the blurred layer
+    // sampling the picture that was there before, so a badge can sit on a green
+    // cover still tinted by the red one. Keying them to the artwork rebuilds the
+    // layer, which is the only thing that makes it sample afresh.
+    const backdropKey = imageUrl ?? 'no-cover';
 
     return (
         <button
@@ -115,7 +122,7 @@ export const GameCard = memo(function GameCard({
                 <div className="absolute inset-x-0 bottom-0 h-2/3 bg-gradient-to-t from-scrim via-scrim/60 to-transparent opacity-0 group-hover:opacity-90 transition-opacity duration-300 z-20 pointer-events-none" />
 
                 {/* Platform badge — fixed scrim: it sits on cover art, not on a surface. */}
-                <div className="absolute top-2 right-2 flex flex-col gap-1 z-30 pointer-events-none items-end">
+                <div key={backdropKey} className="absolute top-2 right-2 flex flex-col gap-1 z-30 pointer-events-none items-end">
                     <div className={`bg-scrim/75 text-on-media p-1 rounded-full shadow-lg border border-on-media/15 backdrop-blur-sm flex items-center justify-center gap-2 h-7 ${isMacCompatible ? 'px-2' : 'w-7 px-0'}`}>
                         {isWindowsCompatible && (
                             <span title="Windows Compatible" className="flex items-center justify-center w-3.5 h-3.5 shrink-0">
@@ -146,6 +153,7 @@ export const GameCard = memo(function GameCard({
 
                 {/* Favorite star — fixed scrim, for the same reason as the platform badge. */}
                 <div
+                    key={backdropKey}
                     className={`absolute top-2 left-2 p-1.5 rounded-full transition-all duration-200 z-20 shadow-md ${isFavorite
                         ? 'bg-scrim/70 border border-on-media/15 backdrop-blur-sm text-yellow-400 opacity-100 hover:scale-110'
                         : showFavoriteAlways

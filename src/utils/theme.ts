@@ -1041,7 +1041,7 @@ function channels(hex: string): string {
 }
 
 /** Every custom property the theme engine controls. */
-function paletteVars(p: ResolvedPalette): Record<string, string> {
+export function paletteVars(p: ResolvedPalette): Record<string, string> {
     const vars: Record<string, string> = {};
     for (const family of THEMED_FAMILIES) {
         for (const shade of SHADES) {
@@ -1093,6 +1093,18 @@ export interface StyleTarget {
     removeAttribute?(name: string): void;
 }
 
+/**
+ * A theme's variables as a plain style object.
+ *
+ * Applying these to any element scopes the theme to that subtree, which is how
+ * the editor shows an unsaved draft: every specimen inside resolves against the
+ * draft through the same tokens the real app uses, so nothing can be live in one
+ * corner and stale in another.
+ */
+export function themeStyleVariables(theme: Theme): Record<string, string> {
+    return paletteVars(resolveTheme(theme));
+}
+
 export function applyTheme(
     theme: Theme | null,
     root: StyleTarget = document.documentElement,
@@ -1123,6 +1135,7 @@ function clearBackgroundImage(root: StyleTarget): void {
     root.style.removeProperty(`${VAR_PREFIX}background-veil`);
     root.style.removeProperty(`${VAR_PREFIX}background-size`);
     root.style.removeProperty(`${VAR_PREFIX}background-position`);
+    root.style.removeProperty(`${VAR_PREFIX}background-scale`);
     root.style.removeProperty(`${VAR_PREFIX}background-repeat`);
     if ('removeAttribute' in root && typeof root.removeAttribute === 'function') {
         root.removeAttribute(BACKGROUND_ATTRIBUTE);
@@ -1182,6 +1195,10 @@ function applyBackgroundImage(
     const posX = typeof image.offset_x === 'number' ? clamp(image.offset_x, 0, 100) : 50;
     const posY = typeof image.offset_y === 'number' ? clamp(image.offset_y, 0, 100) : 50;
     root.style.setProperty(`${VAR_PREFIX}background-position`, `${posX}% ${posY}%`);
+
+    // Overscan exists only so a blurred edge cannot show; without blur there is
+    // nothing to hide, and scaling up would crop a picture that is meant to fit.
+    root.style.setProperty(`${VAR_PREFIX}background-scale`, image.blur > 0 ? '1.06' : '1');
 
     if ('setAttribute' in root && typeof root.setAttribute === 'function') {
         root.setAttribute(BACKGROUND_ATTRIBUTE, '');

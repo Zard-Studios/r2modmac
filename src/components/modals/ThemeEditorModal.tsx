@@ -22,6 +22,7 @@ import {
     normalizeHex,
     normalizeTheme,
     parseHex,
+    themeStyleVariables,
     themeToToml,
     type Theme,
     type ThemeColors,
@@ -164,6 +165,11 @@ function Slider({
     const pendingValueRef = useRef<number | null>(null);
     const frameRef = useRef<number | null>(null);
 
+    // While the pointer or a key is down the control belongs to the user, and
+    // the incoming prop — which trails a frame behind because publishing is
+    // coalesced — must not be written back over what they are doing. The two
+    // pulling against each other is what made the handle jitter and refuse to
+    // settle on the value being aimed at.
     useEffect(() => {
         liveValueRef.current = value;
         if (!draggingRef.current) setDisplayValue(value);
@@ -184,15 +190,19 @@ function Slider({
         });
     }, [onChange]);
 
+    const [dragging, setDragging] = useState(false);
+
     const startInteraction = useCallback(() => {
         if (draggingRef.current) return;
         draggingRef.current = true;
+        setDragging(true);
         onPreviewStart?.();
     }, [onPreviewStart]);
 
     const finishInteraction = useCallback((finalValue: number) => {
         if (!draggingRef.current) return;
         draggingRef.current = false;
+        setDragging(false);
         liveValueRef.current = finalValue;
         setDisplayValue(finalValue);
         if (frameRef.current !== null) {
@@ -204,7 +214,28 @@ function Slider({
         onPreviewEnd?.();
     }, [onChange, onPreviewEnd]);
 
-    const pct = ((displayValue - min) / (max - min)) * 100;
+    // A button released outside the window never reaches the input, and the
+    // gesture would otherwise stay open for good — the prop would stop syncing
+    // and the handle would go on answering the cursor. This backstop replaces
+    // the old `blur` handler, which fired *during* the drag whenever the preview
+    // overlay took focus and ended the gesture out from under the pointer.
+    useEffect(() => {
+        if (!dragging) return;
+        const end = () => finishInteraction(liveValueRef.current);
+        window.addEventListener('pointerup', end);
+        window.addEventListener('pointercancel', end);
+        return () => {
+            window.removeEventListener('pointerup', end);
+            window.removeEventListener('pointercancel', end);
+        };
+    }, [dragging, finishInteraction]);
+
+    // The knob travels between its own half-widths, so a fill measured against
+    // the full track runs ahead of it — worst at the ends, where a sliver of
+    // colour stayed visible past the knob and it never looked closed at 100%.
+    // Measuring the fill against the same span puts the two back together.
+    const ratio = Math.min(1, Math.max(0, (displayValue - min) / (max - min)));
+    const fillStop = `calc(${THUMB / 2}px + (100% - ${THUMB}px) * ${ratio})`;
     return (
         <input
             type="range"
@@ -220,25 +251,167 @@ function Slider({
                 setDisplayValue(next);
                 publishNextFrame(next);
             }}
-            onPointerDown={(event) => {
-                event.currentTarget.setPointerCapture(event.pointerId);
-                startInteraction();
-            }}
+            // No setPointerCapture: a native range already captures the pointer
+            // for the duration of a drag. Adding a second, explicit capture that
+            // nothing ever released left the control believing the button was
+            // still down, so it went on tracking the cursor long after the mouse
+            // had been let go.
+            onPointerDown={startInteraction}
             onPointerUp={(event) => finishInteraction(Number(event.currentTarget.value))}
             onPointerCancel={() => finishInteraction(liveValueRef.current)}
-            onLostPointerCapture={() => finishInteraction(liveValueRef.current)}
             onKeyDown={(event) => {
                 if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End'].includes(event.key)) {
                     startInteraction();
                 }
             }}
             onKeyUp={(event) => finishInteraction(Number(event.currentTarget.value))}
-            onBlur={() => finishInteraction(liveValueRef.current)}
             style={{
-                background: `linear-gradient(to right, rgb(var(--r2-blue-600) / var(--r2-blue-600-alpha, 1)) ${pct}%, rgb(var(--r2-gray-700) / var(--r2-gray-700-alpha, 1)) ${pct}%)`,
+                background: [
+                    'linear-gradient(to right,',
+                    `rgb(var(--r2-blue-600) / var(--r2-blue-600-alpha, 1)) ${fillStop},`,
+                    `rgb(var(--r2-gray-700) / var(--r2-gray-700-alpha, 1)) ${fillStop})`,
+                ].join(' '),
             }}
             className="h-2 w-full cursor-pointer appearance-none rounded-full border border-gray-600/70 disabled:cursor-not-allowed disabled:opacity-50 [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:appearance-none [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border [&::-moz-range-thumb]:border-gray-400 [&::-moz-range-thumb]:bg-white [&::-moz-range-thumb]:shadow-sm [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border [&::-webkit-slider-thumb]:border-gray-400 [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:shadow-sm"
         />
+    );
+}
+
+/**
+ * A segmented control whose selection can be scrubbed like a slider.
+ *
+ * The moving background is the same gesture the platform filter on the game
+ * list uses, with the same timing, so the two read as one idea rather than two
+ * takes on it. Dragging across the strip walks the options: with five sizings
+ * that each change the picture behind them, sweeping through to see them is
+ * quicker than clicking one, looking, clicking the next.
+ */
+/** The `p-1` on the track, in pixels, needed for the maths above. */
+const PADDING = 4;
+
+/** The slider knob's diameter, in pixels; the track maths needs it. */
+const THUMB = 16;
+
+function SegmentedControl<T extends string>({
+    options,
+    value,
+    onChange,
+    onScrubStart,
+    onScrubEnd,
+    disabled = false,
+    ariaLabel,
+}: {
+    options: readonly { id: T; label: string; desc: string }[];
+    value: T;
+    onChange: (id: T) => void;
+    onScrubStart?: (id: T) => void;
+    onScrubEnd?: () => void;
+    disabled?: boolean;
+    ariaLabel: string;
+}) {
+    const trackRef = useRef<HTMLDivElement>(null);
+    const scrubbingRef = useRef(false);
+    const selectedIndex = Math.max(0, options.findIndex((option) => option.id === value));
+
+    /** Which segment the pointer is over, clamped to the ends of the strip. */
+    const indexAt = useCallback((clientX: number) => {
+        const track = trackRef.current;
+        if (!track) return selectedIndex;
+        const rect = track.getBoundingClientRect();
+        // The padding either side is not part of any segment; without removing
+        // it the last option would only be reachable past the right edge.
+        const inner = rect.width - PADDING * 2;
+        const position = (clientX - rect.left - PADDING) / Math.max(inner, 1);
+        return Math.min(options.length - 1, Math.max(0, Math.floor(position * options.length)));
+    }, [options.length, selectedIndex]);
+
+    const moveTo = useCallback((index: number) => {
+        const option = options[index];
+        if (option && option.id !== value) onChange(option.id);
+    }, [onChange, options, value]);
+
+    return (
+        <div
+            ref={trackRef}
+            role="radiogroup"
+            aria-label={ariaLabel}
+            className="relative grid rounded-xl border border-gray-700 bg-gray-900/70 p-1"
+            style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}
+            onPointerDown={(event) => {
+                if (disabled || event.button !== 0) return;
+                event.currentTarget.setPointerCapture(event.pointerId);
+                scrubbingRef.current = true;
+                const index = indexAt(event.clientX);
+                moveTo(index);
+                onScrubStart?.(options[index].id);
+            }}
+            onPointerMove={(event) => {
+                if (!scrubbingRef.current) return;
+                moveTo(indexAt(event.clientX));
+            }}
+            onPointerUp={() => {
+                if (!scrubbingRef.current) return;
+                scrubbingRef.current = false;
+                onScrubEnd?.();
+            }}
+            onPointerCancel={() => {
+                if (!scrubbingRef.current) return;
+                scrubbingRef.current = false;
+                onScrubEnd?.();
+            }}
+        >
+            {/* The travelling selection. Width is a share of the track so the
+                strip stays correct at any size, and the transform is what
+                animates — moving `left` would repaint on every frame. */}
+            <span
+                aria-hidden="true"
+                className={`pointer-events-none absolute bottom-1 top-1 left-1 rounded-lg bg-blue-600 shadow-sm transition-transform duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${
+                    disabled ? 'opacity-50' : ''
+                }`}
+                style={{
+                    width: `calc((100% - ${PADDING * 2}px) / ${options.length})`,
+                    transform: `translateX(${selectedIndex * 100}%)`,
+                }}
+            />
+
+            {options.map((option, index) => {
+                const active = index === selectedIndex;
+                return (
+                    <button
+                        key={option.id}
+                        type="button"
+                        role="radio"
+                        aria-checked={active}
+                        disabled={disabled}
+                        // The strip owns the pointer while scrubbing, so a click
+                        // here only has to cover keyboard and assistive use.
+                        onClick={() => moveTo(index)}
+                        onKeyDown={(event) => {
+                            if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+                                event.preventDefault();
+                                moveTo(Math.min(options.length - 1, index + 1));
+                            }
+                            if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+                                event.preventDefault();
+                                moveTo(Math.max(0, index - 1));
+                            }
+                        }}
+                        className={`relative z-10 flex select-none flex-col items-center justify-center rounded-lg px-2 py-1.5 text-center transition-colors disabled:opacity-50 ${
+                            active ? 'font-semibold text-on-accent' : 'text-gray-400 hover:text-white'
+                        }`}
+                    >
+                        <span className="pointer-events-none text-[12px] leading-tight">{option.label}</span>
+                        <span
+                            className={`pointer-events-none text-[9px] leading-tight ${
+                                active ? 'text-on-accent/70' : 'text-gray-500'
+                            }`}
+                        >
+                            {option.desc}
+                        </span>
+                    </button>
+                );
+            })}
+        </div>
     );
 }
 
@@ -247,30 +420,16 @@ function BackgroundCanvas({
     imageUrl,
     pinned,
     visible,
-    activeControl,
     onClose,
 }: {
     theme: Theme;
     imageUrl: string | null;
     pinned: boolean;
     visible: boolean;
-    activeControl: 'tile-scale' | 'opacity' | 'blur' | 'offset-x' | 'offset-y' | null;
     onClose: () => void;
 }) {
     const image = theme.backgroundImage;
     if (!image) return null;
-
-    const control = activeControl === 'opacity'
-        ? { label: 'Visibility', value: `${Math.round(image.opacity * 100)}%`, progress: image.opacity * 100 }
-        : activeControl === 'blur'
-          ? { label: 'Blur', value: `${Math.round(image.blur)}px`, progress: (image.blur / 40) * 100 }
-          : activeControl === 'offset-x'
-            ? { label: 'Horizontal position', value: `${Math.round(image.offset_x ?? 50)}%`, progress: image.offset_x ?? 50 }
-            : activeControl === 'offset-y'
-              ? { label: 'Vertical position', value: `${Math.round(image.offset_y ?? 50)}%`, progress: image.offset_y ?? 50 }
-              : activeControl === 'tile-scale'
-                ? { label: 'Pattern size', value: `${Math.round(image.tile_scale ?? 25)}%`, progress: image.tile_scale ?? 25 }
-                : null;
 
     const size = image.fit === 'contain'
         ? 'contain'
@@ -309,24 +468,6 @@ function BackgroundCanvas({
                     opacity: 1 - image.opacity,
                 }}
             />
-            {!pinned && control && (
-                <div className="absolute bottom-8 left-1/2 w-[min(34rem,calc(100%-2rem))] -translate-x-1/2 rounded-2xl border border-gray-700 bg-gray-900/90 px-5 py-4 shadow-2xl backdrop-blur-xl">
-                    <div className="mb-3 flex items-baseline justify-between gap-6">
-                        <span className="text-sm font-medium text-white">{control.label}</span>
-                        <span className="font-mono text-sm text-gray-300">{control.value}</span>
-                    </div>
-                    <div className="relative h-2 overflow-visible rounded-full bg-gray-700">
-                        <div
-                            className="h-full rounded-full bg-blue-600"
-                            style={{ width: `${Math.max(0, Math.min(100, control.progress))}%` }}
-                        />
-                        <span
-                            className="absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border border-gray-400 bg-white shadow-sm"
-                            style={{ left: `${Math.max(0, Math.min(100, control.progress))}%` }}
-                        />
-                    </div>
-                </div>
-            )}
         </div>
     );
 }
@@ -359,7 +500,7 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
     const [backgroundPreviewHeld, setBackgroundPreviewHeld] = useState(false);
     const [backgroundPreviewPinned, setBackgroundPreviewPinned] = useState(false);
     const [backgroundPreviewControl, setBackgroundPreviewControl] = useState<
-        'tile-scale' | 'opacity' | 'blur' | 'offset-x' | 'offset-y' | null
+        'sizing' | 'tile-scale' | 'opacity' | 'blur' | 'offset-x' | 'offset-y' | null
     >(null);
 
     const selectedId = activeFileName;
@@ -568,7 +709,7 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
             if (!theme.backgroundImage || theme.backgroundImage.fit === fit) return theme;
             return { ...theme, backgroundImage: { ...theme.backgroundImage, fit } };
         });
-        setBackgroundPreviewControl(null);
+        setBackgroundPreviewControl('sizing');
         setBackgroundPreviewHeld(true);
     }, [applyVisualEdit]);
 
@@ -734,17 +875,14 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
 
     const activeGameImage = activeGame ? communityImages[activeGame.identifier] : undefined;
     const activeGamePlatform = activeGame ? communityPlatforms[activeGame.identifier] : undefined;
-    const coverPreviewStyle = useMemo(() => {
-        if (!draft) return undefined;
-        return {
-            '--r2-gray-700': channels(draft.colors.border),
-            '--r2-gray-700-alpha': String(draft.opacity?.border ?? 1),
-            '--r2-scrim': channels(draft.colors.media_scrim ?? DEFAULT_SCRIM),
-            '--r2-scrim-alpha': String(draft.opacity?.media_scrim ?? 1),
-            '--r2-on-media': channels(draft.colors.media_ink ?? DEFAULT_MEDIA_INK),
-            '--r2-on-media-alpha': String(draft.opacity?.media_ink ?? 1),
-        } as CSSProperties;
-    }, [draft]);
+    // The whole editor is painted with the draft's own tokens, so every specimen
+    // inside answers to an unsaved change at once. Scoping a hand-picked subset
+    // to one card left the rest reading the *applied* theme, which is why some
+    // elements moved with the opacity slider and others sat still.
+    const draftStyle = useMemo(
+        () => (draft ? (themeStyleVariables(draft) as CSSProperties) : undefined),
+        [draft]
+    );
 
     // Filter themes for sidebar
     const filteredThemes = useMemo(() => {
@@ -784,7 +922,6 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
                     imageUrl={imageUrl}
                     pinned={backgroundPreviewPinned}
                     visible={backgroundPreviewHeld || backgroundPreviewPinned}
-                    activeControl={backgroundPreviewControl}
                     onClose={() => setBackgroundPreviewPinned(false)}
                 />
             )}
@@ -1065,7 +1202,7 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
                                 </Button>
                             </div>
                         ) : view === 'colours' ? (
-                            <div className="min-h-0 flex-1 overflow-y-auto p-7 space-y-8 bg-gray-900 scrollbar-thin">
+                            <div className="min-h-0 flex-1 overflow-y-auto p-7 space-y-8 bg-gray-900 scrollbar-thin" style={draftStyle}>
                                 {!editable && (
                                     <div className="flex items-center justify-between gap-4 rounded-2xl border border-fg-accent/30 bg-fg-accent/10 p-4">
                                         <p className="text-[13px] text-fg-accent">
@@ -1094,33 +1231,15 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
 
                                 {/* ── Game Covers & Media Chrome Section ── */}
                                 <div className="space-y-3">
-                                    <div className="flex items-center justify-between px-1">
-                                        <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-widest">
-                                            Game Covers & Media
-                                        </h3>
-                                        {communities.length > 1 && (
-                                            <div className="flex items-center gap-2">
-                                                <span className="text-[11px] text-gray-500">Preview game:</span>
-                                                <select
-                                                    value={activeGame?.identifier ?? ''}
-                                                    onChange={(e) => setSelectedGameId(e.target.value)}
-                                                    className="rounded-lg border border-gray-700 bg-gray-800 px-2.5 py-1 text-xs text-white focus:border-blue-500 focus:outline-none"
-                                                >
-                                                    {communities.map((c) => (
-                                                        <option key={c.identifier} value={c.identifier}>
-                                                            {c.name}
-                                                        </option>
-                                                    ))}
-                                                </select>
-                                            </div>
-                                        )}
-                                    </div>
+                                    <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-widest px-1">
+                                        Game Covers & Media
+                                    </h3>
 
                                     <div className="bg-gray-800 border border-gray-700 rounded-2xl p-5">
                                         <div className="flex flex-col sm:flex-row items-center sm:items-start gap-6">
                                             {/* Game Card rendered exactly with app tokens */}
                                             {activeGame && (
-                                                <div className="w-[220px] shrink-0" style={coverPreviewStyle}>
+                                                <div className="w-[220px] shrink-0">
                                                     <GameCard
                                                         community={activeGame}
                                                         isSelected={false}
@@ -1163,6 +1282,28 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
                                                         />
                                                     ))}
                                                 </div>
+
+                                                {/* Below the colours it belongs to: this picks what the
+                                                    specimen beside them is drawn from, so it reads as
+                                                    part of the same group rather than as a section
+                                                    heading control. */}
+                                                {communities.length > 1 && (
+                                                    <div className="flex items-center justify-between gap-4 rounded-xl border border-gray-700 bg-gray-900/60 px-4 py-3">
+                                                        <p className="min-w-0 text-[15px] font-medium text-white">Preview game</p>
+                                                        <select
+                                                            value={activeGame?.identifier ?? ''}
+                                                            onChange={(e) => setSelectedGameId(e.target.value)}
+                                                            aria-label="Preview game"
+                                                            className="h-9 max-w-[220px] shrink-0 rounded-lg border border-gray-600 bg-gray-800 px-3 text-[13px] text-white transition-colors hover:border-gray-500 focus:border-blue-500 focus:outline-none"
+                                                        >
+                                                            {communities.map((c) => (
+                                                                <option key={c.identifier} value={c.identifier}>
+                                                                    {c.name}
+                                                                </option>
+                                                            ))}
+                                                        </select>
+                                                    </div>
+                                                )}
                                             </div>
                                         </div>
                                     </div>
@@ -1344,67 +1485,36 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
                                                     </button>
                                                 </div>
 
-                                                <div>
+                                                <div className={backgroundPreviewHeld && backgroundPreviewControl === 'sizing'
+                                                    ? "relative z-[60] isolate before:pointer-events-none before:absolute before:-inset-3 before:-z-10 before:rounded-2xl before:border before:border-gray-600 before:bg-gray-800/95 before:shadow-2xl before:backdrop-blur-xl"
+                                                    : 'relative'}>
                                                     <div className="mb-2 flex items-baseline justify-between">
                                                         <span className="text-[12px] font-medium text-gray-300">Sizing</span>
                                                         <span className="font-mono text-[11px] capitalize text-gray-400">
                                                             {draft.backgroundImage.fit || 'cover'}
                                                         </span>
                                                     </div>
-                                                    <div className="grid grid-cols-5 gap-1.5 rounded-xl border border-gray-700 bg-gray-900/70 p-1">
-                                                        {([
+                                                    <SegmentedControl
+                                                        ariaLabel="Background sizing"
+                                                        disabled={!editable}
+                                                        value={draft.backgroundImage.fit || 'cover'}
+                                                        options={[
                                                             { id: 'cover', label: 'Cover', desc: 'Fills, crops' },
                                                             { id: 'contain', label: 'Contain', desc: 'Fits, whole' },
                                                             { id: 'fill', label: 'Stretch', desc: 'Distorts' },
                                                             { id: 'tile', label: 'Pattern', desc: 'Repeats' },
                                                             { id: 'center', label: 'Original', desc: 'True size' },
-                                                        ] as const).map((mode) => {
-                                                            const active = (draft.backgroundImage?.fit || 'cover') === mode.id;
-                                                            return (
-                                                                <button
-                                                                    key={mode.id}
-                                                                    type="button"
-                                                                    disabled={!editable}
-                                                                    onPointerDown={(event) => {
-                                                                        if (event.button !== 0) return;
-                                                                        event.currentTarget.setPointerCapture(event.pointerId);
-                                                                        beginSizingPreview(mode.id);
-                                                                    }}
-                                                                    onPointerUp={endBackgroundPreview}
-                                                                    onPointerCancel={endBackgroundPreview}
-                                                                    onLostPointerCapture={endBackgroundPreview}
-                                                                    onKeyDown={(event) => {
-                                                                        if (!event.repeat && (event.key === 'Enter' || event.key === ' ')) {
-                                                                            beginSizingPreview(mode.id);
-                                                                        }
-                                                                    }}
-                                                                    onKeyUp={(event) => {
-                                                                        if (event.key === 'Enter' || event.key === ' ') endBackgroundPreview();
-                                                                    }}
-                                                                    onClick={() => {
-                                                                        applyVisualEdit((theme) => {
-                                                                            if (!theme.backgroundImage || theme.backgroundImage.fit === mode.id) return theme;
-                                                                            return { ...theme, backgroundImage: { ...theme.backgroundImage, fit: mode.id } };
-                                                                        });
-                                                                    }}
-                                                                    className={`flex flex-col items-center justify-center rounded-lg px-2 py-1.5 text-center transition-all disabled:opacity-50 ${
-                                                                        active
-                                                                            ? 'bg-blue-600 font-semibold text-on-accent shadow-sm'
-                                                                            : 'text-gray-400 hover:bg-gray-800 hover:text-white'
-                                                                    }`}
-                                                                >
-                                                                    <span className="text-[12px] leading-tight">{mode.label}</span>
-                                                                    <span className={`text-[9px] leading-tight ${active ? 'text-on-accent/70' : 'text-gray-500'}`}>
-                                                                        {mode.desc}
-                                                                    </span>
-                                                                </button>
-                                                            );
-                                                        })}
-                                                    </div>
+                                                        ] as const}
+                                                        onChange={(fit) => updateImage({ fit })}
+                                                        onScrubStart={(fit) => beginSizingPreview(fit)}
+                                                        onScrubEnd={endBackgroundPreview}
+                                                    />
                                                 </div>
 
                                                 <div className="grid grid-cols-2 gap-4">
-                                                    <div>
+                                                    <div className={backgroundPreviewHeld && backgroundPreviewControl === 'opacity'
+                                                        ? "relative z-[60] isolate before:pointer-events-none before:absolute before:-inset-3 before:-z-10 before:rounded-2xl before:border before:border-gray-600 before:bg-gray-800/95 before:shadow-2xl before:backdrop-blur-xl"
+                                                        : 'relative'}>
                                                         <div className="mb-1.5 flex items-baseline justify-between">
                                                             <span className="text-[12px] text-gray-300">Visibility</span>
                                                             <span className="font-mono text-[11px] text-gray-400">
@@ -1429,7 +1539,9 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
                                                             onChange={(n) => updateImage({ opacity: n }, false)}
                                                         />
                                                     </div>
-                                                    <div>
+                                                    <div className={backgroundPreviewHeld && backgroundPreviewControl === 'blur'
+                                                        ? "relative z-[60] isolate before:pointer-events-none before:absolute before:-inset-3 before:-z-10 before:rounded-2xl before:border before:border-gray-600 before:bg-gray-800/95 before:shadow-2xl before:backdrop-blur-xl"
+                                                        : 'relative'}>
                                                         <div className="mb-1.5 flex items-baseline justify-between">
                                                             <span className="text-[12px] text-gray-300">Blur</span>
                                                             <span className="font-mono text-[11px] text-gray-400">
@@ -1457,7 +1569,9 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
                                                 </div>
 
                                                 <div className="grid grid-cols-2 gap-4">
-                                                    <div>
+                                                    <div className={backgroundPreviewHeld && backgroundPreviewControl === 'offset-x'
+                                                        ? "relative z-[60] isolate before:pointer-events-none before:absolute before:-inset-3 before:-z-10 before:rounded-2xl before:border before:border-gray-600 before:bg-gray-800/95 before:shadow-2xl before:backdrop-blur-xl"
+                                                        : 'relative'}>
                                                         <div className="mb-1.5 flex items-baseline justify-between">
                                                             <span className="text-[12px] text-gray-300">Horizontal position</span>
                                                             <span className="font-mono text-[11px] text-gray-400">
@@ -1482,7 +1596,9 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
                                                             onChange={(n) => updateImage({ offset_x: n }, false)}
                                                         />
                                                     </div>
-                                                    <div>
+                                                    <div className={backgroundPreviewHeld && backgroundPreviewControl === 'offset-y'
+                                                        ? "relative z-[60] isolate before:pointer-events-none before:absolute before:-inset-3 before:-z-10 before:rounded-2xl before:border before:border-gray-600 before:bg-gray-800/95 before:shadow-2xl before:backdrop-blur-xl"
+                                                        : 'relative'}>
                                                         <div className="mb-1.5 flex items-baseline justify-between">
                                                             <span className="text-[12px] text-gray-300">Vertical position</span>
                                                             <span className="font-mono text-[11px] text-gray-400">
@@ -1510,7 +1626,9 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
                                                 </div>
 
                                                 {draft.backgroundImage.fit === 'tile' && (
-                                                    <div>
+                                                    <div className={backgroundPreviewHeld && backgroundPreviewControl === 'tile-scale'
+                                                        ? "relative z-[60] isolate before:pointer-events-none before:absolute before:-inset-3 before:-z-10 before:rounded-2xl before:border before:border-gray-600 before:bg-gray-800/95 before:shadow-2xl before:backdrop-blur-xl"
+                                                        : 'relative'}>
                                                         <div className="mb-1.5 flex items-baseline justify-between">
                                                             <span className="text-[12px] text-gray-300">Pattern size</span>
                                                             <span className="font-mono text-[11px] text-gray-400">
