@@ -208,8 +208,25 @@ export const useProfileStore = create<ProfileState>((set) => ({
             // Continue anyway to clean up state
         }
 
+        // Deleting a profile strips BepInEx and its loader out of the *game*
+        // folder — whichever profile had put them there. So every other profile
+        // for that game has just stopped being applied, whatever its own state
+        // says. Left unmarked they claim to be in sync while the game sits
+        // empty, and nothing looks wrong until an Apply reinstalls everything.
+        //
+        // Marking them is deliberately generous: re-applying only installs what
+        // is genuinely missing, so an unnecessary prompt costs a moment, while a
+        // missing one costs a silent mismatch of the kind this is fixing.
+        const affectedGame = gameIdentifier ?? existingProfile?.gameIdentifier;
+
         set((state) => {
-            const updatedProfiles = state.profiles.filter(p => p.id !== profileId);
+            const updatedProfiles = state.profiles
+                .filter(p => p.id !== profileId)
+                .map(profile => (
+                    affectedGame && profile.gameIdentifier === affectedGame && profile.mods.length > 0
+                        ? { ...profile, needs_sync: true }
+                        : profile
+                ));
             debouncedSaveProfiles(updatedProfiles);
 
             return {

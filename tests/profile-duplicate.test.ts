@@ -25,6 +25,7 @@ function installFakeEnvironment(): FakeBackend {
                 backend.copies.push({ source, destination });
                 return true;
             },
+            deleteProfileFolder: async () => true,
             saveProfiles: async (profiles: Profile[]) => {
                 backend.saved.push(profiles);
                 return true;
@@ -143,4 +144,51 @@ test('duplicating a profile that is gone changes nothing', async () => {
     assert.equal(result, null);
     assert.equal(store.getState().profiles.length, 1);
     assert.equal(backend.copies.length, 0, 'nothing was copied on disk');
+});
+
+// ── Deleting a profile takes the runtime with it ─────────────────────────────
+
+test('deleting a profile tells the others for that game they are no longer applied', async () => {
+    // Deleting strips BepInEx out of the *game* folder, whichever profile put it
+    // there. Left unmarked, the survivors claim to be in sync while the game
+    // sits empty — nothing looks wrong until an Apply reinstalls everything.
+    installFakeEnvironment();
+    const store = await freshStore();
+    store.getState().setProfiles([
+        profile({ id: 'keep', name: 'Original', needs_sync: false }),
+        profile({ id: 'copy', name: 'Original copy', needs_sync: false }),
+    ]);
+
+    await store.getState().deleteProfile('copy', 'lethal-company');
+
+    const survivor = store.getState().profiles.find((p: Profile) => p.id === 'keep')!;
+    assert.equal(survivor.needs_sync, true);
+});
+
+test('a profile for a different game is left alone', async () => {
+    installFakeEnvironment();
+    const store = await freshStore();
+    store.getState().setProfiles([
+        profile({ id: 'other', gameIdentifier: 'outerwilds', needs_sync: false }),
+        profile({ id: 'copy', needs_sync: false }),
+    ]);
+
+    await store.getState().deleteProfile('copy', 'lethal-company');
+
+    const untouched = store.getState().profiles.find((p: Profile) => p.id === 'other')!;
+    assert.equal(untouched.needs_sync, false);
+});
+
+test('an empty profile is not asked to sync nothing', async () => {
+    installFakeEnvironment();
+    const store = await freshStore();
+    store.getState().setProfiles([
+        profile({ id: 'empty', mods: [], needs_sync: false }),
+        profile({ id: 'copy', needs_sync: false }),
+    ]);
+
+    await store.getState().deleteProfile('copy', 'lethal-company');
+
+    const empty = store.getState().profiles.find((p: Profile) => p.id === 'empty')!;
+    assert.equal(empty.needs_sync, false);
 });
