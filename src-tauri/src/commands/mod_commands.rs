@@ -49,6 +49,33 @@ static EXACT_PACKAGE_LAST_REQUEST: OnceLock<Mutex<Option<Instant>>> = OnceLock::
 // overhead of creating a new pool (+ thread/socket/TLS resources) per call.
 static THUNDERSTORE_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 
+/// The client mod payloads are fetched with.
+///
+/// Separate from the API client above because the two want opposite timeouts: a
+/// catalogue request that has not finished in a minute is stuck, while a 300 MB
+/// mod legitimately takes longer than that. Only the connect phase is bounded
+/// here; the read is not, or large downloads would be cut off mid-file.
+///
+/// It is shared for the same reason the API client is. A fresh client per
+/// install meant a fresh connection pool, so every mod in a batch paid for its
+/// own TCP and TLS handshake instead of reusing the one before it — which for a
+/// modpack of fifty mods is fifty handshakes that buy nothing.
+static DOWNLOAD_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+
+fn download_client() -> Result<&'static reqwest::Client, String> {
+    if let Some(client) = DOWNLOAD_CLIENT.get() {
+        return Ok(client);
+    }
+    let client = reqwest::Client::builder()
+        .user_agent(APP_USER_AGENT)
+        .redirect(reqwest::redirect::Policy::limited(10))
+        .connect_timeout(Duration::from_secs(8))
+        .pool_max_idle_per_host(8)
+        .build()
+        .map_err(|e| e.to_string())?;
+    Ok(DOWNLOAD_CLIENT.get_or_init(|| client))
+}
+
 fn thunderstore_client() -> &'static reqwest::Client {
     THUNDERSTORE_CLIENT.get_or_init(|| {
         reqwest::Client::builder()
@@ -3526,11 +3553,7 @@ pub async fn install_mod(
     game_path: String,
     use_profile_cache: Option<bool>,
 ) -> Result<serde_json::Value, String> {
-    let client = reqwest::Client::builder()
-        .user_agent(APP_USER_AGENT)
-        .redirect(reqwest::redirect::Policy::limited(10))
-        .build()
-        .map_err(|e| e.to_string())?;
+    let client = download_client()?;
     let cache_dir = crate::utils::paths::app_cache_dir(&app).map_err(|e| e.to_string())?;
     let progress_app = app.clone();
     let progress_mod_name = mod_name.clone();

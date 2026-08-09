@@ -389,12 +389,25 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
         window.addEventListener('keydown', onKeyDown);
         return () => window.removeEventListener('keydown', onKeyDown);
     }, [syncConfirmation]);
-    const searchedMods = activeProfile?.mods.filter(mod =>
-        `${mod.fullName} ${mod.displayName || ''} ${mod.author || ''}`.toLowerCase().includes(searchQuery.toLowerCase())
-    ) || [];
-    const displayedMods = renderedModView === 'updates'
-        ? searchedMods.filter(mod => updateIds.has(mod.uuid4))
-        : renderedModView === 'sync' ? [] : searchedMods;
+    // Memoised because this component re-renders for reasons that have nothing
+    // to do with its mod list — a download progress tick, a dialog opening.
+    // Unmemoised it lowercased and concatenated three strings per mod on every
+    // one of those, which on a 300-mod profile is work done for nothing.
+    const searchedMods = useMemo(() => {
+        const mods = activeProfile?.mods;
+        if (!mods) return [];
+        const needle = searchQuery.trim().toLowerCase();
+        if (!needle) return mods;
+        return mods.filter((mod) =>
+            `${mod.fullName} ${mod.displayName || ''} ${mod.author || ''}`.toLowerCase().includes(needle)
+        );
+    }, [activeProfile?.mods, searchQuery]);
+
+    const displayedMods = useMemo(() => {
+        if (renderedModView === 'updates') return searchedMods.filter((mod) => updateIds.has(mod.uuid4));
+        if (renderedModView === 'sync') return [];
+        return searchedMods;
+    }, [renderedModView, searchedMods, updateIds]);
     const modRowVirtualizer = useVirtualizer({
         count: displayedMods.length,
         getScrollElement: () => modListScrollRef.current,

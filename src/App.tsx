@@ -470,7 +470,19 @@ function App() {
     fullCommunitiesLoadDoneRef.current = true;
     setLoading(true)
     try {
-      const data = await window.ipcRenderer.fetchCommunities(refresh);
+      // Both requests go out together: the game list and the cover map are
+      // independent, and awaiting one before starting the other made startup
+      // wait for the sum of two round trips instead of the longer of the two.
+      // The images promise carries its own catch so a failure there still
+      // leaves us with a usable game list — which is why this is not a plain
+      // Promise.all. (The default-game path already did this correctly.)
+      const communitiesPromise = window.ipcRenderer.fetchCommunities(refresh);
+      const imagesPromise = window.ipcRenderer.fetchCommunityImages(refresh).catch((imgErr) => {
+        console.warn('[community-images] failed to fetch image map, using cached mac images', imgErr);
+        return null;
+      });
+
+      const data = await communitiesPromise;
       setCommunities(data)
       console.log(`[communities] loaded ${data.length} communities`);
 
@@ -479,11 +491,10 @@ function App() {
       const knownGamesSet = new Set(storedPlatformCache.known_games);
       let sessionImages: Record<string, string> = {};
 
-      try {
-        sessionImages = await window.ipcRenderer.fetchCommunityImages(refresh);
+      const fetchedImages = await imagesPromise;
+      if (fetchedImages) {
+        sessionImages = fetchedImages;
         setCommunityImages(sessionImages);
-      } catch (imgErr) {
-        console.warn('[community-images] failed to fetch image map, using cached mac images', imgErr);
       }
 
       const defaultPlatforms: Record<string, CommunityPlatformInfo> = Object.fromEntries(

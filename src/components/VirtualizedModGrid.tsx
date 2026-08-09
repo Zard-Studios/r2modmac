@@ -6,6 +6,7 @@ import { ModListItem } from './ModListItem';
 import { SponsorSurface } from './sponsors/SponsorSurface';
 import type { Package } from '../types/thunderstore';
 import type { InstalledMod } from '../types/profile';
+import { packageIdentityKey } from '../utils/modVersioning';
 
 interface VirtualizedModGridProps {
     packages: Package[];
@@ -54,13 +55,27 @@ export function VirtualizedModGrid({ packages, installedMods, onInstall, onUnins
         prevSearchQuery.current = searchQuery;
     }, [searchQuery]);
 
-    // Helper to check install status
+    // Indexed once per change to the installed set rather than scanned per card.
+    // With the grid virtualised there are only ~30 cards on screen, but each one
+    // walked the whole installed list on every render, so a 300-mod profile paid
+    // ~9000 string comparisons per frame while scrolling.
+    //
+    // The key is the app's own notion of "same mod" (name without version), the
+    // one the profile store already dedupes by. It also drops a latent false
+    // positive in the old prefix test, where "Author-Mod" matched an unrelated
+    // "Author-ModExtra".
+    const installedByIdentity = useMemo(() => {
+        const index = new Map<string, InstalledMod>();
+        for (const mod of installedMods) index.set(packageIdentityKey(mod.fullName), mod);
+        return index;
+    }, [installedMods]);
+
     const getInstallStatus = useCallback((pkg: Package): 'installed' | 'not_installed' | 'update_available' => {
-        const installed = installedMods.find(m => m.fullName.startsWith(pkg.full_name));
+        const installed = installedByIdentity.get(packageIdentityKey(pkg.full_name));
         if (!installed) return 'not_installed';
         if (installed.versionNumber !== pkg.versions[0].version_number) return 'update_available';
         return 'installed';
-    }, [installedMods]);
+    }, [installedByIdentity]);
 
     // Scroll Synchronization on viewMode changes
     const prevViewMode = useRef(viewMode);
