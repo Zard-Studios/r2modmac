@@ -1235,6 +1235,21 @@ function applyBackgroundImage(
     }
 }
 
+/**
+ * Repaint only the picture layer after its asynchronous disk read completes.
+ *
+ * The palette is already on screen by then. Calling `applyTheme` again used to
+ * rewrite every colour token a second time just to add one image URL, causing a
+ * second full style invalidation immediately after a theme switch.
+ */
+export function applyThemeBackgroundImage(
+    theme: Theme,
+    root: StyleTarget = document.documentElement,
+    url?: string | null
+): void {
+    applyBackgroundImage(theme, root, url);
+}
+
 // ── TOML ─────────────────────────────────────────────────────────────────────
 
 /**

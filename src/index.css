@@ -318,23 +318,42 @@
   .theme-background-canvas { transition-duration: 0ms; }
 }
 
-/* ── Theme change cross-fade ──────────────────────────────────────────────────
-   Swapping a theme rewrites ~100 custom properties at once, which lands as a
-   hard cut. The fix is a View Transition: the browser snapshots the window
-   before and after and cross-fades the two in the compositor — one GPU
-   operation, independent of how many elements changed.
+/* ── Theme change settle ──────────────────────────────────────────────────────
+   Native View Transitions were deliberately removed here. They duplicate the
+   full window into before/after snapshots; on long game/profile lists that
+   capture blocks the renderer and briefly doubles the large composited surface.
 
-   The obvious alternative, a transition on every element, was tried and is
-   what made the swap crawl: it asks the engine to animate thousands of nodes
-   at once, which on a full window drops enough frames that the animation is
-   never seen at all.
+   The palette itself lands atomically. This faint compositor-only veil softens
+   that cut without cloning the DOM, reading layout or keeping another screen-
+   sized bitmap alive. Alternating names restart the animation on rapid clicks
+   without forcing a synchronous style/layout read. */
+@keyframes r2-theme-settle-a {
+  from { opacity: 0.13; }
+  to { opacity: 0; }
+}
 
-   Live edits in the theme editor deliberately do not animate: dragging a
-   colour picker through a fade would smear rather than track the cursor. */
-::view-transition-old(root),
-::view-transition-new(root) {
-  animation-duration: 180ms;
-  animation-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
+@keyframes r2-theme-settle-b {
+  from { opacity: 0.13; }
+  to { opacity: 0; }
+}
+
+:root.r2-theme-crossfade-a::after,
+:root.r2-theme-crossfade-b::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
+  background: rgb(var(--r2-gray-900) / var(--r2-gray-900-alpha, 1));
+  pointer-events: none;
+  will-change: opacity;
+}
+
+:root.r2-theme-crossfade-a::after {
+  animation: r2-theme-settle-a 150ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+:root.r2-theme-crossfade-b::after {
+  animation: r2-theme-settle-b 150ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
 
 /* Freeze every element's own transition for the instant the palette changes.
@@ -346,21 +365,14 @@
    Switching them off costs nothing (it removes animation work rather than
    adding it), makes the palette land in a single frame, and leaves the
    cross-fade above as the one thing actually animating. */
-:root.r2-theme-swapping *,
-:root.r2-theme-swapping *::before,
-:root.r2-theme-swapping *::after {
-  transition: none !important;
-  animation-duration: 0s !important;
-}
-
-/* The snapshots are the whole window; nothing should intercept clicks. */
-::view-transition-group(root) {
-  pointer-events: none;
+:root.r2-theme-swapping .transition-colors,
+:root.r2-theme-swapping .transition-all {
+  transition-duration: 0s !important;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  ::view-transition-old(root),
-  ::view-transition-new(root) {
+  :root.r2-theme-crossfade-a::after,
+  :root.r2-theme-crossfade-b::after {
     animation: none;
   }
 }

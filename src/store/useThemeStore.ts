@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-import { applyTheme, normalizeTheme, type Theme } from '../utils/theme.ts';
+import { applyTheme, applyThemeBackgroundImage, normalizeTheme, type Theme } from '../utils/theme.ts';
 import { findPreset, isBuiltinId, type ThemePreset } from '../utils/themePresets.ts';
 import type { ThemeSummary } from '../types/electron';
 
@@ -120,12 +120,14 @@ export const useThemeStore = create<ThemeState>((set, get) => {
         const theme = resolved;
 
         const path = theme?.backgroundImage?.path ?? null;
-        // Hand the picture straight back when it has not changed, so dragging a
-        // slider repaints colours without touching the megabyte-long data URL.
-        const url = path && path === paintedImagePath ? paintedImageUrl : null;
+        // Hand the picture straight back when it has not changed. When the user
+        // returns to an already visited theme, read the warm cache synchronously
+        // so the old picture is never cleared for a frame before being restored.
+        const cachedUrl = path && imageCache.has(path) ? imageCache.get(path) ?? null : null;
+        const url = path && path === paintedImagePath ? paintedImageUrl : cachedUrl;
         applyTheme(theme, document.documentElement, url);
 
-        if (path && path !== paintedImagePath) {
+        if (path && path !== paintedImagePath && !imageCache.has(path)) {
             void loadBackgroundImage(theme).then((loaded) => {
                 const latest = get();
                 const current = latest.preview ?? resolveActive(latest.themes, latest.activeFileName);
@@ -134,8 +136,13 @@ export const useThemeStore = create<ThemeState>((set, get) => {
                 if (current?.backgroundImage?.path !== path) return;
                 paintedImagePath = path;
                 paintedImageUrl = loaded;
-                applyTheme(current, document.documentElement, loaded);
+                // The colours were painted before the async read. Updating only
+                // the picture avoids a second global palette invalidation.
+                applyThemeBackgroundImage(current, document.documentElement, loaded);
             });
+        } else if (path) {
+            paintedImagePath = path;
+            paintedImageUrl = url;
         } else if (!path) {
             paintedImagePath = null;
             paintedImageUrl = null;
@@ -163,14 +170,14 @@ export const useThemeStore = create<ThemeState>((set, get) => {
      * times a second, and easing those would lag the colour picker behind the
      * cursor rather than making anything feel smoother.
      */
+    let swapFrame: number | null = null;
+    let swapTimer: ReturnType<typeof setTimeout> | null = null;
+    let swapVariant = false;
+
     const crossfade = (run: () => void) => {
         if (typeof document === 'undefined') { run(); return; }
 
-        const doc = document as Document & {
-            startViewTransition?: (callback: () => void | Promise<void>) => { finished: Promise<unknown> };
-        };
-
-        const root = doc.documentElement;
+        const root = document.documentElement;
 
         /**
          * Land the whole palette in one frame.
@@ -180,48 +187,48 @@ export const useThemeStore = create<ThemeState>((set, get) => {
          * element. Suppressing them for the swap is what makes it arrive all at
          * once — and costs nothing, since it removes animation work.
          */
-        const freeze = () => root.classList?.add('r2-theme-swapping');
-        const release = () => root.classList?.remove('r2-theme-swapping');
-
-        const swapAtOnce = () => {
-            freeze();
-            run();
-            if (typeof requestAnimationFrame !== 'function') { release(); return; }
-            // Two frames: one for the style change to be committed, one for it
-            // to be painted, before element transitions are allowed back.
-            requestAnimationFrame(() => requestAnimationFrame(release));
+        const release = () => {
+            root.classList?.remove('r2-theme-swapping');
+            root.classList?.remove('r2-theme-crossfade-a');
+            root.classList?.remove('r2-theme-crossfade-b');
+            swapTimer = null;
         };
 
         const reduced =
             typeof matchMedia === 'function' &&
             matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-        // Without View Transitions the swap is simply instant, which is still
-        // the correct behaviour: everything changes together, just with no
-        // cross-fade over the top.
-        if (reduced || typeof doc.startViewTransition !== 'function') {
-            swapAtOnce();
+        if (reduced) {
+            release();
+            run();
             return;
         }
 
-        try {
-            const transition = doc.startViewTransition(async () => {
-                freeze();
-                run();
-
-                // Zustand updates the palette synchronously, while React still
-                // needs one render opportunity to update selected cards and
-                // derived labels. Waiting for that frame makes the transition's
-                // "after" snapshot contain the complete UI instead of half old,
-                // half new colours.
-                if (typeof requestAnimationFrame === 'function') {
-                    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-                }
-            });
-            void transition.finished.then(release, release);
-        } catch {
-            swapAtOnce();
+        // Native View Transitions snapshot the entire window twice. That is
+        // inexpensive on a small document but stalls this app when the home
+        // grid or profile sidebar contains hundreds of cards. A tiny colour
+        // veil gives the palette a soft landing using one compositor animation,
+        // without duplicating the page or retaining another full-size texture.
+        if (swapFrame !== null && typeof cancelAnimationFrame === 'function') {
+            cancelAnimationFrame(swapFrame);
+            swapFrame = null;
         }
+        if (swapTimer !== null) clearTimeout(swapTimer);
+        root.classList?.remove('r2-theme-crossfade-a');
+        root.classList?.remove('r2-theme-crossfade-b');
+        root.classList?.add('r2-theme-swapping');
+        swapVariant = !swapVariant;
+        root.classList?.add(swapVariant ? 'r2-theme-crossfade-a' : 'r2-theme-crossfade-b');
+        run();
+
+        if (typeof requestAnimationFrame !== 'function') {
+            release();
+            return;
+        }
+        swapFrame = requestAnimationFrame(() => {
+            swapFrame = null;
+            swapTimer = setTimeout(release, 160);
+        });
     };
 
     return {

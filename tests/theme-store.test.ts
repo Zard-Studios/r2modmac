@@ -18,11 +18,12 @@ interface FakeFile { name: string; toml: string }
 
 function installFakeEnvironment() {
     const props = new Map<string, string>();
+    const writes: string[] = [];
     const attributes = new Set<string>();
     const classes = new Set<string>();
     const root = {
         style: {
-            setProperty: (k: string, v: string) => { props.set(k, v); },
+            setProperty: (k: string, v: string) => { writes.push(k); props.set(k, v); },
             removeProperty: (k: string) => { props.delete(k); },
         },
         setAttribute: (k: string) => { attributes.add(k); },
@@ -110,6 +111,7 @@ function installFakeEnvironment() {
 
     return {
         props,
+        writes,
         files,
         classes,
         transitions,
@@ -251,24 +253,53 @@ test('a theme file edited outside the app repaints on reload', async () => {
     assert.equal(env.background(), channels('#0f0f0f'));
 });
 
-test('switching theme cross-fades; editing repaints without animating', async () => {
+test('switching theme avoids full-window snapshots', async () => {
     const env = installFakeEnvironment();
     const store = await freshStore();
 
-    // Selecting a theme is a whole-palette swap, so it goes through a View
-    // Transition — one compositor cross-fade rather than a per-element one.
-    // Transitioning every element instead is what made the swap stutter badly
-    // enough that the animation was never seen.
+    // View Transitions retain before/after snapshots of the whole window. The
+    // game grids make that expensive enough to freeze the renderer, so theme
+    // selection must paint without asking the browser to capture them.
     await store.getState().setActive(`${BUILTIN_PREFIX}nord`);
-    assert.equal(env.transitions.length, 1, 'expected a cross-fade on switch');
+    assert.equal(env.transitions.length, 0, 'must not snapshot the full app');
 
-    // Live editing repaints many times a second. Animating that would make the
-    // colour picker lag behind the cursor instead of feeling smoother.
+    // Live editing remains snapshot-free as well.
     const nord = findPreset(`${BUILTIN_PREFIX}nord`)!;
     for (const accent of ['#ff0000', '#00ff00', '#0000ff']) {
         store.getState().setPreview({ ...nord, colors: { ...nord.colors, accent } });
     }
-    assert.equal(env.transitions.length, 1, 'edits must not animate');
+    assert.equal(env.transitions.length, 0, 'edits must not snapshot either');
+});
+
+test('loading a theme picture does not repaint the palette twice', async () => {
+    const env = installFakeEnvironment();
+    const store = await freshStore();
+    const { themeToToml, normalizeTheme } = await import('../src/utils/theme.ts');
+
+    const theme = normalizeTheme({
+        ...findPreset(`${BUILTIN_PREFIX}nord`)!,
+        backgroundImage: {
+            path: 'assets/background.png',
+            opacity: 0.5,
+            blur: 0,
+            fit: 'cover',
+            offset_x: 50,
+            offset_y: 50,
+            tile_scale: 25,
+        },
+    });
+    await window.ipcRenderer.writeTheme('pictured.toml', themeToToml(theme));
+    await store.getState().loadThemes();
+    env.writes.length = 0;
+
+    await store.getState().setActive('pictured.toml');
+    await Promise.resolve();
+
+    assert.equal(
+        env.writes.filter(name => name === '--r2-gray-900').length,
+        1,
+        'the async image arrival must update only the picture layer'
+    );
 });
 
 test('a swap suppresses per-element transitions so the palette lands at once', async () => {
@@ -278,13 +309,9 @@ test('a swap suppresses per-element transitions so the palette lands at once', a
     const env = installFakeEnvironment();
     const store = await freshStore();
 
-    const seen: boolean[] = [];
-    const realAdd = (c: string) => { seen.push(c === 'r2-theme-swapping'); };
-    void realAdd;
-
     await store.getState().setActive(`${BUILTIN_PREFIX}github-dark`);
-    // The fake rAF runs synchronously, so by now the class has been added and
-    // removed again; what matters is that it was applied around the change.
+    // Node has no animation frame, so the lightweight swap class is released
+    // immediately after the atomic palette write.
     assert.ok(env.classes.size === 0, 'the freeze must be lifted afterwards');
     assert.ok(env.background(), 'and the theme must actually be applied');
 });
