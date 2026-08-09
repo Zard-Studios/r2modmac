@@ -23,6 +23,7 @@ import {
     normalizeHex,
     normalizeTheme,
     parseHex,
+    backgroundLayerStyle,
     themeStyleVariables,
     themeToToml,
     type Theme,
@@ -304,15 +305,8 @@ function BackgroundCanvas({
     const image = theme.backgroundImage;
     if (!image) return null;
 
-    const size = image.fit === 'contain'
-        ? 'contain'
-        : image.fit === 'fill'
-          ? '100% 100%'
-          : image.fit === 'tile'
-            ? `${image.tile_scale ?? 25}% auto`
-            : image.fit === 'center'
-              ? 'auto'
-              : 'cover';
+    // The same layout the window itself uses, so the preview cannot lie.
+    const layer = backgroundLayerStyle(image);
 
     return (
         <div
@@ -324,14 +318,14 @@ function BackgroundCanvas({
             aria-label={pinned ? 'Return to the theme editor' : undefined}
         >
             <div
-                className="absolute inset-0 bg-center"
+                className="absolute inset-0"
                 style={{
                     backgroundImage: imageUrl ? `url("${imageUrl}")` : undefined,
-                    backgroundSize: size,
-                    backgroundRepeat: image.fit === 'tile' ? 'repeat' : 'no-repeat',
-                    backgroundPosition: `${image.offset_x ?? 50}% ${image.offset_y ?? 50}%`,
-                    filter: `blur(${image.blur}px)`,
-                    transform: 'scale(1.06) translateZ(0)',
+                    backgroundSize: layer.backgroundSize,
+                    backgroundRepeat: layer.backgroundRepeat,
+                    backgroundPosition: layer.backgroundPosition,
+                    filter: layer.filter,
+                    transform: `scale(${layer.scale}) translateZ(0)`,
                 }}
             />
             <div

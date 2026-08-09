@@ -1105,6 +1105,55 @@ export function themeStyleVariables(theme: Theme): Record<string, string> {
     return paletteVars(resolveTheme(theme));
 }
 
+
+/**
+ * How the background picture is laid out, for a given image setting.
+ *
+ * The one description of it. The editor's full-screen preview used to work this
+ * out again on its own, and the two drifted: the preview kept the blur overscan
+ * switched on for every mode, so a "contain" picture was quietly enlarged past
+ * the point where it fits, and it never clamped the pattern scale. A preview
+ * that lays the picture out differently from the window it is previewing is
+ * worse than no preview.
+ */
+export function backgroundLayerStyle(image: ThemeBackgroundImage): {
+    backgroundSize: string;
+    backgroundRepeat: string;
+    backgroundPosition: string;
+    filter: string;
+    /** Multiplier for the layer's transform, as a bare number. */
+    scale: string;
+} {
+    const fit = image.fit || 'cover';
+
+    let backgroundSize = 'cover';
+    let backgroundRepeat = 'no-repeat';
+    if (fit === 'contain') backgroundSize = 'contain';
+    else if (fit === 'fill') backgroundSize = '100% 100%';
+    else if (fit === 'tile') {
+        // A percentage size is what makes the pattern scalable; `auto` would
+        // pin it to the file's own pixel size and ignore the setting.
+        backgroundSize = `${clamp(image.tile_scale ?? 25, 2, 100)}% auto`;
+        backgroundRepeat = 'repeat';
+    } else if (fit === 'center') backgroundSize = 'auto';
+
+    const posX = typeof image.offset_x === 'number' ? clamp(image.offset_x, 0, 100) : 50;
+    const posY = typeof image.offset_y === 'number' ? clamp(image.offset_y, 0, 100) : 50;
+
+    // Overscan exists only so a blurred edge cannot show. Without blur there is
+    // nothing to hide, and enlarging would crop the modes that promise to fit
+    // the picture whole — which is exactly what `contain` and `center` promise.
+    const blur = Math.max(0, image.blur ?? 0);
+
+    return {
+        backgroundSize,
+        backgroundRepeat,
+        backgroundPosition: `${posX}% ${posY}%`,
+        filter: `blur(${blur}px)`,
+        scale: blur > 0 ? '1.06' : '1',
+    };
+}
+
 export function applyTheme(
     theme: Theme | null,
     root: StyleTarget = document.documentElement,
@@ -1175,30 +1224,11 @@ function applyBackgroundImage(
         String(clamp(1 - image.opacity, 0, 1))
     );
 
-    const fit = image.fit || 'cover';
-    let bgSize = 'cover';
-    let bgRepeat = 'no-repeat';
-    if (fit === 'contain') bgSize = 'contain';
-    else if (fit === 'fill') bgSize = '100% 100%';
-    else if (fit === 'tile') {
-        // A percentage size is what makes the pattern scalable; `auto` would
-        // pin it to the file's own pixel size and ignore the setting.
-        const scale = clamp(image.tile_scale ?? 25, 2, 100);
-        bgSize = `${scale}% auto`;
-        bgRepeat = 'repeat';
-    }
-    else if (fit === 'center') bgSize = 'auto';
-
-    root.style.setProperty(`${VAR_PREFIX}background-size`, bgSize);
-    root.style.setProperty(`${VAR_PREFIX}background-repeat`, bgRepeat);
-
-    const posX = typeof image.offset_x === 'number' ? clamp(image.offset_x, 0, 100) : 50;
-    const posY = typeof image.offset_y === 'number' ? clamp(image.offset_y, 0, 100) : 50;
-    root.style.setProperty(`${VAR_PREFIX}background-position`, `${posX}% ${posY}%`);
-
-    // Overscan exists only so a blurred edge cannot show; without blur there is
-    // nothing to hide, and scaling up would crop a picture that is meant to fit.
-    root.style.setProperty(`${VAR_PREFIX}background-scale`, image.blur > 0 ? '1.06' : '1');
+    const layer = backgroundLayerStyle(image);
+    root.style.setProperty(`${VAR_PREFIX}background-size`, layer.backgroundSize);
+    root.style.setProperty(`${VAR_PREFIX}background-repeat`, layer.backgroundRepeat);
+    root.style.setProperty(`${VAR_PREFIX}background-position`, layer.backgroundPosition);
+    root.style.setProperty(`${VAR_PREFIX}background-scale`, layer.scale);
 
     if ('setAttribute' in root && typeof root.setAttribute === 'function') {
         root.setAttribute(BACKGROUND_ATTRIBUTE, '');
