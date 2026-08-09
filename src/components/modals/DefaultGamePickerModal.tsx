@@ -370,7 +370,7 @@ export function DefaultGamePickerModal({
                         </div>
 
                         {/* Game Selector Content Container */}
-                        <div className="flex-1 min-h-0 overflow-y-auto bg-gray-900 relative">
+                        <div data-game-selector-scroll className="flex-1 min-h-0 overflow-y-auto bg-gray-900 relative">
                             {loadingProfiles && (
                                 <div className="absolute inset-0 bg-gray-900/60 backdrop-blur-xs z-40 flex items-center justify-center">
                                     <div className="flex items-center gap-3 bg-gray-800 border border-gray-700 px-5 py-3 rounded-xl shadow-xl">
@@ -518,7 +518,6 @@ export function DefaultGamePickerModal({
         </div>
     );
 }
-
 
 
 

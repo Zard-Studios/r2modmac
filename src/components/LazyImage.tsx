@@ -12,6 +12,23 @@ interface LazyImageProps {
 const loadedImageUrls = new Set<string>();
 const failedImageUrls = new Set<string>();
 const pendingImageLoads = new Map<string, Promise<void>>();
+type ImageStatus = 'loaded' | 'error';
+type ImageStatusListener = (status: ImageStatus) => void;
+const imageStatusListeners = new Map<string, Set<ImageStatusListener>>();
+
+function publishImageStatus(src: string, status: ImageStatus) {
+    imageStatusListeners.get(src)?.forEach(listener => listener(status));
+}
+
+function subscribeToImageStatus(src: string, listener: ImageStatusListener) {
+    const listeners = imageStatusListeners.get(src) ?? new Set<ImageStatusListener>();
+    listeners.add(listener);
+    imageStatusListeners.set(src, listeners);
+    return () => {
+        listeners.delete(listener);
+        if (listeners.size === 0) imageStatusListeners.delete(src);
+    };
+}
 
 export function warmImageCache(src: string) {
     if (loadedImageUrls.has(src)) {
@@ -32,13 +49,13 @@ export function warmImageCache(src: string) {
         img.onload = () => {
             loadedImageUrls.add(src);
             pendingImageLoads.delete(src);
-            window.dispatchEvent(new CustomEvent('lazy-image-loaded', { detail: src }));
+            publishImageStatus(src, 'loaded');
             resolve();
         };
         img.onerror = () => {
             failedImageUrls.add(src);
             pendingImageLoads.delete(src);
-            window.dispatchEvent(new CustomEvent('lazy-image-error', { detail: src }));
+            publishImageStatus(src, 'error');
             reject(new Error('Image failed to load'));
         };
         img.src = src;
@@ -70,26 +87,15 @@ export function LazyImage({ src, alt, className, fallback, eager = false }: Lazy
     }
 
     useEffect(() => {
-        const handleLoaded = (event: Event) => {
-            const customEvent = event as CustomEvent<string>;
-            if (customEvent.detail !== src) return;
-            setShouldLoad(true);
-            setIsLoaded(true);
-            setHasError(false);
-        };
-
-        const handleErrored = (event: Event) => {
-            const customEvent = event as CustomEvent<string>;
-            if (customEvent.detail !== src) return;
-            setHasError(true);
-        };
-
-        window.addEventListener('lazy-image-loaded', handleLoaded as EventListener);
-        window.addEventListener('lazy-image-error', handleErrored as EventListener);
-        return () => {
-            window.removeEventListener('lazy-image-loaded', handleLoaded as EventListener);
-            window.removeEventListener('lazy-image-error', handleErrored as EventListener);
-        };
+        return subscribeToImageStatus(src, status => {
+            if (status === 'loaded') {
+                setShouldLoad(true);
+                setIsLoaded(true);
+                setHasError(false);
+            } else {
+                setHasError(true);
+            }
+        });
     }, [src]);
 
     useEffect(() => {

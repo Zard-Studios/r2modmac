@@ -80,7 +80,7 @@ export function GameSelectionScreen({
 
     return (
         <div className="r2-app-backdrop relative flex h-full min-h-0 w-full bg-gray-900">
-            <div className="h-full w-full overflow-y-auto p-8 pb-32">
+            <div data-game-selector-scroll className="h-full w-full overflow-y-auto p-8 pb-32">
                 <div className="max-w-7xl mx-auto w-full min-h-full flex flex-col">
                 <div className="text-center mb-10">
                     <h1 className="text-4xl font-bold text-white mb-3">Welcome to r2modmac</h1>

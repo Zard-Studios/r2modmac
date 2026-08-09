@@ -1,7 +1,8 @@
 import type { MouseEvent } from 'react';
-import { memo, useEffect, useMemo } from 'react';
+import { memo, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import type { Community, CommunityPlatformInfo } from '../../types/thunderstore';
-import { LazyImage, warmImageCache } from '../LazyImage';
+import { LazyImage } from '../LazyImage';
 
 interface GameSelectorProps {
     communities: Community[];
@@ -178,6 +179,32 @@ export const GameCard = memo(function GameCard({
     );
 });
 
+const GAME_GRID_GAP = 16;
+
+function responsiveColumnCount() {
+    const width = window.innerWidth;
+    if (width >= 1920) return 10;
+    if (width >= 1536) return 8;
+    if (width >= 1280) return 7;
+    if (width >= 1024) return 6;
+    if (width >= 768) return 5;
+    if (width >= 640) return 4;
+    return 3;
+}
+
+type GameSelectorRow =
+    | { kind: 'favorites-heading' }
+    | { kind: 'divider' }
+    | { kind: 'games'; communities: Community[]; favorite: boolean };
+
+function chunkCommunities(communities: Community[], columns: number, favorite: boolean): GameSelectorRow[] {
+    const rows: GameSelectorRow[] = [];
+    for (let index = 0; index < communities.length; index += columns) {
+        rows.push({ kind: 'games', communities: communities.slice(index, index + columns), favorite });
+    }
+    return rows;
+}
+
 export function GameSelector({
     communities,
     selectedCommunity,
@@ -190,6 +217,11 @@ export function GameSelector({
     gridClassName = "grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8 3xl:grid-cols-10 gap-3.5 sm:gap-4",
     containerClassName = "p-4 pt-0 space-y-8",
 }: GameSelectorProps) {
+    const containerRef = useRef<HTMLDivElement>(null);
+    const virtualListRef = useRef<HTMLDivElement>(null);
+    const [columnCount, setColumnCount] = useState(responsiveColumnCount);
+    const [containerWidth, setContainerWidth] = useState(0);
+    const [scrollMargin, setScrollMargin] = useState(0);
     const favorites = useMemo(
         () => communities.filter(c => favoriteGames.includes(c.identifier)),
         [communities, favoriteGames]
@@ -199,109 +231,122 @@ export function GameSelector({
         [communities, favoriteGames]
     );
 
-    // Pre-warm image cache — use setTimeout(0) not requestIdleCallback so
-    // the browser doesn't pause loading during scroll/animation frames
-    useEffect(() => {
-        const urls = communities
-            .map((community) => communityImages[community.identifier])
-            .filter((url): url is string => typeof url === 'string' && url.length > 0);
+    const rows = useMemo<GameSelectorRow[]>(() => {
+        const nextRows: GameSelectorRow[] = [];
+        if (favorites.length > 0) {
+            nextRows.push({ kind: 'favorites-heading' });
+            nextRows.push(...chunkCommunities(favorites, columnCount, true));
+            if (others.length > 0) nextRows.push({ kind: 'divider' });
+        }
+        nextRows.push(...chunkCommunities(others, columnCount, false));
+        return nextRows;
+    }, [columnCount, favorites, others]);
 
-        if (urls.length === 0) return;
+    const getScrollElement = () => (
+        containerRef.current?.closest<HTMLElement>('[data-game-selector-scroll]') ?? null
+    );
 
-        let cancelled = false;
-        let nextIndex = 0;
-        let activeLoads = 0;
-        let timeoutId: number | null = null;
-        const concurrency = 8;
+    useLayoutEffect(() => {
+        const container = containerRef.current;
+        if (!container) return;
 
-        const queueMore = () => {
-            if (cancelled) return;
-            while (activeLoads < concurrency && nextIndex < urls.length) {
-                const url = urls[nextIndex++];
-                activeLoads += 1;
-                void warmImageCache(url)
-                    .catch(() => undefined)
-                    .finally(() => {
-                        activeLoads -= 1;
-                        if (!cancelled && nextIndex < urls.length) scheduleWarmup();
-                    });
+        const updateLayout = () => {
+            const virtualList = virtualListRef.current;
+            const measuredElement = virtualList ?? container;
+            const scrollElement = getScrollElement();
+            setColumnCount(responsiveColumnCount());
+            setContainerWidth(measuredElement.clientWidth);
+            if (scrollElement) {
+                const containerRect = measuredElement.getBoundingClientRect();
+                const scrollRect = scrollElement.getBoundingClientRect();
+                setScrollMargin(containerRect.top - scrollRect.top + scrollElement.scrollTop);
             }
         };
 
-        const scheduleWarmup = () => {
-            if (cancelled || (nextIndex >= urls.length && activeLoads === 0)) return;
-            timeoutId = globalThis.setTimeout(() => { timeoutId = null; queueMore(); }, 0);
-        };
-
-        scheduleWarmup();
+        updateLayout();
+        const resizeObserver = new ResizeObserver(updateLayout);
+        resizeObserver.observe(container);
+        if (virtualListRef.current) resizeObserver.observe(virtualListRef.current);
+        window.addEventListener('resize', updateLayout);
         return () => {
-            cancelled = true;
-            if (timeoutId !== null) window.clearTimeout(timeoutId);
+            resizeObserver.disconnect();
+            window.removeEventListener('resize', updateLayout);
         };
-    }, [communities, communityImages]);
+    }, []);
+
+    const cardRowHeight = containerWidth > 0
+        ? ((containerWidth - GAME_GRID_GAP * (columnCount - 1)) / columnCount) * (4 / 3) + GAME_GRID_GAP
+        : 320;
+    const rowVirtualizer = useVirtualizer({
+        count: rows.length,
+        getScrollElement,
+        estimateSize: index => {
+            const row = rows[index];
+            if (row?.kind === 'favorites-heading') return 40;
+            if (row?.kind === 'divider') return 48;
+            return cardRowHeight;
+        },
+        overscan: 3,
+        scrollMargin,
+        getItemKey: index => {
+            const row = rows[index];
+            if (!row) return index;
+            if (row.kind !== 'games') return row.kind;
+            return `${row.favorite ? 'favorite' : 'game'}:${row.communities.map(community => community.identifier).join(',')}`;
+        },
+    });
 
     return (
-        <div className={containerClassName}>
-
-            {favorites.length > 0 && (
-                <div className="space-y-4">
-                    <div className="flex items-center gap-3 text-yellow-400">
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                            <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-                        </svg>
-                        <h2 className="text-sm font-bold tracking-wider uppercase text-white/90">Favorites</h2>
-                    </div>
-                    <div className={gridClassName}>
-                        {favorites.map((community, index) => (
-                            <GameCard
-                                key={community.identifier}
-                                community={community}
-                                isSelected={selectedCommunity === community.identifier}
-                                isFavorite={true}
-                                imageUrl={getCommunityImage(community, communityImages)}
-                                platform={communityPlatforms[community.identifier]}
-                                eager={index < 18}
-                                searchQuery={searchQuery}
-                                onSelect={onSelect}
-                                onToggleFavorite={onToggleFavorite}
-                            />
-                        ))}
-                    </div>
-
-                    {others.length > 0 && (
-                        <div className="relative pt-6 pb-2">
-                            <div className="absolute inset-0 flex items-center" aria-hidden="true">
-                                <div className="w-full border-t border-gray-800" />
-                            </div>
-                        </div>
-                    )}
-                </div>
-            )}
-
-            {others.length > 0 && (
-                <div className="space-y-4">
-                    <div className={gridClassName}>
-                        {others.map((community, index) => (
-                            <GameCard
-                                key={community.identifier}
-                                community={community}
-                                isSelected={selectedCommunity === community.identifier}
-                                isFavorite={false}
-                                imageUrl={getCommunityImage(community, communityImages)}
-                                platform={communityPlatforms[community.identifier]}
-                                eager={favorites.length === 0 && index < 24}
-                                searchQuery={searchQuery}
-                                onSelect={onSelect}
-                                onToggleFavorite={onToggleFavorite}
-                            />
-                        ))}
-                    </div>
-                </div>
-            )}
-
+        <div ref={containerRef} className={containerClassName}>
             {communities.length === 0 && (
                 <div className="text-center py-12 text-gray-500">
                     No games found matching your filters/search.
+                </div>
+            )}
+            {communities.length > 0 && (
+                <div ref={virtualListRef} className="relative w-full" style={{ height: `${rowVirtualizer.getTotalSize()}px` }}>
+                    {rowVirtualizer.getVirtualItems().map(virtualRow => {
+                        const row = rows[virtualRow.index];
+                        return (
+                            <div
+                                key={virtualRow.key}
+                                ref={rowVirtualizer.measureElement}
+                                data-index={virtualRow.index}
+                                className="absolute left-0 top-0 w-full"
+                                style={{ transform: `translateY(${virtualRow.start - scrollMargin}px)` }}
+                            >
+                                {row.kind === 'favorites-heading' ? (
+                                    <div className="flex items-center gap-3 pb-4 text-yellow-400">
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                            <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                                        </svg>
+                                        <h2 className="text-sm font-bold uppercase tracking-wider text-white/90">Favorites</h2>
+                                    </div>
+                                ) : row.kind === 'divider' ? (
+                                    <div className="relative h-12">
+                                        <div className="absolute inset-x-0 top-1/2 border-t border-gray-800" />
+                                    </div>
+                                ) : (
+                                    <div className={`${gridClassName} pb-4`}>
+                                        {row.communities.map(community => (
+                                            <GameCard
+                                                key={community.identifier}
+                                                community={community}
+                                                isSelected={selectedCommunity === community.identifier}
+                                                isFavorite={row.favorite}
+                                                imageUrl={getCommunityImage(community, communityImages)}
+                                                platform={communityPlatforms[community.identifier]}
+                                                eager
+                                                searchQuery={searchQuery}
+                                                onSelect={onSelect}
+                                                onToggleFavorite={onToggleFavorite}
+                                            />
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        );
+                    })}
                 </div>
             )}
         </div>
