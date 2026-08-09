@@ -130,6 +130,9 @@ export default function PreferencesModal({
     const [confirmBeforeApply, setConfirmBeforeApply] = useState(settings.confirm_before_apply_to_game);
     const [writeDebugLogsToGame, setWriteDebugLogsToGame] = useState(settings.write_debug_logs_to_game);
     const [verboseLogging, setVerboseLogging] = useState(settings.verbose_logging);
+    const [logsExpanded, setLogsExpanded] = useState(
+        settings.write_debug_logs_to_game || settings.verbose_logging
+    );
     const [defaultModViewMode, setDefaultModViewMode] = useState<'grid' | 'list'>(settings.default_mod_view_mode);
     const [showDeprecatedWarnings, setShowDeprecatedWarnings] = useState(settings.show_deprecated_warnings);
     const [streamMode, setStreamMode] = useState(settings.stream_mode);
@@ -170,6 +173,13 @@ export default function PreferencesModal({
             setConfirmBeforeApply(settings.confirm_before_apply_to_game);
             setWriteDebugLogsToGame(settings.write_debug_logs_to_game ?? false);
             setVerboseLogging(settings.verbose_logging ?? false);
+            setLogsExpanded(
+                settings.write_debug_logs_to_game
+                || settings.verbose_logging
+                || initialPanel === 'debug-logs'
+                || initialPanel === 'verbose-logs'
+                || initialPanel === 'open-logs'
+            );
             setShowDeprecatedWarnings(settings.show_deprecated_warnings);
             setStreamMode(settings.stream_mode ?? false);
             setDefaultModViewMode(settings.default_mod_view_mode ?? 'grid');
@@ -272,6 +282,26 @@ export default function PreferencesModal({
             return;
         }
         supportHeartClicks.current = recentClicks;
+    };
+
+    const logsActive = writeDebugLogsToGame || verboseLogging;
+    const logsOpen = logsActive || logsExpanded;
+    const logsStatus = writeDebugLogsToGame && verboseLogging
+        ? '2 active'
+        : writeDebugLogsToGame || verboseLogging
+            ? '1 active'
+            : 'Off';
+
+    const changeDebugLogs = (enabled: boolean) => {
+        setWriteDebugLogsToGame(enabled);
+        if (enabled) setLogsExpanded(true);
+        else if (!verboseLogging) setLogsExpanded(false);
+    };
+
+    const changeVerboseLogging = (enabled: boolean) => {
+        setVerboseLogging(enabled);
+        if (enabled) setLogsExpanded(true);
+        else if (!writeDebugLogsToGame) setLogsExpanded(false);
     };
 
     // Spotlight destinations are panels in their own right. Mounting the full
@@ -513,42 +543,79 @@ export default function PreferencesModal({
                                 <Toggle value={confirmBeforeApply} onChange={setConfirmBeforeApply} />
                             </div>
 
-                            <div id="preference-debug-logs" className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-surface-hover">
-                                <div className="flex items-center gap-4">
-                                    <RowIcon kind="logs" />
-                                    <div>
-                                        <p className="text-[15px] font-medium text-white">Write debug logs to game folder</p>
-                                        <p className="text-[13px] text-gray-400 mt-0.5 leading-snug">Writes r2modmac bootstrap, dyld, and exec logs when launching supported games from the app.</p>
-                                    </div>
-                                </div>
-                                <Toggle value={writeDebugLogsToGame} onChange={setWriteDebugLogsToGame} />
-                            </div>
-
-                            <div id="preference-verbose-logs" className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-surface-hover">
-                                <div className="flex items-center gap-4">
-                                    <RowIcon kind="logs" />
-                                    <div>
-                                        <p className="text-[15px] font-medium text-white">Verbose app logging</p>
-                                        <p className="text-[13px] text-gray-400 mt-0.5 leading-snug">Records detailed per-mod and per-file tracing in the app log. Leave off for normal use; turn it on to reproduce a bug before reporting it.</p>
-                                    </div>
-                                </div>
-                                <Toggle value={verboseLogging} onChange={setVerboseLogging} />
-                            </div>
-
-                            <div id="preference-open-logs" className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-surface-hover">
-                                <div className="flex items-center gap-4">
-                                    <RowIcon kind="folder" />
-                                    <div>
-                                        <p className="text-[15px] font-medium text-white">Open app logs folder</p>
-                                        <p className="text-[13px] text-gray-400 mt-0.5 leading-snug">Opens the r2modmac application log folder containing launch, Steam, and CrossOver/Wine diagnostics.</p>
-                                    </div>
-                                </div>
+                            <div id="preference-debug-logs">
                                 <button
-                                    onClick={() => { void window.ipcRenderer.openAppLogsFolder(); }}
-                                    className="px-4 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-sm font-medium text-white transition-all active:scale-95 whitespace-nowrap flex-shrink-0"
+                                    type="button"
+                                    aria-expanded={logsOpen}
+                                    aria-disabled={logsActive}
+                                    aria-controls="preference-log-details"
+                                    onClick={() => { if (!logsActive) setLogsExpanded(current => !current); }}
+                                    className={`flex w-full items-center justify-between gap-4 p-4 text-left transition-colors ${logsActive ? 'cursor-default' : 'hover:bg-surface-hover'}`}
                                 >
-                                    Open
+                                    <div className="flex min-w-0 items-center gap-4">
+                                        <RowIcon kind="logs" />
+                                        <div className="min-w-0">
+                                            <p className="text-[15px] font-medium text-white">Troubleshooting logs</p>
+                                            <p className="mt-0.5 text-[13px] leading-snug text-gray-400">
+                                                {logsActive ? 'Diagnostic logging is enabled.' : 'Enable additional logging when diagnosing a problem.'}
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <span className="flex shrink-0 items-center gap-3">
+                                        <span className={`text-xs font-medium ${logsActive ? 'text-fg-warning' : 'text-gray-400'}`}>{logsStatus}</span>
+                                        <svg className={`h-4 w-4 text-gray-400 transition-transform duration-200 ${logsOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="m6 9 6 6 6-6" />
+                                        </svg>
+                                    </span>
                                 </button>
+                                <div
+                                    id="preference-log-details"
+                                    className={`grid transition-[grid-template-rows,opacity] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] ${logsOpen ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'}`}
+                                    aria-hidden={!logsOpen}
+                                    inert={!logsOpen}
+                                >
+                                    <div className="min-h-0 overflow-hidden">
+                                        <div className="divide-y divide-gray-700/50 border-t border-gray-700/50">
+                                            <div className="flex items-center justify-between gap-4 p-4 pl-8 transition-colors hover:bg-surface-hover">
+                                                <div className="flex items-center gap-4">
+                                                    <RowIcon kind="logs" />
+                                                    <div>
+                                                        <p className="text-[15px] font-medium text-white">Write debug logs to game folder</p>
+                                                        <p className="mt-0.5 text-[13px] leading-snug text-gray-400">Writes bootstrap, dyld, and exec logs when launching supported games.</p>
+                                                    </div>
+                                                </div>
+                                                <Toggle value={writeDebugLogsToGame} onChange={changeDebugLogs} />
+                                            </div>
+
+                                            <div id="preference-verbose-logs" className="flex items-center justify-between gap-4 p-4 pl-8 transition-colors hover:bg-surface-hover">
+                                                <div className="flex items-center gap-4">
+                                                    <RowIcon kind="logs" />
+                                                    <div>
+                                                        <p className="text-[15px] font-medium text-white">Verbose app logging</p>
+                                                        <p className="mt-0.5 text-[13px] leading-snug text-gray-400">Records detailed per-mod and per-file tracing while reproducing a bug.</p>
+                                                    </div>
+                                                </div>
+                                                <Toggle value={verboseLogging} onChange={changeVerboseLogging} />
+                                            </div>
+
+                                            <div id="preference-open-logs" className="flex items-center justify-between gap-4 p-4 pl-8 transition-colors hover:bg-surface-hover">
+                                                <div className="flex items-center gap-4">
+                                                    <RowIcon kind="folder" />
+                                                    <div>
+                                                        <p className="text-[15px] font-medium text-white">Open app logs folder</p>
+                                                        <p className="mt-0.5 text-[13px] leading-snug text-gray-400">Open launch, Steam, and CrossOver/Wine diagnostics.</p>
+                                                    </div>
+                                                </div>
+                                                <button
+                                                    onClick={() => { void window.ipcRenderer.openAppLogsFolder(); }}
+                                                    className="shrink-0 whitespace-nowrap rounded-lg bg-gray-700 px-4 py-2 text-sm font-medium text-white transition-all hover:bg-gray-600 active:scale-95"
+                                                >
+                                                    Open
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
 
                             <div id="preference-default-view" className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-surface-hover">
