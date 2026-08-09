@@ -659,21 +659,50 @@ export function useGameSync({
             } catch (e: any) {
             console.error('Sync to game failed:', e);
             setProgressState(prev => ({ ...prev, isOpen: false }));
+            // Stopping is not failing. The rollback restores the snapshot taken
+            // before the Apply began, so running it on a user-initiated stop
+            // threw away every mod installed so far — a quarter of an hour and
+            // gigabytes of downloads, undone by pressing Stop. Worse, the check
+            // for cancellation came *after* the rollback had already done it.
+            //
+            // What is on disk after a stop is exactly what Resume Apply is built
+            // to continue from: the sync diff reads the game folder, so already
+            // installed mods are simply not reinstalled. So the transaction is
+            // committed instead, which keeps the files and releases the
+            // snapshot, and the profile is marked interrupted so Resume appears.
+            const wasCancelled = String(e?.message || e).includes('MOD_OPERATION_CANCELLED');
+
             let rolledBack = false;
             if (applyTransactionStarted) {
-                try {
-                    rolledBack = await window.ipcRenderer.rollbackProfileApplyTransaction(activeProfile.id, community);
-                } catch (rollbackError) {
-                    console.error('Failed to roll back interrupted Apply', rollbackError);
+                if (wasCancelled) {
+                    try {
+                        await window.ipcRenderer.commitProfileApplyTransaction(activeProfile.id, community);
+                    } catch (commitError) {
+                        console.error('Failed to keep the stopped Apply', commitError);
+                    }
+                } else {
+                    try {
+                        rolledBack = await window.ipcRenderer.rollbackProfileApplyTransaction(activeProfile.id, community);
+                    } catch (rollbackError) {
+                        console.error('Failed to roll back interrupted Apply', rollbackError);
+                    }
                 }
             }
             const failedProfile = useProfileStore.getState().profiles.find(profile => profile.id === activeProfile.id);
             if (failedProfile) {
                 const errorMessage = String(e?.message || e || 'Sync failed');
                 updateProfile(activeProfile.id, {
+                    // A stop leaves work to finish, not work that failed: what
+                    // was mid-flight goes back in the queue rather than being
+                    // marked failed, so Resume picks it up without the user
+                    // having to clear an error first.
+                    needs_sync: true,
+                    apply_interrupted: true,
                     mods: failedProfile.mods.map(mod => {
                         if (mod.pending_sync_status === 'syncing') {
-                            return { ...mod, pending_sync_status: 'failed' as const, pending_sync_error: errorMessage };
+                            return wasCancelled
+                                ? { ...mod, pending_sync_status: 'queued' as const, pending_sync_error: undefined }
+                                : { ...mod, pending_sync_status: 'failed' as const, pending_sync_error: errorMessage };
                         }
                         if (rolledBack && mod.pending_sync_status === 'ready') {
                             return { ...mod, pending_sync_status: 'queued' as const, pending_sync_error: undefined };

@@ -3412,11 +3412,15 @@ function App() {
                     </g>
                   </mask>
                   <linearGradient id="background-download-sweep" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0" stopColor="#60a5fa" stopOpacity="0" />
-                    <stop offset="0.28" stopColor="#93c5fd" stopOpacity="0.55" />
-                    <stop offset="0.5" stopColor="#eff6ff" stopOpacity="0.95" />
-                    <stop offset="0.72" stopColor="#93c5fd" stopOpacity="0.55" />
-                    <stop offset="1" stopColor="#60a5fa" stopOpacity="0" />
+                    {/* The sweep was three hardcoded blues, so it stayed the
+                        stock cyan whatever theme was on — the one thing on this
+                        banner that never followed the accent. It reads from the
+                        same tokens as everything else now. */}
+                    <stop offset="0" style={{ stopColor: 'rgb(var(--r2-blue-400))' }} stopOpacity="0" />
+                    <stop offset="0.28" style={{ stopColor: 'rgb(var(--r2-blue-300))' }} stopOpacity="0.55" />
+                    <stop offset="0.5" style={{ stopColor: 'rgb(var(--r2-blue-50))' }} stopOpacity="0.95" />
+                    <stop offset="0.72" style={{ stopColor: 'rgb(var(--r2-blue-300))' }} stopOpacity="0.55" />
+                    <stop offset="1" style={{ stopColor: 'rgb(var(--r2-blue-400))' }} stopOpacity="0" />
                   </linearGradient>
                   <filter id="background-download-soft-glow" x="-30%" y="-30%" width="160%" height="160%">
                     <feGaussianBlur stdDeviation="0.65" />
