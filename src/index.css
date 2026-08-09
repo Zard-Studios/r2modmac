@@ -330,11 +330,11 @@
    never seen at all.
 
    Live edits in the theme editor deliberately do not animate: dragging a
-   colour picker through a 260ms fade would smear rather than track the cursor. */
+   colour picker through a fade would smear rather than track the cursor. */
 ::view-transition-old(root),
 ::view-transition-new(root) {
-  animation-duration: 260ms;
-  animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  animation-duration: 180ms;
+  animation-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 /* Freeze every element's own transition for the instant the palette changes.

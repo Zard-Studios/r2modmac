@@ -38,10 +38,10 @@ function installFakeEnvironment() {
     const transitions: number[] = [];
     (globalThis as Record<string, unknown>).document = {
         documentElement: root,
-        startViewTransition: (cb: () => void) => {
+        startViewTransition: (cb: () => void | Promise<void>) => {
             transitions.push(1);
-            cb();
-            return { finished: Promise.resolve() };
+            const updated = Promise.resolve(cb());
+            return { finished: updated };
         },
     };
     (globalThis as Record<string, unknown>).matchMedia = () => ({ matches: false });

@@ -167,7 +167,7 @@ export const useThemeStore = create<ThemeState>((set, get) => {
         if (typeof document === 'undefined') { run(); return; }
 
         const doc = document as Document & {
-            startViewTransition?: (callback: () => void) => { finished?: Promise<unknown> };
+            startViewTransition?: (callback: () => void | Promise<void>) => { finished: Promise<unknown> };
         };
 
         const root = doc.documentElement;
@@ -180,10 +180,12 @@ export const useThemeStore = create<ThemeState>((set, get) => {
          * element. Suppressing them for the swap is what makes it arrive all at
          * once — and costs nothing, since it removes animation work.
          */
+        const freeze = () => root.classList?.add('r2-theme-swapping');
+        const release = () => root.classList?.remove('r2-theme-swapping');
+
         const swapAtOnce = () => {
-            root.classList?.add('r2-theme-swapping');
+            freeze();
             run();
-            const release = () => root.classList?.remove('r2-theme-swapping');
             if (typeof requestAnimationFrame !== 'function') { release(); return; }
             // Two frames: one for the style change to be committed, one for it
             // to be painted, before element transitions are allowed back.
@@ -203,7 +205,20 @@ export const useThemeStore = create<ThemeState>((set, get) => {
         }
 
         try {
-            doc.startViewTransition(swapAtOnce);
+            const transition = doc.startViewTransition(async () => {
+                freeze();
+                run();
+
+                // Zustand updates the palette synchronously, while React still
+                // needs one render opportunity to update selected cards and
+                // derived labels. Waiting for that frame makes the transition's
+                // "after" snapshot contain the complete UI instead of half old,
+                // half new colours.
+                if (typeof requestAnimationFrame === 'function') {
+                    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+                }
+            });
+            void transition.finished.then(release, release);
         } catch {
             swapAtOnce();
         }
@@ -228,11 +243,16 @@ export const useThemeStore = create<ThemeState>((set, get) => {
         },
 
         setActive: async (id) => {
-            set({ activeFileName: id });
             // Painted straight away rather than through the frame-coalescing
             // path: the transition class has to be in place for the same frame
             // that changes the colours, or there is nothing to ease from.
-            crossfade(paint);
+            crossfade(() => {
+                // Selection state and CSS tokens belong to the same visual
+                // transaction. Updating either outside it is what produced the
+                // staggered sidebar/content swap visible in screen recordings.
+                set({ activeFileName: id });
+                paint();
+            });
             try {
                 await window.ipcRenderer.setActiveTheme(id);
             } catch (error) {
