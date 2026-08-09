@@ -4997,6 +4997,58 @@ fn load_packages_from_disk(app: &AppHandle, game_id: &str) -> Option<GamePackage
     }
 }
 
+/// How many games keep a package cache on disk.
+///
+/// Every game opened left one behind for good, and nothing ever removed them —
+/// the only way out was the "clear app cache" button in the danger zone, which
+/// removes all of them at once. Someone browsing thirty communities accumulated
+/// thirty files they would never look at again. Five covers going back and
+/// forth between the handful of games anyone actually plays.
+const MAX_PACKAGE_CACHES_ON_DISK: usize = 5;
+
+const PACKAGE_CACHE_SUFFIX: &str = "_packages_v2.json.gz";
+
+/// The caches to remove, oldest first, keeping the `keep` most recently written.
+///
+/// Split out from the deletion so the choice can be tested without a filesystem.
+/// Recency is the file's own modified time, which is refreshed every time a
+/// game's cache is rewritten — so "recently used" and "recently written" are the
+/// same thing here.
+fn package_caches_to_evict<T: Ord + Copy>(
+    mut caches: Vec<(std::path::PathBuf, T)>,
+    keep: usize,
+) -> Vec<std::path::PathBuf> {
+    if caches.len() <= keep {
+        return Vec::new();
+    }
+    caches.sort_by(|left, right| right.1.cmp(&left.1));
+    caches.into_iter().skip(keep).map(|(path, _)| path).collect()
+}
+
+fn evict_stale_package_caches(cache_dir: &std::path::Path, keep: usize) {
+    let Ok(entries) = std::fs::read_dir(cache_dir) else {
+        return;
+    };
+    let caches: Vec<(std::path::PathBuf, std::time::SystemTime)> = entries
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_str()
+                .is_some_and(|name| name.ends_with(PACKAGE_CACHE_SUFFIX))
+        })
+        .filter_map(|entry| {
+            let modified = entry.metadata().ok()?.modified().ok()?;
+            Some((entry.path(), modified))
+        })
+        .collect();
+
+    for path in package_caches_to_evict(caches, keep) {
+        log::debug!("[packages-cache] evicting stale disk cache {:?}", path);
+        let _ = std::fs::remove_file(path);
+    }
+}
+
 fn save_packages_to_disk(
     app: &AppHandle,
     game_id: &str,
@@ -5019,6 +5071,8 @@ fn save_packages_to_disk(
     encoder
         .finish()
         .map_err(|e| format!("Failed to finalize gzip: {}", e))?;
+
+    evict_stale_package_caches(&cache_dir, MAX_PACKAGE_CACHES_ON_DISK);
     Ok(())
 }
 
@@ -7153,5 +7207,61 @@ mod extraction_characterisation_tests {
         assert_eq!(files_under(&target), vec!["fresh.txt".to_string()]);
 
         fs::remove_dir_all(&root).ok();
+    }
+}
+
+#[cfg(test)]
+mod package_cache_eviction_tests {
+    use super::{package_caches_to_evict, MAX_PACKAGE_CACHES_ON_DISK};
+    use std::path::PathBuf;
+
+    fn entry(name: &str, recency: u64) -> (PathBuf, u64) {
+        (PathBuf::from(name), recency)
+    }
+
+    #[test]
+    fn nothing_is_removed_while_there_is_room() {
+        let caches = vec![entry("a", 1), entry("b", 2)];
+        assert!(package_caches_to_evict(caches, 5).is_empty());
+    }
+
+    #[test]
+    fn the_oldest_go_first_and_the_newest_are_kept() {
+        let caches = vec![
+            entry("oldest", 1),
+            entry("newest", 4),
+            entry("older", 2),
+            entry("newer", 3),
+        ];
+        assert_eq!(
+            package_caches_to_evict(caches, 2),
+            vec![PathBuf::from("older"), PathBuf::from("oldest")]
+        );
+    }
+
+    #[test]
+    fn exactly_at_the_limit_nothing_goes() {
+        // The boundary: a user who plays exactly the limit keeps all of them.
+        let caches: Vec<(PathBuf, u64)> = (0..MAX_PACKAGE_CACHES_ON_DISK as u64)
+            .map(|n| entry("game", n))
+            .collect();
+        assert!(package_caches_to_evict(caches, MAX_PACKAGE_CACHES_ON_DISK).is_empty());
+    }
+
+    #[test]
+    fn one_over_the_limit_removes_exactly_one() {
+        let caches: Vec<(PathBuf, u64)> = (0..=MAX_PACKAGE_CACHES_ON_DISK as u64)
+            .map(|n| entry(&format!("game{n}"), n))
+            .collect();
+        assert_eq!(
+            package_caches_to_evict(caches, MAX_PACKAGE_CACHES_ON_DISK),
+            vec![PathBuf::from("game0")]
+        );
+    }
+
+    #[test]
+    fn keeping_none_removes_everything() {
+        let caches = vec![entry("a", 1), entry("b", 2)];
+        assert_eq!(package_caches_to_evict(caches, 0).len(), 2);
     }
 }
