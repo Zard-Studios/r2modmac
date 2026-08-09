@@ -1,4 +1,5 @@
 import React, { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import type { Community, Package } from '../../types/thunderstore';
 import type { Profile, InstalledMod } from '../../types/profile';
 import type { RuntimeHealth } from '../../types/electron';
@@ -394,6 +395,13 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
     const displayedMods = renderedModView === 'updates'
         ? searchedMods.filter(mod => updateIds.has(mod.uuid4))
         : renderedModView === 'sync' ? [] : searchedMods;
+    const modRowVirtualizer = useVirtualizer({
+        count: displayedMods.length,
+        getScrollElement: () => modListScrollRef.current,
+        estimateSize: () => 60,
+        overscan: 8,
+        getItemKey: index => displayedMods[index]?.uuid4 ?? index,
+    });
     const updateScrollFades = (element: HTMLDivElement | null) => {
         if (!element) return;
         const next = {
@@ -1011,7 +1019,13 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                     </button>
                 ) : null}
 
-                {renderedModView !== 'sync' && displayedMods.map(mod => {
+                {renderedModView !== 'sync' && (
+                    <div
+                        className="relative w-full"
+                        style={{ height: `${modRowVirtualizer.getTotalSize()}px` }}
+                    >
+                {modRowVirtualizer.getVirtualItems().map(virtualRow => {
+                    const mod = displayedMods[virtualRow.index];
                     const packageName = parsePackageReference(mod.fullName).packageName.toLowerCase();
                     const pkg = mod.source === 'local' ? undefined : packageIndex[packageName];
                     const latestVersion = pkg ? latestVersionNumber(pkg) : undefined;
@@ -1022,7 +1036,13 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
 
                     return (
                         <div
-                            key={mod.uuid4}
+                            key={virtualRow.key}
+                            ref={modRowVirtualizer.measureElement}
+                            data-index={virtualRow.index}
+                            className="absolute left-0 top-0 w-full pb-1"
+                            style={{ transform: `translateY(${virtualRow.start}px)` }}
+                        >
+                        <div
                             onMouseDown={(event) => { if (event.shiftKey || event.metaKey || event.ctrlKey) event.preventDefault(); }}
                             aria-selected={isSelected}
                             className={`profile-mod-row isolate flex items-center gap-3 rounded-lg border p-2 pr-16 transition-[background-color,border-color] duration-200 group relative cursor-pointer overflow-hidden ${renderedModView === 'updates' ? 'pr-24' : ''} ${isSelected
@@ -1168,8 +1188,11 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                             </>
                             )}
                         </div>
+                        </div>
                     );
                 })}
+                    </div>
+                )}
                 {activeProfile?.mods.length === 0 && (
                     <div className="text-center py-12 px-4 flex flex-col items-center">
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-16 w-16 mb-3 opacity-20 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
