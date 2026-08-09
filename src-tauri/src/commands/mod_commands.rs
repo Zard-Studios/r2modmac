@@ -1,6 +1,7 @@
 use crate::commands::game_commands::get_game_path;
 use crate::models::shared::*;
 use crate::utils::file_ops::*;
+use crate::utils::without_starving_runtime;
 use crate::utils::mod_manifest::{
     backup_existing_mod_files, save_owned_mod_manifest, GAME_MANIFEST_SCOPE,
 };
@@ -4044,188 +4045,201 @@ async fn install_mod_bytes(
         }
     }
 
-    // Install to game folder
-    let managed_files = {
-        let cursor = std::io::Cursor::new(&runtime_bytes);
-        let mut manifest_archive = zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
+    // Everything from here on is synchronous: unpacking the archive,
+    // writing it into the game folder and recording the manifest. There is
+    // no `.await` left in it, and on a large mod it is seconds of solid CPU
+    // and disk. Running it on an async worker is what let ten parallel
+    // installs occupy every worker at once, leaving nothing to answer IPC —
+    // the freeze. `without_starving_runtime` hands the work to a thread the
+    // runtime is free to replace, so the rest of the app keeps moving.
+    //
+    // Wrapped rather than lifted into its own function on purpose: the body
+    // borrows a dozen locals and every `return` inside it still means the
+    // same thing, so the change is a closure and nothing else.
+    without_starving_runtime(move || {
+        // Install to game folder
+        let managed_files = {
+            let cursor = std::io::Cursor::new(&runtime_bytes);
+            let mut manifest_archive = zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
 
-        let mut files = if is_bepinex_pack {
-            collect_bepinex_pack_files(&mut manifest_archive, target_is_macos)?
-        } else {
-            collect_regular_mod_files(&mut manifest_archive, &mod_name)?
+            let mut files = if is_bepinex_pack {
+                collect_bepinex_pack_files(&mut manifest_archive, target_is_macos)?
+            } else {
+                collect_regular_mod_files(&mut manifest_archive, &mod_name)?
+            };
+
+            if let Some(overlay_bytes) = macos_runtime_overlay_bytes.as_ref() {
+                let cursor = std::io::Cursor::new(overlay_bytes);
+                let mut overlay_archive = zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
+                files.extend(collect_macos_bepinex_runtime_overlay_files(
+                    &mut overlay_archive,
+                )?);
+            }
+            files.extend(
+                runtime_compat_assets
+                    .iter()
+                    .map(|asset| asset.relative_path.clone()),
+            );
+
+            files.sort();
+            files.dedup();
+            files
+                .into_iter()
+                .map(|file| remap_disabled_macos_runtime_path(&file, install_into_disabled_runtime))
+                .collect::<Vec<_>>()
         };
-
-        if let Some(overlay_bytes) = macos_runtime_overlay_bytes.as_ref() {
-            let cursor = std::io::Cursor::new(overlay_bytes);
-            let mut overlay_archive = zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
-            files.extend(collect_macos_bepinex_runtime_overlay_files(
-                &mut overlay_archive,
-            )?);
-        }
-        files.extend(
-            runtime_compat_assets
-                .iter()
-                .map(|asset| asset.relative_path.clone()),
-        );
-
-        files.sort();
-        files.dedup();
-        files
-            .into_iter()
-            .map(|file| remap_disabled_macos_runtime_path(&file, install_into_disabled_runtime))
-            .collect::<Vec<_>>()
-    };
-    let backed_up_files = if managed_files.is_empty() {
-        Vec::new()
-    } else {
-        backup_existing_mod_files(
-            &app,
-            &profile_id,
-            GAME_MANIFEST_SCOPE,
-            &mod_name,
-            game_dir,
-            &managed_files,
-        )?
-    };
-
-    let cursor = std::io::Cursor::new(&runtime_bytes);
-    let mut archive = zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
-
-    if is_bepinex_pack {
-        if !target_is_macos && has_macos_loader && !has_windows_loader {
-            return Err("Detected a macOS-only BepInEx pack. Please use a Windows/CrossOver-compatible pack for this profile.".to_string());
-        }
-
-        log::debug!(
-            "[install_mod] Detected BepInExPack - installing to game root {:?} (into_disabled_runtime={}, {} managed files)",
-            game_dir,
-            install_into_disabled_runtime,
-            managed_files.len()
-        );
-        extract_bepinex_pack_to_root(
-            &mut archive,
-            game_dir,
-            target_is_macos,
-            install_into_disabled_runtime,
-        )?;
-
-        if let Some(overlay_bytes) = macos_runtime_overlay_bytes.as_ref() {
-            let cursor = std::io::Cursor::new(overlay_bytes);
-            let mut overlay_archive = zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
-            extract_macos_bepinex_runtime_overlay_to_root(
-                &mut overlay_archive,
+        let backed_up_files = if managed_files.is_empty() {
+            Vec::new()
+        } else {
+            backup_existing_mod_files(
+                &app,
+                &profile_id,
+                GAME_MANIFEST_SCOPE,
+                &mod_name,
                 game_dir,
-                install_into_disabled_runtime,
-            )?;
-        }
-
-        if target_is_macos && !install_into_disabled_runtime {
-            migrate_root_plugins_into_bepinex(game_dir)?;
-            dequarantine_recursive(game_dir);
-        }
-    } else {
-        extract_regular_mod_to_root(
-            &mut archive,
-            game_dir,
-            &mod_name,
-            install_into_disabled_runtime,
-        )?;
-        if target_is_macos && !install_into_disabled_runtime {
-            migrate_root_plugins_into_bepinex(game_dir)?;
-        }
-    }
-
-    if !runtime_compat_assets.is_empty() {
-        write_runtime_compat_assets(
-            game_dir,
-            &runtime_compat_assets,
-            install_into_disabled_runtime,
-        )?;
-    }
-
-    if !managed_files.is_empty() {
-        save_owned_mod_manifest(
-            &app,
-            &profile_id,
-            GAME_MANIFEST_SCOPE,
-            &mod_name,
-            game_dir,
-            &managed_files,
-            &backed_up_files,
-        )?;
-    }
-
-    // LEGACY MODE: Also save to profile cache folder
-    if use_profile_cache.unwrap_or(false) {
-        let profile_dir = crate::utils::paths::app_data_dir(&app)
-            .map_err(|e| e.to_string())?
-            .join("profiles")
-            .join(&profile_id);
-        log::debug!(
-            "[install_mod] LEGACY: Also caching to profile: {:?}",
-            profile_dir
-        );
+                &managed_files,
+            )?
+        };
 
         let cursor = std::io::Cursor::new(&runtime_bytes);
         let mut archive = zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
 
         if is_bepinex_pack {
-            // Cache BepInExPack to profile root
-            extract_bepinex_pack_to_root(&mut archive, &profile_dir, target_is_macos, false)?;
+            if !target_is_macos && has_macos_loader && !has_windows_loader {
+                return Err("Detected a macOS-only BepInEx pack. Please use a Windows/CrossOver-compatible pack for this profile.".to_string());
+            }
+
+            log::debug!(
+                "[install_mod] Detected BepInExPack - installing to game root {:?} (into_disabled_runtime={}, {} managed files)",
+                game_dir,
+                install_into_disabled_runtime,
+                managed_files.len()
+            );
+            extract_bepinex_pack_to_root(
+                &mut archive,
+                game_dir,
+                target_is_macos,
+                install_into_disabled_runtime,
+            )?;
 
             if let Some(overlay_bytes) = macos_runtime_overlay_bytes.as_ref() {
                 let cursor = std::io::Cursor::new(overlay_bytes);
-                let mut overlay_archive =
-                    zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
+                let mut overlay_archive = zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
                 extract_macos_bepinex_runtime_overlay_to_root(
                     &mut overlay_archive,
-                    &profile_dir,
-                    false,
+                    game_dir,
+                    install_into_disabled_runtime,
                 )?;
             }
+
+            if target_is_macos && !install_into_disabled_runtime {
+                migrate_root_plugins_into_bepinex(game_dir)?;
+                dequarantine_recursive(game_dir);
+            }
         } else {
-            log::debug!(
-                "[install_mod] Updating profile cache root for {:?}",
-                profile_dir
-            );
-            extract_regular_mod_to_root(&mut archive, &profile_dir, &mod_name, false)?;
-            if target_is_macos {
-                migrate_root_plugins_into_bepinex(&profile_dir)?;
+            extract_regular_mod_to_root(
+                &mut archive,
+                game_dir,
+                &mod_name,
+                install_into_disabled_runtime,
+            )?;
+            if target_is_macos && !install_into_disabled_runtime {
+                migrate_root_plugins_into_bepinex(game_dir)?;
             }
         }
 
         if !runtime_compat_assets.is_empty() {
-            write_runtime_compat_assets(&profile_dir, &runtime_compat_assets, false)?;
+            write_runtime_compat_assets(
+                game_dir,
+                &runtime_compat_assets,
+                install_into_disabled_runtime,
+            )?;
         }
 
-        if target_is_macos {
-            dequarantine_recursive(game_dir);
+        if !managed_files.is_empty() {
+            save_owned_mod_manifest(
+                &app,
+                &profile_id,
+                GAME_MANIFEST_SCOPE,
+                &mod_name,
+                game_dir,
+                &managed_files,
+                &backed_up_files,
+            )?;
         }
-    }
 
-    if is_bepinex_pack {
-        // Verify the loader landed where the health check will look for it, so a
-        // "successful" install that leaves an unusable runtime is visible here
-        // rather than only as a downstream repair loop.
-        let core_dir = game_dir
-            .join(if install_into_disabled_runtime {
-                "BepInEx_DISABLED"
+        // LEGACY MODE: Also save to profile cache folder
+        if use_profile_cache.unwrap_or(false) {
+            let profile_dir = crate::utils::paths::app_data_dir(&app)
+                .map_err(|e| e.to_string())?
+                .join("profiles")
+                .join(&profile_id);
+            log::debug!(
+                "[install_mod] LEGACY: Also caching to profile: {:?}",
+                profile_dir
+            );
+
+            let cursor = std::io::Cursor::new(&runtime_bytes);
+            let mut archive = zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
+
+            if is_bepinex_pack {
+                // Cache BepInExPack to profile root
+                extract_bepinex_pack_to_root(&mut archive, &profile_dir, target_is_macos, false)?;
+
+                if let Some(overlay_bytes) = macos_runtime_overlay_bytes.as_ref() {
+                    let cursor = std::io::Cursor::new(overlay_bytes);
+                    let mut overlay_archive =
+                        zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
+                    extract_macos_bepinex_runtime_overlay_to_root(
+                        &mut overlay_archive,
+                        &profile_dir,
+                        false,
+                    )?;
+                }
             } else {
-                "BepInEx"
-            })
-            .join("core");
-        log::debug!(
-            "[install_mod] Post-install runtime check at {:?}: preloader_present={}",
-            core_dir,
-            crate::commands::game_commands::runtime_health::core_directory_has_preloader(&core_dir)
-        );
-    }
+                log::debug!(
+                    "[install_mod] Updating profile cache root for {:?}",
+                    profile_dir
+                );
+                extract_regular_mod_to_root(&mut archive, &profile_dir, &mod_name, false)?;
+                if target_is_macos {
+                    migrate_root_plugins_into_bepinex(&profile_dir)?;
+                }
+            }
 
-    log::debug!(
-        "[install_mod] Successfully installed {} to game folder",
-        mod_name
-    );
-    Ok(serde_json::json!({ "success": true }))
+            if !runtime_compat_assets.is_empty() {
+                write_runtime_compat_assets(&profile_dir, &runtime_compat_assets, false)?;
+            }
+
+            if target_is_macos {
+                dequarantine_recursive(game_dir);
+            }
+        }
+
+        if is_bepinex_pack {
+            // Verify the loader landed where the health check will look for it, so a
+            // "successful" install that leaves an unusable runtime is visible here
+            // rather than only as a downstream repair loop.
+            let core_dir = game_dir
+                .join(if install_into_disabled_runtime {
+                    "BepInEx_DISABLED"
+                } else {
+                    "BepInEx"
+                })
+                .join("core");
+            log::debug!(
+                "[install_mod] Post-install runtime check at {:?}: preloader_present={}",
+                core_dir,
+                crate::commands::game_commands::runtime_health::core_directory_has_preloader(&core_dir)
+            );
+        }
+
+        log::debug!(
+            "[install_mod] Successfully installed {} to game folder",
+            mod_name
+        );
+        Ok(serde_json::json!({ "success": true }))
+    })
 }
 
 #[command]
