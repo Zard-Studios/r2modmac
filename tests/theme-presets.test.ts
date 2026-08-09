@@ -314,7 +314,7 @@ test('every filled control in every preset carries a readable label', () => {
         const p = resolveTheme(normalizeTheme(preset));
         const fills: Array<[string, string, string]> = [
             ['accent', p.on.accent, p.blue[600]],
-            ['secondary', p.on.surface, p.gray[700]],
+            ['secondary', p.on.surface, p.gray[800]],
             ['danger', p.on.danger, p.red[600]],
             ['warning', p.on.warning, p.yellow[600]],
             ['warning (amber)', p.on.warning, p.amber[600]],

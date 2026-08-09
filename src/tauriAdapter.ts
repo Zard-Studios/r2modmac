@@ -242,6 +242,8 @@ export const tauriAPI: IElectronAPI = {
         return await invoke('open_profile_config_file', { profileId, relativePath, root: root ?? null });
     },
     openAppLogsFolder: async () => invoke('open_app_logs_folder'),
+    getAppLogsSize: async () => invoke<number>('get_app_logs_size'),
+    clearAppLogs: async () => invoke<number>('clear_app_logs'),
     setVerboseLogging: async (enabled: boolean) => invoke('set_verbose_logging', { enabled }),
 
     listThemes: async () => invoke<ThemeSummary[]>('list_themes'),

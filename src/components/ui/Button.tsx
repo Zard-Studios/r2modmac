@@ -1,6 +1,6 @@
 import React from 'react';
 
-type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'outline' | 'purple';
+type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'dangerSecondary' | 'outline' | 'purple';
 type ButtonSize = 'sm' | 'md' | 'lg';
 
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
@@ -12,9 +12,10 @@ interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
 
 const variantStyles: Record<ButtonVariant, string> = {
     primary: 'bg-blue-600 text-on-accent hover:bg-accent-hover active:scale-[0.98]',
-    secondary: 'bg-gray-700 text-on-surface hover:bg-surface-hover active:scale-[0.98]',
+    secondary: 'border border-gray-700 bg-gray-800 text-on-surface hover:border-gray-600 hover:bg-surface-hover active:scale-[0.98]',
     ghost: 'bg-transparent text-gray-400 hover:text-white hover:bg-gray-700/60 active:scale-[0.98]',
     danger: 'bg-red-600 text-[#ffffff] hover:bg-red-500 active:scale-[0.98]',
+    dangerSecondary: 'border border-fg-danger/40 bg-fg-danger/10 text-fg-danger hover:border-fg-danger/60 hover:bg-fg-danger/20 active:scale-[0.98]',
     outline: 'bg-transparent text-gray-400 hover:text-white hover:bg-gray-800 border border-gray-700 hover:border-gray-600 active:scale-[0.98]',
     purple: 'bg-purple-600 text-[#ffffff] hover:bg-purple-500 active:scale-[0.98]',
 };

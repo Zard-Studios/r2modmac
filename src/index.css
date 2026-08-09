@@ -289,7 +289,7 @@
   position: fixed;
   inset: 0;
   z-index: -1;
-  background-color: rgb(var(--r2-gray-900) / var(--r2-background-veil, 0.65));
+  background-color: rgb(var(--r2-gray-900) / calc(var(--r2-gray-900-alpha, 1) * var(--r2-background-veil, 0.65)));
   pointer-events: none;
 }
 
@@ -304,6 +304,15 @@
 
 :root[data-r2-background-image] .r2-app-backdrop {
   background-color: transparent;
+}
+
+.theme-background-canvas {
+  transition: opacity 220ms cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: opacity;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .theme-background-canvas { transition-duration: 0ms; }
 }
 
 /* ── Theme change cross-fade ──────────────────────────────────────────────────
@@ -372,7 +381,7 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
-  background-color: rgb(var(--r2-gray-900));
+  background-color: rgb(var(--r2-gray-900) / var(--r2-gray-900-alpha, 1));
   /* gray-900 */
   user-select: none;
   -webkit-user-select: none;
@@ -382,8 +391,19 @@ body {
   /* Prevent body scroll */
 }
 
-/* ── macOS-style overlay scrollbars (global) ─────────────────────────────── */
-/* Force overlay mode so the bar floats over content without shifting layout  */
+/* ── Balanced scrollbars (global) ────────────────────────────────────────── */
+/*
+ * A classic vertical scrollbar consumes width on one side of a container,
+ * moving its visual centre whenever the bar appears. Reserve an equal gutter
+ * on both edges so scrollable screens stay centred and never reflow.
+ */
+.overflow-y-auto,
+.overflow-y-scroll,
+.overflow-auto,
+.overflow-scroll {
+  scrollbar-gutter: stable both-edges;
+}
+
 * {
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.20) transparent;
@@ -524,6 +544,68 @@ body {
   }
 }
 
+@keyframes command-scope-stack-in {
+  from {
+    opacity: 0;
+    transform: translate3d(-6px, 0, 0) scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+/*
+ * Spotlight enters as one composited surface. Only opacity and transform move:
+ * no animated blur, shadow or layout property, so opening it does not make the
+ * catalogue behind it repaint frame by frame.
+ */
+@keyframes command-palette-backdrop-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes command-palette-panel-in {
+  from {
+    opacity: 0.72;
+    clip-path: inset(0 0 calc(100% - 58px) 0 round 16px);
+    transform: translate3d(0, -5px, 0) scaleX(0.985);
+  }
+  to {
+    opacity: 1;
+    clip-path: inset(0 0 0 0 round 16px);
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes command-palette-content-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, -7px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+.command-palette-backdrop {
+  animation: command-palette-backdrop-in 170ms ease-out both;
+}
+
+.command-palette-panel {
+  transform-origin: top center;
+  animation: command-palette-panel-in 215ms cubic-bezier(0.2, 0.82, 0.2, 1) both;
+}
+
+.command-palette-reveal {
+  animation: command-palette-content-in 155ms 38ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.command-scope-stack {
+  animation: command-scope-stack-in 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
 .hover-marquee {
   position: relative;
 }
@@ -549,6 +631,16 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .command-palette-backdrop,
+  .command-palette-panel,
+  .command-palette-reveal {
+    animation: none;
+  }
+
+  .command-scope-stack {
+    animation: none;
+  }
+
   .hover-marquee.is-overflowing:hover .hover-marquee-static {
     opacity: 1;
   }

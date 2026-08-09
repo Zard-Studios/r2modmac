@@ -262,7 +262,7 @@ test('every automatic label clears the bar on the fill it sits on', () => {
     const p = resolveTheme(theme);
     const fills: Array<[string, string, string]> = [
         ['accent', p.on.accent, p.blue[500]],
-        ['surface', p.on.surface, p.gray[700]],
+        ['surface', p.on.surface, p.gray[800]],
         ['danger', p.on.danger, p.red[600]],
         ['warning', p.on.warning, p.amber[600]],
         ['success', p.on.success, p.green[600]],
@@ -401,7 +401,8 @@ test('applying a theme writes every token the palette depends on', () => {
     // tokens, the two hover tokens, the four readable-on-surface status ones
     // and the two cover-chrome tokens.
     const families = THEMED_FAMILIES.length + DECORATIVE_FAMILIES.length;
-    assert.equal(root.props.size, families * 11 + 1 + 5 + 2 + 4 + 2);
+    // Every colour token has a matching alpha token.
+    assert.equal(root.props.size, (families * 11 + 1 + 5 + 2 + 4 + 2) * 2);
     assert.equal(root.props.get('--r2-gray-900'), '17 24 39');
     assert.equal(root.props.get('--r2-blue-500'), '59 130 246');
     assert.equal(root.props.get('--r2-white'), '255 255 255');
@@ -421,7 +422,11 @@ test('channel values are integers, as rgb(var(...)) requires', () => {
     const root = fakeRoot();
     applyTheme(LIGHT, root);
     for (const [name, value] of root.props) {
-        assert.match(value, /^\d{1,3} \d{1,3} \d{1,3}$/, `${name} = "${value}"`);
+        if (name.endsWith('-alpha')) {
+            assert.ok(Number(value) >= 0 && Number(value) <= 1, `${name} = "${value}"`);
+        } else {
+            assert.match(value, /^\d{1,3} \d{1,3} \d{1,3}$/, `${name} = "${value}"`);
+        }
     }
 });
 
@@ -562,6 +567,29 @@ test('quotes in a theme name cannot break out of the TOML string', () => {
 
 test('an author is omitted rather than written empty', () => {
     assert.ok(!themeToToml(DEFAULT_THEME).includes('author'));
+});
+
+test('per-colour opacity is clamped, serialised and applied as CSS tokens', () => {
+    const theme = normalizeTheme({
+        ...LIGHT,
+        opacity: { background: 0.42, border: -2, accent: 3, media_scrim: 0.25 },
+    });
+    assert.equal(theme.opacity?.background, 0.42);
+    assert.equal(theme.opacity?.border, 0);
+    assert.equal(theme.opacity?.accent, 1);
+    assert.equal(theme.opacity?.media_scrim, 0.25);
+
+    const toml = themeToToml(theme);
+    assert.match(toml, /^\[opacity\]$/m);
+    assert.match(toml, /^background = 0\.42$/m);
+    assert.match(toml, /^media_scrim = 0\.25$/m);
+
+    const root = fakeRoot();
+    applyTheme(theme, root);
+    assert.equal(root.props.get('--r2-gray-900-alpha'), '0.42');
+    assert.equal(root.props.get('--r2-gray-700-alpha'), '0');
+    assert.equal(root.props.get('--r2-blue-500-alpha'), '1');
+    assert.equal(root.props.get('--r2-scrim-alpha'), '0.25');
 });
 
 // ── Cover chrome ─────────────────────────────────────────────────────────────

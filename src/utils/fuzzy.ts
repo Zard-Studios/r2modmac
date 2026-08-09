@@ -1,9 +1,9 @@
 /**
  * Subsequence matching for the command palette.
  *
- * Lives apart from what searches with it: profiles, games, settings rows and
- * slash commands all rank through the same scorer, and none of them is the
- * one it belongs to.
+ * Lives apart from what searches with it: profiles, games, actions and
+ * settings rows all rank through the same scorer, and none of them is the one
+ * it belongs to.
  */
 
 /**

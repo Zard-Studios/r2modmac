@@ -7,9 +7,12 @@
 // with no theme applied renders exactly as it did before theming existed.
 const SHADES = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950];
 
+const themedColor = (token) =>
+    `rgb(var(--r2-${token}) / calc(var(--r2-${token}-alpha, 1) * <alpha-value>))`;
+
 const themeable = (family) =>
     Object.fromEntries(
-        SHADES.map((shade) => [shade, `rgb(var(--r2-${family}-${shade}) / <alpha-value>)`])
+        SHADES.map((shade) => [shade, themedColor(`${family}-${shade}`)])
     );
 
 export default {
@@ -39,28 +42,28 @@ export default {
                 emerald: themeable('emerald'),
                 // Primary text (also toggle knobs and slider thumbs, which
                 // intentionally follow the text colour).
-                white: 'rgb(var(--r2-white) / <alpha-value>)',
+                white: themedColor('white'),
                 // Labels painted on an accent fill (primary buttons, selected
                 // tabs). Chosen per-theme so a pale accent cannot swallow them.
                 // A theme carries one text colour, but text lands on several
                 // different fills. Each of these is resolved per theme against
                 // the fill it names, so a label stays readable on a grey
                 // secondary button and a red destructive one alike.
-                'on-accent': 'rgb(var(--r2-on-accent) / <alpha-value>)',
-                'on-surface': 'rgb(var(--r2-on-surface) / <alpha-value>)',
-                'on-danger': 'rgb(var(--r2-on-danger) / <alpha-value>)',
-                'on-warning': 'rgb(var(--r2-on-warning) / <alpha-value>)',
-                'on-success': 'rgb(var(--r2-on-success) / <alpha-value>)',
-                'accent-hover': 'rgb(var(--r2-accent-hover) / <alpha-value>)',
-                'surface-hover': 'rgb(var(--r2-surface-hover) / <alpha-value>)',
+                'on-accent': themedColor('on-accent'),
+                'on-surface': themedColor('on-surface'),
+                'on-danger': themedColor('on-danger'),
+                'on-warning': themedColor('on-warning'),
+                'on-success': themedColor('on-success'),
+                'accent-hover': themedColor('accent-hover'),
+                'surface-hover': themedColor('surface-hover'),
                 // Status colours as *text on a panel*. A fixed shade cannot do
                 // this: `text-amber-200` assumes a dark panel and drops to
                 // ~1.6:1 once the theme inverts. These are resolved per theme
                 // against its surface, so they read either way.
-                'fg-accent': 'rgb(var(--r2-fg-accent) / <alpha-value>)',
-                'fg-danger': 'rgb(var(--r2-fg-danger) / <alpha-value>)',
-                'fg-warning': 'rgb(var(--r2-fg-warning) / <alpha-value>)',
-                'fg-success': 'rgb(var(--r2-fg-success) / <alpha-value>)',
+                'fg-accent': themedColor('fg-accent'),
+                'fg-danger': themedColor('fg-danger'),
+                'fg-warning': themedColor('fg-warning'),
+                'fg-success': themedColor('fg-success'),
                 // Icon hues. Fixed identities — no theme colour drives them —
                 // but routed through variables so the engine can mirror their
                 // lightness under a light theme, keeping a glyph visible the
@@ -83,8 +86,8 @@ export default {
                 // must contrast with *it*, not with the palette. Tying them to
                 // the theme turns every badge white under a light theme and
                 // leaves dark icons floating on bright cover art.
-                scrim: 'rgb(var(--r2-scrim) / <alpha-value>)',
-                'on-media': 'rgb(var(--r2-on-media) / <alpha-value>)',
+                scrim: themedColor('scrim'),
+                'on-media': themedColor('on-media'),
                 // `black` is deliberately left alone: it backs modal scrims,
                 // which should stay neutral regardless of the active theme.
             },
@@ -95,21 +98,21 @@ export default {
             typography: {
                 invert: {
                     css: {
-                        '--tw-prose-invert-body': 'rgb(var(--r2-gray-300))',
-                        '--tw-prose-invert-headings': 'rgb(var(--r2-white))',
-                        '--tw-prose-invert-lead': 'rgb(var(--r2-gray-400))',
-                        '--tw-prose-invert-links': 'rgb(var(--r2-white))',
-                        '--tw-prose-invert-bold': 'rgb(var(--r2-white))',
-                        '--tw-prose-invert-counters': 'rgb(var(--r2-gray-400))',
-                        '--tw-prose-invert-bullets': 'rgb(var(--r2-gray-600))',
-                        '--tw-prose-invert-hr': 'rgb(var(--r2-gray-700))',
-                        '--tw-prose-invert-quotes': 'rgb(var(--r2-gray-100))',
-                        '--tw-prose-invert-quote-borders': 'rgb(var(--r2-gray-700))',
-                        '--tw-prose-invert-captions': 'rgb(var(--r2-gray-400))',
-                        '--tw-prose-invert-code': 'rgb(var(--r2-white))',
-                        '--tw-prose-invert-pre-code': 'rgb(var(--r2-gray-300))',
-                        '--tw-prose-invert-th-borders': 'rgb(var(--r2-gray-600))',
-                        '--tw-prose-invert-td-borders': 'rgb(var(--r2-gray-700))',
+                        '--tw-prose-invert-body': 'rgb(var(--r2-gray-300) / var(--r2-gray-300-alpha, 1))',
+                        '--tw-prose-invert-headings': 'rgb(var(--r2-white) / var(--r2-white-alpha, 1))',
+                        '--tw-prose-invert-lead': 'rgb(var(--r2-gray-400) / var(--r2-gray-400-alpha, 1))',
+                        '--tw-prose-invert-links': 'rgb(var(--r2-white) / var(--r2-white-alpha, 1))',
+                        '--tw-prose-invert-bold': 'rgb(var(--r2-white) / var(--r2-white-alpha, 1))',
+                        '--tw-prose-invert-counters': 'rgb(var(--r2-gray-400) / var(--r2-gray-400-alpha, 1))',
+                        '--tw-prose-invert-bullets': 'rgb(var(--r2-gray-600) / var(--r2-gray-600-alpha, 1))',
+                        '--tw-prose-invert-hr': 'rgb(var(--r2-gray-700) / var(--r2-gray-700-alpha, 1))',
+                        '--tw-prose-invert-quotes': 'rgb(var(--r2-gray-100) / var(--r2-gray-100-alpha, 1))',
+                        '--tw-prose-invert-quote-borders': 'rgb(var(--r2-gray-700) / var(--r2-gray-700-alpha, 1))',
+                        '--tw-prose-invert-captions': 'rgb(var(--r2-gray-400) / var(--r2-gray-400-alpha, 1))',
+                        '--tw-prose-invert-code': 'rgb(var(--r2-white) / var(--r2-white-alpha, 1))',
+                        '--tw-prose-invert-pre-code': 'rgb(var(--r2-gray-300) / var(--r2-gray-300-alpha, 1))',
+                        '--tw-prose-invert-th-borders': 'rgb(var(--r2-gray-600) / var(--r2-gray-600-alpha, 1))',
+                        '--tw-prose-invert-td-borders': 'rgb(var(--r2-gray-700) / var(--r2-gray-700-alpha, 1))',
                     },
                 },
             },

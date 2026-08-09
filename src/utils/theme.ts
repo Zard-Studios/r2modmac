@@ -63,6 +63,9 @@ export interface ThemeColors {
     media_ink?: string;
 }
 
+/** Per-role transparency. Missing values are fully opaque for old themes. */
+export type ThemeOpacity = Partial<Record<keyof ThemeColors, number>>;
+
 /** Chrome that floats on artwork rather than on an app surface. */
 export const COVER_COLOR_KEYS = ['media_scrim', 'media_ink'] as const;
 
@@ -116,6 +119,7 @@ export interface Theme {
     name: string;
     author?: string;
     colors: ThemeColors;
+    opacity?: ThemeOpacity;
     backgroundImage?: ThemeBackgroundImage | null;
     options?: ThemeOptions;
 }
@@ -201,6 +205,7 @@ export const THEME_COLOR_META: Record<
 const SHADES = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950] as const;
 type Shade = (typeof SHADES)[number];
 type Ramp = Record<Shade, string>;
+type AlphaRamp = Record<Shade, number>;
 
 const DEFAULT_GRAY: Ramp = {
     50: '#f9fafb', 100: '#f3f4f6', 200: '#e5e7eb', 300: '#d1d5db',
@@ -551,6 +556,38 @@ function expandRamp(reference: Ramp, anchors: Partial<Record<Shade, string>>): R
     return out;
 }
 
+/** Match opacity to the same perceptual shade spacing used by a colour ramp. */
+function expandAlphaRamp(reference: Ramp, anchors: Partial<Record<Shade, number>>): AlphaRamp {
+    const anchored = (Object.keys(anchors) as unknown as string[])
+        .map((key) => Number(key) as Shade)
+        .filter((shade) => typeof anchors[shade] === 'number')
+        .map((shade) => ({
+            shade,
+            refL: rgbToLab(parseHex(reference[shade])!).L,
+            alpha: clamp(anchors[shade]!, 0, 1),
+        }))
+        .sort((a, b) => a.refL - b.refL);
+    if (anchored.length < 2) {
+        const alpha = anchored[0]?.alpha ?? 1;
+        return Object.fromEntries(SHADES.map((shade) => [shade, alpha])) as AlphaRamp;
+    }
+    const out = {} as AlphaRamp;
+    for (const shade of SHADES) {
+        const refL = rgbToLab(parseHex(reference[shade])!).L;
+        let lo = 0;
+        while (lo < anchored.length - 2 && refL > anchored[lo + 1].refL) lo++;
+        const a = anchored[lo];
+        const b = anchored[lo + 1];
+        const span = b.refL - a.refL;
+        const t = span === 0 ? 0 : (refL - a.refL) / span;
+        out[shade] = clamp(a.alpha + (b.alpha - a.alpha) * t, 0, 1);
+    }
+    return out;
+}
+
+const flatAlphaRamp = (alpha: number): AlphaRamp =>
+    Object.fromEntries(SHADES.map((shade) => [shade, clamp(alpha, 0, 1)])) as AlphaRamp;
+
 /**
  * Rebuild the accent ramp around a single colour.
  *
@@ -653,6 +690,24 @@ export interface ResolvedPalette {
         danger: string;
         warning: string;
         success: string;
+    };
+    /** Alpha counterparts for every runtime colour token. */
+    alpha: {
+        gray: AlphaRamp;
+        slate: AlphaRamp;
+        blue: AlphaRamp;
+        red: AlphaRamp;
+        amber: AlphaRamp;
+        yellow: AlphaRamp;
+        green: AlphaRamp;
+        emerald: AlphaRamp;
+        white: number;
+        on: Record<'accent' | 'surface' | 'danger' | 'warning' | 'success', number>;
+        media: { scrim: number; ink: number };
+        accentHover: number;
+        surfaceHover: number;
+        fg: Record<'accent' | 'danger' | 'warning' | 'success', number>;
+        decorative: number;
     };
 }
 
@@ -771,6 +826,9 @@ export function resolveTheme(theme: Theme): ResolvedPalette {
         ...THEME_COLOR_KEYS.map((k) => theme.colors[k] || ''),
         ...MANUAL_COLOR_KEYS.map((k) => theme.colors[k] || ''),
         ...COVER_COLOR_KEYS.map((k) => theme.colors[k] || ''),
+        ...[...THEME_COLOR_KEYS, ...MANUAL_COLOR_KEYS, ...COVER_COLOR_KEYS].map(
+            (k) => theme.opacity?.[k] ?? 1
+        ),
         theme.options?.autoContrast ?? DEFAULT_THEME_OPTIONS.autoContrast,
     ].join('|');
     const cached = paletteCache.get(key);
@@ -799,6 +857,7 @@ function deriveHoverColor(baseHex: string, isAccent = true): string {
 
 function computePalette(theme: Theme): ResolvedPalette {
     const c = theme.colors;
+    const opacity = (key: keyof ThemeColors) => clamp(theme.opacity?.[key] ?? 1, 0, 1);
 
     // The gray ramp runs from the background (darkest surface) up through the
     // muted text to the primary text at its lightest end.
@@ -812,6 +871,13 @@ function computePalette(theme: Theme): ResolvedPalette {
 
     const auto = theme.options?.autoContrast ?? DEFAULT_THEME_OPTIONS.autoContrast;
     const gray = expandRamp(DEFAULT_GRAY, grayAnchors);
+    const grayAlpha = expandAlphaRamp(DEFAULT_GRAY, {
+        900: opacity('background'),
+        800: opacity('surface'),
+        700: opacity('border'),
+        400: opacity('text_muted'),
+        50: opacity('text'),
+    });
     const blue = expandAccentRamp(DEFAULT_BLUE, c.accent);
     const red = expandAccentRamp(DEFAULT_RED, c.danger);
     const amber = expandAccentRamp(DEFAULT_AMBER, c.warning);
@@ -846,8 +912,9 @@ function computePalette(theme: Theme): ResolvedPalette {
         onAccent: pickLabel(c, 'on_accent', c.accent, auto),
         on: {
             accent: pickLabel(c, 'on_accent', c.accent, auto),
-            // Secondary buttons are filled with gray-700, not the surface.
-            surface: pickLabel(c, 'on_surface', gray[700], auto),
+            // Secondary buttons use the surface as their fill. Border is only
+            // an outline token and must never decide a button's label colour.
+            surface: pickLabel(c, 'on_surface', c.surface, auto),
             danger: pickLabel(c, 'on_danger', red[600], auto),
             warning: pickLabel(c, 'on_warning', amber[600], auto),
             success: pickLabel(c, 'on_success', green[600], auto),
@@ -863,6 +930,40 @@ function computePalette(theme: Theme): ResolvedPalette {
             danger: readableOnSurface(red, c.surface),
             warning: readableOnSurface(amber, c.surface),
             success: readableOnSurface(green, c.surface),
+        },
+        alpha: {
+            gray: grayAlpha,
+            slate: expandAlphaRamp(DEFAULT_SLATE, {
+                900: opacity('background'),
+                800: opacity('surface'),
+                700: opacity('border'),
+                400: opacity('text_muted'),
+                50: opacity('text'),
+            }),
+            blue: flatAlphaRamp(opacity('accent')),
+            red: flatAlphaRamp(opacity('danger')),
+            amber: flatAlphaRamp(opacity('warning')),
+            yellow: flatAlphaRamp(opacity('warning')),
+            green: flatAlphaRamp(opacity('success')),
+            emerald: flatAlphaRamp(opacity('success')),
+            white: opacity('text'),
+            on: {
+                accent: auto ? 1 : opacity('on_accent'),
+                surface: auto ? 1 : opacity('on_surface'),
+                danger: auto ? 1 : opacity('on_danger'),
+                warning: auto ? 1 : opacity('on_warning'),
+                success: auto ? 1 : opacity('on_success'),
+            },
+            media: { scrim: opacity('media_scrim'), ink: opacity('media_ink') },
+            accentHover: opacity(c.accent_hover ? 'accent_hover' : 'accent'),
+            surfaceHover: opacity(c.surface_hover ? 'surface_hover' : 'surface'),
+            fg: {
+                accent: opacity('accent'),
+                danger: opacity('danger'),
+                warning: opacity('warning'),
+                success: opacity('success'),
+            },
+            decorative: !auto && c.icon ? opacity('icon') : 1,
         },
     };
 }
@@ -945,22 +1046,31 @@ function paletteVars(p: ResolvedPalette): Record<string, string> {
     for (const family of THEMED_FAMILIES) {
         for (const shade of SHADES) {
             vars[`${VAR_PREFIX}${family}-${shade}`] = channels(p[family][shade]);
+            vars[`${VAR_PREFIX}${family}-${shade}-alpha`] = String(p.alpha[family][shade]);
         }
     }
     vars[`${VAR_PREFIX}white`] = channels(p.white);
+    vars[`${VAR_PREFIX}white-alpha`] = String(p.alpha.white);
     vars[`${VAR_PREFIX}scrim`] = channels(p.media.scrim);
+    vars[`${VAR_PREFIX}scrim-alpha`] = String(p.alpha.media.scrim);
     vars[`${VAR_PREFIX}on-media`] = channels(p.media.ink);
+    vars[`${VAR_PREFIX}on-media-alpha`] = String(p.alpha.media.ink);
     for (const [fill, value] of Object.entries(p.on)) {
         vars[`${VAR_PREFIX}on-${fill}`] = channels(value);
+        vars[`${VAR_PREFIX}on-${fill}-alpha`] = String(p.alpha.on[fill as keyof typeof p.alpha.on]);
     }
     vars[`${VAR_PREFIX}accent-hover`] = channels(p.accentHover);
+    vars[`${VAR_PREFIX}accent-hover-alpha`] = String(p.alpha.accentHover);
     vars[`${VAR_PREFIX}surface-hover`] = channels(p.surfaceHover);
+    vars[`${VAR_PREFIX}surface-hover-alpha`] = String(p.alpha.surfaceHover);
     for (const [role, value] of Object.entries(p.fg)) {
         vars[`${VAR_PREFIX}fg-${role}`] = channels(value);
+        vars[`${VAR_PREFIX}fg-${role}-alpha`] = String(p.alpha.fg[role as keyof typeof p.alpha.fg]);
     }
     for (const [family, ramp] of Object.entries(p.decorative)) {
         for (const shade of SHADES) {
             vars[`${VAR_PREFIX}${family}-${shade}`] = channels(ramp[shade]);
+            vars[`${VAR_PREFIX}${family}-${shade}-alpha`] = String(p.alpha.decorative);
         }
     }
     return vars;
@@ -1114,6 +1224,16 @@ export function themeToToml(theme: Theme): string {
         }
     }
 
+    const transparent = [...THEME_COLOR_KEYS, ...MANUAL_COLOR_KEYS, ...COVER_COLOR_KEYS]
+        .filter((key) => typeof theme.opacity?.[key] === 'number');
+    if (transparent.length > 0) {
+        lines.push('', '[opacity]', '# Per-colour opacity: 0 = transparent, 1 = opaque.');
+        for (const key of transparent) {
+            const value = clamp(theme.opacity?.[key] ?? 1, 0, 1);
+            lines.push(`${key} = ${round2(value)}`);
+        }
+    }
+
     const options = theme.options ?? DEFAULT_THEME_OPTIONS;
     lines.push(
         '',
@@ -1150,8 +1270,9 @@ export function themeToToml(theme: Theme): string {
  * theme rather than rejecting the file, so a typo costs one colour, not all six.
  */
 export function normalizeTheme(
-    input: Omit<Partial<Theme>, 'colors' | 'backgroundImage' | 'options'> & {
+    input: Omit<Partial<Theme>, 'colors' | 'opacity' | 'backgroundImage' | 'options'> & {
         colors?: Partial<ThemeColors>;
+        opacity?: Partial<Record<keyof ThemeColors, number | null>> | null;
         // Nullable per field: this is what arrives over IPC, where an unset
         // value is `null` rather than absent. Accepting it here means callers
         // no longer hand-convert — which is what kept losing fields.
@@ -1170,6 +1291,15 @@ export function normalizeTheme(
         if (value && isValidHex(value)) colors[key] = normalizeHex(value);
     }
 
+
+    const opacity: ThemeOpacity = {};
+    for (const key of [...THEME_COLOR_KEYS, ...MANUAL_COLOR_KEYS, ...COVER_COLOR_KEYS]) {
+        const value = input.opacity?.[key];
+        if (typeof value === 'number' && Number.isFinite(value)) {
+            opacity[key] = clamp(value, 0, 1);
+        }
+    }
+
     const rawOptions = input.options;
     const rawImage = input.backgroundImage;
     const path = rawImage?.path?.trim();
@@ -1180,6 +1310,7 @@ export function normalizeTheme(
         name: input.name?.trim() || 'Untitled',
         author: input.author?.trim() || undefined,
         colors,
+        opacity: Object.keys(opacity).length > 0 ? opacity : undefined,
         options: {
             autoContrast:
                 typeof rawOptions?.autoContrast === 'boolean'

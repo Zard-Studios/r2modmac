@@ -1,22 +1,26 @@
-import { useEffect, useRef } from 'react';
+import { useLayoutEffect } from 'react';
 import { create } from 'zustand';
 
-import type { CommandGroup, CommandItem } from '../utils/commandPalette';
+import type { CommandItem, CommandScope } from '../utils/commandPalette';
 
-/** Builds the items a view can offer, called when the palette needs them. */
-export type CommandProvider = () => CommandItem[];
+/** Builds only the items needed by the palette's current context. */
+export type CommandProvider = (scope: CommandScope | null) => CommandItem[];
 
 interface CommandState {
     isOpen: boolean;
     /**
-     * Narrows the palette to one group. The magnifier on the profile page opens
-     * it scoped to profiles; the keyboard shortcut opens it whole.
+     * Narrows the palette. The magnifier on a game's profile page opens it
+     * pinned to profiles of that game; the keyboard shortcut opens it whole.
      */
-    scope: CommandGroup | null;
-    open: (scope?: CommandGroup) => void;
+    scope: CommandScope | null;
+    open: (scope?: CommandScope) => void;
     close: () => void;
     /** What the shortcut does: the same key that opened it puts it away. */
-    toggle: (scope?: CommandGroup) => void;
+    toggle: (scope?: CommandScope) => void;
+    /** Replaces the active context while leaving the palette open. */
+    setScope: (scope: CommandScope | null) => void;
+    /** Drops the narrowing, widening the palette to everything. */
+    clearScope: () => void;
 
     /** Providers by source id, in registration order. */
     providers: Record<string, CommandProvider>;
@@ -39,6 +43,8 @@ export const useCommandStore = create<CommandState>((set) => ({
     close: () => set({ isOpen: false }),
     toggle: (scope) =>
         set((state) => (state.isOpen ? { isOpen: false } : { isOpen: true, scope: scope ?? null })),
+    setScope: (scope) => set({ scope }),
+    clearScope: () => set({ scope: null }),
 
     providers: {},
     setProvider: (id, provider) =>
@@ -54,28 +60,25 @@ export const useCommandStore = create<CommandState>((set) => ({
 /**
  * Contribute commands for as long as the calling component is mounted.
  *
- * The provider is read through a ref and registered once, so a closure rebuilt
- * on every render does not churn the store — and the palette still sees the
- * latest one, because it calls the provider at the moment it needs items.
+ * Registration happens in a layout effect so a screen's newest context is in
+ * the registry before Spotlight can be opened from that painted screen.
  */
 export function useCommandSource(id: string, provider: CommandProvider) {
-    const providerRef = useRef(provider);
-    useEffect(() => {
-        providerRef.current = provider;
-    }, [provider]);
-
-    useEffect(() => {
+    useLayoutEffect(() => {
         const { setProvider, clearProvider } = useCommandStore.getState();
-        setProvider(id, () => providerRef.current());
+        setProvider(id, provider);
         return () => clearProvider(id);
-    }, [id]);
+    }, [id, provider]);
 }
 
 /** Everything currently on offer, from every mounted source. */
-export function collectCommands(providers: Record<string, CommandProvider>): CommandItem[] {
+export function collectCommands(
+    providers: Record<string, CommandProvider>,
+    scope: CommandScope | null = null
+): CommandItem[] {
     return Object.values(providers).flatMap((provider) => {
         try {
-            return provider();
+            return provider(scope);
         } catch (error) {
             // One broken source must not take the whole palette down with it —
             // but it must not disappear quietly either. Swallowing this once

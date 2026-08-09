@@ -11,6 +11,7 @@ import { CommandPalette } from './components/CommandPalette'
 import { CommandSource } from './components/CommandSource'
 import { KeyboardShortcuts } from './components/KeyboardShortcuts'
 import { useCommandSource, useCommandStore } from './store/useCommandStore'
+import { getProfileAvatarGradient, getProfileInitial } from './utils/profileAvatar'
 import type { CommandItem } from './utils/commandPalette'
 import { useKeybindStore } from './store/useKeybindStore';
 import { formatAccelerator, overridesFromKeybinds } from './utils/keybinds';
@@ -31,7 +32,7 @@ import { describeLaunchIssue, type LaunchIssue } from './utils/launchIssue';
 import type { AppSettings, RuntimeHealth, UpdateInfo } from './types/electron';
 import type { InstalledMod } from './types/profile';
 import { MAC_IMAGE_CACHE_KEY, MAC_PLATFORM_CACHE_KEY } from './constants/cacheKeys';
-import type { PreferencesSettings } from './components/modals/PreferencesModal';
+import type { PreferencesSettings, PreferencesTarget } from './components/modals/PreferencesModal';
 import type { ProgressState } from './types/progress';
 
 import { useModActions } from './hooks/useModActions';
@@ -68,6 +69,9 @@ const QUICK_MAC_HINTS = new Set([
   'outerwilds',
 ]);
 
+const VERBOSE_LOG_WARNING_BYTES = 5 * 1024 * 1024;
+const VERBOSE_LOG_SIZE_CHECK_INTERVAL_MS = 10 * 60 * 1000;
+
 interface StoredMacPlatformCache {
   version: number;
   known_games: string[];
@@ -92,6 +96,35 @@ interface ImportedProfileMod {
   author?: string;
   platforms?: string[];
   sha256?: string;
+}
+
+type ProfileCommand = 'apply' | 'launch' | 'launch-vanilla' | 'stop' | 'duplicate' | 'export';
+
+interface PendingProfileCommand {
+  command: ProfileCommand;
+}
+
+function ProfileCommandBridge({
+  request,
+  handlers,
+  onHandled,
+}: {
+  request: PendingProfileCommand | null;
+  handlers: Record<ProfileCommand, () => void>;
+  onHandled: () => void;
+}) {
+  useEffect(() => {
+    if (!request) return;
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      handlers[request.command]();
+      onHandled();
+    });
+    return () => { cancelled = true; };
+  }, [handlers, onHandled, request]);
+
+  return null;
 }
 
 interface ProfileArchiveMergeSummary {
@@ -317,13 +350,17 @@ function App() {
   const openPalette = useCommandStore((state) => state.open)
   const togglePalette = useCommandStore((state) => state.toggle)
   // Which panel Preferences should land on, when a command names one.
-  const [preferencesPanel, setPreferencesPanel] = useState<'theme' | 'keybinds' | null>(null)
+  const [preferencesPanel, setPreferencesPanel] = useState<PreferencesTarget | null>(null)
   const [legacyInstallMode, setLegacyInstallMode] = useState(false)
   const [askVersionBeforeInstall, setAskVersionBeforeInstall] = useState(false)
   const [installInParallel, setInstallInParallel] = useState(true)
   const [confirmBeforeApplyToGame, setConfirmBeforeApplyToGame] = useState(false)
   const [writeDebugLogsToGame, setWriteDebugLogsToGame] = useState(false)
   const [verboseLogging, setVerboseLogging] = useState(false)
+  const [hideVerboseLogsWarning, setHideVerboseLogsWarning] = useState(false)
+  const [verboseLogsWarningBytes, setVerboseLogsWarningBytes] = useState<number | null>(null)
+  const [verboseLogsWarningDismissed, setVerboseLogsWarningDismissed] = useState(false)
+  const [settingsHydrated, setSettingsHydrated] = useState(false)
   const [defaultModViewMode, setDefaultModViewMode] = useState<'grid' | 'list'>('grid')
   const [showDeprecatedWarnings, setShowDeprecatedWarnings] = useState(true)
   const [sponsoredMessagesEnabled, setSponsoredMessagesEnabled] = useState(true)
@@ -351,6 +388,7 @@ function App() {
   const profilePackageIndexRequestRef = useRef(0)
   const syncInspectionRequestRef = useRef<string | null>(null)
   const installToGameRequestRef = useRef<((isVanillaOverride?: boolean) => Promise<void>) | null>(null)
+  const [pendingProfileCommand, setPendingProfileCommand] = useState<PendingProfileCommand | null>(null)
 
   const {
     profiles,
@@ -794,6 +832,7 @@ function App() {
       setSponsoredMessagesScale(s.sponsored_messages_scale ?? 80);
       setSponsoredMessagesOpacity(s.sponsored_messages_background_opacity ?? 80);
       setHideCrossOverGuide(!!s.hide_crossover_guide);
+      setHideVerboseLogsWarning(!!s.hide_verbose_logs_warning);
       setStreamMode(!!s.stream_mode);
       setDefaultGame(s.default_game ?? null);
       setDefaultProfile(s.default_profile ?? null);
@@ -811,6 +850,7 @@ function App() {
       } else {
         void loadData(true);
       }
+      setSettingsHydrated(true);
     });
 
     window.ipcRenderer.getUsername().then((u: string) => {
@@ -821,6 +861,7 @@ function App() {
 
     // Listen for preferences menu event
     const unlistenPrefs = listen('show-preferences', () => {
+      setPreferencesPanel(null);
       setShowPreferences(true);
     });
 
@@ -850,6 +891,31 @@ function App() {
       unlistenSteamLaunchOptionsRestart.then(fn => fn());
     };
   }, [])
+
+  useEffect(() => {
+    if (!settingsHydrated || !verboseLogging || hideVerboseLogsWarning || verboseLogsWarningDismissed) {
+      return;
+    }
+
+    let cancelled = false;
+    const checkLogSize = async () => {
+      try {
+        const bytes = await window.ipcRenderer.getAppLogsSize();
+        if (!cancelled) {
+          setVerboseLogsWarningBytes(bytes >= VERBOSE_LOG_WARNING_BYTES ? bytes : null);
+        }
+      } catch (error) {
+        console.warn('Could not inspect application log storage:', error);
+      }
+    };
+
+    void checkLogSize();
+    const interval = window.setInterval(checkLogSize, VERBOSE_LOG_SIZE_CHECK_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [settingsHydrated, verboseLogging, hideVerboseLogsWarning, verboseLogsWarningDismissed]);
 
   // Jump straight to the default game's profile list on startup, skipping the
   // game selection screen. Runs once, using the value settings had at launch
@@ -1136,16 +1202,74 @@ function App() {
     selectProfile(profileId);
   };
 
+  // One source of truth for every way Spotlight is opened from the profile
+  // selection page. The toolbar button and the keyboard shortcut must carry
+  // the exact same game context.
+  const selectedGamePaletteScope = selectedCommunity
+    ? {
+        group: 'Profiles' as const,
+        game: {
+          identifier: selectedCommunity,
+          name: communities.find((community) => community.identifier === selectedCommunity)?.name ?? selectedCommunity,
+          image: communityImages[selectedCommunity],
+        },
+      }
+    : undefined;
+
+  const activeProfilePaletteScope = !isBrowsingMode && activeProfile && selectedGamePaletteScope?.game
+    ? {
+        ...selectedGamePaletteScope,
+        profile: {
+          identifier: activeProfile.id,
+          name: activeProfile.name,
+          image: activeProfile.profileImageUrl,
+          initial: getProfileInitial(activeProfile.name),
+          gradient: getProfileAvatarGradient(activeProfile.name, activeProfile.id),
+        },
+      }
+    : undefined;
+
+  const runProfileCommand = (profileId: string, gameIdentifier: string, command: ProfileCommand) => {
+    // Adding a profile tag must not navigate. Navigation is deferred until an
+    // actual action is chosen; after the profile screen mounts, it supplies the
+    // exact same handlers used by its buttons and keyboard shortcuts.
+    setSelectedCommunity(gameIdentifier);
+    handleSelectProfile(profileId);
+    setPendingProfileCommand({ command });
+  };
+
   // Everything reachable regardless of where the user is standing: the games
   // list, every profile, and the panels that would otherwise take several
   // clicks. Registered from here because these are App's own to perform.
-  useCommandSource('app', () => {
-    const games: CommandItem[] = communities.map((community) => ({
+  useCommandSource('app', (scope) => {
+    // Do not build the whole catalogue only to discard it below. Universal
+    // search needs everything; a pinned search needs just its current branch.
+    const visibleCommunities = scope ? [] : communities;
+    const visibleProfiles = scope?.profile
+      ? []
+      : scope?.game
+        ? profiles.filter((profile) => profile.gameIdentifier === scope.game!.identifier)
+        : profiles;
+    const contextualCommunities = scope?.game
+      ? communities.filter((community) => community.identifier === scope.game!.identifier)
+      : [];
+
+    const games: CommandItem[] = visibleCommunities.map((community) => ({
       id: `game:${community.identifier}`,
       title: community.name,
       subtitle: community.identifier,
       group: 'Games',
       icon: 'game',
+      image: communityImages[community.identifier],
+      game: community.identifier,
+      nextScope: {
+        group: 'Profiles',
+        game: {
+          identifier: community.identifier,
+          name: community.name,
+          image: communityImages[community.identifier],
+        },
+      },
       current: community.identifier === selectedCommunity,
       run: () => {
         selectProfile('');
@@ -1154,7 +1278,7 @@ function App() {
       },
     }));
 
-    const profileItems: CommandItem[] = profiles.map((profile) => {
+    const profileItems: CommandItem[] = visibleProfiles.map((profile) => {
       const game = communities.find((c) => c.identifier === profile.gameIdentifier);
       return {
         id: `profile:${profile.id}`,
@@ -1164,6 +1288,30 @@ function App() {
         subtitle: game?.name ?? profile.gameIdentifier,
         group: 'Profiles',
         icon: 'profile',
+        // The game's cover says which game, the badge says which profile.
+        image: communityImages[profile.gameIdentifier],
+        badge: {
+          image: profile.profileImageUrl,
+          initial: getProfileInitial(profile.name),
+          gradient: getProfileAvatarGradient(profile.name, profile.id),
+        },
+        game: profile.gameIdentifier,
+        profile: profile.id,
+        nextScope: {
+          group: 'Profiles',
+          game: {
+            identifier: profile.gameIdentifier,
+            name: game?.name ?? profile.gameIdentifier,
+            image: communityImages[profile.gameIdentifier],
+          },
+          profile: {
+            identifier: profile.id,
+            name: profile.name,
+            image: profile.profileImageUrl,
+            initial: getProfileInitial(profile.name),
+            gradient: getProfileAvatarGradient(profile.name, profile.id),
+          },
+        },
         current: profile.id === activeProfileId,
         run: () => {
           setSelectedCommunity(profile.gameIdentifier);
@@ -1172,17 +1320,147 @@ function App() {
       };
     });
 
-    const settings: CommandItem[] = [
+    const gameActions: CommandItem[] = contextualCommunities.flatMap((community) => [
+      {
+        id: `action:browse:${community.identifier}`,
+        title: 'Browse mods',
+        subtitle: community.name,
+        group: 'Actions',
+        icon: 'browse',
+        game: community.identifier,
+        contextOnly: true,
+        run: () => {
+          selectProfile('');
+          setSelectedCommunity(community.identifier);
+          setIsBrowsingMode(true);
+        },
+      },
+      {
+        id: `action:import-profile:${community.identifier}`,
+        title: 'Import profile',
+        subtitle: 'From a code or a file',
+        group: 'Actions',
+        icon: 'import',
+        game: community.identifier,
+        contextOnly: true,
+        run: () => {
+          selectProfile('');
+          setIsBrowsingMode(false);
+          setSelectedCommunity(community.identifier);
+          requestAnimationFrame(() => {
+            window.dispatchEvent(new CustomEvent('r2modmac:open-profile-action', { detail: 'import' }));
+          });
+        },
+      },
+      {
+        id: `action:new-profile:${community.identifier}`,
+        title: 'New profile',
+        subtitle: `for ${community.name}`,
+        group: 'Actions',
+        icon: 'plus',
+        game: community.identifier,
+        contextOnly: true,
+        hint: formatAccelerator(activeKeybinds['new-profile']),
+        shortcut: 'new-profile',
+        run: () => {
+          selectProfile('');
+          setIsBrowsingMode(false);
+          setSelectedCommunity(community.identifier);
+          requestAnimationFrame(() => {
+            window.dispatchEvent(new CustomEvent('r2modmac:open-profile-action', { detail: 'new' }));
+          });
+        },
+      },
+    ] as CommandItem[]);
+
+    const scopedProfile = scope?.profile
+      ? profiles.find((profile) => profile.id === scope.profile!.identifier)
+      : null;
+    const profileActions: CommandItem[] = scopedProfile && scopedProfile.id !== activeProfileId
+      ? [
+          {
+            id: 'action:apply',
+            title: 'Apply mods to game',
+            subtitle: scopedProfile.name,
+            group: 'Actions',
+            icon: 'apply',
+            game: scopedProfile.gameIdentifier,
+            profile: scopedProfile.id,
+            hint: formatAccelerator(activeKeybinds['apply-mods']),
+            shortcut: 'apply-mods',
+            run: () => runProfileCommand(scopedProfile.id, scopedProfile.gameIdentifier, 'apply'),
+          },
+          {
+            id: 'action:launch',
+            title: 'Launch game (modded)',
+            subtitle: scopedProfile.name,
+            group: 'Actions',
+            icon: 'play',
+            game: scopedProfile.gameIdentifier,
+            profile: scopedProfile.id,
+            hint: formatAccelerator(activeKeybinds['launch-modded']),
+            shortcut: 'launch-modded',
+            run: () => runProfileCommand(scopedProfile.id, scopedProfile.gameIdentifier, 'launch'),
+          },
+          {
+            id: 'action:launch-vanilla',
+            title: 'Launch game (unmodded)',
+            group: 'Actions',
+            icon: 'play',
+            game: scopedProfile.gameIdentifier,
+            profile: scopedProfile.id,
+            hint: formatAccelerator(activeKeybinds['launch-vanilla']),
+            shortcut: 'launch-vanilla',
+            run: () => runProfileCommand(scopedProfile.id, scopedProfile.gameIdentifier, 'launch-vanilla'),
+          },
+          {
+            id: 'action:stop',
+            title: 'Quit game',
+            group: 'Actions',
+            icon: 'stop',
+            game: scopedProfile.gameIdentifier,
+            profile: scopedProfile.id,
+            hint: formatAccelerator(activeKeybinds['stop-game']),
+            shortcut: 'stop-game',
+            run: () => runProfileCommand(scopedProfile.id, scopedProfile.gameIdentifier, 'stop'),
+          },
+          {
+            id: 'action:duplicate',
+            title: 'Duplicate profile',
+            subtitle: scopedProfile.name,
+            group: 'Actions',
+            icon: 'copy',
+            game: scopedProfile.gameIdentifier,
+            profile: scopedProfile.id,
+            hint: formatAccelerator(activeKeybinds['duplicate-profile']),
+            shortcut: 'duplicate-profile',
+            run: () => runProfileCommand(scopedProfile.id, scopedProfile.gameIdentifier, 'duplicate'),
+          },
+          {
+            id: 'action:export',
+            title: 'Export profile',
+            subtitle: scopedProfile.name,
+            group: 'Actions',
+            icon: 'file',
+            game: scopedProfile.gameIdentifier,
+            profile: scopedProfile.id,
+            run: () => runProfileCommand(scopedProfile.id, scopedProfile.gameIdentifier, 'export'),
+          },
+        ]
+      : [];
+
+    const openPreferencesAt = (target: PreferencesTarget | null) => {
+      setPreferencesPanel(target);
+      setShowPreferences(true);
+    };
+
+    const settings: CommandItem[] = scope ? [] : [
       {
         id: 'settings:preferences',
         title: 'Preferences',
         group: 'Settings',
         icon: 'settings',
-        slash: 'preferences',
-        run: () => {
-          setPreferencesPanel(null);
-          setShowPreferences(true);
-        },
+        run: () => openPreferencesAt(null),
       },
       {
         id: 'settings:theme',
@@ -1190,43 +1468,145 @@ function App() {
         subtitle: 'Colours, background image and presets',
         group: 'Settings',
         icon: 'theme',
-        slash: 'theme',
-        run: () => {
-          setPreferencesPanel('theme');
-          setShowPreferences(true);
-        },
+        run: () => openPreferencesAt('theme'),
       },
       {
         id: 'settings:shortcuts',
         title: 'Keyboard shortcuts',
         group: 'Settings',
         icon: 'keyboard',
-        slash: 'shortcuts',
-        run: () => {
-          setPreferencesPanel('keybinds');
-          setShowPreferences(true);
-        },
+        run: () => openPreferencesAt('keybinds'),
       },
       {
         id: 'settings:paths',
         title: 'Game paths and setup',
         group: 'Settings',
         icon: 'settings',
-        slash: 'settings',
         run: () => setShowSettings(true),
       },
       {
-        id: 'settings:browse',
-        title: 'Browse mods',
-        subtitle: 'Explore the catalogue without a profile',
+        id: 'settings:check-updates',
+        title: 'Check updates',
+        subtitle: 'Preferences',
         group: 'Settings',
-        icon: 'browse',
-        slash: 'browse',
-        run: () => setIsBrowsingMode(true),
+        icon: 'update',
+        run: () => openPreferencesAt('updates'),
+      },
+      {
+        id: 'settings:default-game',
+        title: 'Default game and profile',
+        subtitle: 'Startup behavior',
+        group: 'Settings',
+        icon: 'game',
+        run: () => openPreferencesAt('default-game'),
+      },
+      {
+        id: 'settings:legacy-install',
+        title: 'Legacy install mode',
+        subtitle: 'Install behavior',
+        group: 'Settings',
+        icon: 'install',
+        run: () => openPreferencesAt('legacy-install'),
+      },
+      {
+        id: 'settings:ask-version',
+        title: 'Ask version before installing',
+        subtitle: 'Install behavior',
+        group: 'Settings',
+        icon: 'version',
+        run: () => openPreferencesAt('ask-version'),
+      },
+      {
+        id: 'settings:parallel-downloads',
+        title: 'Download mods in parallel',
+        subtitle: 'Install behavior',
+        group: 'Settings',
+        icon: 'parallel',
+        run: () => openPreferencesAt('parallel-downloads'),
+      },
+      {
+        id: 'settings:confirm-apply',
+        title: 'Confirm before apply to game',
+        subtitle: 'Install behavior',
+        group: 'Settings',
+        icon: 'apply',
+        run: () => openPreferencesAt('confirm-apply'),
+      },
+      {
+        id: 'settings:debug-logs',
+        title: 'Write debug logs to game folder',
+        subtitle: 'Logging',
+        group: 'Settings',
+        icon: 'logs',
+        run: () => openPreferencesAt('debug-logs'),
+      },
+      {
+        id: 'settings:verbose-logs',
+        title: 'Verbose app logging',
+        subtitle: 'Logging',
+        group: 'Settings',
+        icon: 'logs',
+        run: () => openPreferencesAt('verbose-logs'),
+      },
+      {
+        id: 'settings:open-logs',
+        title: 'Open app logs folder',
+        subtitle: 'Logging',
+        group: 'Settings',
+        icon: 'folder',
+        run: () => openPreferencesAt('open-logs'),
+      },
+      {
+        id: 'settings:default-view',
+        title: 'Default mods view',
+        subtitle: 'Appearance',
+        group: 'Settings',
+        icon: 'layout',
+        run: () => openPreferencesAt('default-view'),
+      },
+      {
+        id: 'settings:stream-mode',
+        title: 'Stream Mode',
+        subtitle: 'Privacy',
+        group: 'Settings',
+        icon: 'stream',
+        run: () => openPreferencesAt('stream-mode'),
+      },
+      {
+        id: 'settings:sponsored-messages',
+        title: 'Sponsored messages',
+        subtitle: 'Support r2modmac',
+        group: 'Settings',
+        icon: 'support',
+        run: () => openPreferencesAt('sponsored-messages'),
+      },
+      {
+        id: 'settings:deprecated-warnings',
+        title: 'Deprecated mod warnings',
+        subtitle: 'Guides & alerts',
+        group: 'Settings',
+        icon: 'warning',
+        run: () => openPreferencesAt('deprecated-warnings'),
+      },
+      {
+        id: 'settings:restore-warnings',
+        title: 'Restore setup warnings',
+        subtitle: 'Guides & alerts',
+        group: 'Settings',
+        icon: 'warning',
+        run: () => openPreferencesAt('restore-warnings'),
+      },
+      {
+        id: 'settings:clear-cache',
+        title: 'Clear app cache',
+        subtitle: 'Storage',
+        group: 'Settings',
+        icon: 'cache',
+        run: () => openPreferencesAt('clear-cache'),
       },
     ];
 
-    return [...profileItems, ...games, ...settings];
+    return [...profileItems, ...games, ...gameActions, ...profileActions, ...settings];
   });
 
   const loadMorePackages = useCallback(() => {
@@ -2214,6 +2594,7 @@ function App() {
     setConfirmBeforeApplyToGame(newSettings.confirm_before_apply_to_game);
     setWriteDebugLogsToGame(newSettings.write_debug_logs_to_game);
     setVerboseLogging(newSettings.verbose_logging);
+    if (!newSettings.verbose_logging) setVerboseLogsWarningBytes(null);
     void window.ipcRenderer.setVerboseLogging(newSettings.verbose_logging);
     setDefaultModViewMode(newSettings.default_mod_view_mode);
     setViewMode(newSettings.default_mod_view_mode);
@@ -2266,18 +2647,49 @@ function App() {
 
   const handleRestoreGuideWarnings = async () => {
     setHideCrossOverGuide(false);
+    setHideVerboseLogsWarning(false);
+    setVerboseLogsWarningDismissed(false);
 
     const currentSettings = await window.ipcRenderer.getSettings();
     await window.ipcRenderer.saveSettings({
       ...currentSettings,
       hide_crossover_guide: false,
       hide_macos_guide: false,
+      hide_verbose_logs_warning: false,
     });
 
     await window.ipcRenderer.alert(
       'Warnings restored',
       'Setup warnings have been re-enabled. They will be shown again when needed.'
     );
+  };
+
+  const handleVerboseLoggingFromWarning = async (enabled: boolean) => {
+    setVerboseLogging(enabled);
+    if (!enabled) setVerboseLogsWarningBytes(null);
+    await window.ipcRenderer.setVerboseLogging(enabled);
+
+    const currentSettings = await window.ipcRenderer.getSettings();
+    await window.ipcRenderer.saveSettings({
+      ...currentSettings,
+      verbose_logging: enabled,
+    });
+  };
+
+  const handleClearAppLogs = async () => {
+    await window.ipcRenderer.clearAppLogs();
+    setVerboseLogsWarningBytes(null);
+  };
+
+  const handleHideVerboseLogsWarning = async () => {
+    setHideVerboseLogsWarning(true);
+    setVerboseLogsWarningBytes(null);
+
+    const currentSettings = await window.ipcRenderer.getSettings();
+    await window.ipcRenderer.saveSettings({
+      ...currentSettings,
+      hide_verbose_logs_warning: true,
+    });
   };
 
 
@@ -2379,7 +2791,10 @@ function App() {
   ]);
 
   useEffect(() => {
-    const handleOpenPreferences = () => setShowPreferences(true);
+    const handleOpenPreferences = () => {
+      setPreferencesPanel(null);
+      setShowPreferences(true);
+    };
     window.addEventListener('r2modmac:open-preferences', handleOpenPreferences);
     return () => window.removeEventListener('r2modmac:open-preferences', handleOpenPreferences);
   }, []);
@@ -2397,7 +2812,10 @@ function App() {
         loading={loading}
         selectedCommunity={selectedCommunity}
         onSelectCommunity={setSelectedCommunity}
-        onOpenPreferences={() => setShowPreferences(true)}
+        onOpenPreferences={() => {
+          setPreferencesPanel(null);
+          setShowPreferences(true);
+        }}
         searchQuery={gameSearchQuery}
         onSearchQueryChange={setGameSearchQuery}
       />
@@ -2444,8 +2862,11 @@ function App() {
           onCreateProfile={(name, platform) => createProfile(name, selectedCommunity!, platform)}
           onImportProfile={handleImportProfile}
           onImportFile={handleImportFile}
-          onBrowseMods={() => setIsBrowsingMode(true)}
-          onFindProfile={() => openPalette('Profiles')}
+          onBrowseMods={() => {
+            selectProfile('');
+            setIsBrowsingMode(true);
+          }}
+          onFindProfile={() => openPalette(selectedGamePaletteScope)}
           onDeleteProfile={deleteProfile}
           onUpdateProfile={updateProfile}
           onToggleVanilla={handleToggleProfileVanilla}
@@ -2596,20 +3017,35 @@ function App() {
 
     // Rendered beside the sidebar because these handlers only exist in this
     // branch — there is nothing to apply or launch without an open profile.
-    // The same actions the shortcuts fire, reachable by name and by slash for
-    // anyone who would rather type than remember a combination.
+    // The same actions the shortcuts fire, reachable by name for anyone who
+    // would rather search than remember a combination.
     const gameCommands = (
-      <CommandSource
-        id="profile"
-        items={() => activeProfile ? [
+      <>
+        <ProfileCommandBridge
+          request={pendingProfileCommand}
+          handlers={{
+            apply: () => { void handleInstallToGameRequest(); },
+            launch: () => { void handleLaunchModdedDirect(); },
+            'launch-vanilla': () => { void handleLaunchVanillaDirect(); },
+            stop: () => { void handleStopProfileDirect(); },
+            duplicate: () => { void handleDuplicateActiveProfile(); },
+            export: () => setShowExportModal(true),
+          }}
+          onHandled={() => setPendingProfileCommand(null)}
+        />
+        <CommandSource
+          id="profile"
+          items={() => activeProfile ? [
           {
             id: 'action:apply',
             title: 'Apply mods to game',
             subtitle: activeProfile.name,
             group: 'Actions',
             icon: 'apply',
-            slash: 'apply',
+            game: activeProfile.gameIdentifier,
+            profile: activeProfile.id,
             hint: formatAccelerator(activeKeybinds['apply-mods']),
+            shortcut: 'apply-mods',
             run: () => { void handleInstallToGameRequest(); },
           },
           {
@@ -2618,8 +3054,10 @@ function App() {
             subtitle: activeProfile.name,
             group: 'Actions',
             icon: 'play',
-            slash: 'launch',
+            game: activeProfile.gameIdentifier,
+            profile: activeProfile.id,
             hint: formatAccelerator(activeKeybinds['launch-modded']),
+            shortcut: 'launch-modded',
             run: () => { void handleLaunchModdedDirect(); },
           },
           {
@@ -2627,8 +3065,10 @@ function App() {
             title: 'Launch game (unmodded)',
             group: 'Actions',
             icon: 'play',
-            slash: 'vanilla',
+            game: activeProfile.gameIdentifier,
+            profile: activeProfile.id,
             hint: formatAccelerator(activeKeybinds['launch-vanilla']),
+            shortcut: 'launch-vanilla',
             run: () => { void handleLaunchVanillaDirect(); },
           },
           {
@@ -2636,8 +3076,10 @@ function App() {
             title: 'Quit game',
             group: 'Actions',
             icon: 'stop',
-            slash: 'quit',
+            game: activeProfile.gameIdentifier,
+            profile: activeProfile.id,
             hint: formatAccelerator(activeKeybinds['stop-game']),
+            shortcut: 'stop-game',
             run: () => { void handleStopProfileDirect(); },
           },
           {
@@ -2646,8 +3088,10 @@ function App() {
             subtitle: activeProfile.name,
             group: 'Actions',
             icon: 'copy',
-            slash: 'duplicate',
+            game: activeProfile.gameIdentifier,
+            profile: activeProfile.id,
             hint: formatAccelerator(activeKeybinds['duplicate-profile']),
+            shortcut: 'duplicate-profile',
             run: () => { void handleDuplicateActiveProfile(); },
           },
           {
@@ -2655,12 +3099,14 @@ function App() {
             title: 'Export profile',
             subtitle: activeProfile.name,
             group: 'Actions',
-            icon: 'copy',
-            slash: 'export',
+            icon: 'file',
+            game: activeProfile.gameIdentifier,
+            profile: activeProfile.id,
             run: () => setShowExportModal(true),
           },
-        ] : []}
-      />
+          ] : []}
+        />
+      </>
     );
 
     const gameShortcuts = (
@@ -2672,6 +3118,8 @@ function App() {
           'launch-vanilla': () => { void handleLaunchVanillaDirect(); },
           'stop-game': () => { void handleStopProfileDirect(); },
           'duplicate-profile': () => { void handleDuplicateActiveProfile(); },
+          'view-grid': () => setViewMode('grid'),
+          'view-list': () => setViewMode('list'),
         }}
       />
     );
@@ -2879,7 +3327,23 @@ function App() {
           list too, where none of the view-scoped listeners exist. */}
       <KeyboardShortcuts
         enabled={!showSettings && !showPreferences && !showExportModal && !showUpdateModal}
-        handlers={{ 'open-search': () => togglePalette() }}
+        handlers={{
+          'open-search': () => togglePalette(
+            activeProfilePaletteScope ?? selectedGamePaletteScope
+          ),
+          'open-preferences': () => {
+            setPreferencesPanel(null);
+            setShowPreferences(true);
+          },
+          'go-home': () => {
+            flushSync(() => {
+              setSelectedMod(null);
+              selectProfile('');
+              setIsBrowsingMode(false);
+              setSelectedCommunity(null);
+            });
+          },
+        }}
       />
 
       <CommandPalette />
@@ -3051,11 +3515,19 @@ function App() {
         communityPlatforms={communityPlatforms}
         onSavePreferences={handleSavePreferences}
         onSponsorPreferencesChange={handleSponsorPreferencesChange}
-        hasHiddenGuideWarnings={hideCrossOverGuide}
+        hasHiddenGuideWarnings={hideCrossOverGuide || hideVerboseLogsWarning}
         onRestoreGuideWarnings={handleRestoreGuideWarnings}
         onSetGuideHidden={handleSetGuideHidden}
         legacyInstallMode={legacyInstallMode}
         onCheckForUpdates={forceCheckForUpdates}
+        verboseLogsWarningBytes={verboseLogsWarningBytes}
+        onVerboseLoggingChange={handleVerboseLoggingFromWarning}
+        onClearAppLogs={handleClearAppLogs}
+        onDismissVerboseLogsWarning={() => {
+          setVerboseLogsWarningDismissed(true)
+          setVerboseLogsWarningBytes(null)
+        }}
+        onHideVerboseLogsWarning={handleHideVerboseLogsWarning}
         codeShareDisabled={selectedCommunity === 'outerwilds'}
       />
     </div>

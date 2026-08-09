@@ -771,6 +771,15 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                         searchInputRef.current?.focus();
                         searchInputRef.current?.select();
                     },
+                    'import-custom-mod': () => { onImportCustomMod?.(); },
+                    'export-profile': onExportProfile,
+                    'toggle-profile-mods': () => {
+                        if (!activeProfile || isBusy) return;
+                        void onToggleVanilla(activeProfile.id, !activeProfile.is_vanilla);
+                    },
+                    'show-all-mods': () => changeModView('all'),
+                    'show-mod-updates': () => changeModView('updates'),
+                    'show-sync-changes': () => changeModView('sync'),
                 }}
             />
 
@@ -840,8 +849,8 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
             )}
 
             {/* Mod List */}
-            <div className={`profile-sidebar-motion-item [--sidebar-motion-order:2] flex min-h-0 flex-1 flex-col ${activeProfile?.is_vanilla ? 'grayscale opacity-75' : ''}`}>
-                {availableTabs.length > 1 ? <div className="px-4 py-2 text-xs font-bold">
+            <div className="profile-sidebar-motion-item [--sidebar-motion-order:2] flex min-h-0 flex-1 flex-col">
+                {availableTabs.length > 1 ? <div className={`px-4 py-2 text-xs font-bold transition-[filter,opacity] duration-300 ${activeProfile?.is_vanilla ? 'grayscale opacity-75' : ''}`}>
                     <div role="tablist" aria-label="Profile mod view" className="relative flex w-full overflow-hidden rounded-lg border border-gray-700 bg-gray-800 p-0.5">
                         <div
                             aria-hidden="true"
@@ -865,7 +874,11 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                 </div> : null}
 
                 <div className="relative min-h-0 flex-1">
-                <div ref={modListScrollRef} onScroll={event => updateScrollFades(event.currentTarget)} className="h-full overflow-y-auto p-2 space-y-1 scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-transparent">
+                <div
+                    ref={modListScrollRef}
+                    onScroll={event => updateScrollFades(event.currentTarget)}
+                    className={`h-full overflow-y-auto p-2 space-y-1 scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-transparent transition-[filter,opacity] duration-300 ${activeProfile?.is_vanilla ? 'grayscale opacity-75' : ''}`}
+                >
                 <div
                     id="profile-mod-view-panel"
                     role="tabpanel"

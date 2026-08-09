@@ -172,15 +172,16 @@ test('the Windows key does not stand in for Command', () => {
     assert.equal(actionForEvent(keyEvent('KeyR', { meta: true }), DEFAULT_KEYBINDS, 'other'), null);
 });
 
-test('every shipped default is reachable on both platforms', () => {
+test('every assigned shipped default is reachable on both platforms', () => {
     // A default nobody can press is the failure this guards; the two keyboards
     // are checked from whichever machine runs the tests.
     for (const action of KEYBIND_ACTIONS) {
+        if (!action.defaultAccelerator) continue;
         const parts = action.defaultAccelerator.split('+');
         const key = parts[parts.length - 1];
         const held = new Set(parts.slice(0, -1));
         const code =
-            key === 'Enter' ? 'Enter' : key === '.' ? 'Period' : `Key${key}`;
+            key === 'Enter' ? 'Enter' : key === '.' ? 'Period' : key === ',' ? 'Comma' : `Key${key}`;
 
         const apple = keyEvent(code, { meta: held.has('Mod'), shift: held.has('Shift') });
         const other = keyEvent(code, { ctrl: held.has('Mod'), shift: held.has('Shift') });
@@ -196,6 +197,8 @@ test('shortcuts are printed the way each platform writes them', () => {
     assert.equal(formatAccelerator('Mod+Shift+R', 'other'), 'Ctrl+Shift+R');
     assert.equal(formatAccelerator('Mod+Enter', 'other'), 'Ctrl+Enter');
     assert.equal(formatAccelerator('Mod+.', 'other'), 'Ctrl+.');
+    assert.equal(formatAccelerator('Mod+,', 'apple'), '⌘,');
+    assert.equal(formatAccelerator('Mod+,', 'other'), 'Ctrl+,');
 });
 
 test('off macOS Control and the command modifier are one key, not two', () => {
@@ -243,12 +246,19 @@ test('every other shortcut still works with the caret in a field', () => {
     // on every shortcut inside a text field would leave search unreachable
     // exactly where it is most useful.
     for (const action of KEYBIND_ACTIONS) {
+        if (!action.defaultAccelerator) continue;
         assert.equal(
             isTextEditingAccelerator(action.defaultAccelerator, 'apple'),
             false,
             `${action.id} (${action.defaultAccelerator}) must survive a focused field`
         );
     }
+});
+
+test('catalogue actions without a default start off but can be assigned', () => {
+    assert.equal(DEFAULT_KEYBINDS['go-home'], '');
+    const resolved = resolveKeybinds({ 'go-home': 'Mod+Shift+H' }, 'apple');
+    assert.equal(resolved['go-home'], 'Mod+Shift+H');
 });
 
 test('the editing gestures are recognised on Windows and Linux too', () => {

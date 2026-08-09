@@ -160,6 +160,8 @@ pub struct Settings {
     #[serde(default)]
     pub hide_macos_guide: bool,
     #[serde(default)]
+    pub hide_verbose_logs_warning: bool,
+    #[serde(default)]
     pub thunderstore_chunk_cache_migrated: bool,
     #[serde(default)]
     pub stream_mode: bool,
@@ -217,6 +219,7 @@ impl Settings {
             show_deprecated_warnings: true,
             hide_crossover_guide: false,
             hide_macos_guide: false,
+            hide_verbose_logs_warning: false,
             thunderstore_chunk_cache_migrated: false,
             stream_mode: false,
             sponsored_messages_enabled: true,

@@ -10,6 +10,7 @@ export function summaryToTheme(summary: ThemeSummary): Theme {
         name: summary.name,
         author: summary.author ?? undefined,
         colors: summary.colors,
+        opacity: summary.opacity ?? undefined,
         options:
             typeof summary.options?.auto_contrast === 'boolean'
                 ? { autoContrast: summary.options.auto_contrast }
@@ -57,11 +58,9 @@ interface ThemeState {
     themes: ThemeSummary[];
     /** Selected theme: a file name, a `builtin:` preset id, or null for stock. */
     activeFileName: string | null;
-    /**
-     * Unsaved editor state. While the editor is open its colours are painted
-     * over the whole app, so the preview is the app itself rather than a
-     * swatch — you judge a theme by living in it for a moment.
-     */
+    /** Optional explicit preview. The visual editor keeps drafts local and
+     * commits them only on Save, so routine colour dragging does not repaint
+     * the whole application. */
     preview: Theme | null;
 
     loadThemes: () => Promise<ThemeSummary[]>;

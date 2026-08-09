@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Button } from '../ui';
+import { AppIcon } from '../ui/icons';
 
 import {
     DEFAULT_KEYBINDS,
@@ -8,6 +10,7 @@ import {
     formatAccelerator,
     isUsableAccelerator,
     type KeybindActionId,
+    type KeybindGroup,
     type KeybindMap,
 } from '../../utils/keybinds';
 
@@ -19,7 +22,7 @@ interface KeybindsModalProps {
 }
 
 /** The groups in the order the panel lists them. */
-const GROUPS = ['Game', 'Profiles'] as const;
+const GROUPS: readonly KeybindGroup[] = ['General', 'Game', 'Profiles', 'Mods'];
 
 function KeyCap({ children, tone }: { children: React.ReactNode; tone: 'set' | 'recording' | 'off' }) {
     const toneClass =
@@ -47,6 +50,7 @@ function KeyCap({ children, tone }: { children: React.ReactNode; tone: 'set' | '
  */
 export function KeybindsModal({ isOpen, keybinds, onChange, onClose }: KeybindsModalProps) {
     const [recording, setRecording] = useState<KeybindActionId | null>(null);
+    const [search, setSearch] = useState('');
 
     const conflicts = useMemo(() => findKeybindConflicts(keybinds), [keybinds]);
 
@@ -115,11 +119,17 @@ export function KeybindsModal({ isOpen, keybinds, onChange, onClose }: KeybindsM
     if (wasOpen !== isOpen) {
         setWasOpen(isOpen);
         if (recording !== null) setRecording(null);
+        if (search !== '') setSearch('');
     }
 
     if (!isOpen) return null;
 
     const anyChanged = KEYBIND_ACTIONS.some((action) => keybinds[action.id] !== action.defaultAccelerator);
+    const searchTerm = search.trim().toLowerCase();
+    const visibleActions = KEYBIND_ACTIONS.filter((action) =>
+        !searchTerm || [action.label, action.group, ...(action.keywords ?? [])]
+            .some((value) => value.toLowerCase().includes(searchTerm))
+    );
 
     return (
         <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
@@ -129,33 +139,56 @@ export function KeybindsModal({ isOpen, keybinds, onChange, onClose }: KeybindsM
                 className="relative flex max-h-[85vh] w-full max-w-[640px] flex-col overflow-hidden rounded-2xl border border-gray-700 bg-gray-900 shadow-2xl"
                 onClick={(e) => e.stopPropagation()}
             >
-                <div className="flex shrink-0 items-center justify-between border-b border-gray-800 px-7 py-6">
-                    <div>
+                <div className="shrink-0 border-b border-gray-800 px-7 pb-5 pt-6">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
                         <h2 className="text-2xl font-bold tracking-tight text-white">Keyboard shortcuts</h2>
                         <p className="mt-1 text-[13px] text-gray-400">
-                            Click a shortcut and press the keys you want. Delete clears it.
+                            Select a key, then press a new combination. Delete turns it off.
                         </p>
+                      </div>
+                      <button
+                          onClick={onClose}
+                          className="rounded-xl p-2 text-gray-400 transition-all hover:bg-gray-800 hover:text-white active:scale-95 focus:outline-none focus:ring-2 focus:ring-gray-700"
+                          aria-label="Close"
+                      >
+                          <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                      </button>
                     </div>
-                    <button
-                        onClick={onClose}
-                        className="rounded-xl p-2 text-gray-400 transition-all hover:bg-gray-800 hover:text-white active:scale-95 focus:outline-none focus:ring-2 focus:ring-gray-700"
-                        aria-label="Close"
-                    >
-                        <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                    </button>
+
+                    <div className="relative mt-5">
+                        <AppIcon name="search" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" />
+                        <input
+                            value={search}
+                            onChange={(event) => setSearch(event.target.value)}
+                            placeholder="Search actions..."
+                            spellCheck={false}
+                            className="h-10 w-full rounded-xl border border-gray-700 bg-gray-800 pl-10 pr-10 text-sm text-white placeholder-gray-500 outline-none transition-colors focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                        />
+                        {search && (
+                            <button
+                                type="button"
+                                onClick={() => setSearch('')}
+                                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg px-2 py-1 text-gray-500 hover:bg-gray-700 hover:text-white"
+                                aria-label="Clear action search"
+                            >
+                                ×
+                            </button>
+                        )}
+                    </div>
                 </div>
 
-                <div className="min-h-0 flex-1 space-y-8 overflow-y-auto p-7">
-                    {GROUPS.map((group) => (
-                        <div key={group} className="space-y-3">
+                <div className="min-h-0 flex-1 space-y-6 overflow-y-auto p-6">
+                    {GROUPS.filter((group) => visibleActions.some((action) => action.group === group)).map((group) => (
+                        <div key={group} className="space-y-2.5">
                             <h3 className="px-1 text-xs font-semibold uppercase tracking-widest text-gray-400">
                                 {group}
                             </h3>
 
-                            <div className="divide-y divide-gray-700/50 overflow-hidden rounded-2xl border border-gray-700 bg-gray-800">
-                                {KEYBIND_ACTIONS.filter((action) => action.group === group).map((action) => {
+                            <div className="divide-y divide-gray-700/50 overflow-hidden rounded-xl border border-gray-700 bg-gray-800">
+                                {visibleActions.filter((action) => action.group === group).map((action) => {
                                     const accelerator = keybinds[action.id];
                                     const isRecording = recording === action.id;
                                     const clashes = !!accelerator && conflicts.has(accelerator);
@@ -164,15 +197,20 @@ export function KeybindsModal({ isOpen, keybinds, onChange, onClose }: KeybindsM
                                     return (
                                         <div
                                             key={action.id}
-                                            className="flex items-center justify-between gap-4 p-4 transition-colors hover:bg-gray-750"
+                                            className="flex items-center justify-between gap-4 px-3.5 py-3 transition-colors hover:bg-gray-750"
                                         >
-                                            <div className="min-w-0">
-                                                <p className="text-[15px] font-medium text-white">{action.label}</p>
-                                                <p className="mt-0.5 text-[13px] leading-snug text-gray-400">
-                                                    {clashes
-                                                        ? 'Another action uses this combination.'
-                                                        : action.description}
-                                                </p>
+                                            <div className="flex min-w-0 items-center gap-3">
+                                                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-700 bg-gray-900 text-gray-400">
+                                                    <AppIcon name={action.icon} className="h-[17px] w-[17px]" />
+                                                </span>
+                                                <div className="min-w-0">
+                                                <p className="truncate text-[14px] font-medium text-white">{action.label}</p>
+                                                {clashes && (
+                                                    <p className="mt-0.5 text-[12px] leading-snug text-fg-warning">
+                                                        Shortcut already in use
+                                                    </p>
+                                                )}
+                                                </div>
                                             </div>
 
                                             <div className="flex shrink-0 items-center gap-2">
@@ -181,8 +219,12 @@ export function KeybindsModal({ isOpen, keybinds, onChange, onClose }: KeybindsM
                                                         type="button"
                                                         onClick={() => assign(action.id, action.defaultAccelerator)}
                                                         className="rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-700 hover:text-gray-200"
-                                                        title={`Restore ${formatAccelerator(action.defaultAccelerator)}`}
-                                                        aria-label={`Restore the default for ${action.label}`}
+                                                        title={action.defaultAccelerator
+                                                            ? `Restore ${formatAccelerator(action.defaultAccelerator)}`
+                                                            : 'Remove shortcut'}
+                                                        aria-label={action.defaultAccelerator
+                                                            ? `Restore the default for ${action.label}`
+                                                            : `Remove the shortcut for ${action.label}`}
                                                     >
                                                         <svg
                                                             className="h-4 w-4"
@@ -217,7 +259,7 @@ export function KeybindsModal({ isOpen, keybinds, onChange, onClose }: KeybindsM
                                                             ? 'Press keys'
                                                             : accelerator
                                                               ? formatAccelerator(accelerator)
-                                                              : 'Off'}
+                                                              : 'None'}
                                                     </KeyCap>
                                                 </button>
                                             </div>
@@ -228,28 +270,25 @@ export function KeybindsModal({ isOpen, keybinds, onChange, onClose }: KeybindsM
                         </div>
                     ))}
 
-                    <p className="px-1 text-[12px] leading-relaxed text-gray-500">
-                        A shortcut needs at least one modifier, so it cannot fire while you are typing. Shortcuts stay
-                        out of the way while a text field has focus.
-                    </p>
+                    {visibleActions.length === 0 && (
+                        <div className="py-12 text-center text-sm text-gray-500">No matching actions</div>
+                    )}
+
                 </div>
 
                 <div className="flex shrink-0 items-center justify-between gap-3 border-t border-gray-800 bg-gray-900 px-7 py-5">
-                    <button
+                    <Button
                         type="button"
+                        variant="dangerSecondary"
                         disabled={!anyChanged}
                         onClick={() => onChange({ ...DEFAULT_KEYBINDS })}
-                        className="rounded-xl px-4 py-2 text-[13px] font-medium text-gray-400 transition-colors hover:bg-gray-800 hover:text-white disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-gray-400"
+                        className="rounded-xl text-[13px]"
                     >
                         Restore defaults
-                    </button>
-                    <button
-                        type="button"
-                        onClick={onClose}
-                        className="rounded-xl border border-gray-600 px-5 py-2 text-[13px] font-medium text-gray-200 transition-colors hover:border-gray-500 hover:bg-gray-700"
-                    >
+                    </Button>
+                    <Button type="button" variant="primary" onClick={onClose}>
                         Done
-                    </button>
+                    </Button>
                 </div>
             </div>
         </div>

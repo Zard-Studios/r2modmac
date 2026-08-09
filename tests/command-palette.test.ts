@@ -5,9 +5,9 @@ import {
     GROUP_ORDER,
     MAX_PER_GROUP,
     buildSections,
+    findShortcutItem,
     flattenSections,
     moveHighlight,
-    parseQuery,
     scoreItem,
     type CommandItem,
 } from '../src/utils/commandPalette.ts';
@@ -24,51 +24,52 @@ function item(overrides: Partial<CommandItem> & { id: string; title: string }): 
 }
 
 const catalogue: CommandItem[] = [
-    item({ id: 'a1', title: 'Launch game (modded)', group: 'Actions', slash: 'launch' }),
-    item({ id: 'a2', title: 'Launch game (unmodded)', group: 'Actions', slash: 'vanilla' }),
-    item({ id: 'a3', title: 'Apply mods to game', group: 'Actions', slash: 'apply' }),
+    item({ id: 'a1', title: 'Launch game (modded)', group: 'Actions' }),
+    item({ id: 'a2', title: 'Launch game (unmodded)', group: 'Actions' }),
+    item({ id: 'a3', title: 'Apply mods to game', group: 'Actions' }),
     item({ id: 'p1', title: 'Modded', group: 'Profiles' }),
     item({ id: 'p2', title: 'Vanilla run', group: 'Profiles' }),
     item({ id: 'g1', title: 'Lethal Company', group: 'Games', subtitle: 'lethal-company' }),
     item({ id: 'g2', title: 'Outer Wilds', group: 'Games', subtitle: 'outerwilds' }),
-    item({ id: 's1', title: 'Theme', group: 'Settings', slash: 'theme' }),
+    item({ id: 's1', title: 'Theme', group: 'Settings' }),
 ];
 
-// ── Slash commands ───────────────────────────────────────────────────────────
-
-test('a leading slash switches to command mode', () => {
-    assert.deepEqual(parseQuery('/lau'), { slashMode: true, term: 'lau' });
-    assert.deepEqual(parseQuery('lau'), { slashMode: false, term: 'lau' });
-});
-
-test('a bare slash lists every command', () => {
-    // How someone who typed "/" to see what happens finds out what there is.
-    const sections = buildSections(catalogue, '/');
-    const titles = flattenSections(sections).map((i) => i.title);
-    assert.deepEqual(titles.sort(), [
-        'Apply mods to game',
-        'Launch game (modded)',
-        'Launch game (unmodded)',
-        'Theme',
-    ]);
-});
-
-test('slash mode matches the command word, not the item title', () => {
-    // "/lau" means the launch command. A profile called "Launcher" is not one.
-    const withProfile = [...catalogue, item({ id: 'p3', title: 'Launcher', group: 'Profiles' })];
-    const titles = flattenSections(buildSections(withProfile, '/lau')).map((i) => i.title);
-    assert.deepEqual(titles, ['Launch game (modded)']);
-});
-
-test('items with no command word are unreachable by slash', () => {
-    assert.equal(scoreItem(item({ id: 'p1', title: 'Modded', group: 'Profiles' }), parseQuery('/mod')), null);
-});
-
-test('leading whitespace does not defeat slash mode', () => {
-    assert.equal(parseQuery('  /apply').slashMode, true);
-});
-
 // ── Ordinary search ──────────────────────────────────────────────────────────
+
+test('actions are found by their visible name', () => {
+    const titles = flattenSections(buildSections(catalogue, 'launch')).map((i) => i.title);
+    assert.deepEqual(titles, ['Launch game (modded)', 'Launch game (unmodded)']);
+});
+
+test('a slash is an ordinary character, not a separate command mode', () => {
+    assert.deepEqual(buildSections(catalogue, '/'), []);
+    assert.equal(scoreItem(item({ id: 'p1', title: 'co-op / modded', group: 'Profiles' }), '/ mod') !== null, true);
+});
+
+test('a shortcut resolves to the action offered by the active context', () => {
+    const actions = [
+        item({
+            id: 'new:muck',
+            title: 'New profile',
+            group: 'Actions',
+            game: 'muck',
+            shortcut: 'new-profile',
+        }),
+        item({
+            id: 'new:peak',
+            title: 'New profile',
+            group: 'Actions',
+            game: 'peak',
+            shortcut: 'new-profile',
+        }),
+    ];
+
+    const found = findShortcutItem(actions, 'new-profile', {
+        group: 'Profiles',
+        game: { identifier: 'muck', name: 'Muck' },
+    });
+    assert.equal(found?.id, 'new:muck');
+});
 
 test('results are grouped in a fixed order', () => {
     const groups = buildSections(catalogue, '').map((s) => s.group);
@@ -129,7 +130,7 @@ test('a query matching nothing yields no sections', () => {
 test('the arrow keys walk every item across group boundaries', () => {
     const flat = flattenSections(buildSections(catalogue, ''));
     assert.ok(flat.length > MAX_PER_GROUP, 'more than one group is in play');
-    assert.equal(flat[0].group, 'Actions');
+    assert.equal(flat[0].group, 'Games');
 });
 
 test('the highlight wraps at both ends', () => {
@@ -148,30 +149,24 @@ test('moving through an empty list stays put instead of dividing by zero', () =>
 test('a scoped search offers only that group', () => {
     // The magnifier on the profile page means "find a profile". Offering to
     // launch a game or open Preferences there answers a question nobody asked.
-    const sections = buildSections(catalogue, '', 'Profiles');
+    const sections = buildSections(catalogue, '', { group: 'Profiles' });
     assert.deepEqual(sections.map((s) => s.group), ['Profiles']);
     assert.deepEqual(flattenSections(sections).map((i) => i.title), ['Modded', 'Vanilla run']);
 });
 
-test('a slash in a scoped search does not turn it into a command list', () => {
-    // The profile magnifier must stay a profile magnifier whatever is typed.
-    const sections = buildSections(catalogue, '/', 'Profiles');
+test('a slash with no matching profile yields no scoped results', () => {
+    const sections = buildSections(catalogue, '/', { group: 'Profiles' });
     assert.deepEqual(sections.map((s) => s.group), []);
-    assert.deepEqual(
-        buildSections(catalogue, '/launch', 'Profiles'),
-        [],
-        'not even a real command word reaches through'
-    );
 });
 
 test('a scoped search matches a slash as an ordinary character', () => {
     const profiles = [item({ id: 'p1', title: 'co-op / modded', group: 'Profiles' })];
-    const titles = flattenSections(buildSections(profiles, 'op / mod', 'Profiles')).map((i) => i.title);
+    const titles = flattenSections(buildSections(profiles, 'op / mod', { group: 'Profiles' })).map((i) => i.title);
     assert.deepEqual(titles, ['co-op / modded']);
 });
 
 test('a scoped search with no match yields nothing rather than falling back', () => {
-    assert.deepEqual(buildSections(catalogue, 'lethal', 'Profiles'), []);
+    assert.deepEqual(buildSections(catalogue, 'lethal', { group: 'Profiles' }), []);
 });
 
 test('an item with no title does not take the whole search down', () => {
@@ -181,4 +176,121 @@ test('an item with no title does not take the whole search down', () => {
         item({ id: 'g2', title: 'Lethal Company' }),
     ];
     assert.deepEqual(flattenSections(buildSections(messy, 'lethal')).map((i) => i.title), ['Lethal Company']);
+});
+
+// ── Pinned to one game ───────────────────────────────────────────────────────
+
+const acrossGames: CommandItem[] = [
+    item({ id: 'p1', title: 'Modded', group: 'Profiles', game: 'lethal-company' }),
+    item({ id: 'p2', title: 'Modded', group: 'Profiles', game: 'outerwilds' }),
+    item({ id: 'p3', title: 'Casual', group: 'Profiles', game: 'lethal-company' }),
+    item({ id: 'g1', title: 'Lethal Company', group: 'Games', game: 'lethal-company' }),
+];
+
+test('a search pinned to a game sees only that game profiles', () => {
+    // On a game profile page the question is always which of *these* profiles.
+    const sections = buildSections(acrossGames, '', {
+        group: 'Profiles',
+        game: { identifier: 'lethal-company', name: 'Lethal Company' },
+    });
+    assert.deepEqual(flattenSections(sections).map((i) => i.id), ['p3', 'p1']);
+});
+
+test('the pin narrows before the search runs, not after', () => {
+    // "Modded" exists under two games; only the pinned one may come back.
+    const sections = buildSections(acrossGames, 'Modded', {
+        group: 'Profiles',
+        game: { identifier: 'outerwilds', name: 'Outer Wilds' },
+    });
+    assert.deepEqual(flattenSections(sections).map((i) => i.id), ['p2']);
+});
+
+test('dropping the pin widens the search back to everything', () => {
+    // What clearing the tag has to do: the narrow case is a starting point,
+    // not a separate mode with its own results.
+    const widened = flattenSections(buildSections(acrossGames, 'Modded', null));
+    assert.deepEqual(widened.map((i) => i.id).sort(), ['p1', 'p2']);
+});
+
+test('an item belonging to no game is excluded while a pin is on', () => {
+    const withGlobal = [...acrossGames, item({ id: 's1', title: 'Preferences', group: 'Settings' })];
+    const sections = buildSections(withGlobal, '', {
+        group: 'Settings',
+        game: { identifier: 'lethal-company', name: 'Lethal Company' },
+    });
+    assert.deepEqual(sections, []);
+});
+
+test('a game pin includes actions belonging to that game', () => {
+    const items = [
+        ...acrossGames,
+        item({ id: 'a1', title: 'New profile', group: 'Actions', game: 'lethal-company' }),
+        item({ id: 'a2', title: 'New profile', group: 'Actions', game: 'outerwilds' }),
+    ];
+    const sections = buildSections(items, '', {
+        group: 'Profiles',
+        game: { identifier: 'lethal-company', name: 'Lethal Company' },
+    });
+    assert.deepEqual(sections.map((section) => section.group), ['Actions', 'Profiles']);
+    assert.deepEqual(flattenSections(sections).map((entry) => entry.id), ['a1', 'p3', 'p1']);
+});
+
+test('a game pin never leaks actions from a previously active profile', () => {
+    const items = [
+        ...acrossGames,
+        item({ id: 'browse', title: 'Browse mods', group: 'Actions', game: 'lethal-company' }),
+        item({
+            id: 'launch:p1',
+            title: 'Launch game (modded)',
+            group: 'Actions',
+            game: 'lethal-company',
+            profile: 'p1',
+        }),
+    ];
+    const sections = buildSections(items, '', {
+        group: 'Profiles',
+        game: { identifier: 'lethal-company', name: 'Lethal Company' },
+    });
+    const ids = flattenSections(sections).map((entry) => entry.id);
+
+    assert.ok(ids.includes('browse'));
+    assert.ok(ids.includes('p1'));
+    assert.ok(!ids.includes('launch:p1'));
+});
+
+test('home orders games before profiles', () => {
+    const sections = buildSections(acrossGames, '');
+    assert.deepEqual(sections.map((section) => section.group), ['Games', 'Profiles']);
+});
+
+test('a profile pin shows only actions for that profile', () => {
+    const items = [
+        item({ id: 'a1', title: 'Launch', group: 'Actions', game: 'lethal-company', profile: 'p1' }),
+        item({ id: 'a2', title: 'Launch', group: 'Actions', game: 'lethal-company', profile: 'p2' }),
+        ...acrossGames,
+    ];
+    const sections = buildSections(items, '', {
+        group: 'Profiles',
+        game: { identifier: 'lethal-company', name: 'Lethal Company' },
+        profile: { identifier: 'p1', name: 'Modded' },
+    });
+    assert.deepEqual(sections.map((section) => section.group), ['Actions']);
+    assert.deepEqual(flattenSections(sections).map((entry) => entry.id), ['a1']);
+});
+
+test('context-only actions stay hidden until their game is pinned', () => {
+    const browse = item({
+        id: 'browse',
+        title: 'Browse mods',
+        group: 'Actions',
+        game: 'lethal-company',
+        contextOnly: true,
+    });
+    assert.ok(!flattenSections(buildSections([...acrossGames, browse], '')).some((entry) => entry.id === 'browse'));
+
+    const scoped = buildSections([...acrossGames, browse], '', {
+        group: 'Profiles',
+        game: { identifier: 'lethal-company', name: 'Lethal Company' },
+    });
+    assert.ok(flattenSections(scoped).some((entry) => entry.id === 'browse'));
 });

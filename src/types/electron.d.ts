@@ -23,6 +23,7 @@ export interface AppSettings {
     show_deprecated_warnings?: boolean;
     hide_crossover_guide?: boolean;
     hide_macos_guide?: boolean;
+    hide_verbose_logs_warning?: boolean;
     stream_mode?: boolean;
     sponsored_messages_enabled?: boolean;
     sponsored_messages_scale?: number;
@@ -54,6 +55,13 @@ export interface ThemeSummary {
         | 'media_scrim' | 'media_ink',
         string
     >>;
+    opacity?: Partial<Record<
+        'background' | 'surface' | 'surface_hover' | 'border' | 'text' | 'text_muted' | 'accent' | 'accent_hover'
+        | 'danger' | 'warning' | 'success'
+        | 'on_accent' | 'on_surface' | 'on_danger' | 'on_warning' | 'on_success' | 'icon'
+        | 'media_scrim' | 'media_ink',
+        number | null
+    >> | null;
     background_image?: {
         path?: string | null;
         opacity?: number | null;
@@ -183,6 +191,8 @@ export interface IElectronAPI {
     revealProfileConfigFile: (profileId: string, relativePath: string, root?: string) => Promise<void>;
     openProfileConfigFile: (profileId: string, relativePath: string, root?: string) => Promise<void>;
     openAppLogsFolder: () => Promise<void>;
+    getAppLogsSize: () => Promise<number>;
+    clearAppLogs: () => Promise<number>;
     setVerboseLogging: (enabled: boolean) => Promise<void>;
     listThemes: () => Promise<ThemeSummary[]>;
     readThemeSource: (fileName: string) => Promise<string>;

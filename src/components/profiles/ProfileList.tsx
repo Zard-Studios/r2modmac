@@ -9,9 +9,6 @@ import { revealInFileManagerLabel } from '../../utils/platformUtils';
 import { getProfileAvatarGradient, getProfileInitial } from '../../utils/profileAvatar';
 import { SponsorSurface } from '../sponsors/SponsorSurface';
 import { KeyboardShortcuts } from '../KeyboardShortcuts';
-import { useCommandSource } from '../../store/useCommandStore';
-import { formatAccelerator } from '../../utils/keybinds';
-import { useKeybindStore } from '../../store/useKeybindStore';
 
 interface ProfileListProps {
     profiles: Profile[];
@@ -47,7 +44,7 @@ export function ProfileList({
     onFindProfile,
     onDeleteProfile,
     onUpdateProfile,
-    onToggleVanilla
+    onToggleVanilla,
 }: ProfileListProps) {
     const [isCreating, setIsCreating] = useState(false);
     const [isImporting, setIsImporting] = useState(false);
@@ -58,6 +55,29 @@ export function ProfileList({
     const [selectedPlatform, setSelectedPlatform] = useState<'windows' | 'mac'>('windows');
     // null = no pending import; string = code; { file: string } = file
     const [pendingImport, setPendingImport] = useState<string | { file: string } | null>(null);
+
+    useEffect(() => {
+        const openRequestedAction = (event: Event) => {
+            const action = (event as CustomEvent<'new' | 'import'>).detail;
+            if (action !== 'new' && action !== 'import') return;
+
+            setEditingProfile(null);
+            setPendingImport(null);
+            setSelectedPlatform('windows');
+            if (action === 'import') {
+                setIsCreating(false);
+                setImportCode('');
+                setIsImporting(true);
+            } else {
+                setIsImporting(false);
+                setNewProfileName('');
+                setIsCreating(true);
+            }
+        };
+
+        window.addEventListener('r2modmac:open-profile-action', openRequestedAction);
+        return () => window.removeEventListener('r2modmac:open-profile-action', openRequestedAction);
+    }, []);
 
     useEffect(() => {
         const onKeyDown = (event: KeyboardEvent) => {
@@ -95,37 +115,7 @@ export function ProfileList({
         return () => window.removeEventListener('keydown', onKeyDown, true);
     }, [editingProfile, isCreating, isImporting, pendingImport]);
 
-    const keybinds = useKeybindStore((state) => state.keybinds);
-
-    // Same reason as the shortcuts below: these open this component's own
-    // forms, which nothing above it can reach.
-    useCommandSource('profile-list', () => [
-        {
-            id: 'action:new-profile',
-            title: 'New profile',
-            subtitle: `for ${selectedGameIdentifier}`,
-            group: 'Actions',
-            icon: 'plus',
-            slash: 'new',
-            hint: formatAccelerator(keybinds['new-profile']),
-            run: () => {
-                setSelectedPlatform('windows');
-                setIsCreating(true);
-            },
-        },
-        {
-            id: 'action:import-profile',
-            title: 'Import profile',
-            subtitle: 'From a code or a file',
-            group: 'Actions',
-            icon: 'copy',
-            slash: 'import',
-            run: () => setIsImporting(true),
-        },
-    ]);
-
-    // Rendered here rather than in App because "new profile" opens this
-    // component's own form; nothing above it can reach that state.
+    // Kept local because it is active only while this screen is mounted.
     const shortcuts = (
         <KeyboardShortcuts
             enabled={!isCreating && !isImporting && !editingProfile && !pendingImport && !isBusy}
@@ -134,6 +124,12 @@ export function ProfileList({
                     setSelectedPlatform('windows');
                     setIsCreating(true);
                 },
+                'import-profile': () => {
+                    setImportCode('');
+                    setSelectedPlatform('windows');
+                    setIsImporting(true);
+                },
+                'browse-mods': onBrowseMods,
             }}
         />
     );

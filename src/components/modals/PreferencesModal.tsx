@@ -1,11 +1,12 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Button } from '../ui';
 import { Toggle } from '../ui/Toggle';
-import { HeartIcon } from '../LikeStat';
+import { AppIcon, type IconName } from '../ui/icons';
 import { DefaultGamePickerModal } from './DefaultGamePickerModal';
 import { ThemeEditorModal } from './ThemeEditorModal';
 import { KeybindsModal } from './KeybindsModal';
-import { formatAccelerator, overridesFromKeybinds, resolveKeybinds, type KeybindMap } from '../../utils/keybinds';
+import { UiPreviewLab } from './UiPreviewLab';
+import { overridesFromKeybinds, resolveKeybinds, type KeybindMap } from '../../utils/keybinds';
 import { useThemeStore } from '../../store/useThemeStore';
 import type { Community, CommunityPlatformInfo } from '../../types/thunderstore';
 
@@ -28,13 +29,32 @@ export interface PreferencesSettings {
     keybinds?: Record<string, string>;
 }
 
+export type PreferencesTarget =
+    | 'theme'
+    | 'keybinds'
+    | 'updates'
+    | 'default-game'
+    | 'legacy-install'
+    | 'ask-version'
+    | 'parallel-downloads'
+    | 'confirm-apply'
+    | 'debug-logs'
+    | 'verbose-logs'
+    | 'open-logs'
+    | 'default-view'
+    | 'stream-mode'
+    | 'sponsored-messages'
+    | 'deprecated-warnings'
+    | 'restore-warnings'
+    | 'clear-cache';
+
 interface PreferencesModalProps {
     isOpen: boolean;
     /**
      * Opened straight away on arrival, so a command can land on the panel it
      * names rather than on Preferences with the panel one click further on.
      */
-    initialPanel?: 'theme' | 'keybinds' | null;
+    initialPanel?: PreferencesTarget | null;
     onClose: () => void;
     settings: PreferencesSettings;
     communities: Community[];
@@ -55,120 +75,37 @@ function IconBox({ children, colorClass }: { children: React.ReactNode; colorCla
     );
 }
 
-function RowIcon({ kind }: { kind: 'install' | 'version' | 'parallel' | 'apply' | 'logs' | 'layout' | 'warning' | 'cache' | 'stream' | 'update' | 'support' | 'folder' | 'game' | 'profile' | 'theme' | 'keyboard' }) {
-    if (kind === 'keyboard') return (
-        <IconBox colorClass="text-amber-400">
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <rect x="2.5" y="6" width="19" height="12" rx="2" strokeWidth={1.5} />
-                <path strokeLinecap="round" strokeWidth={1.5} d="M6 9.5h.01M9.5 9.5h.01M13 9.5h.01M16.5 9.5h.01M6 12.75h.01M9.5 12.75h.01M13 12.75h.01M16.5 12.75h.01M8 15.5h8" />
-            </svg>
-        </IconBox>
-    );
-    if (kind === 'theme') return (
-        <IconBox colorClass="text-pink-400">
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 3a9 9 0 000 18h1.5a2 2 0 001.6-3.2 2 2 0 011.6-3.2H19a2 2 0 002-2A9 9 0 0012 3z" />
-                <circle cx="7.5" cy="12" r="1.1" fill="currentColor" stroke="none" />
-                <circle cx="10" cy="8" r="1.1" fill="currentColor" stroke="none" />
-                <circle cx="14.5" cy="8" r="1.1" fill="currentColor" stroke="none" />
-            </svg>
-        </IconBox>
-    );
-    if (kind === 'profile') return (
-        <IconBox colorClass="text-purple-400">
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-            </svg>
-        </IconBox>
-    );
-    if (kind === 'install') return (
-        <IconBox colorClass="text-fg-accent">
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-5l-4 4m0 0l-4-4m4 4V4" />
-            </svg>
-        </IconBox>
-    );
-    if (kind === 'version') return (
-        <IconBox colorClass="text-cyan-400">
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-        </IconBox>
-    );
-    if (kind === 'parallel') return (
-        <IconBox colorClass="text-violet-400">
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 10V3L4 14h7v7l9-11h-7z" />
-            </svg>
-        </IconBox>
-    );
-    if (kind === 'apply') return (
-        <IconBox colorClass="text-fg-success">
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M5 13l4 4L19 7" />
-            </svg>
-        </IconBox>
-    );
-    if (kind === 'logs') return (
-        <IconBox colorClass="text-sky-400">
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6M8 4h8a2 2 0 012 2v12a2 2 0 01-2 2H8a2 2 0 01-2-2V6a2 2 0 012-2z" />
-            </svg>
-        </IconBox>
-    );
-    if (kind === 'layout') return (
-        <IconBox colorClass="text-indigo-400">
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 6h7v12H4V6zm9 0h7v5h-7V6zm0 7h7v5h-7v-5z" />
-            </svg>
-        </IconBox>
-    );
-    if (kind === 'warning') return (
-        <IconBox colorClass="text-fg-warning">
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v2m0 4h.01m-7.938 4h15.876c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L2.33 16c-.77 1.333.192 3 1.732 3z" />
-            </svg>
-        </IconBox>
-    );
-    if (kind === 'update') return (
-        <IconBox colorClass="text-fg-success">
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
-            </svg>
-        </IconBox>
-    );
-    if (kind === 'stream') return (
-        <IconBox colorClass="text-fuchsia-400">
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-            </svg>
-        </IconBox>
-    );
-    if (kind === 'support') return (
-        <IconBox colorClass="text-rose-400">
-            <HeartIcon className="h-5 w-5" />
-        </IconBox>
-    );
-    if (kind === 'folder') return (
-        <IconBox colorClass="text-orange-400">
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-            </svg>
-        </IconBox>
-    );
-    if (kind === 'game') return (
-        <IconBox colorClass="text-teal-400">
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
-            </svg>
-        </IconBox>
-    );
+type PreferencesIconName = Extract<
+    IconName,
+    'install' | 'version' | 'parallel' | 'apply' | 'logs' | 'layout' | 'warning' |
+    'cache' | 'stream' | 'update' | 'support' | 'folder' | 'game' | 'profile' |
+    'theme' | 'keyboard'
+>;
+
+const ROW_ICON_COLORS: Record<PreferencesIconName, string> = {
+    install: 'text-fg-accent',
+    version: 'text-cyan-400',
+    parallel: 'text-violet-400',
+    apply: 'text-fg-success',
+    logs: 'text-sky-400',
+    layout: 'text-indigo-400',
+    warning: 'text-fg-warning',
+    cache: 'text-red-400',
+    stream: 'text-fuchsia-400',
+    update: 'text-fg-success',
+    support: 'text-rose-400',
+    folder: 'text-orange-400',
+    game: 'text-teal-400',
+    profile: 'text-purple-400',
+    theme: 'text-pink-400',
+    keyboard: 'text-amber-400',
+};
+
+function RowIcon({ kind }: { kind: PreferencesIconName }) {
     return (
-        <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-red-500/10 border border-red-500/20 text-fg-danger flex-shrink-0">
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-            </svg>
-        </div>
+        <IconBox colorClass={ROW_ICON_COLORS[kind]}>
+            <AppIcon name={kind} className="h-5 w-5" strokeWidth={1.75} />
+        </IconBox>
     );
 }
 
@@ -203,6 +140,8 @@ export default function PreferencesModal({
     const [showGamePicker, setShowGamePicker] = useState(false);
     const [showThemeEditor, setShowThemeEditor] = useState(false);
     const [showKeybinds, setShowKeybinds] = useState(false);
+    const [showUiPreviewLab, setShowUiPreviewLab] = useState(false);
+    const supportHeartClicks = useRef<number[]>([]);
     const [keybinds, setKeybinds] = useState<KeybindMap>(() => resolveKeybinds(settings.keybinds));
     const themes = useThemeStore((s) => s.themes);
     const activeThemeFileName = useThemeStore((s) => s.activeFileName);
@@ -257,6 +196,14 @@ export default function PreferencesModal({
     }, [isOpen]);
 
     useEffect(() => {
+        if (!isOpen || !initialPanel || initialPanel === 'theme' || initialPanel === 'keybinds') return;
+        const frame = requestAnimationFrame(() => {
+            document.getElementById(`preference-${initialPanel}`)?.scrollIntoView({ block: 'center' });
+        });
+        return () => cancelAnimationFrame(frame);
+    }, [initialPanel, isOpen]);
+
+    useEffect(() => {
         if (!isOpen) return;
         let cancelled = false;
         let timeoutId: number | undefined;
@@ -280,8 +227,7 @@ export default function PreferencesModal({
 
     if (!isOpen) return null;
 
-    const handleSave = () => {
-        onSave({
+    const currentSettings = (currentKeybinds: KeybindMap = keybinds): PreferencesSettings => ({
             legacy_install_mode: legacyMode,
             ask_version_before_install: askVersionBeforeInstall,
             install_in_parallel: installInParallel,
@@ -296,15 +242,34 @@ export default function PreferencesModal({
             sponsored_messages_background_opacity: sponsoredMessagesOpacity,
             default_game: defaultGame,
             default_profile: defaultProfile,
-            keybinds: overridesFromKeybinds(keybinds),
-        });
+            keybinds: overridesFromKeybinds(currentKeybinds),
+    });
+
+    const handleSave = () => {
+        onSave(currentSettings());
         onClose();
+    };
+
+    const handleKeybindsClose = () => {
+        onSave(currentSettings());
+        setShowKeybinds(false);
     };
 
     const persistSponsorPreferences = (enabled: boolean) => {
         setSponsoredMessagesEnabled(enabled);
         window.dispatchEvent(new CustomEvent('r2modmac:sponsor-preferences', { detail: { enabled, scale: sponsoredMessagesScale, opacity: sponsoredMessagesOpacity } }));
         void onSponsorPreferencesChange(enabled).catch(() => undefined);
+    };
+
+    const handleSupportHeartClick = () => {
+        const now = Date.now();
+        const recentClicks = [...supportHeartClicks.current.filter((time) => now - time < 1_800), now];
+        if (recentClicks.length >= 5) {
+            supportHeartClicks.current = [];
+            setShowUiPreviewLab(true);
+            return;
+        }
+        supportHeartClicks.current = recentClicks;
     };
 
     return (
@@ -335,7 +300,7 @@ export default function PreferencesModal({
                 <div className="p-7 space-y-8 overflow-y-auto flex-1 bg-gray-900 relative z-0">
 
                     {/* Updates Section */}
-                    <div className="space-y-3">
+                    <div id="preference-updates" className="space-y-3">
                         <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-widest px-1">Updates</h3>
 
                         <div className="bg-gray-800 border border-gray-700 rounded-2xl overflow-hidden">
@@ -372,7 +337,7 @@ export default function PreferencesModal({
                         <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-widest px-1">Appearance</h3>
 
                         <div className="bg-gray-800 border border-gray-700 rounded-2xl divide-y divide-gray-700/50 overflow-hidden">
-                            <div className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-gray-750">
+                            <div id="preference-theme" className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-gray-750">
                                 <div className="flex items-center gap-4">
                                     <RowIcon kind="theme" />
                                     <div>
@@ -401,7 +366,7 @@ export default function PreferencesModal({
                         <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-widest px-1">Keyboard</h3>
 
                         <div className="bg-gray-800 border border-gray-700 rounded-2xl overflow-hidden">
-                            <div className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-gray-750">
+                            <div id="preference-keybinds" className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-gray-750">
                                 <div className="flex items-center gap-4">
                                     <RowIcon kind="keyboard" />
                                     <div>
@@ -411,14 +376,7 @@ export default function PreferencesModal({
                                         </p>
                                     </div>
                                 </div>
-                                <div className="flex shrink-0 items-center gap-3">
-                                    {/* The one people reach for most, so the row
-                                        says something without being opened. */}
-                                    <span className="text-[13px] text-gray-400">
-                                        {keybinds['launch-modded']
-                                            ? `Launch ${formatAccelerator(keybinds['launch-modded'])}`
-                                            : 'Customised'}
-                                    </span>
+                                <div className="flex shrink-0 items-center">
                                     <button
                                         type="button"
                                         onClick={() => setShowKeybinds(true)}
@@ -436,7 +394,7 @@ export default function PreferencesModal({
                         <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-widest px-1">Behavior</h3>
 
                         <div className="bg-gray-800 border border-gray-700 rounded-2xl divide-y divide-gray-700/50 overflow-hidden">
-                            <div className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-gray-750">
+                            <div id="preference-default-game" className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-gray-750">
                                 <div className="flex items-center gap-4">
                                     <RowIcon kind="game" />
                                     <div>
@@ -490,7 +448,7 @@ export default function PreferencesModal({
                                 </div>
                             )}
 
-                            <div className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-gray-750">
+                            <div id="preference-legacy-install" className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-gray-750">
                                 <div className="flex items-center gap-4">
                                     <RowIcon kind="install" />
                                     <div>
@@ -501,7 +459,7 @@ export default function PreferencesModal({
                                 <Toggle value={legacyMode} onChange={setLegacyMode} />
                             </div>
 
-                            <div className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-gray-750">
+                            <div id="preference-ask-version" className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-gray-750">
                                 <div className="flex items-center gap-4">
                                     <RowIcon kind="version" />
                                     <div>
@@ -512,7 +470,7 @@ export default function PreferencesModal({
                                 <Toggle value={askVersionBeforeInstall} onChange={setAskVersionBeforeInstall} />
                             </div>
 
-                            <div className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-gray-750">
+                            <div id="preference-parallel-downloads" className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-gray-750">
                                 <div className="flex items-center gap-4">
                                     <RowIcon kind="parallel" />
                                     <div>
@@ -523,7 +481,7 @@ export default function PreferencesModal({
                                 <Toggle value={installInParallel} onChange={setInstallInParallel} />
                             </div>
 
-                            <div className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-gray-750">
+                            <div id="preference-confirm-apply" className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-gray-750">
                                 <div className="flex items-center gap-4">
                                     <RowIcon kind="apply" />
                                     <div>
@@ -534,7 +492,7 @@ export default function PreferencesModal({
                                 <Toggle value={confirmBeforeApply} onChange={setConfirmBeforeApply} />
                             </div>
 
-                            <div className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-gray-750">
+                            <div id="preference-debug-logs" className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-gray-750">
                                 <div className="flex items-center gap-4">
                                     <RowIcon kind="logs" />
                                     <div>
@@ -545,7 +503,7 @@ export default function PreferencesModal({
                                 <Toggle value={writeDebugLogsToGame} onChange={setWriteDebugLogsToGame} />
                             </div>
 
-                            <div className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-gray-750">
+                            <div id="preference-verbose-logs" className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-gray-750">
                                 <div className="flex items-center gap-4">
                                     <RowIcon kind="logs" />
                                     <div>
@@ -556,7 +514,7 @@ export default function PreferencesModal({
                                 <Toggle value={verboseLogging} onChange={setVerboseLogging} />
                             </div>
 
-                            <div className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-gray-750">
+                            <div id="preference-open-logs" className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-gray-750">
                                 <div className="flex items-center gap-4">
                                     <RowIcon kind="folder" />
                                     <div>
@@ -572,7 +530,7 @@ export default function PreferencesModal({
                                 </button>
                             </div>
 
-                            <div className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-gray-750">
+                            <div id="preference-default-view" className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-gray-750">
                                 <div className="flex items-center gap-4">
                                     <RowIcon kind="layout" />
                                     <div>
@@ -608,7 +566,7 @@ export default function PreferencesModal({
                                 </div>
                             </div>
 
-                            <div className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-gray-750">
+                            <div id="preference-stream-mode" className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-gray-750">
                                 <div className="flex items-center gap-4">
                                     <RowIcon kind="stream" />
                                     <div>
@@ -626,9 +584,11 @@ export default function PreferencesModal({
                         <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-widest px-1">Support r2modmac</h3>
 
                         <div className="divide-y divide-gray-700/50 overflow-hidden rounded-2xl border border-gray-700 bg-gray-800">
-                            <div className="flex items-center justify-between gap-4 p-4 transition-colors hover:bg-gray-750">
+                            <div id="preference-sponsored-messages" className="flex items-center justify-between gap-4 p-4 transition-colors hover:bg-gray-750">
                                 <div className="flex items-center gap-4">
-                                    <RowIcon kind="support" />
+                                    <span onClick={handleSupportHeartClick} className="shrink-0 select-none">
+                                        <RowIcon kind="support" />
+                                    </span>
                                     <div>
                                         <p className="text-[15px] font-medium text-white">Support r2modmac with sponsored messages</p>
                                         <p className="mt-0.5 text-[13px] leading-snug text-gray-400">Occasional short text messages help fund development. Enabled by default, they can be disabled at any time and never affect the application&apos;s functionality.</p>
@@ -652,7 +612,7 @@ export default function PreferencesModal({
                                                     setSponsoredMessagesScale(value);
                                                     window.dispatchEvent(new CustomEvent('r2modmac:sponsor-preferences', { detail: { enabled: sponsoredMessagesEnabled, scale: value, opacity: sponsoredMessagesOpacity } }));
                                                 }}
-                                                style={{ background: `linear-gradient(to right, rgb(var(--r2-blue-600)) ${((sponsoredMessagesScale - 70) / 30) * 100}%, rgb(var(--r2-gray-700)) ${((sponsoredMessagesScale - 70) / 30) * 100}%)` }}
+                                                style={{ background: `linear-gradient(to right, rgb(var(--r2-blue-600) / var(--r2-blue-600-alpha, 1)) ${((sponsoredMessagesScale - 70) / 30) * 100}%, rgb(var(--r2-gray-700) / var(--r2-gray-700-alpha, 1)) ${((sponsoredMessagesScale - 70) / 30) * 100}%)` }}
                                                 className="h-2 w-full cursor-pointer appearance-none rounded-full border border-gray-600/70 [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:appearance-none [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border [&::-moz-range-thumb]:border-gray-400 [&::-moz-range-thumb]:bg-[#ffffff] [&::-moz-range-thumb]:shadow-sm [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border [&::-webkit-slider-thumb]:border-gray-400 [&::-webkit-slider-thumb]:bg-[#ffffff] [&::-webkit-slider-thumb]:shadow-sm"
                                                 aria-label="Sponsored message size"
                                             />
@@ -670,7 +630,7 @@ export default function PreferencesModal({
                                                     setSponsoredMessagesOpacity(value);
                                                     window.dispatchEvent(new CustomEvent('r2modmac:sponsor-preferences', { detail: { enabled: sponsoredMessagesEnabled, scale: sponsoredMessagesScale, opacity: value } }));
                                                 }}
-                                                style={{ background: `linear-gradient(to right, rgb(var(--r2-blue-600)) ${sponsoredMessagesOpacity}%, rgb(var(--r2-gray-700)) ${sponsoredMessagesOpacity}%)` }}
+                                                style={{ background: `linear-gradient(to right, rgb(var(--r2-blue-600) / var(--r2-blue-600-alpha, 1)) ${sponsoredMessagesOpacity}%, rgb(var(--r2-gray-700) / var(--r2-gray-700-alpha, 1)) ${sponsoredMessagesOpacity}%)` }}
                                                 className="h-2 w-full cursor-pointer appearance-none rounded-full border border-gray-600/70 [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:appearance-none [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border [&::-moz-range-thumb]:border-gray-400 [&::-moz-range-thumb]:bg-[#ffffff] [&::-moz-range-thumb]:shadow-sm [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border [&::-webkit-slider-thumb]:border-gray-400 [&::-webkit-slider-thumb]:bg-[#ffffff] [&::-webkit-slider-thumb]:shadow-sm"
                                                 aria-label="Sponsored message background opacity"
                                             />
@@ -697,7 +657,7 @@ export default function PreferencesModal({
                         <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-widest px-1">Guides & Alerts</h3>
 
                         <div className="divide-y divide-gray-700/50 overflow-hidden rounded-2xl border border-gray-700 bg-gray-800">
-                            <div className="flex items-center justify-between gap-4 p-4 transition-colors hover:bg-gray-750">
+                            <div id="preference-deprecated-warnings" className="flex items-center justify-between gap-4 p-4 transition-colors hover:bg-gray-750">
                                 <div className="flex items-center gap-4">
                                     <RowIcon kind="warning" />
                                     <div>
@@ -707,7 +667,7 @@ export default function PreferencesModal({
                                 </div>
                                 <Toggle value={showDeprecatedWarnings} onChange={setShowDeprecatedWarnings} label="Show deprecated mod warnings" />
                             </div>
-                            <div className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-colors hover:bg-gray-750">
+                            <div id="preference-restore-warnings" className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-colors hover:bg-gray-750">
                                 <div className="flex items-center gap-4">
                                     <RowIcon kind="warning" />
                                     <div>
@@ -742,7 +702,7 @@ export default function PreferencesModal({
                     {/* Danger Zone */}
                     <div className="space-y-3">
                         <div className="bg-red-500/5 hover:bg-red-500/10 border border-red-500/20 rounded-2xl overflow-hidden transition-colors duration-200 mt-2">
-                            <div className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                            <div id="preference-clear-cache" className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                                 <div className="flex items-center gap-4">
                                     <RowIcon kind="cache" />
                                     <div>
@@ -844,12 +804,16 @@ export default function PreferencesModal({
             isOpen={showKeybinds}
             keybinds={keybinds}
             onChange={setKeybinds}
-            onClose={() => setShowKeybinds(false)}
+            onClose={handleKeybindsClose}
         />
 
         <ThemeEditorModal
             isOpen={showThemeEditor}
             onClose={() => setShowThemeEditor(false)}
+        />
+        <UiPreviewLab
+            isOpen={showUiPreviewLab}
+            onClose={() => setShowUiPreviewLab(false)}
         />
         </>
     );

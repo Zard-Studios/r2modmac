@@ -78,6 +78,48 @@ pub struct ThemeColors {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct ThemeOpacity {
+    #[serde(default)]
+    pub background: Option<f32>,
+    #[serde(default)]
+    pub surface: Option<f32>,
+    #[serde(default)]
+    pub surface_hover: Option<f32>,
+    #[serde(default)]
+    pub border: Option<f32>,
+    #[serde(default)]
+    pub text: Option<f32>,
+    #[serde(default)]
+    pub text_muted: Option<f32>,
+    #[serde(default)]
+    pub accent: Option<f32>,
+    #[serde(default)]
+    pub accent_hover: Option<f32>,
+    #[serde(default)]
+    pub danger: Option<f32>,
+    #[serde(default)]
+    pub warning: Option<f32>,
+    #[serde(default)]
+    pub success: Option<f32>,
+    #[serde(default)]
+    pub on_accent: Option<f32>,
+    #[serde(default)]
+    pub on_surface: Option<f32>,
+    #[serde(default)]
+    pub on_danger: Option<f32>,
+    #[serde(default)]
+    pub on_warning: Option<f32>,
+    #[serde(default)]
+    pub on_success: Option<f32>,
+    #[serde(default)]
+    pub icon: Option<f32>,
+    #[serde(default)]
+    pub media_scrim: Option<f32>,
+    #[serde(default)]
+    pub media_ink: Option<f32>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct ThemeOptions {
     /// Whether the engine picks label colours per filled control. Absent means
     /// on, so themes written before the option existed keep working.
@@ -118,6 +160,8 @@ struct ThemeDocument {
     #[serde(default)]
     colors: ThemeColors,
     #[serde(default)]
+    opacity: Option<ThemeOpacity>,
+    #[serde(default)]
     background_image: Option<ThemeBackgroundImage>,
     #[serde(default)]
     options: Option<ThemeOptions>,
@@ -130,6 +174,8 @@ pub struct ThemeSummary {
     pub name: String,
     pub author: Option<String>,
     pub colors: ThemeColors,
+    #[serde(default)]
+    pub opacity: Option<ThemeOpacity>,
     #[serde(default)]
     pub background_image: Option<ThemeBackgroundImage>,
     #[serde(default)]
@@ -371,6 +417,7 @@ fn parse_theme(file_name: String, source: &str) -> ThemeSummary {
                     .map(|a| a.trim().to_string())
                     .filter(|a| !a.is_empty()),
                 colors: doc.colors,
+                opacity: doc.opacity,
                 background_image: doc.background_image,
                 options: doc.options,
                 error: None,
@@ -381,6 +428,7 @@ fn parse_theme(file_name: String, source: &str) -> ThemeSummary {
             file_name,
             author: None,
             colors: ThemeColors::default(),
+            opacity: None,
             background_image: None,
             options: None,
             error: Some(error.message().to_string()),
@@ -421,6 +469,7 @@ pub async fn list_themes(app: AppHandle) -> Result<Vec<ThemeSummary>, String> {
                 file_name,
                 author: None,
                 colors: ThemeColors::default(),
+                opacity: None,
                 background_image: None,
                 options: None,
                 error: Some(format!("Could not read the file: {}", error)),
@@ -698,6 +747,25 @@ success = "#50fa7b"
         assert_eq!(summary.colors.danger.as_deref(), Some("#ff5555"));
         assert_eq!(summary.colors.warning.as_deref(), Some("#f1fa8c"));
         assert_eq!(summary.colors.success.as_deref(), Some("#50fa7b"));
+    }
+
+    #[test]
+    fn per_colour_opacity_is_parsed() {
+        let summary = parse_theme(
+            "alpha.toml".to_string(),
+            r##"
+[colors]
+background = "#111827"
+[opacity]
+background = 0.42
+accent = 0.75
+media_scrim = 0.25
+"##,
+        );
+        let opacity = summary.opacity.expect("expected opacity values");
+        assert_eq!(opacity.background, Some(0.42));
+        assert_eq!(opacity.accent, Some(0.75));
+        assert_eq!(opacity.media_scrim, Some(0.25));
     }
 
     #[test]

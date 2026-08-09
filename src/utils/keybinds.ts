@@ -12,6 +12,8 @@
  * everywhere and a settings file stays portable between machines. Order is
  * canonical, so two spellings of the same combination compare equal.
  */
+import type { IconName } from '../components/ui/icons';
+
 
 /**
  * Which key `Mod` stands for. Passed explicitly rather than read from the
@@ -34,14 +36,29 @@ export type KeybindActionId =
     | 'new-profile'
     | 'duplicate-profile'
     | 'open-search'
-    | 'search-mods';
+    | 'search-mods'
+    | 'open-preferences'
+    | 'go-home'
+    | 'import-profile'
+    | 'browse-mods'
+    | 'export-profile'
+    | 'toggle-profile-mods'
+    | 'import-custom-mod'
+    | 'show-all-mods'
+    | 'show-mod-updates'
+    | 'show-sync-changes'
+    | 'view-grid'
+    | 'view-list';
+
+export type KeybindGroup = 'General' | 'Game' | 'Profiles' | 'Mods';
 
 export interface KeybindAction {
     id: KeybindActionId;
     label: string;
-    description: string;
+    icon: IconName;
+    keywords?: readonly string[];
     /** Groups the action under a heading in the settings panel. */
-    group: 'Game' | 'Profiles';
+    group: KeybindGroup;
     defaultAccelerator: string;
 }
 
@@ -55,60 +72,152 @@ export interface KeybindAction {
  */
 export const KEYBIND_ACTIONS: readonly KeybindAction[] = [
     {
+        id: 'open-search',
+        label: 'Open Spotlight',
+        icon: 'search',
+        keywords: ['find', 'command palette'],
+        group: 'General',
+        defaultAccelerator: 'Mod+F',
+    },
+    {
+        id: 'open-preferences',
+        label: 'Open Preferences',
+        icon: 'settings',
+        keywords: ['settings'],
+        group: 'General',
+        defaultAccelerator: 'Mod+,',
+    },
+    {
+        id: 'go-home',
+        label: 'Go to Home',
+        icon: 'home',
+        keywords: ['games', 'back'],
+        group: 'General',
+        defaultAccelerator: '',
+    },
+    {
         id: 'apply-mods',
         label: 'Apply mods to game',
-        description: 'Write the active profile into the game folder.',
+        icon: 'apply',
         group: 'Game',
         defaultAccelerator: 'Mod+Enter',
     },
     {
         id: 'launch-modded',
         label: 'Launch game (modded)',
-        description: 'Start the game with the active profile.',
+        icon: 'play',
         group: 'Game',
         defaultAccelerator: 'Mod+R',
     },
     {
         id: 'launch-vanilla',
         label: 'Launch game (unmodded)',
-        description: 'Start the game with no mods loaded.',
+        icon: 'play',
         group: 'Game',
         defaultAccelerator: 'Mod+Shift+R',
     },
     {
         id: 'stop-game',
         label: 'Quit game',
-        description: 'Stop the running game.',
+        icon: 'stop',
         group: 'Game',
         defaultAccelerator: 'Mod+.',
     },
     {
         id: 'new-profile',
         label: 'New profile',
-        description: 'Create a profile for the current game.',
+        icon: 'plus',
         group: 'Profiles',
         defaultAccelerator: 'Mod+N',
     },
     {
+        id: 'import-profile',
+        label: 'Import profile',
+        icon: 'import',
+        keywords: ['code', 'file'],
+        group: 'Profiles',
+        defaultAccelerator: '',
+    },
+    {
+        id: 'browse-mods',
+        label: 'Browse mods without a profile',
+        icon: 'browse',
+        keywords: ['catalogue'],
+        group: 'Profiles',
+        defaultAccelerator: '',
+    },
+    {
         id: 'duplicate-profile',
         label: 'Duplicate profile',
-        description: 'Copy the current profile, mods and all.',
+        icon: 'copy',
         group: 'Profiles',
         defaultAccelerator: 'Mod+D',
     },
     {
-        id: 'open-search',
-        label: 'Search',
-        description: 'Find games, profiles, settings and commands from anywhere.',
+        id: 'export-profile',
+        label: 'Export profile',
+        icon: 'file',
         group: 'Profiles',
-        defaultAccelerator: 'Mod+F',
+        defaultAccelerator: '',
+    },
+    {
+        id: 'toggle-profile-mods',
+        label: 'Enable or disable profile mods',
+        icon: 'disable',
+        keywords: ['vanilla', 'toggle'],
+        group: 'Profiles',
+        defaultAccelerator: '',
     },
     {
         id: 'search-mods',
         label: 'Search mods in profile',
-        description: 'Jump to the search field inside the open profile.',
-        group: 'Profiles',
+        icon: 'search',
+        group: 'Mods',
         defaultAccelerator: 'Mod+Shift+F',
+    },
+    {
+        id: 'import-custom-mod',
+        label: 'Import custom mod',
+        icon: 'import',
+        keywords: ['local', 'folder', 'archive'],
+        group: 'Mods',
+        defaultAccelerator: '',
+    },
+    {
+        id: 'show-all-mods',
+        label: 'Show all profile mods',
+        icon: 'browse',
+        group: 'Mods',
+        defaultAccelerator: '',
+    },
+    {
+        id: 'show-mod-updates',
+        label: 'Show available updates',
+        icon: 'update',
+        group: 'Mods',
+        defaultAccelerator: '',
+    },
+    {
+        id: 'show-sync-changes',
+        label: 'Show pending sync changes',
+        icon: 'apply',
+        keywords: ['apply', 'pending'],
+        group: 'Mods',
+        defaultAccelerator: '',
+    },
+    {
+        id: 'view-grid',
+        label: 'Use grid view',
+        icon: 'layout',
+        group: 'Mods',
+        defaultAccelerator: '',
+    },
+    {
+        id: 'view-list',
+        label: 'Use list view',
+        icon: 'list',
+        group: 'Mods',
+        defaultAccelerator: '',
     },
 ];
 

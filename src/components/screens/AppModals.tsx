@@ -6,7 +6,8 @@ import { SettingsModal } from '../modals/SettingsModal'
 import { ExportModal } from '../modals/ExportModal'
 import { CrossOverGuideModal } from '../modals/CrossOverGuideModal';
 import { UpdateModal } from '../modals/UpdateModal';
-import PreferencesModal, { type PreferencesSettings } from '../modals/PreferencesModal';
+import PreferencesModal, { type PreferencesSettings, type PreferencesTarget } from '../modals/PreferencesModal';
+import { VerboseLogsWarningModal } from '../modals/VerboseLogsWarningModal';
 import type { Package, PackageVersion, Community, CommunityPlatformInfo } from '../../types/thunderstore'
 import type { UpdateInfo } from '../../types/electron';
 
@@ -43,7 +44,7 @@ export interface AppModalsProps {
     hideCrossOverGuide: boolean;
     setHideCrossOverGuide: (hide: boolean) => void;
     showPreferences: boolean;
-    preferencesInitialPanel?: 'theme' | 'keybinds' | null;
+    preferencesInitialPanel?: PreferencesTarget | null;
     setShowPreferences: (show: boolean) => void;
     preferences: PreferencesSettings;
     communities: Community[];
@@ -56,6 +57,11 @@ export interface AppModalsProps {
     onSetGuideHidden: (guide: 'crossover' | 'macos', hidden: boolean) => Promise<void>;
     legacyInstallMode: boolean;
     onCheckForUpdates: () => Promise<void>;
+    verboseLogsWarningBytes: number | null;
+    onVerboseLoggingChange: (enabled: boolean) => Promise<void>;
+    onClearAppLogs: () => Promise<void>;
+    onDismissVerboseLogsWarning: () => void;
+    onHideVerboseLogsWarning: () => Promise<void>;
     codeShareDisabled?: boolean;
 }
 
@@ -74,6 +80,11 @@ export function AppModals({
     hasHiddenGuideWarnings, onRestoreGuideWarnings, onSetGuideHidden,
     legacyInstallMode,
     onCheckForUpdates,
+    verboseLogsWarningBytes,
+    onVerboseLoggingChange,
+    onClearAppLogs,
+    onDismissVerboseLogsWarning,
+    onHideVerboseLogsWarning,
     codeShareDisabled = false,
 }: AppModalsProps) {
 
@@ -235,6 +246,18 @@ export function AppModals({
                 onRestoreGuideWarnings={onRestoreGuideWarnings}
                 onCheckForUpdates={onCheckForUpdates}
             />
+
+            {verboseLogsWarningBytes !== null && (
+                <VerboseLogsWarningModal
+                    isOpen
+                    bytes={verboseLogsWarningBytes}
+                    verboseLogging={preferences.verbose_logging}
+                    onVerboseLoggingChange={onVerboseLoggingChange}
+                    onClearLogs={onClearAppLogs}
+                    onClose={onDismissVerboseLogsWarning}
+                    onDontShowAgain={onHideVerboseLogsWarning}
+                />
+            )}
         </>
     );
 }

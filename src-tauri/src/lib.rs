@@ -43,6 +43,65 @@ fn open_app_logs_folder(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+fn app_logs_size_at(log_dir: &std::path::Path) -> Result<u64, String> {
+    if !log_dir.exists() {
+        return Ok(0);
+    }
+
+    let mut total = 0_u64;
+    for entry in std::fs::read_dir(log_dir).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let file_type = entry.file_type().map_err(|error| error.to_string())?;
+        if file_type.is_file() {
+            total = total.saturating_add(
+                entry
+                    .metadata()
+                    .map_err(|error| error.to_string())?
+                    .len(),
+            );
+        }
+    }
+    Ok(total)
+}
+
+fn clear_app_logs_at(log_dir: &std::path::Path) -> Result<u64, String> {
+    let bytes_freed = app_logs_size_at(log_dir)?;
+    if !log_dir.exists() {
+        return Ok(0);
+    }
+
+    for entry in std::fs::read_dir(log_dir).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let file_type = entry.file_type().map_err(|error| error.to_string())?;
+        if file_type.is_file() {
+            std::fs::OpenOptions::new()
+                .write(true)
+                .truncate(true)
+                .open(entry.path())
+                .map_err(|error| format!("Could not clear {}: {error}", entry.path().display()))?;
+        }
+    }
+    Ok(bytes_freed)
+}
+
+#[tauri::command]
+fn get_app_logs_size(app: tauri::AppHandle) -> Result<u64, String> {
+    let log_dir = app
+        .path()
+        .app_log_dir()
+        .map_err(|error| format!("Could not resolve app log directory: {error}"))?;
+    app_logs_size_at(&log_dir)
+}
+
+#[tauri::command]
+fn clear_app_logs(app: tauri::AppHandle) -> Result<u64, String> {
+    let log_dir = app
+        .path()
+        .app_log_dir()
+        .map_err(|error| format!("Could not resolve app log directory: {error}"))?;
+    clear_app_logs_at(&log_dir)
+}
+
 /// Apply the Verbose logging preference to the global `log` filter.
 ///
 /// Kept separate from the plugin's build-time level so the toggle takes effect
@@ -79,7 +138,7 @@ pub fn run() {
                 // request that matters already gets its own descriptive log line
                 // at the call site.
                 .level_for("reqwest::connect", log::LevelFilter::Warn)
-                .max_file_size(1_048_576) // 1 MiB
+                .max_file_size(2_097_152) // 2 MiB
                 .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepSome(3))
                 .build(),
         )
@@ -274,9 +333,17 @@ pub fn run() {
                     .item(&kofi)
                     .build()?;
 
-                let preferences_item = MenuItemBuilder::with_id("preferences", "Preferences...")
-                    .accelerator("CommandOrControl+,")
-                    .build(app)?;
+                let preferences_accelerator =
+                    commands::settings_commands::preferences_menu_accelerator(
+                        &models::shared::load_settings_impl(app.handle()),
+                    );
+                let mut preferences_item_builder =
+                    MenuItemBuilder::with_id("preferences", "Preferences...");
+                if let Some(accelerator) = preferences_accelerator {
+                    preferences_item_builder =
+                        preferences_item_builder.accelerator(accelerator.as_str());
+                }
+                let preferences_item = preferences_item_builder.build(app)?;
 
                 let app_menu = SubmenuBuilder::new(app, "r2modmac")
                     .item(&PredefinedMenuItem::about(
@@ -423,8 +490,38 @@ pub fn run() {
             commands::profile_commands::open_profile_config_file,
             open_devtools,
             open_app_logs_folder,
+            get_app_logs_size,
+            clear_app_logs,
             set_verbose_logging,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod app_log_storage_tests {
+    use super::{app_logs_size_at, clear_app_logs_at};
+
+    #[test]
+    fn measures_and_clears_log_files_without_deleting_them() {
+        let directory = std::env::temp_dir().join(format!(
+            "r2modmac-log-storage-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::write(directory.join("app.log"), vec![1_u8; 3_000]).unwrap();
+        std::fs::write(directory.join("app.log.1"), vec![2_u8; 2_000]).unwrap();
+
+        assert_eq!(app_logs_size_at(&directory).unwrap(), 5_000);
+        assert_eq!(clear_app_logs_at(&directory).unwrap(), 5_000);
+        assert_eq!(app_logs_size_at(&directory).unwrap(), 0);
+        assert!(directory.join("app.log").exists());
+        assert!(directory.join("app.log.1").exists());
+
+        std::fs::remove_dir_all(directory).unwrap();
+    }
 }

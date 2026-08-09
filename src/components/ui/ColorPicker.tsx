@@ -65,7 +65,11 @@ const clamp01 = (n: number) => (n < 0 ? 0 : n > 1 ? 1 : n);
  * The element comes from the event rather than a ref: `currentTarget` is
  * exactly the surface being dragged, so there is nothing to store.
  */
-function useDragRatio(onMove: (x: number, y: number) => void) {
+function useDragRatio(
+    onMove: (x: number, y: number) => void,
+    onInteractionStart?: () => void,
+    onInteractionEnd?: () => void
+) {
     const emit = useCallback(
         (el: HTMLElement, clientX: number, clientY: number) => {
             const r = el.getBoundingClientRect();
@@ -77,10 +81,11 @@ function useDragRatio(onMove: (x: number, y: number) => void) {
     const onPointerDown = useCallback(
         (e: React.PointerEvent<HTMLDivElement>) => {
             e.preventDefault();
+            onInteractionStart?.();
             e.currentTarget.setPointerCapture(e.pointerId);
             emit(e.currentTarget, e.clientX, e.clientY);
         },
-        [emit]
+        [emit, onInteractionStart]
     );
 
     const onPointerMove = useCallback(
@@ -92,7 +97,14 @@ function useDragRatio(onMove: (x: number, y: number) => void) {
         [emit]
     );
 
-    return { onPointerDown, onPointerMove };
+    const onPointerEnd = useCallback(() => onInteractionEnd?.(), [onInteractionEnd]);
+
+    return {
+        onPointerDown,
+        onPointerMove,
+        onPointerUp: onPointerEnd,
+        onPointerCancel: onPointerEnd,
+    };
 }
 
 // ── Picker body ──────────────────────────────────────────────────────────────
@@ -102,9 +114,18 @@ interface ColorPickerProps {
     onChange: (hex: string) => void;
     /** Colours offered as one-click choices — normally the rest of the theme. */
     presets?: string[];
+    /** Groups a continuous picker drag into one undoable edit. */
+    onInteractionStart?: () => void;
+    onInteractionEnd?: () => void;
 }
 
-function PickerBody({ value, onChange, presets = [] }: ColorPickerProps) {
+function PickerBody({
+    value,
+    onChange,
+    presets = [],
+    onInteractionStart,
+    onInteractionEnd,
+}: ColorPickerProps) {
     // Hue is held separately: at zero saturation or value the hex no longer
     // encodes it, and without this the slider would snap back to red whenever
     // the user dragged into a corner of the square.
@@ -121,12 +142,16 @@ function PickerBody({ value, onChange, presets = [] }: ColorPickerProps) {
 
     const { s, v } = hexToHsv(value);
 
-    const sv = useDragRatio((x, y) => onChange(hsvToHex({ h: hue, s: x, v: 1 - y })));
+    const sv = useDragRatio(
+        (x, y) => onChange(hsvToHex({ h: hue, s: x, v: 1 - y })),
+        onInteractionStart,
+        onInteractionEnd
+    );
     const hueBar = useDragRatio((x) => {
         const h = x * 360;
         setHue(h);
         onChange(hsvToHex({ h, s: s || 1, v: v || 1 }));
-    });
+    }, onInteractionStart, onInteractionEnd);
 
     const commitHex = (next: string) => {
         setHexDraft(next);
@@ -143,6 +168,8 @@ function PickerBody({ value, onChange, presets = [] }: ColorPickerProps) {
             <div
                 onPointerDown={sv.onPointerDown}
                 onPointerMove={sv.onPointerMove}
+                onPointerUp={sv.onPointerUp}
+                onPointerCancel={sv.onPointerCancel}
                 onKeyDown={(e) => {
                     const step = e.shiftKey ? 0.1 : 0.02;
                     const map: Record<string, [number, number]> = {
@@ -172,6 +199,8 @@ function PickerBody({ value, onChange, presets = [] }: ColorPickerProps) {
             <div
                 onPointerDown={hueBar.onPointerDown}
                 onPointerMove={hueBar.onPointerMove}
+                onPointerUp={hueBar.onPointerUp}
+                onPointerCancel={hueBar.onPointerCancel}
                 onKeyDown={(e) => {
                     const step = e.shiftKey ? 20 : 4;
                     if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
@@ -254,7 +283,14 @@ interface ColorFieldProps extends ColorPickerProps {
 }
 
 /** A swatch that opens the picker in a popover anchored beneath it. */
-export function ColorField({ value, onChange, presets, label }: ColorFieldProps) {
+export function ColorField({
+    value,
+    onChange,
+    presets,
+    label,
+    onInteractionStart,
+    onInteractionEnd,
+}: ColorFieldProps) {
     const [open, setOpen] = useState(false);
     const [position, setPosition] = useState<{ top: number; left: number } | null>(null);
     const triggerRef = useRef<HTMLButtonElement>(null);
@@ -327,7 +363,13 @@ export function ColorField({ value, onChange, presets, label }: ColorFieldProps)
                     style={{ top: position.top, left: position.left }}
                     className="fixed z-[80] rounded-xl border border-gray-700 bg-gray-800 p-3 shadow-2xl"
                 >
-                    <PickerBody value={value} onChange={onChange} presets={presets} />
+                    <PickerBody
+                        value={value}
+                        onChange={onChange}
+                        presets={presets}
+                        onInteractionStart={onInteractionStart}
+                        onInteractionEnd={onInteractionEnd}
+                    />
                 </div>,
                 document.body
             )}
