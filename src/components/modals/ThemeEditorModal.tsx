@@ -175,7 +175,7 @@ function SegmentedControl<T extends string>({
     disabled = false,
     ariaLabel,
 }: {
-    options: readonly { id: T; label: string; desc: string }[];
+    options: readonly { id: T; label: string }[];
     value: T;
     onChange: (id: T) => void;
     onScrubStart?: (id: T) => void;
@@ -270,18 +270,11 @@ function SegmentedControl<T extends string>({
                                 moveTo(Math.max(0, index - 1));
                             }
                         }}
-                        className={`relative z-10 flex select-none flex-col items-center justify-center rounded-lg px-2 py-1.5 text-center transition-colors disabled:opacity-50 ${
+                        className={`relative z-10 flex select-none items-center justify-center rounded-lg px-2 py-2 text-center transition-colors disabled:opacity-50 ${
                             active ? 'font-semibold text-on-accent' : 'text-gray-400 hover:text-white'
                         }`}
                     >
                         <span className="pointer-events-none text-[12px] leading-tight">{option.label}</span>
-                        <span
-                            className={`pointer-events-none text-[9px] leading-tight ${
-                                active ? 'text-on-accent/70' : 'text-gray-500'
-                            }`}
-                        >
-                            {option.desc}
-                        </span>
                     </button>
                 );
             })}
@@ -1355,22 +1348,19 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
                                                 <div className={backgroundPreviewHeld && backgroundPreviewControl === 'sizing'
                                                     ? "relative z-[60] isolate before:pointer-events-none before:absolute before:-inset-3 before:-z-10 before:rounded-2xl before:border before:border-gray-600 before:bg-gray-800/95 before:shadow-2xl before:backdrop-blur-xl"
                                                     : 'relative'}>
-                                                    <div className="mb-2 flex items-baseline justify-between">
+                                                    <div className="mb-2">
                                                         <span className="text-[12px] font-medium text-gray-300">Sizing</span>
-                                                        <span className="font-mono text-[11px] capitalize text-gray-400">
-                                                            {draft.backgroundImage.fit || 'cover'}
-                                                        </span>
                                                     </div>
                                                     <SegmentedControl
                                                         ariaLabel="Background sizing"
                                                         disabled={!editable}
                                                         value={draft.backgroundImage.fit || 'cover'}
                                                         options={[
-                                                            { id: 'cover', label: 'Cover', desc: 'Fills, crops' },
-                                                            { id: 'contain', label: 'Contain', desc: 'Fits, whole' },
-                                                            { id: 'fill', label: 'Stretch', desc: 'Distorts' },
-                                                            { id: 'tile', label: 'Pattern', desc: 'Repeats' },
-                                                            { id: 'center', label: 'Original', desc: 'True size' },
+                                                            { id: 'cover', label: 'Cover' },
+                                                            { id: 'contain', label: 'Fit' },
+                                                            { id: 'fill', label: 'Stretch' },
+                                                            { id: 'tile', label: 'Pattern' },
+                                                            { id: 'center', label: 'Original' },
                                                         ] as const}
                                                         onChange={(fit) => updateImage({ fit })}
                                                         onScrubStart={(fit) => beginSizingPreview(fit)}
