@@ -11,6 +11,28 @@ import { overridesFromKeybinds, resolveKeybinds, type KeybindMap } from '../../u
 import { useThemeStore } from '../../store/useThemeStore';
 import type { Community, CommunityPlatformInfo } from '../../types/thunderstore';
 
+const TROUBLESHOOTING_LOGS_EXPANDED_KEY = 'r2modmac:preferences:troubleshooting-logs-expanded';
+
+function storedLogsExpanded(fallback: boolean): boolean {
+    try {
+        const stored = window.localStorage.getItem(TROUBLESHOOTING_LOGS_EXPANDED_KEY);
+        if (stored === 'true') return true;
+        if (stored === 'false') return false;
+    } catch {
+        // A restricted webview can reject storage. The panel still works for
+        // the current mount; it simply falls back to its useful default.
+    }
+    return fallback;
+}
+
+function storeLogsExpanded(expanded: boolean): void {
+    try {
+        window.localStorage.setItem(TROUBLESHOOTING_LOGS_EXPANDED_KEY, String(expanded));
+    } catch {
+        // View state is non-critical and must never block Preferences.
+    }
+}
+
 export interface PreferencesSettings {
     legacy_install_mode: boolean;
     ask_version_before_install: boolean;
@@ -130,9 +152,9 @@ export default function PreferencesModal({
     const [confirmBeforeApply, setConfirmBeforeApply] = useState(settings.confirm_before_apply_to_game);
     const [writeDebugLogsToGame, setWriteDebugLogsToGame] = useState(settings.write_debug_logs_to_game);
     const [verboseLogging, setVerboseLogging] = useState(settings.verbose_logging);
-    const [logsExpanded, setLogsExpanded] = useState(
+    const [logsExpanded, setLogsExpanded] = useState(() => storedLogsExpanded(
         settings.write_debug_logs_to_game || settings.verbose_logging
-    );
+    ));
     const [defaultModViewMode, setDefaultModViewMode] = useState<'grid' | 'list'>(settings.default_mod_view_mode);
     const [showDeprecatedWarnings, setShowDeprecatedWarnings] = useState(settings.show_deprecated_warnings);
     const [streamMode, setStreamMode] = useState(settings.stream_mode);
@@ -173,13 +195,12 @@ export default function PreferencesModal({
             setConfirmBeforeApply(settings.confirm_before_apply_to_game);
             setWriteDebugLogsToGame(settings.write_debug_logs_to_game ?? false);
             setVerboseLogging(settings.verbose_logging ?? false);
-            setLogsExpanded(
-                settings.write_debug_logs_to_game
-                || settings.verbose_logging
-                || initialPanel === 'debug-logs'
+            const targetsLogs = initialPanel === 'debug-logs'
                 || initialPanel === 'verbose-logs'
-                || initialPanel === 'open-logs'
-            );
+                || initialPanel === 'open-logs';
+            setLogsExpanded(targetsLogs || storedLogsExpanded(
+                settings.write_debug_logs_to_game || settings.verbose_logging
+            ));
             setShowDeprecatedWarnings(settings.show_deprecated_warnings);
             setStreamMode(settings.stream_mode ?? false);
             setDefaultModViewMode(settings.default_mod_view_mode ?? 'grid');
@@ -292,16 +313,21 @@ export default function PreferencesModal({
             ? '1 active'
             : 'Off';
 
+    const changeLogsExpanded = (expanded: boolean) => {
+        setLogsExpanded(expanded);
+        storeLogsExpanded(expanded);
+    };
+
     const changeDebugLogs = (enabled: boolean) => {
         setWriteDebugLogsToGame(enabled);
-        if (enabled) setLogsExpanded(true);
-        else if (!verboseLogging) setLogsExpanded(false);
+        if (enabled) changeLogsExpanded(true);
+        else if (!verboseLogging) changeLogsExpanded(false);
     };
 
     const changeVerboseLogging = (enabled: boolean) => {
         setVerboseLogging(enabled);
-        if (enabled) setLogsExpanded(true);
-        else if (!writeDebugLogsToGame) setLogsExpanded(false);
+        if (enabled) changeLogsExpanded(true);
+        else if (!writeDebugLogsToGame) changeLogsExpanded(false);
     };
 
     // Spotlight destinations are panels in their own right. Mounting the full
@@ -548,7 +574,7 @@ export default function PreferencesModal({
                                     type="button"
                                     aria-expanded={logsOpen}
                                     aria-controls="preference-log-details"
-                                    onClick={() => setLogsExpanded(current => !current)}
+                                    onClick={() => changeLogsExpanded(!logsExpanded)}
                                     className="flex w-full items-center justify-between gap-4 p-4 text-left transition-colors hover:bg-surface-hover"
                                 >
                                     <div className="flex min-w-0 items-center gap-4">
