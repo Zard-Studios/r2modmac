@@ -158,7 +158,53 @@ function Slider({
     onChange: (n: number) => void; ariaLabel: string; disabled?: boolean;
     onPreviewStart?: () => void; onPreviewEnd?: () => void;
 }) {
-    const pct = ((value - min) / (max - min)) * 100;
+    const [displayValue, setDisplayValue] = useState(value);
+    const liveValueRef = useRef(value);
+    const draggingRef = useRef(false);
+    const pendingValueRef = useRef<number | null>(null);
+    const frameRef = useRef<number | null>(null);
+
+    useEffect(() => {
+        liveValueRef.current = value;
+        if (!draggingRef.current) setDisplayValue(value);
+    }, [value]);
+
+    useEffect(() => () => {
+        if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
+    }, []);
+
+    const publishNextFrame = useCallback((next: number) => {
+        pendingValueRef.current = next;
+        if (frameRef.current !== null) return;
+        frameRef.current = requestAnimationFrame(() => {
+            frameRef.current = null;
+            const pending = pendingValueRef.current;
+            pendingValueRef.current = null;
+            if (pending !== null) onChange(pending);
+        });
+    }, [onChange]);
+
+    const startInteraction = useCallback(() => {
+        if (draggingRef.current) return;
+        draggingRef.current = true;
+        onPreviewStart?.();
+    }, [onPreviewStart]);
+
+    const finishInteraction = useCallback((finalValue: number) => {
+        if (!draggingRef.current) return;
+        draggingRef.current = false;
+        liveValueRef.current = finalValue;
+        setDisplayValue(finalValue);
+        if (frameRef.current !== null) {
+            cancelAnimationFrame(frameRef.current);
+            frameRef.current = null;
+        }
+        pendingValueRef.current = null;
+        onChange(finalValue);
+        onPreviewEnd?.();
+    }, [onChange, onPreviewEnd]);
+
+    const pct = ((displayValue - min) / (max - min)) * 100;
     return (
         <input
             type="range"
@@ -166,22 +212,28 @@ function Slider({
             min={min}
             max={max}
             step={step}
-            value={value}
+            value={displayValue}
             aria-label={ariaLabel}
-            onChange={(e) => onChange(Number(e.target.value))}
+            onInput={(event) => {
+                const next = Number(event.currentTarget.value);
+                liveValueRef.current = next;
+                setDisplayValue(next);
+                publishNextFrame(next);
+            }}
             onPointerDown={(event) => {
                 event.currentTarget.setPointerCapture(event.pointerId);
-                onPreviewStart?.();
+                startInteraction();
             }}
-            onPointerUp={onPreviewEnd}
-            onPointerCancel={onPreviewEnd}
-            onLostPointerCapture={onPreviewEnd}
+            onPointerUp={(event) => finishInteraction(Number(event.currentTarget.value))}
+            onPointerCancel={() => finishInteraction(liveValueRef.current)}
+            onLostPointerCapture={() => finishInteraction(liveValueRef.current)}
             onKeyDown={(event) => {
                 if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End'].includes(event.key)) {
-                    onPreviewStart?.();
+                    startInteraction();
                 }
             }}
-            onKeyUp={onPreviewEnd}
+            onKeyUp={(event) => finishInteraction(Number(event.currentTarget.value))}
+            onBlur={() => finishInteraction(liveValueRef.current)}
             style={{
                 background: `linear-gradient(to right, rgb(var(--r2-blue-600) / var(--r2-blue-600-alpha, 1)) ${pct}%, rgb(var(--r2-gray-700) / var(--r2-gray-700-alpha, 1)) ${pct}%)`,
             }}
@@ -290,6 +342,7 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
     const setPreview = useThemeStore((s) => s.setPreview);
 
     const [draft, setDraft] = useState<Theme | null>(null);
+    const draftRef = useRef<Theme | null>(null);
     const [dirty, setDirty] = useState(false);
     const [visualUndo, setVisualUndo] = useState<Theme[]>([]);
     const [visualRedo, setVisualRedo] = useState<Theme[]>([]);
@@ -308,7 +361,6 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
     const [backgroundPreviewControl, setBackgroundPreviewControl] = useState<
         'tile-scale' | 'opacity' | 'blur' | 'offset-x' | 'offset-y' | null
     >(null);
-    const sizingPreviewTimerRef = useRef<number | null>(null);
 
     const selectedId = activeFileName;
     const builtins = useMemo(() => allBuiltinThemes(), []);
@@ -351,6 +403,10 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
     }
 
     useEffect(() => {
+        draftRef.current = draft;
+    }, [draft]);
+
+    useEffect(() => {
         visualGestureBaseRef.current = null;
     }, [isOpen, signature]);
 
@@ -391,34 +447,39 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
     );
 
     const applyVisualEdit = useCallback((change: (theme: Theme) => Theme, record = true) => {
-        if (!draft) return;
-        const next = change(draft);
-        if (next === draft) return;
+        const current = draftRef.current;
+        if (!current) return;
+        const next = change(current);
+        if (next === current) return;
         if (record && !visualGestureBaseRef.current) {
-            setVisualUndo((history) => [...history, draft].slice(-100));
+            setVisualUndo((history) => [...history, current].slice(-100));
             setVisualRedo([]);
         }
+        draftRef.current = next;
         setDraft(next);
         setDirty(JSON.stringify(next) !== JSON.stringify(visualBaseline));
-    }, [draft, visualBaseline]);
+    }, [visualBaseline]);
 
     const beginVisualGesture = useCallback(() => {
-        if (draft && !visualGestureBaseRef.current) visualGestureBaseRef.current = draft;
-    }, [draft]);
+        const current = draftRef.current;
+        if (current && !visualGestureBaseRef.current) visualGestureBaseRef.current = current;
+    }, []);
 
     const endVisualGesture = useCallback(() => {
         const base = visualGestureBaseRef.current;
+        const current = draftRef.current;
         visualGestureBaseRef.current = null;
-        if (!base || !draft || draft === base) return;
+        if (!base || !current || current === base) return;
         setVisualUndo((history) => [...history, base].slice(-100));
         setVisualRedo([]);
-    }, [draft]);
+    }, []);
 
     const undoVisual = useCallback(() => {
         const previous = visualUndo[visualUndo.length - 1];
         if (!previous || !draft) return;
         setVisualUndo((history) => history.slice(0, -1));
         setVisualRedo((history) => [...history, draft].slice(-100));
+        draftRef.current = previous;
         setDraft(previous);
         setDirty(JSON.stringify(previous) !== JSON.stringify(visualBaseline));
     }, [draft, visualBaseline, visualUndo]);
@@ -428,6 +489,7 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
         if (!next || !draft) return;
         setVisualRedo((history) => history.slice(0, -1));
         setVisualUndo((history) => [...history, draft].slice(-100));
+        draftRef.current = next;
         setDraft(next);
         setDirty(JSON.stringify(next) !== JSON.stringify(visualBaseline));
     }, [draft, visualBaseline, visualRedo]);
@@ -501,39 +563,19 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
         }, record);
     }, [applyVisualEdit]);
 
-    const previewSizing = useCallback((fit: NonNullable<Theme['backgroundImage']>['fit']) => {
-        updateImage({ fit });
+    const beginSizingPreview = useCallback((fit: NonNullable<Theme['backgroundImage']>['fit']) => {
+        applyVisualEdit((theme) => {
+            if (!theme.backgroundImage || theme.backgroundImage.fit === fit) return theme;
+            return { ...theme, backgroundImage: { ...theme.backgroundImage, fit } };
+        });
         setBackgroundPreviewControl(null);
         setBackgroundPreviewHeld(true);
-        if (sizingPreviewTimerRef.current !== null) {
-            window.clearTimeout(sizingPreviewTimerRef.current);
-        }
-        sizingPreviewTimerRef.current = window.setTimeout(() => {
-            sizingPreviewTimerRef.current = null;
-            setBackgroundPreviewHeld(false);
-        }, 2000);
-    }, [updateImage]);
+    }, [applyVisualEdit]);
 
-    useEffect(() => () => {
-        if (sizingPreviewTimerRef.current !== null) {
-            window.clearTimeout(sizingPreviewTimerRef.current);
-        }
+    const endBackgroundPreview = useCallback(() => {
+        setBackgroundPreviewHeld(false);
+        setBackgroundPreviewControl(null);
     }, []);
-
-    useEffect(() => {
-        if (!backgroundPreviewHeld || !backgroundPreviewControl) return;
-        const endDragPreview = () => {
-            endVisualGesture();
-            setBackgroundPreviewHeld(false);
-            setBackgroundPreviewControl(null);
-        };
-        window.addEventListener('pointerup', endDragPreview, true);
-        window.addEventListener('blur', endDragPreview);
-        return () => {
-            window.removeEventListener('pointerup', endDragPreview, true);
-            window.removeEventListener('blur', endDragPreview);
-        };
-    }, [backgroundPreviewHeld, backgroundPreviewControl, endVisualGesture]);
 
     const handleSelect = useCallback(
         async (id: string | null) => {
@@ -1323,7 +1365,28 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
                                                                     key={mode.id}
                                                                     type="button"
                                                                     disabled={!editable}
-                                                                    onClick={() => previewSizing(mode.id)}
+                                                                    onPointerDown={(event) => {
+                                                                        if (event.button !== 0) return;
+                                                                        event.currentTarget.setPointerCapture(event.pointerId);
+                                                                        beginSizingPreview(mode.id);
+                                                                    }}
+                                                                    onPointerUp={endBackgroundPreview}
+                                                                    onPointerCancel={endBackgroundPreview}
+                                                                    onLostPointerCapture={endBackgroundPreview}
+                                                                    onKeyDown={(event) => {
+                                                                        if (!event.repeat && (event.key === 'Enter' || event.key === ' ')) {
+                                                                            beginSizingPreview(mode.id);
+                                                                        }
+                                                                    }}
+                                                                    onKeyUp={(event) => {
+                                                                        if (event.key === 'Enter' || event.key === ' ') endBackgroundPreview();
+                                                                    }}
+                                                                    onClick={() => {
+                                                                        applyVisualEdit((theme) => {
+                                                                            if (!theme.backgroundImage || theme.backgroundImage.fit === mode.id) return theme;
+                                                                            return { ...theme, backgroundImage: { ...theme.backgroundImage, fit: mode.id } };
+                                                                        });
+                                                                    }}
                                                                     className={`flex flex-col items-center justify-center rounded-lg px-2 py-1.5 text-center transition-all disabled:opacity-50 ${
                                                                         active
                                                                             ? 'bg-blue-600 font-semibold text-on-accent shadow-sm'
