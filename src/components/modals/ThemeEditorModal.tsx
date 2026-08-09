@@ -1,9 +1,9 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 
 import { Button } from '../ui';
 import { ColorField } from '../ui/ColorPicker';
 import { Toggle } from '../ui/Toggle';
-import { LazyImage } from '../LazyImage';
+import { GameCard } from '../game/GameSelector';
 import { ThemeTomlEditor } from './ThemeTomlEditor';
 import { useThemeStore, summaryToTheme, forgetBackgroundImage } from '../../store/useThemeStore';
 import { useAppStore } from '../../store/useAppStore';
@@ -21,6 +21,7 @@ import {
     isValidHex,
     normalizeHex,
     normalizeTheme,
+    parseHex,
     themeToToml,
     type Theme,
     type ThemeColors,
@@ -33,16 +34,9 @@ interface ThemeEditorModalProps {
     onClose: () => void;
 }
 
-const getInitials = (name: string) => {
-    return name.split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase();
-};
-
-const colorWithOpacity = (color: string, opacity = 1) => {
-    const hex = normalizeHex(color).replace('#', '');
-    const alpha = Math.round(Math.max(0, Math.min(1, opacity)) * 255)
-        .toString(16)
-        .padStart(2, '0');
-    return `#${hex}${alpha}`;
+const channels = (color: string) => {
+    const rgb = parseHex(color);
+    return rgb ? `${rgb.r} ${rgb.g} ${rgb.b}` : '0 0 0';
 };
 
 const hslToHex = (hue: number, saturation: number, lightness: number) => {
@@ -199,6 +193,7 @@ function Slider({
             }}
             onPointerUp={onPreviewEnd}
             onPointerCancel={onPreviewEnd}
+            onLostPointerCapture={onPreviewEnd}
             onKeyDown={(event) => {
                 if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End'].includes(event.key)) {
                     onPreviewStart?.();
@@ -218,16 +213,30 @@ function BackgroundCanvas({
     imageUrl,
     pinned,
     visible,
+    activeControl,
     onClose,
 }: {
     theme: Theme;
     imageUrl: string | null;
     pinned: boolean;
     visible: boolean;
+    activeControl: 'tile-scale' | 'opacity' | 'blur' | 'offset-x' | 'offset-y' | null;
     onClose: () => void;
 }) {
     const image = theme.backgroundImage;
     if (!image) return null;
+
+    const control = activeControl === 'opacity'
+        ? { label: 'Visibility', value: `${Math.round(image.opacity * 100)}%`, progress: image.opacity * 100 }
+        : activeControl === 'blur'
+          ? { label: 'Blur', value: `${Math.round(image.blur)}px`, progress: (image.blur / 40) * 100 }
+          : activeControl === 'offset-x'
+            ? { label: 'Horizontal position', value: `${Math.round(image.offset_x ?? 50)}%`, progress: image.offset_x ?? 50 }
+            : activeControl === 'offset-y'
+              ? { label: 'Vertical position', value: `${Math.round(image.offset_y ?? 50)}%`, progress: image.offset_y ?? 50 }
+              : activeControl === 'tile-scale'
+                ? { label: 'Pattern size', value: `${Math.round(image.tile_scale ?? 25)}%`, progress: image.tile_scale ?? 25 }
+                : null;
 
     const size = image.fit === 'contain'
         ? 'contain'
@@ -241,8 +250,8 @@ function BackgroundCanvas({
 
     return (
         <div
-            className={`theme-background-canvas absolute inset-0 z-50 overflow-hidden ${visible ? 'opacity-100' : 'opacity-0'} ${pinned && visible ? 'pointer-events-auto' : 'pointer-events-none'}`}
-            style={{ backgroundColor: theme.colors.background }}
+            className={`theme-background-canvas absolute inset-0 z-50 overflow-hidden transition-opacity duration-200 ease-out ${visible ? 'opacity-100' : 'opacity-0'} ${pinned && visible ? 'pointer-events-auto' : 'pointer-events-none'}`}
+            style={{ backgroundColor: `rgb(${channels(theme.colors.background)} / ${theme.opacity?.background ?? 1})` }}
             onClick={pinned ? onClose : undefined}
             role={pinned ? 'button' : undefined}
             tabIndex={pinned ? 0 : undefined}
@@ -262,13 +271,26 @@ function BackgroundCanvas({
             <div
                 className="absolute inset-0"
                 style={{
-                    backgroundColor: theme.colors.background,
+                    backgroundColor: `rgb(${channels(theme.colors.background)} / ${theme.opacity?.background ?? 1})`,
                     opacity: 1 - image.opacity,
                 }}
             />
-            {pinned && (
-                <div className="absolute bottom-6 left-1/2 -translate-x-1/2 rounded-full border border-gray-700 bg-gray-900/90 px-4 py-2 text-xs text-gray-300 shadow-xl backdrop-blur-md">
-                    Press <kbd className="rounded bg-gray-800 px-1.5 py-0.5 text-[11px] font-mono text-white">Esc</kbd> or click to return
+            {!pinned && control && (
+                <div className="absolute bottom-8 left-1/2 w-[min(34rem,calc(100%-2rem))] -translate-x-1/2 rounded-2xl border border-gray-700 bg-gray-900/90 px-5 py-4 shadow-2xl backdrop-blur-xl">
+                    <div className="mb-3 flex items-baseline justify-between gap-6">
+                        <span className="text-sm font-medium text-white">{control.label}</span>
+                        <span className="font-mono text-sm text-gray-300">{control.value}</span>
+                    </div>
+                    <div className="relative h-2 overflow-visible rounded-full bg-gray-700">
+                        <div
+                            className="h-full rounded-full bg-blue-600"
+                            style={{ width: `${Math.max(0, Math.min(100, control.progress))}%` }}
+                        />
+                        <span
+                            className="absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border border-gray-400 bg-white shadow-sm"
+                            style={{ left: `${Math.max(0, Math.min(100, control.progress))}%` }}
+                        />
+                    </div>
                 </div>
             )}
         </div>
@@ -682,8 +704,17 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
 
     const activeGameImage = activeGame ? communityImages[activeGame.identifier] : undefined;
     const activeGamePlatform = activeGame ? communityPlatforms[activeGame.identifier] : undefined;
-    const isWindowsCompatible = activeGamePlatform?.windows ?? true;
-    const isMacCompatible = activeGamePlatform?.mac ?? false;
+    const coverPreviewStyle = useMemo(() => {
+        if (!draft) return undefined;
+        return {
+            '--r2-gray-700': channels(draft.colors.border),
+            '--r2-gray-700-alpha': String(draft.opacity?.border ?? 1),
+            '--r2-scrim': channels(draft.colors.media_scrim ?? DEFAULT_SCRIM),
+            '--r2-scrim-alpha': String(draft.opacity?.media_scrim ?? 1),
+            '--r2-on-media': channels(draft.colors.media_ink ?? DEFAULT_MEDIA_INK),
+            '--r2-on-media-alpha': String(draft.opacity?.media_ink ?? 1),
+        } as CSSProperties;
+    }, [draft]);
 
     // Filter themes for sidebar
     const filteredThemes = useMemo(() => {
@@ -723,6 +754,7 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
                     imageUrl={imageUrl}
                     pinned={backgroundPreviewPinned}
                     visible={backgroundPreviewHeld || backgroundPreviewPinned}
+                    activeControl={backgroundPreviewControl}
                     onClose={() => setBackgroundPreviewPinned(false)}
                 />
             )}
@@ -756,7 +788,7 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
                                 <input
                                     value={draft.author ?? ''}
                                     disabled={!editable}
-                                    placeholder="Author — groups your themes in the list"
+                                    placeholder="Author name"
                                     onChange={(e) => applyVisualEdit((theme) => ({ ...theme, author: e.target.value || undefined }))}
                                     aria-label="Theme author"
                                     className="text-xs text-gray-400 bg-transparent border border-transparent rounded-lg px-2 py-0.5 hover:border-gray-700 focus:border-blue-500 focus:bg-gray-800 focus:outline-none disabled:hover:border-transparent min-w-0"
@@ -1030,65 +1062,6 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
                                     </div>
                                 )}
 
-                                <section className="space-y-3">
-                                    <div className="flex items-center justify-between px-1">
-                                        <h3 className="text-xs font-semibold uppercase tracking-widest text-gray-400">Live sample</h3>
-                                        <span className="text-[11px] text-gray-500">The app changes only after Save</span>
-                                    </div>
-                                    <div
-                                        className="overflow-hidden rounded-2xl border p-4"
-                                        style={{
-                                            backgroundColor: colorWithOpacity(draft.colors.background, draft.opacity?.background ?? 1),
-                                            borderColor: colorWithOpacity(draft.colors.border, draft.opacity?.border ?? 1),
-                                        }}
-                                    >
-                                        <div
-                                            className="flex items-center justify-between gap-5 rounded-xl border p-4"
-                                            style={{
-                                                backgroundColor: colorWithOpacity(draft.colors.surface, draft.opacity?.surface ?? 1),
-                                                borderColor: colorWithOpacity(draft.colors.border, draft.opacity?.border ?? 1),
-                                            }}
-                                        >
-                                            <div className="min-w-0">
-                                                <p className="truncate text-[15px] font-semibold" style={{ color: colorWithOpacity(draft.colors.text, draft.opacity?.text ?? 1) }}>
-                                                    Waterpark Simulator
-                                                </p>
-                                                <p className="mt-1 text-[12px]" style={{ color: colorWithOpacity(draft.colors.text_muted, draft.opacity?.text_muted ?? 1) }}>
-                                                    A compact sample of surfaces, type and status colours.
-                                                </p>
-                                            </div>
-                                            <button
-                                                type="button"
-                                                className="shrink-0 rounded-lg px-4 py-2 text-[12px] font-semibold"
-                                                style={{
-                                                    backgroundColor: colorWithOpacity(draft.colors.accent, draft.opacity?.accent ?? 1),
-                                                    color: colorWithOpacity(draft.colors.on_accent ?? draft.colors.text, draft.opacity?.on_accent ?? draft.opacity?.text ?? 1),
-                                                }}
-                                            >
-                                                Primary
-                                            </button>
-                                        </div>
-                                        <div className="mt-3 flex flex-wrap gap-2">
-                                            {([
-                                                ['Danger', 'danger'],
-                                                ['Warning', 'warning'],
-                                                ['Success', 'success'],
-                                            ] as const).map(([label, key]) => (
-                                                <span
-                                                    key={key}
-                                                    className="rounded-full border px-2.5 py-1 text-[11px] font-medium"
-                                                    style={{
-                                                        borderColor: colorWithOpacity(draft.colors[key], draft.opacity?.[key] ?? 1),
-                                                        color: colorWithOpacity(draft.colors[key], draft.opacity?.[key] ?? 1),
-                                                    }}
-                                                >
-                                                    {label}
-                                                </span>
-                                            ))}
-                                        </div>
-                                    </div>
-                                </section>
-
                                 {/* ── Game Covers & Media Chrome Section ── */}
                                 <div className="space-y-3">
                                     <div className="flex items-center justify-between px-1">
@@ -1117,91 +1090,21 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
                                         <div className="flex flex-col sm:flex-row items-center sm:items-start gap-6">
                                             {/* Game Card rendered exactly with app tokens */}
                                             {activeGame && (
-                                                <div className="shrink-0">
-                                                    <div
-                                                        className="aspect-[3/4] w-[180px] relative overflow-hidden rounded-xl border bg-gray-950 shadow-xl"
-                                                        style={{ borderColor: colorWithOpacity(draft.colors.border, draft.opacity?.border ?? 1) }}
-                                                    >
-                                                        {activeGameImage ? (
-                                                            <LazyImage
-                                                                src={activeGameImage}
-                                                                alt={activeGame.name}
-                                                                eager
-                                                                className="absolute inset-0 z-10 h-full w-full object-cover"
-                                                            />
-                                                        ) : (
-                                                            <div className="absolute inset-0 flex items-center justify-center bg-gray-800 text-3xl font-black text-white/30 select-none">
-                                                                {getInitials(activeGame.name)}
-                                                            </div>
-                                                        )}
-
-                                                        {/* Scrim Gradient */}
-                                                        <div
-                                                            className="absolute inset-x-0 bottom-0 h-2/3 z-20 pointer-events-none transition-opacity"
-                                                            style={{
-                                                                background: `linear-gradient(to top, ${colorWithOpacity(draft.colors.media_scrim ?? DEFAULT_SCRIM, draft.opacity?.media_scrim ?? 1)} 0%, ${colorWithOpacity(draft.colors.media_scrim ?? DEFAULT_SCRIM, (draft.opacity?.media_scrim ?? 1) * 0.6)} 40%, transparent 100%)`,
-                                                            }}
-                                                        />
-
-                                                        {/* Platform badge */}
-                                                        <div className="absolute top-2 right-2 flex flex-col gap-1 z-30 pointer-events-none items-end">
-                                                            <div
-                                                                className={`p-1 rounded-full shadow-lg border backdrop-blur-sm flex items-center justify-center gap-2 h-7 ${isMacCompatible ? 'px-2' : 'w-7 px-0'}`}
-                                                                style={{
-                                                                    backgroundColor: colorWithOpacity(draft.colors.media_scrim ?? DEFAULT_SCRIM, draft.opacity?.media_scrim ?? 1),
-                                                                    borderColor: colorWithOpacity(draft.colors.media_ink ?? DEFAULT_MEDIA_INK, (draft.opacity?.media_ink ?? 1) * 0.15),
-                                                                    color: colorWithOpacity(draft.colors.media_ink ?? DEFAULT_MEDIA_INK, draft.opacity?.media_ink ?? 1),
-                                                                }}
-                                                            >
-                                                                {isWindowsCompatible && (
-                                                                    <span title="Windows Compatible" className="flex items-center justify-center w-3.5 h-3.5 shrink-0">
-                                                                        <svg xmlns="http://www.w3.org/2000/svg" className="w-[14px] h-[14px] shrink-0" viewBox="0 0 24 24" fill="currentColor">
-                                                                            <path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.9-1.801" />
-                                                                        </svg>
-                                                                    </span>
-                                                                )}
-                                                                {isMacCompatible && (
-                                                                    <>
-                                                                        {isWindowsCompatible && (
-                                                                            <div className="w-[1px] h-3.5 opacity-25" style={{ backgroundColor: colorWithOpacity(draft.colors.media_ink ?? DEFAULT_MEDIA_INK, draft.opacity?.media_ink ?? 1) }} />
-                                                                        )}
-                                                                        <span title="MacOS Compatible" className="flex items-center justify-center w-3 h-3.5 shrink-0">
-                                                                            <svg xmlns="http://www.w3.org/2000/svg" className="w-[12px] h-[14px] shrink-0" viewBox="0 0 384 512" fill="currentColor">
-                                                                                <path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zm-56.6-164.2c27.3-32.4 24.8-61.9 24-72.5-24.1 1.4-52 16.4-67.9 34.9-17.5 19.8-27.8 44.3-25.6 71.9 26.1 2 49.9-11.4 69.5-34.3z" />
-                                                                            </svg>
-                                                                        </span>
-                                                                    </>
-                                                                )}
-                                                            </div>
-                                                        </div>
-
-                                                        {/* Favorite star */}
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => setIsFavoriteSample((f) => !f)}
-                                                            className="absolute top-2 left-2 p-1.5 rounded-full z-20 shadow-md border backdrop-blur-sm transition-all hover:scale-110 active:scale-95"
-                                                            style={{
-                                                                backgroundColor: colorWithOpacity(draft.colors.media_scrim ?? DEFAULT_SCRIM, draft.opacity?.media_scrim ?? 1),
-                                                                borderColor: colorWithOpacity(draft.colors.media_ink ?? DEFAULT_MEDIA_INK, (draft.opacity?.media_ink ?? 1) * 0.15),
-                                                                color: isFavoriteSample ? '#facc15' : colorWithOpacity(draft.colors.media_ink ?? DEFAULT_MEDIA_INK, draft.opacity?.media_ink ?? 1),
-                                                            }}
-                                                            title="Toggle favorite badge"
-                                                        >
-                                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
-                                                                <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-                                                            </svg>
-                                                        </button>
-
-                                                        {/* Title overlay */}
-                                                        <div
-                                                            className="absolute inset-x-0 bottom-0 p-3 z-30 pointer-events-none"
-                                                            style={{ color: colorWithOpacity(draft.colors.media_ink ?? DEFAULT_MEDIA_INK, draft.opacity?.media_ink ?? 1) }}
-                                                        >
-                                                            <p className="text-sm font-bold leading-tight drop-shadow-md">
-                                                                {activeGame.name}
-                                                            </p>
-                                                        </div>
-                                                    </div>
+                                                <div className="w-[220px] shrink-0" style={coverPreviewStyle}>
+                                                    <GameCard
+                                                        community={activeGame}
+                                                        isSelected={false}
+                                                        isFavorite={isFavoriteSample}
+                                                        imageUrl={activeGameImage}
+                                                        platform={activeGamePlatform}
+                                                        eager
+                                                        searchQuery="preview"
+                                                        onSelect={() => undefined}
+                                                        onToggleFavorite={(_identifier, event) => {
+                                                            event.stopPropagation();
+                                                            setIsFavoriteSample((favorite) => !favorite);
+                                                        }}
+                                                    />
                                                 </div>
                                             )}
 
@@ -1501,6 +1404,87 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
                                                         />
                                                     </div>
                                                 </div>
+
+                                                <div className="grid grid-cols-2 gap-4">
+                                                    <div>
+                                                        <div className="mb-1.5 flex items-baseline justify-between">
+                                                            <span className="text-[12px] text-gray-300">Horizontal position</span>
+                                                            <span className="font-mono text-[11px] text-gray-400">
+                                                                {Math.round(draft.backgroundImage.offset_x ?? 50)}%
+                                                            </span>
+                                                        </div>
+                                                        <Slider
+                                                            ariaLabel="Background horizontal position"
+                                                            value={draft.backgroundImage.offset_x ?? 50}
+                                                            min={0} max={100} step={1}
+                                                            disabled={!editable}
+                                                            onPreviewStart={() => {
+                                                                beginVisualGesture();
+                                                                setBackgroundPreviewControl('offset-x');
+                                                                setBackgroundPreviewHeld(true);
+                                                            }}
+                                                            onPreviewEnd={() => {
+                                                                endVisualGesture();
+                                                                setBackgroundPreviewHeld(false);
+                                                                setBackgroundPreviewControl(null);
+                                                            }}
+                                                            onChange={(n) => updateImage({ offset_x: n }, false)}
+                                                        />
+                                                    </div>
+                                                    <div>
+                                                        <div className="mb-1.5 flex items-baseline justify-between">
+                                                            <span className="text-[12px] text-gray-300">Vertical position</span>
+                                                            <span className="font-mono text-[11px] text-gray-400">
+                                                                {Math.round(draft.backgroundImage.offset_y ?? 50)}%
+                                                            </span>
+                                                        </div>
+                                                        <Slider
+                                                            ariaLabel="Background vertical position"
+                                                            value={draft.backgroundImage.offset_y ?? 50}
+                                                            min={0} max={100} step={1}
+                                                            disabled={!editable}
+                                                            onPreviewStart={() => {
+                                                                beginVisualGesture();
+                                                                setBackgroundPreviewControl('offset-y');
+                                                                setBackgroundPreviewHeld(true);
+                                                            }}
+                                                            onPreviewEnd={() => {
+                                                                endVisualGesture();
+                                                                setBackgroundPreviewHeld(false);
+                                                                setBackgroundPreviewControl(null);
+                                                            }}
+                                                            onChange={(n) => updateImage({ offset_y: n }, false)}
+                                                        />
+                                                    </div>
+                                                </div>
+
+                                                {draft.backgroundImage.fit === 'tile' && (
+                                                    <div>
+                                                        <div className="mb-1.5 flex items-baseline justify-between">
+                                                            <span className="text-[12px] text-gray-300">Pattern size</span>
+                                                            <span className="font-mono text-[11px] text-gray-400">
+                                                                {Math.round(draft.backgroundImage.tile_scale ?? 25)}%
+                                                            </span>
+                                                        </div>
+                                                        <Slider
+                                                            ariaLabel="Background pattern size"
+                                                            value={draft.backgroundImage.tile_scale ?? 25}
+                                                            min={2} max={100} step={1}
+                                                            disabled={!editable}
+                                                            onPreviewStart={() => {
+                                                                beginVisualGesture();
+                                                                setBackgroundPreviewControl('tile-scale');
+                                                                setBackgroundPreviewHeld(true);
+                                                            }}
+                                                            onPreviewEnd={() => {
+                                                                endVisualGesture();
+                                                                setBackgroundPreviewHeld(false);
+                                                                setBackgroundPreviewControl(null);
+                                                            }}
+                                                            onChange={(n) => updateImage({ tile_scale: n }, false)}
+                                                        />
+                                                    </div>
+                                                )}
                                             </div>
                                         ) : (
                                             <div className="flex items-center justify-between gap-4 p-2">

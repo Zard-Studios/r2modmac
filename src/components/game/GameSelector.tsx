@@ -82,7 +82,7 @@ interface GameCardProps {
     onToggleFavorite: (identifier: string, e: MouseEvent) => void;
 }
 
-const GameCard = memo(function GameCard({
+export const GameCard = memo(function GameCard({
     community, isSelected, isFavorite, imageUrl, platform, eager = false, searchQuery, onSelect, onToggleFavorite,
 }: GameCardProps) {
     const gradient = getGradient(community.name);
