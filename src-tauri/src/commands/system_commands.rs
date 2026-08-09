@@ -117,6 +117,9 @@ async fn fetch_community_images_live() -> Result<std::collections::HashMap<Strin
 /// scrape entirely would degrade to a few requests rather than three hundred.
 const MAX_COMMUNITY_PAGE_LOOKUPS: usize = 40;
 
+/// How many community pages are read at once while backfilling covers.
+const COMMUNITY_PAGE_CONCURRENCY: usize = 6;
+
 /// Fetch covers, one community page at a time, for whatever the listing missed.
 ///
 /// The obvious shortcut — deriving `assets/<id>/<id>-cover-360x480.webp` — was
@@ -148,17 +151,24 @@ async fn fill_missing_community_images(images: &mut HashMap<String, String>) {
         missing.len()
     );
 
-    for id in missing {
+    // Read the pages a few at a time rather than one after another. Forty pages
+    // at a couple of hundred milliseconds each is the better part of ten seconds
+    // of waiting, and it runs as a background refresh after every launch — which
+    // is the burst of network traffic that shows up once the app already looks
+    // ready. Six at a time keeps it well short of anything Thunderstore would
+    // consider a hammering.
+    let covers = stream::iter(missing.into_iter().map(|id| async move {
         let url = format!("https://thunderstore.io/c/{}/", id);
-        let Ok(resp) = reqwest::get(&url).await else {
-            continue;
-        };
-        let Ok(page) = resp.text().await else {
-            continue;
-        };
-        if let Some(cover) = extract_cover_from_community_page(&page, &id) {
-            insert_community_image(images, &id, &cover, true);
-        }
+        let page = reqwest::get(&url).await.ok()?.text().await.ok()?;
+        let cover = extract_cover_from_community_page(&page, &id)?;
+        Some((id, cover))
+    }))
+    .buffer_unordered(COMMUNITY_PAGE_CONCURRENCY)
+    .collect::<Vec<_>>()
+    .await;
+
+    for (id, cover) in covers.into_iter().flatten() {
+        insert_community_image(images, &id, &cover, true);
     }
 }
 

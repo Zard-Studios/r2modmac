@@ -84,6 +84,19 @@ fn hash_file(path: &Path) -> Result<String, String> {
     Ok(format!("{:x}", hasher.finalize()))
 }
 
+/// `hash_file` on a blocking thread.
+///
+/// Digesting a 200 MB mod takes a few hundred milliseconds of solid CPU. Run on
+/// the async runtime it holds a worker for that whole time, and with ten
+/// installs in flight — the frontend's own limit — every worker can be busy
+/// hashing at once, leaving nothing to service IPC or to keep the other
+/// downloads reading. That is the freeze.
+async fn hash_file_async(path: PathBuf) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || hash_file(&path))
+        .await
+        .map_err(|e| format!("Hashing task failed: {}", e))?
+}
+
 fn metadata_slots(path: &Path) -> [PathBuf; 2] {
     [path.with_extension("json.0"), path.with_extension("json.1")]
 }
@@ -215,14 +228,20 @@ where
 
     if let Some(stored) = metadata.as_ref() {
         let actual_len = fs::metadata(&payload_path).map(|m| m.len()).unwrap_or(0);
-        if stored.complete
+        // Hoisted out of the condition so the cheap checks still short-circuit
+        // before anything is digested.
+        let looks_complete = stored.complete
             && stored.downloaded_bytes == actual_len
             && stored
                 .total_bytes
                 .map(|total| total == actual_len)
-                .unwrap_or(true)
-            && stored.sha256.as_deref() == Some(hash_file(&payload_path)?.as_str())
-        {
+                .unwrap_or(true);
+        let digest_matches = if looks_complete && stored.sha256.is_some() {
+            stored.sha256.as_deref() == Some(hash_file_async(payload_path.clone()).await?.as_str())
+        } else {
+            false
+        };
+        if looks_complete && digest_matches {
             progress(DownloadProgress {
                 downloaded_bytes: actual_len,
                 total_bytes: stored.total_bytes,
@@ -238,7 +257,7 @@ where
             let mut recovered = stored.clone();
             recovered.downloaded_bytes = actual_len;
             recovered.complete = true;
-            recovered.sha256 = Some(hash_file(&payload_path)?);
+            recovered.sha256 = Some(hash_file_async(payload_path.clone()).await?);
             save_metadata(&metadata_path, &recovered)?;
             progress(DownloadProgress {
                 downloaded_bytes: actual_len,
@@ -488,7 +507,7 @@ where
         }
 
         metadata.complete = true;
-        metadata.sha256 = Some(hash_file(&payload_path)?);
+        metadata.sha256 = Some(hash_file_async(payload_path.clone()).await?);
         save_metadata(&metadata_path, &metadata)?;
         let elapsed = started.elapsed().as_secs_f64().max(0.001);
         progress(DownloadProgress {

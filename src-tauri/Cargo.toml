@@ -62,8 +62,12 @@ mimalloc = { version = "0.1", default-features = false }
 libc = "0.2"
 
 [profile.release]
-# Trim release binary + reduce allocator churn, lowering resident memory.
-opt-level = "z"
+# Optimised for speed, not for size. `opt-level = "z"` was here to keep the
+# binary small, but it also turns off inlining and vectorisation — and the work
+# that makes this app feel slow is precisely the kind that depends on them:
+# SHA-256 over a few hundred MB, inflating archives, parsing tens of MB of JSON.
+# A larger binary is a one-off cost on disk; the other is paid on every install.
+opt-level = 3
 lto = true
 codegen-units = 1
 strip = "symbols"

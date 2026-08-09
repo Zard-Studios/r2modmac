@@ -274,28 +274,37 @@ pub fn run() {
                 }
 
                 if !settings.legacy_install_mode {
+                    // Off the startup path. This walks every profile and deletes
+                    // its BepInEx tree, which on a large install is hundreds of
+                    // MB of recursive removal — and it ran inside `setup()`, so
+                    // the window was painted but answered no IPC until it
+                    // finished. What it removes is regenerable cache, so it is
+                    // safe to do a moment later on a background thread.
                     let profiles_dir = data_dir.join("profiles");
-                    if profiles_dir.exists() {
-                        if let Ok(entries) = std::fs::read_dir(&profiles_dir) {
-                            for entry in entries.filter_map(|e| e.ok()) {
-                                let profile_path = entry.path();
-                                if profile_path.is_dir() {
-                                    let bepinex_path = profile_path.join("BepInEx");
-                                    if bepinex_path.exists() {
-                                        log::debug!(
-                                            "[startup] Cleaning old profile cache: {:?}",
-                                            bepinex_path
-                                        );
-                                        let _ = std::fs::remove_dir_all(&bepinex_path);
-                                    }
-                                    let _ = std::fs::remove_file(profile_path.join("winhttp.dll"));
-                                    let _ = std::fs::remove_file(
-                                        profile_path.join("doorstop_config.ini"),
-                                    );
-                                }
-                            }
+                    std::thread::spawn(move || {
+                        if !profiles_dir.exists() {
+                            return;
                         }
-                    }
+                        let Ok(entries) = std::fs::read_dir(&profiles_dir) else {
+                            return;
+                        };
+                        for entry in entries.filter_map(|e| e.ok()) {
+                            let profile_path = entry.path();
+                            if !profile_path.is_dir() {
+                                continue;
+                            }
+                            let bepinex_path = profile_path.join("BepInEx");
+                            if bepinex_path.exists() {
+                                log::debug!(
+                                    "[startup] Cleaning old profile cache: {:?}",
+                                    bepinex_path
+                                );
+                                let _ = std::fs::remove_dir_all(&bepinex_path);
+                            }
+                            let _ = std::fs::remove_file(profile_path.join("winhttp.dll"));
+                            let _ = std::fs::remove_file(profile_path.join("doorstop_config.ini"));
+                        }
+                    });
                 } else {
                     log::debug!("[startup] Legacy mode ON - keeping profile cache");
                 }
