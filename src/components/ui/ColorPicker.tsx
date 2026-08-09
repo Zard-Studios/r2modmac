@@ -104,6 +104,7 @@ function useDragRatio(
         onPointerMove,
         onPointerUp: onPointerEnd,
         onPointerCancel: onPointerEnd,
+        onLostPointerCapture: onPointerEnd,
     };
 }
 
@@ -112,6 +113,9 @@ function useDragRatio(
 interface ColorPickerProps {
     value: string;
     onChange: (hex: string) => void;
+    /** Transparency belongs to the colour, so it is edited in this popover too. */
+    opacity?: number;
+    onOpacityChange?: (opacity: number) => void;
     /** Colours offered as one-click choices — normally the rest of the theme. */
     presets?: string[];
     /** Groups a continuous picker drag into one undoable edit. */
@@ -122,6 +126,8 @@ interface ColorPickerProps {
 function PickerBody({
     value,
     onChange,
+    opacity = 1,
+    onOpacityChange,
     presets = [],
     onInteractionStart,
     onInteractionEnd,
@@ -152,6 +158,11 @@ function PickerBody({
         setHue(h);
         onChange(hsvToHex({ h, s: s || 1, v: v || 1 }));
     }, onInteractionStart, onInteractionEnd);
+    const opacityBar = useDragRatio(
+        (x) => onOpacityChange?.(x),
+        onInteractionStart,
+        onInteractionEnd
+    );
 
     const commitHex = (next: string) => {
         setHexDraft(next);
@@ -228,6 +239,51 @@ function PickerBody({
                 />
             </div>
 
+            {/* Opacity */}
+            {onOpacityChange && (
+                <div>
+                    <div className="mb-1.5 flex items-baseline justify-between">
+                        <span className="text-[11px] font-medium uppercase tracking-wider text-gray-500">Opacity</span>
+                        <span className="font-mono text-[11px] text-gray-300">{Math.round(opacity * 100)}%</span>
+                    </div>
+                    <div
+                        onPointerDown={opacityBar.onPointerDown}
+                        onPointerMove={opacityBar.onPointerMove}
+                        onPointerUp={opacityBar.onPointerUp}
+                        onPointerCancel={opacityBar.onPointerCancel}
+                        onLostPointerCapture={opacityBar.onLostPointerCapture}
+                        onKeyDown={(event) => {
+                            if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+                            event.preventDefault();
+                            const step = event.shiftKey ? 0.1 : 0.02;
+                            onOpacityChange(clamp01(opacity + (event.key === 'ArrowLeft' ? -step : step)));
+                        }}
+                        role="slider"
+                        aria-label="Opacity"
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                        aria-valuenow={Math.round(opacity * 100)}
+                        tabIndex={0}
+                        className="relative h-3.5 w-full cursor-ew-resize overflow-visible rounded-full border border-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500/60"
+                        style={{
+                            backgroundColor: '#ffffff',
+                            backgroundImage: 'linear-gradient(45deg, #cbd5e1 25%, transparent 25%), linear-gradient(-45deg, #cbd5e1 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #cbd5e1 75%), linear-gradient(-45deg, transparent 75%, #cbd5e1 75%)',
+                            backgroundPosition: '0 0, 0 4px, 4px -4px, -4px 0',
+                            backgroundSize: '8px 8px',
+                        }}
+                    >
+                        <span
+                            className="absolute inset-0 rounded-full"
+                            style={{ backgroundImage: `linear-gradient(to right, transparent, ${value})` }}
+                        />
+                        <span
+                            className="pointer-events-none absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[#ffffff] shadow-[0_0_0_1px_rgba(0,0,0,0.5)]"
+                            style={{ left: `${opacity * 100}%`, backgroundColor: value }}
+                        />
+                    </div>
+                </div>
+            )}
+
             {/* Hex */}
             <div className="flex items-center gap-2">
                 <span
@@ -286,6 +342,8 @@ interface ColorFieldProps extends ColorPickerProps {
 export function ColorField({
     value,
     onChange,
+    opacity = 1,
+    onOpacityChange,
     presets,
     label,
     onInteractionStart,
@@ -305,7 +363,7 @@ export function ColorField({
             if (!trigger) return;
             const r = trigger.getBoundingClientRect();
             const width = 280;
-            const height = 320;
+            const height = 370;
             const left = Math.min(Math.max(8, r.right - width), window.innerWidth - width - 8);
             const top = r.bottom + height > window.innerHeight - 8
                 ? Math.max(8, r.top - height - 8)
@@ -354,8 +412,15 @@ export function ColorField({
                 className={`h-9 w-9 shrink-0 rounded-lg border transition-colors ${
                     open ? 'border-blue-500 ring-2 ring-blue-500/40' : 'border-gray-600 hover:border-gray-500'
                 }`}
-                style={{ backgroundColor: value }}
-            />
+                style={{
+                    backgroundColor: '#ffffff',
+                    backgroundImage: 'linear-gradient(45deg, #cbd5e1 25%, transparent 25%), linear-gradient(-45deg, #cbd5e1 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #cbd5e1 75%), linear-gradient(-45deg, transparent 75%, #cbd5e1 75%)',
+                    backgroundPosition: '0 0, 0 6px, 6px -6px, -6px 0',
+                    backgroundSize: '12px 12px',
+                }}
+            >
+                <span className="block h-full w-full rounded-[7px]" style={{ backgroundColor: value, opacity }} />
+            </button>
 
             {open && position && createPortal(
                 <div
@@ -366,6 +431,8 @@ export function ColorField({
                     <PickerBody
                         value={value}
                         onChange={onChange}
+                        opacity={opacity}
+                        onOpacityChange={onOpacityChange}
                         presets={presets}
                         onInteractionStart={onInteractionStart}
                         onInteractionEnd={onInteractionEnd}

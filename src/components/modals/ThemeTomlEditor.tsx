@@ -26,6 +26,8 @@ interface ThemeTomlEditorProps {
     fileName: string | null;
     /** Read-only view of what a built-in would look like as a file. */
     readOnlySource?: string;
+    /** Generated from unsaved visual edits when moving from Visual to TOML. */
+    draftSource?: string;
     editable: boolean;
     /** Called after a successful write so the app can reload the theme. */
     onSaved: () => void | Promise<void>;
@@ -38,6 +40,7 @@ const LINE_HEIGHT = 20;
 export function ThemeTomlEditor({
     fileName,
     readOnlySource,
+    draftSource,
     editable,
     onSaved,
 }: ThemeTomlEditorProps) {
@@ -77,7 +80,7 @@ export function ThemeTomlEditor({
             .readThemeSource(fileName)
             .then((text) => {
                 if (cancelled) return;
-                setSource(text);
+                setSource(draftSource ?? text);
                 setSavedSource(text);
             })
             .catch((e) => {
@@ -87,7 +90,7 @@ export function ThemeTomlEditor({
                 if (!cancelled) setLoading(false);
             });
         return () => { cancelled = true; };
-    }, [fileName]);
+    }, [fileName, draftSource]);
 
     /** What the textarea shows: the file being edited, or a built-in's text. */
     const shown = fileName ? (loading ? '' : source) : (readOnlySource ?? '');

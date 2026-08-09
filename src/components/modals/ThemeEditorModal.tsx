@@ -110,14 +110,16 @@ const ColorRow = memo(function ColorRow({
                     {disabled ? (
                         <span
                             className="block h-9 w-9 rounded-lg border border-gray-600"
-                            style={{ backgroundColor: value }}
+                            style={{ backgroundColor: value, opacity }}
                         />
                     ) : (
                         <ColorField
                             label={meta.label}
                             value={value}
                             presets={presets}
+                            opacity={opacity}
                             onChange={(next) => onChange(colorKey, next)}
+                            onOpacityChange={(next) => onOpacityChange(colorKey, next)}
                             onInteractionStart={onInteractionStart}
                             onInteractionEnd={onInteractionEnd}
                         />
@@ -130,26 +132,6 @@ const ColorRow = memo(function ColorRow({
             </div>
 
             <div className="flex shrink-0 items-center gap-3">
-                <label className="w-28" aria-label={`${meta.label} opacity`}>
-                    <span className="mb-1 flex items-center justify-between text-[10px] font-medium uppercase tracking-wider text-gray-400">
-                        <span>Opacity</span>
-                        <span className="font-mono normal-case tracking-normal">{Math.round(opacity * 100)}%</span>
-                    </span>
-                    <input
-                        type="range"
-                        min={0}
-                        max={1}
-                        step={0.01}
-                        value={opacity}
-                        disabled={disabled}
-                        onPointerDown={onInteractionStart}
-                        onPointerUp={onInteractionEnd}
-                        onPointerCancel={onInteractionEnd}
-                        onChange={(event) => onOpacityChange(colorKey, Number(event.target.value))}
-                        className="h-1.5 w-full cursor-pointer appearance-none rounded-full border border-gray-700 disabled:cursor-not-allowed [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border [&::-webkit-slider-thumb]:border-gray-400 [&::-webkit-slider-thumb]:bg-white"
-                        style={{ background: `linear-gradient(to right, ${value} 0%, ${value} ${opacity * 100}%, transparent ${opacity * 100}%, transparent 100%)` }}
-                    />
-                </label>
                 <input
                     value={draft}
                     onChange={(e) => commit(e.target.value)}
@@ -1510,6 +1492,7 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
                             <ThemeTomlEditor
                                 fileName={editable ? selectedId : null}
                                 readOnlySource={themeToToml(draft)}
+                                draftSource={editable && dirty ? themeToToml(draft) : undefined}
                                 editable={editable}
                                 onSaved={async () => {
                                     setDirty(false);

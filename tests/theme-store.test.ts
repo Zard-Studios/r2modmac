@@ -60,6 +60,12 @@ function installFakeEnvironment() {
         }
         const nameMatch = /^name = "([^"]*)"/m.exec(toml);
         const authorMatch = /^author = "([^"]*)"/m.exec(toml);
+        const opacitySection = toml.split('[opacity]')[1]?.split(/^\[/m)[0] ?? '';
+        const opacity: Record<string, number> = {};
+        for (const line of opacitySection.split('\n')) {
+            const m = /^\s*(\w+)\s*=\s*([0-9.]+)/.exec(line);
+            if (m) opacity[m[1]] = Number(m[2]);
+        }
         const imageSection = toml.split('[background_image]')[1];
         const pathMatch = imageSection ? /^path\s*=\s*"([^"]+)"/m.exec(imageSection) : null;
         const str = (k: string) =>
@@ -73,6 +79,7 @@ function installFakeEnvironment() {
             name: nameMatch?.[1] ?? name.replace('.toml', ''),
             author: authorMatch ? authorMatch[1] : null,
             colors,
+            opacity: Object.keys(opacity).length > 0 ? opacity : null,
             background_image: pathMatch
                 ? {
                       path: pathMatch[1],
@@ -306,6 +313,7 @@ test('the picture layout survives a save and reload, field for field', async () 
 
     const theme = normalizeTheme({
         ...findPreset(`${BUILTIN_PREFIX}nord`)!,
+        opacity: { background: 0.42, surface: 0.8, accent: 0.67, media_scrim: 0.55 },
         backgroundImage: {
             path: 'assets/w.png', opacity: 0.6, blur: 8,
             fit: 'tile', offset_x: 20, offset_y: 80, tile_scale: 35,
@@ -316,6 +324,7 @@ test('the picture layout survives a save and reload, field for field', async () 
     const [summary] = await store.getState().loadThemes();
     const reloaded = summaryToTheme(summary);
 
+    assert.deepEqual(reloaded.opacity, theme.opacity);
     assert.deepEqual(reloaded.backgroundImage, theme.backgroundImage);
     assert.ok(env.files.has('mine.toml'));
 });
