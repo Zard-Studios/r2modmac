@@ -26,7 +26,7 @@ export const CrossOverGuideModal: React.FC<CrossOverGuideModalProps> = ({ isOpen
             onClick={handleClose}
         >
             <div
-                className="bg-gray-900 border border-gray-700 rounded-xl shadow-2xl max-w-2xl w-full flex flex-col max-h-[90vh]"
+                className="bg-gray-900 border border-gray-700 rounded-xl overflow-hidden shadow-2xl max-w-2xl w-full flex flex-col max-h-[90vh]"
                 onClick={(e) => e.stopPropagation()}
             >
 
