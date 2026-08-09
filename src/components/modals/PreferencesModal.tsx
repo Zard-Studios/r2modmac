@@ -285,7 +285,7 @@ export default function PreferencesModal({
     };
 
     const logsActive = writeDebugLogsToGame || verboseLogging;
-    const logsOpen = logsActive || logsExpanded;
+    const logsOpen = logsExpanded;
     const logsStatus = writeDebugLogsToGame && verboseLogging
         ? '2 active'
         : writeDebugLogsToGame || verboseLogging
@@ -547,10 +547,9 @@ export default function PreferencesModal({
                                 <button
                                     type="button"
                                     aria-expanded={logsOpen}
-                                    aria-disabled={logsActive}
                                     aria-controls="preference-log-details"
-                                    onClick={() => { if (!logsActive) setLogsExpanded(current => !current); }}
-                                    className={`flex w-full items-center justify-between gap-4 p-4 text-left transition-colors ${logsActive ? 'cursor-default' : 'hover:bg-surface-hover'}`}
+                                    onClick={() => setLogsExpanded(current => !current)}
+                                    className="flex w-full items-center justify-between gap-4 p-4 text-left transition-colors hover:bg-surface-hover"
                                 >
                                     <div className="flex min-w-0 items-center gap-4">
                                         <RowIcon kind="logs" />
