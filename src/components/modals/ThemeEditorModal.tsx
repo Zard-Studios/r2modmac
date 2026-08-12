@@ -38,6 +38,7 @@ import {
     type Theme,
     type ThemeColors,
 } from '../../utils/theme';
+import { patchThemeToml, themeEdits } from '../../utils/themeFile';
 import { allBuiltinThemes, isBuiltinId, type ThemePreset } from '../../utils/themePresets';
 import { formatAccelerator, isTextFieldTarget } from '../../utils/keybinds';
 import type { ThemeSummary } from '../../types/electron';
@@ -378,6 +379,7 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
     const [saving, setSaving] = useState(false);
     const [busy, setBusy] = useState(false);
     const [imageUrl, setImageUrl] = useState<string | null>(null);
+    const [fileSource, setFileSource] = useState<string | null>(null);
     const [selectedGameId, setSelectedGameId] = useState<string | null>(null);
     const [openCount, setOpenCount] = useState(0);
     const [isFavoriteSample, setIsFavoriteSample] = useState(false);
@@ -466,6 +468,40 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
             .catch(() => { if (!cancelled) setImageUrl(null); });
         return () => { cancelled = true; };
     }, [imagePath]);
+
+    // The file's own text, kept beside the parsed draft so saving can edit it
+    // rather than replace it. Re-read whenever the theme list reloads, so an
+    // edit made in another editor is the thing being patched.
+    const sourceKey = editable ? selectedId : null;
+    const [sourceFor, setSourceFor] = useState<string | null>(null);
+    if (sourceKey !== sourceFor) {
+        setSourceFor(sourceKey);
+        setFileSource(null);
+    }
+
+    useEffect(() => {
+        if (!sourceKey) return;
+        let cancelled = false;
+        void window.ipcRenderer
+            .readThemeSource(sourceKey)
+            .then((text) => { if (!cancelled) setFileSource(text); })
+            .catch(() => { if (!cancelled) setFileSource(null); });
+        return () => { cancelled = true; };
+    }, [sourceKey, themes]);
+
+    /**
+     * What Save would write: the file with this session's changes applied.
+     *
+     * Falls back to a generated file only when there is nothing to patch — a
+     * theme just created, or a file that could not be read.
+     */
+    const draftToml = useCallback(
+        (theme: Theme) => {
+            if (fileSource === null || visualBaseline === null) return themeToToml(theme);
+            return patchThemeToml(fileSource, themeEdits(visualBaseline, theme));
+        },
+        [fileSource, visualBaseline]
+    );
 
     const presetKey = draft ? THEME_COLOR_KEYS.map((k) => draft.colors[k]).join('|') : '';
     const swatchPresets = useMemo(
@@ -633,9 +669,14 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
         if (!draft || !editable || !selectedId || !dirty) return;
         setSaving(true);
         try {
-            await window.ipcRenderer.writeTheme(selectedId, themeToToml(draft));
+            const written = draftToml(draft);
+            await window.ipcRenderer.writeTheme(selectedId, written);
             forgetBackgroundImage(draft.backgroundImage?.path);
             await loadThemes();
+            // Held from what was just written rather than waiting for the reread
+            // the watcher will trigger: the next save patches this text, and a
+            // second save arriving first would otherwise undo this one.
+            setFileSource(written);
             setVisualBaseline(draft);
             setDirty(false);
             setVisualUndo([]);
@@ -646,7 +687,7 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
         } finally {
             setSaving(false);
         }
-    }, [draft, editable, selectedId, dirty, loadThemes, setPreview]);
+    }, [draft, editable, selectedId, dirty, draftToml, loadThemes, setPreview]);
 
     const handleDuplicate = useCallback(async () => {
         setBusy(true);
@@ -1661,7 +1702,7 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
                             <ThemeTomlEditor
                                 fileName={editable ? selectedId : null}
                                 readOnlySource={themeToToml(draft)}
-                                draftSource={editable && dirty ? themeToToml(draft) : undefined}
+                                draftSource={editable && dirty ? draftToml(draft) : undefined}
                                 editable={editable}
                                 onSaved={async () => {
                                     setDirty(false);
