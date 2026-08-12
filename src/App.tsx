@@ -2867,6 +2867,7 @@ function App() {
         <ProfileList
           profiles={profiles}
           selectedGameIdentifier={selectedCommunity}
+          selectedGameName={selectedGame?.name}
           selectedGamePlatform={selectedCommunity ? communityPlatforms[selectedCommunity] : undefined}
           isBusy={isApplyingToGame || isLaunchingProfile || isStoppingProfile || isSteamRestarting}
           onSelectProfile={handleSelectProfile}

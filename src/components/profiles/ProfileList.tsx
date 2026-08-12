@@ -13,6 +13,7 @@ import { KeyboardShortcuts } from '../KeyboardShortcuts';
 interface ProfileListProps {
     profiles: Profile[];
     selectedGameIdentifier: string;
+    selectedGameName?: string;
     selectedGamePlatform?: CommunityPlatformInfo;
     isBusy?: boolean;
     onSelectProfile: (profileId: string) => void;
@@ -34,6 +35,7 @@ interface ProfileListProps {
 export function ProfileList({
     profiles,
     selectedGameIdentifier,
+    selectedGameName,
     selectedGamePlatform,
     isBusy = false,
     onSelectProfile,
@@ -258,7 +260,7 @@ export function ProfileList({
                 <div className="flex items-start justify-between gap-6 mb-8">
                     <div className="min-w-0">
                         <h1 className="text-3xl font-bold text-white mb-2">Select Profile</h1>
-                        <p className="text-gray-400">Choose a profile to manage mods for {selectedGameIdentifier}</p>
+                        <p className="text-gray-400">Choose a profile to manage mods for {selectedGameName || selectedGameIdentifier}</p>
                     </div>
                     {hasProfilesForGame && (
                         <div className="flex items-center gap-1.5 rounded-full border border-gray-700 bg-gray-800/85 p-1 shadow-sm backdrop-blur-sm shrink-0">
