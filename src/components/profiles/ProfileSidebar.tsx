@@ -10,6 +10,7 @@ import { compareVersions, hasNewerVersion, latestVersionNumber, parsePackageRefe
 import { hasPendingRuntimeInstall, restoreInstalledMod } from '../../utils/profileSync';
 import { getProfileAvatarGradient } from '../../utils/profileAvatar';
 import { runWithConcurrency } from '../../utils/concurrency';
+import { shouldReleaseSearchFocus } from '../../utils/searchField';
 
 const MAX_PARALLEL_TOGGLES = 10;
 const formatCount = (count: number, singular: string, plural = `${singular}s`) => (
@@ -380,7 +381,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
     }, [syncConfirmation]);
     useEffect(() => {
         const onKeyDown = (event: KeyboardEvent) => {
-            if (event.key !== 'Escape' || syncConfirmation) return;
+            if (event.key !== 'Escape' || event.defaultPrevented || syncConfirmation) return;
             setSelectedModIds([]);
             setSelectionAnchorId(null);
             setSyncSelectedIds([]);
@@ -820,6 +821,11 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                             onChange={(e) => {
                                 clearSelections();
                                 setSearchQuery(e.target.value);
+                            }}
+                            onKeyDown={(e) => {
+                                if (!shouldReleaseSearchFocus(e)) return;
+                                e.preventDefault();
+                                e.currentTarget.blur();
                             }}
                             placeholder="search profile mods..."
                             spellCheck={false}

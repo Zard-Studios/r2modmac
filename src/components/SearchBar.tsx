@@ -1,3 +1,5 @@
+import { shouldReleaseSearchFocus } from '../utils/searchField';
+
 interface SearchBarProps {
     value: string;
     onChange: (value: string) => void;
@@ -21,6 +23,11 @@ export function SearchBar({ value, onChange, placeholder = "Search mods..." }: S
                 type="text"
                 value={value}
                 onChange={(e) => onChange(e.target.value)}
+                onKeyDown={(e) => {
+                    if (!shouldReleaseSearchFocus(e)) return;
+                    e.preventDefault();
+                    e.currentTarget.blur();
+                }}
                 placeholder={placeholder}
                 spellCheck={false}
                 autoCorrect="off"
