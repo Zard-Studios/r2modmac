@@ -112,6 +112,86 @@ fn write_embedded_local_payloads<W: Write + std::io::Seek>(
     Ok(())
 }
 
+const CONFIG_ARCHIVE_PREFIX: &str = "r2modmac/configs/";
+
+fn write_embedded_configs<W: Write + std::io::Seek>(
+    app: &AppHandle,
+    profile_id: &str,
+    zip: &mut zip::ZipWriter<W>,
+    options: zip::write::FileOptions,
+) -> Result<(), String> {
+    let app_data_dir = crate::utils::paths::app_data_dir(app).map_err(|e| e.to_string())?;
+
+    for (absolute, relative) in
+        crate::utils::config_backup::backup_relative_files(&app_data_dir, profile_id)
+    {
+        let archive_path = format!(
+            "{}{}",
+            CONFIG_ARCHIVE_PREFIX,
+            relative
+                .components()
+                .map(|c| c.as_os_str().to_string_lossy().to_string())
+                .collect::<Vec<_>>()
+                .join("/")
+        );
+        zip.start_file(archive_path, options)
+            .map_err(|e| e.to_string())?;
+        let mut file = fs::File::open(&absolute).map_err(|e| e.to_string())?;
+        std::io::copy(&mut file, zip).map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
+}
+
+#[command]
+pub async fn import_profile_configs(
+    app: AppHandle,
+    profile_id: String,
+    archive_path: String,
+) -> Result<usize, String> {
+    let app_data_dir = crate::utils::paths::app_data_dir(&app).map_err(|e| e.to_string())?;
+    let backup_dir = crate::utils::config_backup::profile_backup_dir(&app_data_dir, &profile_id);
+
+    let file = fs::File::open(&archive_path).map_err(|e| e.to_string())?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
+    let mut restored = 0;
+
+    for index in 0..archive.len() {
+        let mut entry = archive.by_index(index).map_err(|e| e.to_string())?;
+        if entry.is_dir() {
+            continue;
+        }
+        let Some(enclosed) = entry.enclosed_name().map(|path| path.to_path_buf()) else {
+            continue;
+        };
+        let name = enclosed.to_string_lossy().replace('\\', "/");
+        let Some(relative) = name.strip_prefix(CONFIG_ARCHIVE_PREFIX) else {
+            continue;
+        };
+        if relative.is_empty() {
+            continue;
+        }
+
+        let destination = backup_dir.join(relative);
+        if !destination.starts_with(&backup_dir) {
+            continue;
+        }
+        if let Some(parent) = destination.parent() {
+            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        let mut output = fs::File::create(&destination).map_err(|e| e.to_string())?;
+        std::io::copy(&mut entry, &mut output).map_err(|e| e.to_string())?;
+        restored += 1;
+    }
+
+    log::info!(
+        "[import_profile_configs] Restored {} config file(s) into profile {}",
+        restored,
+        profile_id
+    );
+    Ok(restored)
+}
+
 fn build_export_data(profile: &serde_json::Value) -> serde_json::Value {
     let mods = build_export_mods(profile);
     let mut export_data = serde_json::json!({
@@ -147,6 +227,8 @@ fn write_profile_zip<W: Write + Seek>(
     if include_local_payloads {
         write_embedded_local_payloads(app, profile_id, profile, &mut zip, options)?;
     }
+
+    write_embedded_configs(app, profile_id, &mut zip, options)?;
 
     zip.finish().map_err(|e| e.to_string())
 }
@@ -260,6 +342,19 @@ pub async fn share_profile(app: AppHandle, profile_id: String) -> Result<String,
     Ok(key.to_string())
 }
 
+fn sanitize_code(code: &str) -> String {
+    let cleaned: String = code
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
+        .take(64)
+        .collect();
+    if cleaned.is_empty() {
+        "profile".to_string()
+    } else {
+        cleaned
+    }
+}
+
 #[command]
 pub async fn import_profile(_app: AppHandle, code: String) -> Result<serde_json::Value, String> {
     log::info!("[import_profile] Starting import with provided code");
@@ -307,7 +402,7 @@ pub async fn import_profile(_app: AppHandle, code: String) -> Result<serde_json:
                         "[import_profile] Strategy 1: Decoded {} bytes, creating zip archive...",
                         zip_data.len()
                     );
-                    let cursor = std::io::Cursor::new(zip_data);
+                    let cursor = std::io::Cursor::new(zip_data.clone());
                     let archive = zip::ZipArchive::new(cursor).map_err(|e| {
                         log::warn!(
                             "[import_profile] Strategy 1: Zip archive creation failed: {}",
@@ -316,7 +411,14 @@ pub async fn import_profile(_app: AppHandle, code: String) -> Result<serde_json:
                         e.to_string()
                     })?;
                     log::debug!("[import_profile] Strategy 1: Processing zip archive...");
-                    return process_zip_archive(archive);
+                    let mut result = process_zip_archive(archive)?;
+                    let staged = std::env::temp_dir()
+                        .join(format!("r2modmac-import-{}.r2z", sanitize_code(&code)));
+                    if fs::write(&staged, &zip_data).is_ok() {
+                        result["archivePath"] =
+                            serde_json::json!(staged.to_string_lossy().to_string());
+                    }
+                    return Ok(result);
                 }
             }
         }

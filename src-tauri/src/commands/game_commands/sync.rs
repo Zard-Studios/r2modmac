@@ -82,6 +82,15 @@ pub async fn sync_profile_to_game(
         .join("profiles")
         .join(&profile_id);
     let profile_plugins = profile_dir.join("BepInEx").join("plugins");
+    let app_data_dir = crate::utils::paths::app_data_dir(&app).map_err(|e| e.to_string())?;
+
+    crate::utils::config_backup::apply_profile_configs(
+        &app_data_dir,
+        &profile_id,
+        game_path,
+        runtime_game_path,
+        &game_identifier,
+    );
 
     log::info!(
         "[sync_profile_to_game] Syncing profile {} to game {:?} (runtime root {:?}, legacy_cache: {}, finalize: {})",
@@ -507,6 +516,16 @@ pub async fn sync_profile_to_game(
             let _ = restore_outerwilds_modded(&game_path);
         }
 
+        if finalize {
+            crate::utils::config_backup::capture_profile_configs(
+                &app_data_dir,
+                &profile_id,
+                game_path,
+                runtime_game_path,
+                &game_identifier,
+            );
+        }
+
         return Ok(serde_json::json!({
             "removed": removed,
             "to_install": to_install,
@@ -907,6 +926,16 @@ pub async fn sync_profile_to_game(
                 cached
             );
         }
+    }
+
+    if finalize {
+        crate::utils::config_backup::capture_profile_configs(
+            &app_data_dir,
+            &profile_id,
+            game_path,
+            runtime_game_path,
+            &game_identifier,
+        );
     }
 
     // 7. Return info about what needs to be installed (frontend will handle download)

@@ -1,3 +1,4 @@
+pub mod config_backup;
 pub mod file_ops;
 #[path = "persistent_download.rs"]
 pub mod legacy_persistent_download;

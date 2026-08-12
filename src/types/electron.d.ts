@@ -149,6 +149,7 @@ export interface IElectronAPI {
     fetchPackageByName: (name: string, gameId?: string | null) => Promise<Package | null>;
     importProfile: (code: string) => Promise<any>;
     importProfileFromFile: (path: string) => Promise<any>;
+    importProfileConfigs: (profileId: string, archivePath: string) => Promise<number>;
     shareProfile: (profileId: string) => Promise<string>;
     openModFolder: (profileId: string, modName: string, gameIdentifier: string, platform?: 'windows' | 'mac') => Promise<void>;
     exportProfile: (profileId: string) => Promise<any>;

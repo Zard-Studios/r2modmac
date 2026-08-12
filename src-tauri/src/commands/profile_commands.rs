@@ -385,6 +385,10 @@ pub async fn delete_profile_folder(
         }
     }
 
+    if let Ok(app_data_dir) = crate::utils::paths::app_data_dir(&app) {
+        crate::utils::config_backup::forget_profile_configs(&app_data_dir, &profile_id);
+    }
+
     // Delete the profile folder
     if profile_dir.exists() {
         fs::remove_dir_all(profile_dir).map_err(|e| e.to_string())?;

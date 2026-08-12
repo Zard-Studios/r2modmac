@@ -134,6 +134,13 @@ export function useProfileActions({
                     );
                     return;
                 }
+                if (result.archivePath) {
+                    try {
+                        await window.ipcRenderer.importProfileConfigs(newProfileId, result.archivePath);
+                    } catch (error) {
+                        console.warn('Could not import profile configs:', getErrorMessage(error, 'unknown config import error'));
+                    }
+                }
                 updateProfile(newProfileId, { needs_sync: true });
                 setProgressState(prev => ({ ...prev, isOpen: false, progress: 100, currentTask: 'Import complete' }));
                 const totalMods = modsToAdd.length + localMods.length;

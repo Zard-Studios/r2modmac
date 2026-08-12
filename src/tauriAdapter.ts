@@ -141,6 +141,7 @@ export const tauriAPI: IElectronAPI = {
     fetchPackageByName: async (name: string, gameId?: string | null) => invoke<Package | null>('fetch_package_by_name', { name, gameId }),
     importProfile: async (code) => invoke<any>('import_profile', { code }),
     importProfileFromFile: async (path) => invoke<any>('import_profile_from_file', { path }),
+    importProfileConfigs: async (profileId, archivePath) => invoke<number>('import_profile_configs', { profileId, archivePath }),
     shareProfile: async (profileId) => invoke<string>('share_profile', { profileId }),
     openModFolder: async (profileId, modName, gameIdentifier, platform?) =>
         invoke('open_mod_folder', { profileId, modName, gameIdentifier, platform }),
