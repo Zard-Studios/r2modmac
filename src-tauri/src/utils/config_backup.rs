@@ -354,6 +354,125 @@ mod tests {
     }
 
     #[test]
+    fn the_bepinex_root_follows_a_vanilla_toggled_install() {
+        let root = temp_dir("roots");
+        let game = root.join("game");
+        fs::create_dir_all(game.join("BepInEx_DISABLED")).unwrap();
+
+        let roots = config_roots(&game, &game, "lethal-company");
+        assert_eq!(roots.len(), 1);
+        assert_eq!(
+            roots[0].live_dir,
+            game.join("BepInEx_DISABLED").join("config")
+        );
+
+        fs::create_dir_all(game.join("BepInEx")).unwrap();
+        let roots = config_roots(&game, &game, "lethal-company");
+        assert_eq!(roots[0].live_dir, game.join("BepInEx").join("config"));
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_fresh_install_still_reports_the_bepinex_root() {
+        let root = temp_dir("fresh");
+        let game = root.join("game");
+        fs::create_dir_all(&game).unwrap();
+
+        let roots = config_roots(&game, &game, "lethal-company");
+
+        assert_eq!(roots[0].live_dir, game.join("BepInEx").join("config"));
+        assert!(roots[0].file_names.is_none());
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn the_owml_root_follows_a_vanilla_toggled_install() {
+        let root = temp_dir("owml-roots");
+        let game = root.join("game");
+        fs::create_dir_all(game.join("OWML_DISABLED")).unwrap();
+
+        let roots = config_roots(&game, &game, "outerwilds");
+
+        assert_eq!(roots.len(), 1);
+        assert_eq!(roots[0].live_dir, game.join("OWML_DISABLED").join("Mods"));
+        assert_eq!(roots[0].file_names, Some(OWML_CONFIG_FILES));
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn balatro_has_no_backed_up_config_root() {
+        let root = temp_dir("balatro");
+        let game = root.join("game");
+        fs::create_dir_all(&game).unwrap();
+
+        assert!(config_roots(&game, &game, "balatro").is_empty());
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_game_without_a_config_root_is_left_alone() {
+        let root = temp_dir("balatro-noop");
+        let app_data = root.join("app");
+        let game = root.join("game");
+        fs::create_dir_all(&game).unwrap();
+
+        apply_profile_configs(&app_data, "any", &game, &game, "balatro");
+        let captured = capture_profile_configs(&app_data, "any", &game, &game, "balatro");
+
+        assert_eq!(captured, 0);
+        assert!(!app_data.join(OWNERS_FILE_NAME).exists());
+        assert!(!profile_backup_dir(&app_data, "any").exists());
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn deleting_a_profile_releases_the_configs_it_owned() {
+        let root = temp_dir("forget");
+        let app_data = root.join("app");
+        let game = root.join("game");
+        let live = game.join("BepInEx").join("config");
+        write(&live.join("Mod.cfg"), "owned");
+        fs::create_dir_all(app_data.join("profiles").join("owner")).unwrap();
+
+        capture_profile_configs(&app_data, "owner", &game, &game, "lethal-company");
+        forget_profile_configs(&app_data, "owner");
+        fs::remove_dir_all(app_data.join("profiles").join("owner")).unwrap();
+
+        apply_profile_configs(&app_data, "newcomer", &game, &game, "lethal-company");
+
+        assert!(live.join("Mod.cfg").exists());
+        assert!(!profile_backup_dir(&app_data, "owner").exists());
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_config_deleted_in_game_stops_coming_back() {
+        let root = temp_dir("prune");
+        let app_data = root.join("app");
+        let game = root.join("game");
+        let live = game.join("BepInEx").join("config");
+        write(&live.join("Kept.cfg"), "kept");
+        write(&live.join("Dropped.cfg"), "dropped");
+        fs::create_dir_all(app_data.join("profiles").join("solo")).unwrap();
+
+        capture_profile_configs(&app_data, "solo", &game, &game, "lethal-company");
+        fs::remove_file(live.join("Dropped.cfg")).unwrap();
+        capture_profile_configs(&app_data, "solo", &game, &game, "lethal-company");
+
+        let backup = profile_backup_dir(&app_data, "solo").join("bepinex");
+        assert!(backup.join("Kept.cfg").exists());
+        assert!(!backup.join("Dropped.cfg").exists());
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn outer_wilds_backs_up_only_mod_configs() {
         let root = temp_dir("owml");
         let app_data = root.join("app");

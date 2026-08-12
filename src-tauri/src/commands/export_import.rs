@@ -121,9 +121,17 @@ fn write_embedded_configs<W: Write + std::io::Seek>(
     options: zip::write::FileOptions,
 ) -> Result<(), String> {
     let app_data_dir = crate::utils::paths::app_data_dir(app).map_err(|e| e.to_string())?;
+    write_config_entries(&app_data_dir, profile_id, zip, options)
+}
 
+fn write_config_entries<W: Write + std::io::Seek>(
+    app_data_dir: &std::path::Path,
+    profile_id: &str,
+    zip: &mut zip::ZipWriter<W>,
+    options: zip::write::FileOptions,
+) -> Result<(), String> {
     for (absolute, relative) in
-        crate::utils::config_backup::backup_relative_files(&app_data_dir, profile_id)
+        crate::utils::config_backup::backup_relative_files(app_data_dir, profile_id)
     {
         let archive_path = format!(
             "{}{}",
@@ -154,6 +162,20 @@ pub async fn import_profile_configs(
 
     let file = fs::File::open(&archive_path).map_err(|e| e.to_string())?;
     let mut archive = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
+    let restored = extract_config_entries(&backup_dir, &mut archive)?;
+
+    log::info!(
+        "[import_profile_configs] Restored {} config file(s) into profile {}",
+        restored,
+        profile_id
+    );
+    Ok(restored)
+}
+
+fn extract_config_entries<R: std::io::Read + Seek>(
+    backup_dir: &std::path::Path,
+    archive: &mut zip::ZipArchive<R>,
+) -> Result<usize, String> {
     let mut restored = 0;
 
     for index in 0..archive.len() {
@@ -173,7 +195,7 @@ pub async fn import_profile_configs(
         }
 
         let destination = backup_dir.join(relative);
-        if !destination.starts_with(&backup_dir) {
+        if !destination.starts_with(backup_dir) {
             continue;
         }
         if let Some(parent) = destination.parent() {
@@ -184,11 +206,6 @@ pub async fn import_profile_configs(
         restored += 1;
     }
 
-    log::info!(
-        "[import_profile_configs] Restored {} config file(s) into profile {}",
-        restored,
-        profile_id
-    );
     Ok(restored)
 }
 
@@ -713,6 +730,143 @@ mod tests {
         let mut cursor = writer.finish().unwrap();
         cursor.set_position(0);
         zip::ZipArchive::new(cursor).unwrap()
+    }
+
+    fn temp_dir(label: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "r2modmac-export-configs-{}-{}-{}",
+            label,
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn write_file(path: &std::path::Path, content: &str) {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, content).unwrap();
+    }
+
+    fn zip_with_profile_configs(app_data_dir: &std::path::Path, profile_id: &str) -> Vec<u8> {
+        let cursor = std::io::Cursor::new(Vec::new());
+        let mut zip = zip::ZipWriter::new(cursor);
+        let options = zip::write::FileOptions::default();
+        zip.start_file("export.r2x", options).unwrap();
+        zip.write_all(b"profileName: source\nmods: []\n").unwrap();
+        write_config_entries(app_data_dir, profile_id, &mut zip, options).unwrap();
+        zip.finish().unwrap().into_inner()
+    }
+
+    fn archive_entry_names(bytes: &[u8]) -> Vec<String> {
+        let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes.to_vec())).unwrap();
+        (0..archive.len())
+            .map(|index| archive.by_index(index).unwrap().name().to_string())
+            .collect()
+    }
+
+    #[test]
+    fn exported_configs_come_back_on_import() {
+        let root = temp_dir("round-trip");
+        let app_data = root.join("app");
+        let source_backup =
+            crate::utils::config_backup::profile_backup_dir(&app_data, "source-profile");
+        write_file(&source_backup.join("bepinex").join("Mod.cfg"), "volume = 3");
+        write_file(
+            &source_backup
+                .join("bepinex")
+                .join("nested")
+                .join("Deep.cfg"),
+            "deep = true",
+        );
+
+        let bytes = zip_with_profile_configs(&app_data, "source-profile");
+        assert!(archive_entry_names(&bytes)
+            .contains(&"r2modmac/configs/bepinex/Mod.cfg".to_string()));
+
+        let target_backup =
+            crate::utils::config_backup::profile_backup_dir(&app_data, "target-profile");
+        let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+        let restored = extract_config_entries(&target_backup, &mut archive).unwrap();
+
+        assert_eq!(restored, 2);
+        assert_eq!(
+            fs::read_to_string(target_backup.join("bepinex").join("Mod.cfg")).unwrap(),
+            "volume = 3"
+        );
+        assert_eq!(
+            fs::read_to_string(target_backup.join("bepinex").join("nested").join("Deep.cfg"))
+                .unwrap(),
+            "deep = true"
+        );
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn importing_configs_ignores_every_other_archive_entry() {
+        let root = temp_dir("other-entries");
+        let app_data = root.join("app");
+        let source_backup = crate::utils::config_backup::profile_backup_dir(&app_data, "source");
+        write_file(&source_backup.join("bepinex").join("Mod.cfg"), "kept");
+
+        let mut bytes = zip_with_profile_configs(&app_data, "source");
+        {
+            let mut zip = zip::ZipWriter::new_append(std::io::Cursor::new(&mut bytes)).unwrap();
+            let options = zip::write::FileOptions::default();
+            zip.start_file("r2modmac/local_mods/abc/payload.zip", options)
+                .unwrap();
+            zip.write_all(b"binary payload").unwrap();
+            zip.finish().unwrap();
+        }
+
+        let target_backup = crate::utils::config_backup::profile_backup_dir(&app_data, "target");
+        let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+        let restored = extract_config_entries(&target_backup, &mut archive).unwrap();
+
+        assert_eq!(restored, 1);
+        assert!(!target_backup.join("export.r2x").exists());
+        assert!(!target_backup.join("local_mods").exists());
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn importing_configs_cannot_write_outside_the_profile_backup() {
+        let root = temp_dir("traversal");
+        let backup = root.join("app").join("backup");
+        let cursor = std::io::Cursor::new(Vec::new());
+        let mut zip = zip::ZipWriter::new(cursor);
+        let options = zip::write::FileOptions::default();
+        zip.start_file("r2modmac/configs/../../../escaped.cfg", options)
+            .unwrap();
+        zip.write_all(b"escaped").unwrap();
+        let bytes = zip.finish().unwrap().into_inner();
+
+        let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+        let restored = extract_config_entries(&backup, &mut archive).unwrap();
+
+        assert_eq!(restored, 0);
+        assert!(!root.join("escaped.cfg").exists());
+        assert!(!root.join("app").join("escaped.cfg").exists());
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_profile_without_configs_exports_no_config_entries() {
+        let root = temp_dir("empty");
+        let app_data = root.join("app");
+        fs::create_dir_all(app_data.join("profiles").join("bare")).unwrap();
+
+        let bytes = zip_with_profile_configs(&app_data, "bare");
+
+        assert_eq!(archive_entry_names(&bytes), vec!["export.r2x".to_string()]);
+
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
