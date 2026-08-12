@@ -9,6 +9,7 @@ import {
 } from 'react';
 
 import { Button } from '../ui';
+import { AppIcon } from '../ui/icons';
 import { Slider } from '../ui/Slider';
 import { ColorField } from '../ui/ColorPicker';
 import { Toggle } from '../ui/Toggle';
@@ -45,6 +46,16 @@ interface ThemeEditorModalProps {
     isOpen: boolean;
     onClose: () => void;
 }
+
+/**
+ * Where the cover specimen starts in the library, drawn once per run.
+ *
+ * Module scope on purpose: the editor walks one game forward on each opening,
+ * which alone would show the same first cover every launch. Drawing this while
+ * rendering is what the purity rule forbids, and rightly — a render that picks
+ * a different game each time it runs would never settle.
+ */
+const PREVIEW_GAME_SEED = Math.floor(Math.random() * 1013);
 
 const channels = (color: string) => {
     const rgb = parseHex(color);
@@ -368,6 +379,7 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
     const [busy, setBusy] = useState(false);
     const [imageUrl, setImageUrl] = useState<string | null>(null);
     const [selectedGameId, setSelectedGameId] = useState<string | null>(null);
+    const [openCount, setOpenCount] = useState(0);
     const [isFavoriteSample, setIsFavoriteSample] = useState(false);
     const [backgroundPreviewHeld, setBackgroundPreviewHeld] = useState(false);
     const [backgroundPreviewPinned, setBackgroundPreviewPinned] = useState(false);
@@ -404,6 +416,11 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
             setBackgroundPreviewHeld(false);
             setBackgroundPreviewPinned(false);
             setBackgroundPreviewControl(null);
+            // Judging cover chrome against the same box art every time says
+            // little about how the colours hold up over the rest of a library,
+            // so each opening drops the last choice and moves on one game.
+            setSelectedGameId(null);
+            setOpenCount((count) => count + 1);
         }
     }
 
@@ -427,6 +444,7 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
     useEffect(() => {
         if (isOpen) void loadThemes();
     }, [isOpen, loadThemes]);
+
 
     // Drafts stay inside this editor. Repainting the whole application on each
     // pointer move makes the colour picker lag and changes the app before Save.
@@ -601,9 +619,14 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
                 if (!discard) return;
                 setDirty(false);
             }
+            // The draft being abandoned may still be painting the window — a
+            // "Surprise me!" commits one globally. Without dropping it here the
+            // app stayed on the discarded palette while the sidebar showed the
+            // theme just chosen.
+            setPreview(null);
             await setActive(id);
         },
-        [dirty, setActive]
+        [dirty, setActive, setPreview]
     );
 
     const handleSave = useCallback(async () => {
@@ -747,9 +770,12 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
             const found = communities.find((c) => c.identifier === selectedGameId);
             if (found) return found;
         }
-        const withArt = communities.find((c) => communityImages[c.identifier]);
-        return withArt ?? communities[0];
-    }, [communities, communityImages, selectedGameId]);
+        // Games whose cover has arrived come first: a specimen with no artwork
+        // shows none of the chrome these colours are here to be judged against.
+        const withArt = communities.filter((c) => communityImages[c.identifier]);
+        const pool = withArt.length > 0 ? withArt : communities;
+        return pool[(PREVIEW_GAME_SEED + openCount) % pool.length];
+    }, [communities, communityImages, selectedGameId, openCount]);
 
     const activeGameImage = activeGame ? communityImages[activeGame.identifier] : undefined;
     const activeGamePlatform = activeGame ? communityPlatforms[activeGame.identifier] : undefined;
@@ -909,17 +935,29 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
                         )}
 
                         {draft && (
-                            <div className="flex bg-gray-800 border border-gray-700 rounded-lg p-1" aria-label="Editor view">
+                            // The same switch the mod list uses for grid and list: a
+                            // neutral pill that slides between two equal halves. Two
+                            // toggles of the same kind reading differently is what made
+                            // this one look like a button that had been left pressed.
+                            <div
+                                className="relative flex overflow-hidden rounded-lg border border-gray-700 bg-gray-800 p-1"
+                                role="group"
+                                aria-label="Editor view"
+                            >
+                                <div
+                                    aria-hidden="true"
+                                    className={`absolute top-1 bottom-1 w-[calc(50%-4px)] rounded-md bg-gray-600 transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${
+                                        view === 'colours' ? 'left-1' : 'left-1/2'
+                                    }`}
+                                />
                                 {(['colours', 'toml'] as const).map((nextView) => (
                                     <button
                                         key={nextView}
                                         type="button"
                                         onClick={() => setView(nextView)}
                                         aria-pressed={view === nextView}
-                                        className={`rounded-md px-3 py-1.5 text-[11px] font-medium transition-colors ${
-                                            view === nextView
-                                                ? 'bg-blue-600 text-on-accent shadow-sm'
-                                                : 'text-gray-400 hover:text-white'
+                                        className={`relative z-10 flex-1 rounded-md px-3 py-1.5 text-[11px] font-medium transition-colors ${
+                                            view === nextView ? 'text-white' : 'text-gray-400 hover:text-white'
                                         }`}
                                     >
                                         {nextView === 'colours' ? 'Visual' : 'TOML'}
@@ -991,13 +1029,20 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
                                                             : 'border-gray-700 hover:border-gray-600 hover:bg-gray-800'
                                                     }`}
                                                 >
-                                                    <div className="flex items-center gap-2">
-                                                        <SwatchStrip colors={b.colors} className="h-5 w-12 shrink-0" />
-                                                        <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-white">
-                                                            {b.name}
-                                                        </span>
+                                                    <div className="flex items-center gap-2.5">
+                                                        <SwatchStrip colors={b.colors} className="h-9 w-9 shrink-0" />
+                                                        <div className="min-w-0 flex-1">
+                                                            <p className="truncate text-[13px] font-medium text-white">
+                                                                {b.name}
+                                                            </p>
+                                                            <p className="truncate text-[11px] text-gray-400">
+                                                                {b.origin ?? 'The stock r2modmac look'}
+                                                            </p>
+                                                        </div>
+                                                        {isSelected && (
+                                                            <AppIcon name="apply" className="h-4 w-4 shrink-0 text-fg-accent" />
+                                                        )}
                                                     </div>
-                                                    <p className="mt-1 truncate text-[11px] text-gray-400">{b.origin ?? 'The stock r2modmac look'}</p>
                                                 </button>
                                             );
                                         })}
@@ -1047,20 +1092,24 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
                                                                     : 'border-gray-700 hover:border-gray-600 hover:bg-gray-800'
                                                             }`}
                                                         >
-                                                            <div className="flex items-center gap-2">
-                                                                <SwatchStrip colors={colors} className="h-5 w-12 shrink-0" />
-                                                                <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-white">
-                                                                    {t.name}
-                                                                </span>
-                                                                {isSelected && dirty && (
-                                                                    <span className="h-2 w-2 rounded-full bg-amber-400" title="Unsaved changes" />
-                                                                )}
+                                                            <div className="flex items-center gap-2.5">
+                                                                <SwatchStrip colors={colors} className="h-9 w-9 shrink-0" />
+                                                                <div className="min-w-0 flex-1">
+                                                                    <p className="truncate text-[13px] font-medium text-white">
+                                                                        {t.name}
+                                                                    </p>
+                                                                    {t.error ? (
+                                                                        <p className="truncate text-[11px] text-fg-danger">{t.error}</p>
+                                                                    ) : (
+                                                                        <p className="truncate font-mono text-[11px] text-gray-400">{t.file_name}</p>
+                                                                    )}
+                                                                </div>
+                                                                {isSelected && dirty ? (
+                                                                    <span className="h-2 w-2 shrink-0 rounded-full bg-amber-400" title="Unsaved changes" />
+                                                                ) : isSelected ? (
+                                                                    <AppIcon name="apply" className="h-4 w-4 shrink-0 text-fg-accent" />
+                                                                ) : null}
                                                             </div>
-                                                            {t.error ? (
-                                                                <p className="mt-1 truncate text-[11px] text-fg-danger">{t.error}</p>
-                                                            ) : (
-                                                                <p className="mt-1 truncate text-[11px] text-gray-400">{t.file_name}</p>
-                                                            )}
                                                         </button>
                                                     );
                                                 })}
@@ -1078,8 +1127,9 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
                             </Button>
                             <button
                                 onClick={() => void window.ipcRenderer.openThemesFolder()}
-                                className="w-full rounded-lg px-3 py-1.5 text-[12px] text-gray-400 transition-colors hover:bg-gray-800 hover:text-white"
+                                className="flex w-full items-center justify-center gap-2 rounded-lg px-3 py-1.5 text-[12px] text-gray-400 transition-colors hover:bg-gray-800 hover:text-white"
                             >
+                                <AppIcon name="folder" className="h-3.5 w-3.5" />
                                 Open themes folder
                             </button>
                         </div>
