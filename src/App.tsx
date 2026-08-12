@@ -41,6 +41,7 @@ import { useProfileActions } from './hooks/useProfileActions';
 import { useGameSync } from './hooks/useGameSync';
 import { compareVersions, findPinnedVersion, parsePackageReference } from './utils/modVersioning';
 import { getProfileModKey, hasPendingRuntimeInstall, migratePendingSyncBaselines, restoreInstalledMod } from './utils/profileSync';
+import { isTextEntryTarget, shouldReleaseSearchFocus } from './utils/searchField';
 
 const QUICK_MAC_HINTS = new Set([
   'btd6',
@@ -2704,6 +2705,23 @@ function App() {
   };
 
 
+
+  useEffect(() => {
+    const onKeyDownCapture = (event: KeyboardEvent) => {
+      if (!shouldReleaseSearchFocus(event)) return;
+      if (useCommandStore.getState().isOpen) return;
+
+      const target = event.target as HTMLElement | null;
+      if (!isTextEntryTarget(target)) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      target?.blur();
+    };
+
+    window.addEventListener('keydown', onKeyDownCapture, true);
+    return () => window.removeEventListener('keydown', onKeyDownCapture, true);
+  }, []);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
