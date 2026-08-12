@@ -1078,7 +1078,13 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                         <div
                             onMouseDown={(event) => { if (event.shiftKey || event.metaKey || event.ctrlKey) event.preventDefault(); }}
                             aria-selected={isSelected}
-                            className={`profile-mod-row isolate flex items-center gap-3 rounded-lg border p-2 pr-16 transition-[background-color,border-color] duration-200 group relative cursor-pointer overflow-hidden ${renderedModView === 'updates' ? 'pr-24' : ''} ${isSelected
+                            // No `overflow-hidden`: it was here to keep the two
+                            // full-bleed overlays below inside the corner radius,
+                            // and it also cropped the Update button's glow square
+                            // against the row. Each overlay now carries its own
+                            // radius instead, which is the only thing that needed
+                            // clipping.
+                            className={`profile-mod-row isolate flex items-center gap-3 rounded-lg border p-2 pr-16 transition-[background-color,border-color] duration-200 group relative cursor-pointer ${renderedModView === 'updates' ? 'pr-24' : ''} ${isSelected
                                 ? 'bg-blue-500/12 border-blue-500/35'
                                 : 'border-transparent hover:border-gray-700 hover:bg-gray-800'
                                 } ${!mod.enabled ? 'opacity-50' : ''}`}
@@ -1087,7 +1093,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                             {showDeprecatedWarnings && pkg?.is_deprecated ? (
                                 <div
                                     aria-hidden="true"
-                                    className={`pointer-events-none absolute inset-0 z-0 bg-[linear-gradient(90deg,rgba(76,29,42,0.78)_0%,rgba(76,29,42,0.3)_38%,rgba(76,29,42,0)_82%)] transition-opacity duration-200 ${isSelected ? 'opacity-55' : 'opacity-100'}`}
+                                    className={`pointer-events-none absolute inset-0 z-0 rounded-lg bg-[linear-gradient(90deg,rgba(76,29,42,0.78)_0%,rgba(76,29,42,0.3)_38%,rgba(76,29,42,0)_82%)] transition-opacity duration-200 ${isSelected ? 'opacity-55' : 'opacity-100'}`}
                                 />
                             ) : null}
                             {/* ... existing mod item content ... */}
@@ -1176,7 +1182,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                                 </button>
                             ) : (
                             <>
-                            <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 right-0 z-20 w-[48%] transform-gpu bg-gradient-to-l from-gray-800 via-gray-800/95 to-transparent opacity-0 transition-opacity duration-200 will-change-[opacity] group-hover:opacity-100" />
+                            <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 right-0 z-20 w-[48%] transform-gpu rounded-r-lg bg-gradient-to-l from-gray-800 via-gray-800/95 to-transparent opacity-0 transition-opacity duration-200 will-change-[opacity] group-hover:opacity-100" />
                             <div className="absolute right-2 top-1/2 z-30 flex w-[104px] -translate-y-1/2 transform-gpu items-center justify-between opacity-0 transition-opacity duration-200 will-change-[opacity] group-hover:opacity-100">
                                 <button
                                     onClick={(e) => {
