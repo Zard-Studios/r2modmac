@@ -198,11 +198,15 @@ pub(crate) fn relaunch_macos_steam_if_needed(_steam_root: &std::path::Path) {
 pub(crate) fn relaunch_macos_steam_if_needed(_steam_root: &std::path::Path) {}
 
 #[cfg(target_os = "macos")]
-pub(crate) fn ensure_macos_steam_running_for_launch(app: &AppHandle) {
+/// Makes sure Steam is up before we ask it to run a game.
+///
+/// Returns whether Steam was **already** running: a client that has to boot and
+/// sign in first needs a far longer deadline before its silence means anything.
+pub(crate) fn ensure_macos_steam_running_for_launch(app: &AppHandle) -> bool {
     let steam_roots = get_steam_roots_for_platform(app, false);
     if is_steam_app_running_on_macos() && !collect_macos_steam_process_ids(&steam_roots).is_empty()
     {
-        return;
+        return true;
     }
 
     let mut started = false;
@@ -271,7 +275,7 @@ pub(crate) fn ensure_macos_steam_running_for_launch(app: &AppHandle) {
         log::error!(
             "[launch_via_steam_for_game_path] Failed to start Steam.app before steam://run."
         );
-        return;
+        return false;
     }
 
     let observe_started = std::time::Instant::now();
@@ -283,7 +287,7 @@ pub(crate) fn ensure_macos_steam_running_for_launch(app: &AppHandle) {
                 "[launch_via_steam_for_game_path] Steam startup observed elapsed_ms={}",
                 observe_started.elapsed().as_millis()
             );
-            return;
+            return false;
         }
         std::thread::sleep(std::time::Duration::from_millis(200));
     }
@@ -291,7 +295,10 @@ pub(crate) fn ensure_macos_steam_running_for_launch(app: &AppHandle) {
     log::warn!(
         "[launch_via_steam_for_game_path] Steam startup not fully observed; continuing with steam://run dispatch."
     );
+    false
 }
 
 #[cfg(not(target_os = "macos"))]
-pub(crate) fn ensure_macos_steam_running_for_launch(_app: &AppHandle) {}
+pub(crate) fn ensure_macos_steam_running_for_launch(_app: &AppHandle) -> bool {
+    false
+}

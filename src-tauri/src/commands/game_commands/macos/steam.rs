@@ -129,6 +129,96 @@ fn console_log_contains_logon_failure(offsets: &[(std::path::PathBuf, u64)]) -> 
     })
 }
 
+/// Watch for the game after Steam has been asked to start it.
+///
+/// Kept separate from the launch itself, and taking the "is it up?" answer as a
+/// closure, so the whole decision can be exercised in tests without a Steam.
+#[cfg(target_os = "macos")]
+fn observe_macos_steam_launch(
+    app_id: &str,
+    timeout_ms: u64,
+    console_offsets: &[(std::path::PathBuf, u64)],
+    is_started: impl Fn() -> bool,
+    mut retry_dispatch: impl FnMut(),
+) -> Result<(), String> {
+    let observe_started = std::time::Instant::now();
+    let mut retried_dispatch = false;
+    let mut saw_app_error_18 = false;
+    let mut saw_logon_failure = false;
+    let mut next_log_check = observe_started;
+    let mut confirmation = StartConfirmation::new();
+
+    while observe_started.elapsed().as_millis() < u128::from(timeout_ms) {
+        let was_pending = confirmation.is_pending();
+        if confirmation.observe(is_started()) {
+            return Ok(());
+        }
+
+        if !confirmation.is_pending() {
+            if was_pending {
+                log::debug!(
+                    "[launch_via_steam_for_game_path] A process matching app {} disappeared before it could be confirmed; it was not the game. Still waiting.",
+                    app_id
+                );
+            }
+
+            let now = std::time::Instant::now();
+            if now >= next_log_check {
+                saw_app_error_18 |=
+                    console_log_contains_launch_app_error_18(console_offsets, app_id);
+                saw_logon_failure |= console_log_contains_logon_failure(console_offsets);
+
+                if saw_app_error_18
+                    && !retried_dispatch
+                    && observe_started.elapsed().as_millis()
+                        >= u128::from(STEAM_LAUNCH_RETRY_TRIGGER_DELAY_MS)
+                {
+                    retry_dispatch();
+                    retried_dispatch = true;
+                }
+
+                next_log_check =
+                    now + std::time::Duration::from_millis(STEAM_LAUNCH_LOG_CHECK_INTERVAL_MS);
+            }
+        }
+
+        std::thread::sleep(std::time::Duration::from_millis(
+            STEAM_LAUNCH_POLL_INTERVAL_MS,
+        ));
+    }
+
+    if saw_app_error_18 && saw_logon_failure {
+        log::error!(
+            "[launch_via_steam_for_game_path] Steam reported LaunchApp failure (AppError_18) and `LogonFailure No Connection` while launching app {}.",
+            app_id
+        );
+        return Err(
+            "Steam could not start the game because it is not signed in. Open Steam, sign in, then press Play again."
+                .to_string(),
+        );
+    }
+
+    if saw_app_error_18 {
+        log::error!(
+            "[launch_via_steam_for_game_path] Steam reported LaunchApp failure (AppError_18) for app {} even after one retry.",
+            app_id
+        );
+        return Err(
+            "Steam refused to start the game. Open Steam to check for a prompt or an error waiting for you there, then press Play again."
+                .to_string(),
+        );
+    }
+
+    log::warn!(
+        "[launch_via_steam_for_game_path] Steam accepted the launch request for app {}, but the game process was not observed in time.",
+        app_id
+    );
+    Err(
+        "Steam accepted the launch but the game did not start in time. Check the Steam window, then press Play again."
+            .to_string(),
+    )
+}
+
 pub(crate) fn launch_via_steam_for_game_path(
     app: &AppHandle,
     game_path: &std::path::Path,
@@ -146,7 +236,7 @@ pub(crate) fn launch_via_steam_for_game_path(
     #[cfg(target_os = "macos")]
     let console_offsets = collect_macos_console_log_offsets(app);
 
-    ensure_macos_steam_running_for_launch(app);
+    let steam_was_running = ensure_macos_steam_running_for_launch(app);
     let child = dispatch_macos_steam_run_url(&app_id)?;
     log::info!(
         "[launch_via_steam_for_game_path] open_dispatched pid={} elapsed_ms={}",
@@ -155,95 +245,54 @@ pub(crate) fn launch_via_steam_for_game_path(
     );
 
     if let Some(executable_path) = executable_path.as_ref() {
-        let observed_executable_path = executable_path.clone();
-        let observed_app_id = app_id.clone();
+        // Wait here rather than in a detached thread whose verdict nobody
+        // reads. The caller — and through it the Play button — needs to know
+        // when the game is actually up: a cold Steam can take half a minute to
+        // get there, and returning early is what left the button flipping back
+        // to "play" while the launch was still in flight.
         #[cfg(target_os = "macos")]
-        let observed_console_offsets = console_offsets.clone();
-        std::thread::spawn(move || {
-            #[cfg(target_os = "macos")]
-            {
-                let observe_started = std::time::Instant::now();
-                let mut retried_dispatch = false;
-                let mut saw_app_error_18 = false;
-                let mut saw_logon_failure = false;
-                let mut next_log_check = observe_started;
+        {
+            let observe_timeout_ms = if steam_was_running {
+                MACOS_LAUNCH_OBSERVE_TIMEOUT_MS
+            } else {
+                MACOS_COLD_STEAM_LAUNCH_OBSERVE_TIMEOUT_MS
+            };
+            log::info!(
+                "[launch_via_steam_for_game_path] observing app_id={} steam_was_running={} timeout_ms={}",
+                app_id,
+                steam_was_running,
+                observe_timeout_ms
+            );
 
-                while observe_started.elapsed().as_millis()
-                    < u128::from(MACOS_LAUNCH_OBSERVE_TIMEOUT_MS)
-                {
-                    if is_process_running_for_executable(&observed_executable_path) {
-                        return;
-                    }
-
-                    let now = std::time::Instant::now();
-                    if now >= next_log_check {
-                        saw_app_error_18 |= console_log_contains_launch_app_error_18(
-                            &observed_console_offsets,
-                            &observed_app_id,
-                        );
-                        saw_logon_failure |=
-                            console_log_contains_logon_failure(&observed_console_offsets);
-
-                        if saw_app_error_18
-                            && !retried_dispatch
-                            && observe_started.elapsed().as_millis()
-                                >= u128::from(STEAM_LAUNCH_RETRY_TRIGGER_DELAY_MS)
-                        {
-                            match dispatch_macos_steam_run_url(&observed_app_id) {
-                                Ok(retry_child) => {
-                                    log::warn!(
-                                        "[launch_via_steam_for_game_path] observed LaunchApp failure for app_id={} in Steam logs; retrying steam://run once pid={}",
-                                        observed_app_id,
-                                        retry_child.id()
-                                    );
-                                }
-                                Err(error) => {
-                                    log::error!(
-                                        "[launch_via_steam_for_game_path] retry steam://run failed for app_id={} error={}",
-                                        observed_app_id, error
-                                    );
-                                }
-                            }
-                            retried_dispatch = true;
-                        }
-
-                        next_log_check = now
-                            + std::time::Duration::from_millis(STEAM_LAUNCH_LOG_CHECK_INTERVAL_MS);
-                    }
-
-                    std::thread::sleep(std::time::Duration::from_millis(
-                        STEAM_LAUNCH_POLL_INTERVAL_MS,
-                    ));
+            observe_macos_steam_launch(
+                &app_id,
+                observe_timeout_ms,
+                &console_offsets,
+                || is_process_running_for_executable(executable_path),
+                || {
+                    match dispatch_macos_steam_run_url(&app_id) {
+                    Ok(retry_child) => log::warn!(
+                        "[launch_via_steam_for_game_path] observed LaunchApp failure for app_id={} in Steam logs; retrying steam://run once pid={}",
+                        app_id,
+                        retry_child.id()
+                    ),
+                    Err(error) => log::error!(
+                        "[launch_via_steam_for_game_path] retry steam://run failed for app_id={} error={}",
+                        app_id,
+                        error
+                    ),
                 }
+                },
+            )?;
+        }
 
-                if saw_app_error_18 {
-                    if saw_logon_failure {
-                        log::error!(
-                            "[launch_via_steam_for_game_path] Steam reported LaunchApp failure (AppError_18) and `LogonFailure No Connection` while launching app {}. Steam connectivity/login state likely blocked the modded launch.",
-                            observed_app_id
-                        );
-                    } else {
-                        log::error!(
-                            "[launch_via_steam_for_game_path] Steam reported LaunchApp failure (AppError_18) for app {} even after one retry.",
-                            observed_app_id
-                        );
-                    }
-                } else {
-                    log::warn!(
-                        "[launch_via_steam_for_game_path] Steam accepted the launch request for app {}, but the game process was not observed in time. Continuing optimistically.",
-                        observed_app_id
-                    );
-                }
-            }
-
-            #[cfg(not(target_os = "macos"))]
-            if !wait_for_process_start(&observed_executable_path, MACOS_LAUNCH_OBSERVE_TIMEOUT_MS) {
-                log::warn!(
-                    "[launch_via_steam_for_game_path] Steam accepted the launch request for app {}, but the game process was not observed in time. Continuing optimistically.",
-                    observed_app_id
-                );
-            }
-        });
+        #[cfg(not(target_os = "macos"))]
+        if !wait_for_process_start(executable_path, MACOS_LAUNCH_OBSERVE_TIMEOUT_MS) {
+            log::warn!(
+                "[launch_via_steam_for_game_path] Steam accepted the launch request for app {}, but the game process was not observed in time. Continuing optimistically.",
+                app_id
+            );
+        }
     }
 
     log::info!(
@@ -258,6 +307,90 @@ pub(crate) fn launch_via_steam_for_game_path(
 #[cfg(all(test, target_os = "macos"))]
 mod tests {
     use super::*;
+
+    /// The Muck launch from the log: Steam is asked to run the game, and the
+    /// game only appears twenty-two seconds later. The wait has to still be
+    /// going when it does, or the Play button flips back before the game is up.
+    #[test]
+    fn a_game_that_takes_a_while_is_still_waited_for() {
+        let started_at = std::time::Instant::now();
+        let appears_after = std::time::Duration::from_millis(1_200);
+
+        let outcome = observe_macos_steam_launch(
+            "1625450",
+            10_000,
+            &[],
+            || started_at.elapsed() >= appears_after,
+            || panic!("no Steam error was recorded, so no retry should be dispatched"),
+        );
+
+        assert!(outcome.is_ok(), "{outcome:?}");
+        assert!(
+            started_at.elapsed() >= appears_after,
+            "the wait must not end before the game exists"
+        );
+    }
+
+    /// A process that shows up and disappears is one of the helpers Steam
+    /// spawns while booting, not the game.
+    #[test]
+    fn a_phantom_process_does_not_end_the_wait() {
+        let started_at = std::time::Instant::now();
+
+        let outcome = observe_macos_steam_launch(
+            "1625450",
+            2_000,
+            &[],
+            || {
+                let elapsed = started_at.elapsed().as_millis();
+                // Present briefly, then gone for good.
+                (300..600).contains(&elapsed)
+            },
+            || {},
+        );
+
+        assert!(
+            outcome.is_err(),
+            "a phantom must not be reported as a started game"
+        );
+    }
+
+    /// A launch nobody can see the end of has to say so, rather than reporting
+    /// success and leaving the UI to guess.
+    #[test]
+    fn a_game_that_never_appears_is_reported_as_a_failure() {
+        let outcome = observe_macos_steam_launch("1625450", 1_000, &[], || false, || {});
+
+        let message = outcome.expect_err("a launch that never started is not a success");
+        assert!(message.contains("did not start"), "{message}");
+    }
+
+    /// Steam's own log explains the refusal, so the user gets that instead of a
+    /// bare timeout.
+    #[test]
+    fn a_steam_side_refusal_is_explained() {
+        let log_path = unique_temp_log_path("apperror18");
+        std::fs::write(
+            &log_path,
+            "GameAction [AppID 1625450] : LaunchApp failed with AppError_18\n",
+        )
+        .unwrap();
+        let offsets = vec![(log_path.clone(), 0u64)];
+        let retries = std::cell::Cell::new(0u32);
+
+        let outcome = observe_macos_steam_launch(
+            "1625450",
+            5_000,
+            &offsets,
+            || false,
+            || retries.set(retries.get() + 1),
+        );
+
+        let message = outcome.expect_err("Steam refused the launch");
+        assert!(message.contains("Steam refused"), "{message}");
+        assert_eq!(retries.get(), 1, "the launch is retried exactly once");
+        std::fs::remove_file(log_path).unwrap();
+    }
 
     fn unique_temp_log_path(name: &str) -> std::path::PathBuf {
         let nanos = std::time::SystemTime::now()

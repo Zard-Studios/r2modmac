@@ -226,12 +226,6 @@ pub(crate) enum LaunchWaitOutcome {
 
 const POLL_INTERVAL_MS: u64 = 250;
 
-/// Consecutive sightings required before a launch counts as done.
-///
-/// A cold Steam spawns short-lived helpers; believing the first sighting ended
-/// the wait while Steam was still booting. A real game survives the extra poll.
-const REQUIRED_CONSECUTIVE_STARTED_POLLS: u32 = 4;
-
 /// Wait for the game to appear, watching Steam for a reason it will not start.
 ///
 /// Polling Steam's own state while waiting means a blocked launch is reported
@@ -250,33 +244,35 @@ pub(crate) fn wait_for_launch_or_blocker(
     const STEAM_CHECK_EVERY: u64 = 8;
 
     let attempts = std::cmp::max(1, timeout_ms / POLL_INTERVAL_MS);
-    let mut consecutive_sightings = 0u32;
+    let mut confirmation = crate::commands::game_commands::process::StartConfirmation::new();
 
     for attempt in 0..attempts {
-        if is_started() {
-            consecutive_sightings += 1;
-            if consecutive_sightings >= REQUIRED_CONSECUTIVE_STARTED_POLLS {
-                return LaunchWaitOutcome::Started;
-            }
+        let was_pending = confirmation.is_pending();
+        if confirmation.observe(is_started()) {
+            return LaunchWaitOutcome::Started;
+        }
+
+        if confirmation.is_pending() {
             std::thread::sleep(std::time::Duration::from_millis(POLL_INTERVAL_MS));
             continue;
         }
 
-        if consecutive_sightings > 0 {
+        if was_pending {
             log::debug!(
-                "[wait_for_launch_or_blocker] A process matching app {} disappeared after {} poll(s); it was not the game. Still waiting.",
-                app_id,
-                consecutive_sightings
+                "[wait_for_launch_or_blocker] A process matching app {} disappeared before it could be confirmed; it was not the game. Still waiting.",
+                app_id
             );
-            consecutive_sightings = 0;
         }
 
         if attempt > 0 && attempt % STEAM_CHECK_EVERY == 0 {
             if let Some(reason) = explain_stalled_launch(client_root, library_root, app_id) {
                 // Re-check the process first: the game may have started in the
                 // same tick, which beats a stale log line.
-                if is_started() {
-                    consecutive_sightings = 1;
+                if confirmation.observe(is_started()) {
+                    return LaunchWaitOutcome::Started;
+                }
+                if confirmation.is_pending() {
+                    std::thread::sleep(std::time::Duration::from_millis(POLL_INTERVAL_MS));
                     continue;
                 }
                 return LaunchWaitOutcome::Blocked(reason);

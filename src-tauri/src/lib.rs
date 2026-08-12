@@ -53,12 +53,8 @@ fn app_logs_size_at(log_dir: &std::path::Path) -> Result<u64, String> {
         let entry = entry.map_err(|error| error.to_string())?;
         let file_type = entry.file_type().map_err(|error| error.to_string())?;
         if file_type.is_file() {
-            total = total.saturating_add(
-                entry
-                    .metadata()
-                    .map_err(|error| error.to_string())?
-                    .len(),
-            );
+            total =
+                total.saturating_add(entry.metadata().map_err(|error| error.to_string())?.len());
         }
     }
     Ok(total)

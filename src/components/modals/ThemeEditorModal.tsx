@@ -48,14 +48,6 @@ interface ThemeEditorModalProps {
     onClose: () => void;
 }
 
-/**
- * Where the cover specimen starts in the library, drawn once per run.
- *
- * Module scope on purpose: the editor walks one game forward on each opening,
- * which alone would show the same first cover every launch. Drawing this while
- * rendering is what the purity rule forbids, and rightly — a render that picks
- * a different game each time it runs would never settle.
- */
 const PREVIEW_GAME_SEED = Math.floor(Math.random() * 1013);
 
 const channels = (color: string) => {

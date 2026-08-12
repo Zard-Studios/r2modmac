@@ -1,13 +1,13 @@
 use crate::commands::game_commands::get_game_path;
 use crate::models::shared::*;
 use crate::utils::file_ops::*;
-use crate::utils::without_starving_runtime;
 use crate::utils::mod_manifest::{
     backup_existing_mod_files, save_owned_mod_manifest, GAME_MANIFEST_SCOPE,
 };
 use crate::utils::persistent_download::{
     download_persistent, DownloadProgress, DOWNLOAD_CANCELLED,
 };
+use crate::utils::without_starving_runtime;
 use base64::Engine;
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
@@ -4070,7 +4070,8 @@ async fn install_mod_bytes(
 
             if let Some(overlay_bytes) = macos_runtime_overlay_bytes.as_ref() {
                 let cursor = std::io::Cursor::new(overlay_bytes);
-                let mut overlay_archive = zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
+                let mut overlay_archive =
+                    zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
                 files.extend(collect_macos_bepinex_runtime_overlay_files(
                     &mut overlay_archive,
                 )?);
@@ -4124,7 +4125,8 @@ async fn install_mod_bytes(
 
             if let Some(overlay_bytes) = macos_runtime_overlay_bytes.as_ref() {
                 let cursor = std::io::Cursor::new(overlay_bytes);
-                let mut overlay_archive = zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
+                let mut overlay_archive =
+                    zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
                 extract_macos_bepinex_runtime_overlay_to_root(
                     &mut overlay_archive,
                     game_dir,
@@ -4230,7 +4232,9 @@ async fn install_mod_bytes(
             log::debug!(
                 "[install_mod] Post-install runtime check at {:?}: preloader_present={}",
                 core_dir,
-                crate::commands::game_commands::runtime_health::core_directory_has_preloader(&core_dir)
+                crate::commands::game_commands::runtime_health::core_directory_has_preloader(
+                    &core_dir
+                )
             );
         }
 
@@ -5022,7 +5026,11 @@ fn package_caches_to_evict<T: Ord + Copy>(
         return Vec::new();
     }
     caches.sort_by(|left, right| right.1.cmp(&left.1));
-    caches.into_iter().skip(keep).map(|(path, _)| path).collect()
+    caches
+        .into_iter()
+        .skip(keep)
+        .map(|(path, _)| path)
+        .collect()
 }
 
 fn evict_stale_package_caches(cache_dir: &std::path::Path, keep: usize) {

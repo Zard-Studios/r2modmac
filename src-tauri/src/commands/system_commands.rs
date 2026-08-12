@@ -1893,7 +1893,11 @@ mod tests {
 
         let cover = extract_cover_from_community_page(page, "inside-the-backrooms")
             .expect("expected a cover");
-        assert!(cover.ends_with("inside-the-backrooms-cover-360x480.webp"), "{}", cover);
+        assert!(
+            cover.ends_with("inside-the-backrooms-cover-360x480.webp"),
+            "{}",
+            cover
+        );
     }
 
     #[test]

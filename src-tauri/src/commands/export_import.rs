@@ -784,8 +784,9 @@ mod tests {
         );
 
         let bytes = zip_with_profile_configs(&app_data, "source-profile");
-        assert!(archive_entry_names(&bytes)
-            .contains(&"r2modmac/configs/bepinex/Mod.cfg".to_string()));
+        assert!(
+            archive_entry_names(&bytes).contains(&"r2modmac/configs/bepinex/Mod.cfg".to_string())
+        );
 
         let target_backup =
             crate::utils::config_backup::profile_backup_dir(&app_data, "target-profile");
@@ -798,8 +799,13 @@ mod tests {
             "volume = 3"
         );
         assert_eq!(
-            fs::read_to_string(target_backup.join("bepinex").join("nested").join("Deep.cfg"))
-                .unwrap(),
+            fs::read_to_string(
+                target_backup
+                    .join("bepinex")
+                    .join("nested")
+                    .join("Deep.cfg")
+            )
+            .unwrap(),
             "deep = true"
         );
 

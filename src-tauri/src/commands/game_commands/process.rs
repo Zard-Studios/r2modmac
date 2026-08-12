@@ -166,6 +166,51 @@ pub(crate) fn is_process_running_for_executable(executable_path: &std::path::Pat
     }
 }
 
+// ── Confirming that a game really started ────────────────────────────────────
+
+/// How long a process must be seen without interruption before it counts as
+/// the game that was asked for.
+///
+/// A Steam that is still booting spawns short-lived helpers, and some of them
+/// carry the game's name. Believing the first sighting is what reported a
+/// launch as finished seconds after the request, while the game itself was
+/// still half a minute away. A game that has really started stays up, so a
+/// second of continuous presence separates the two and costs a launch nothing.
+pub(crate) const START_CONFIRMATION_WINDOW_MS: u64 = 1_000;
+
+/// Turns a stream of "is it running?" answers into "has it really started?".
+///
+/// Poll intervals differ between launch paths, so this measures elapsed time
+/// rather than counting polls: the guarantee is the same wherever it is used.
+#[derive(Default)]
+pub(crate) struct StartConfirmation {
+    first_seen: Option<std::time::Instant>,
+}
+
+impl StartConfirmation {
+    pub(crate) fn new() -> Self {
+        Self::default()
+    }
+
+    /// Feeds one observation. Returns true once the process has been present
+    /// for the whole confirmation window; a single absence resets the clock.
+    pub(crate) fn observe(&mut self, running: bool) -> bool {
+        if !running {
+            self.first_seen = None;
+            return false;
+        }
+
+        let since = *self.first_seen.get_or_insert_with(std::time::Instant::now);
+        since.elapsed() >= std::time::Duration::from_millis(START_CONFIRMATION_WINDOW_MS)
+    }
+
+    /// True when something is currently matching but has not been there long
+    /// enough to be believed — used only to explain the wait in the log.
+    pub(crate) fn is_pending(&self) -> bool {
+        self.first_seen.is_some()
+    }
+}
+
 // ── Process polling helpers ───────────────────────────────────────────────────
 
 #[cfg(not(target_os = "macos"))]
@@ -184,13 +229,14 @@ pub(crate) fn wait_for_process_start_pattern(pattern: &str, timeout_ms: u64) -> 
 pub(crate) fn wait_for_process_start_patterns(patterns: &[String], timeout_ms: u64) -> bool {
     let poll_interval = 250u64;
     let attempts = std::cmp::max(1, timeout_ms / poll_interval);
+    let mut confirmation = StartConfirmation::new();
     for _ in 0..attempts {
-        if is_process_running_for_patterns(patterns) {
+        if confirmation.observe(is_process_running_for_patterns(patterns)) {
             return true;
         }
         std::thread::sleep(std::time::Duration::from_millis(poll_interval));
     }
-    is_process_running_for_patterns(patterns)
+    confirmation.observe(is_process_running_for_patterns(patterns))
 }
 
 pub(crate) fn wait_for_process_start(executable_path: &std::path::Path, timeout_ms: u64) -> bool {
@@ -381,5 +427,54 @@ mod pgrep_self_match_tests {
         background.join().unwrap();
 
         assert_eq!(sightings, 0, "a poll saw something, and nothing is running");
+    }
+}
+
+#[cfg(test)]
+mod start_confirmation_tests {
+    use super::*;
+
+    #[test]
+    fn a_match_that_vanishes_never_confirms() {
+        let mut confirmation = StartConfirmation::new();
+        for _ in 0..20 {
+            assert!(!confirmation.observe(true), "too soon to believe");
+            assert!(!confirmation.observe(false), "gone again");
+        }
+    }
+
+    #[test]
+    fn a_match_that_stays_confirms_after_the_window() {
+        let mut confirmation = StartConfirmation::new();
+        assert!(
+            !confirmation.observe(true),
+            "the first sighting proves nothing"
+        );
+        assert!(confirmation.is_pending());
+
+        std::thread::sleep(std::time::Duration::from_millis(
+            START_CONFIRMATION_WINDOW_MS + 50,
+        ));
+
+        assert!(
+            confirmation.observe(true),
+            "a process that stayed is the game"
+        );
+    }
+
+    #[test]
+    fn an_absence_restarts_the_clock() {
+        let mut confirmation = StartConfirmation::new();
+        confirmation.observe(true);
+        std::thread::sleep(std::time::Duration::from_millis(
+            START_CONFIRMATION_WINDOW_MS + 50,
+        ));
+        confirmation.observe(false);
+
+        assert!(!confirmation.is_pending());
+        assert!(
+            !confirmation.observe(true),
+            "the window must be served again from scratch"
+        );
     }
 }

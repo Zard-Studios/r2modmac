@@ -129,9 +129,10 @@ pub async fn duplicate_profile_folder(
     }
 
     let copy_destination = destination.clone();
-    let result = tokio::task::spawn_blocking(move || copy_dir_recursive(&source, &copy_destination))
-        .await
-        .map_err(|e| format!("Task join error: {}", e))?;
+    let result =
+        tokio::task::spawn_blocking(move || copy_dir_recursive(&source, &copy_destination))
+            .await
+            .map_err(|e| format!("Task join error: {}", e))?;
 
     match result {
         Ok(()) => {

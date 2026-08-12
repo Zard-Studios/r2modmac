@@ -23,6 +23,9 @@ const CANONICAL_MAC_BEPINEX_SCRIPT: &str = "run_bepinex.sh";
 const BALATRO_LOVELY_SCRIPT: &str = "run_lovely_macos.sh";
 const STEAM_LAUNCH_OPTIONS_RESTART_EVENT: &str = "steam-launch-options-restart";
 const MACOS_LAUNCH_OBSERVE_TIMEOUT_MS: u64 = 60_000;
+/// A Steam that has to boot and sign in before it can act on the request needs
+/// far longer than a warm one; the same split the Windows launch path uses.
+const MACOS_COLD_STEAM_LAUNCH_OBSERVE_TIMEOUT_MS: u64 = 180_000;
 
 static LOGGED_GAME_PATH_OVERRIDES: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 

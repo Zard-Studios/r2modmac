@@ -323,7 +323,10 @@ mod tests {
         assert!(!live.join("Other.cfg").exists());
 
         apply_profile_configs(&app_data, "second", &game, &game, "lethal-company");
-        assert_eq!(fs::read_to_string(live.join("Other.cfg")).unwrap(), "second");
+        assert_eq!(
+            fs::read_to_string(live.join("Other.cfg")).unwrap(),
+            "second"
+        );
 
         fs::remove_dir_all(root).unwrap();
     }

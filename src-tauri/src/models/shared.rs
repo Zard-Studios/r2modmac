@@ -742,11 +742,17 @@ mod settings_keybind_tests {
             serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
 
         assert_eq!(
-            round_tripped.keybinds.get("launch-modded").map(String::as_str),
+            round_tripped
+                .keybinds
+                .get("launch-modded")
+                .map(String::as_str),
             Some("Mod+Shift+L")
         );
         assert_eq!(
-            round_tripped.keybinds.get("from-the-future").map(String::as_str),
+            round_tripped
+                .keybinds
+                .get("from-the-future")
+                .map(String::as_str),
             Some("Mod+K")
         );
     }

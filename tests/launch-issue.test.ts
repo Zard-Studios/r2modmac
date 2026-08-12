@@ -76,3 +76,21 @@ test('a Steam game with no reachable client points at Settings, not at Steam', (
     assert.equal(issue.title, 'Steam Client Not Found');
     assert.equal(issue.pointsAtSteam, false);
 });
+
+test('a Steam that is not signed in is named, not lumped into a generic failure', () => {
+    // Native macOS launches surface this: Steam is up but logged out, so the
+    // run request is accepted and then quietly refused.
+    const issue = describeLaunchIssue(
+        'Steam could not start the game because it is not signed in. Open Steam, sign in, then press Play again.'
+    );
+    assert.equal(issue.title, 'Steam Not Signed In');
+    assert.equal(issue.pointsAtSteam, true);
+});
+
+test('a native launch that timed out is reported as the game not starting', () => {
+    const issue = describeLaunchIssue(
+        'Steam accepted the launch but the game did not start in time. Check the Steam window, then press Play again.'
+    );
+    assert.equal(issue.title, 'Game Did Not Start');
+    assert.equal(issue.pointsAtSteam, true);
+});

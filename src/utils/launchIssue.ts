@@ -42,6 +42,9 @@ export function describeLaunchIssue(raw: string): LaunchIssue {
     if (lower.includes('waiting for an answer') || lower.includes('prompt')) {
         return { title: 'Steam Prompt Waiting', message, pointsAtSteam: true };
     }
+    if (lower.includes('not signed in')) {
+        return { title: 'Steam Not Signed In', message, pointsAtSteam: true };
+    }
     if (lower.includes('already running')) {
         return { title: 'Game Already Running', message, pointsAtSteam: false };
     }

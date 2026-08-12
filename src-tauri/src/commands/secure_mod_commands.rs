@@ -247,7 +247,6 @@ fn install_client() -> Result<&'static reqwest::Client, String> {
     Ok(INSTALL_CLIENT.get_or_init(|| client))
 }
 
-
 #[tauri::command]
 pub async fn install_mod(
     app: AppHandle,
