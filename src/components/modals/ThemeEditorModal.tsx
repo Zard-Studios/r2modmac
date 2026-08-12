@@ -1016,33 +1016,27 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
                                         </span>
                                         <span className="text-[10px] text-gray-500">{filteredBuiltins.length}</span>
                                     </button>
-                                    {!collapsedGroups.has('built-in') && <div className="space-y-1.5">
+                                    {!collapsedGroups.has('built-in') && <div className="space-y-1">
                                         {filteredBuiltins.map((b) => {
                                             const isSelected = selectedId === b.id;
                                             return (
                                                 <button
                                                     key={b.id}
                                                     onClick={() => void handleSelect(b.id)}
-                                                    className={`w-full rounded-xl border p-2.5 text-left transition-colors ${
+                                                    title={b.origin ?? 'The stock r2modmac look'}
+                                                    className={`flex w-full items-center gap-2.5 rounded-lg border p-2 text-left transition-colors ${
                                                         isSelected
                                                             ? 'border-blue-500/60 bg-blue-500/10'
                                                             : 'border-gray-700 hover:border-gray-600 hover:bg-gray-800'
                                                     }`}
                                                 >
-                                                    <div className="flex items-center gap-2.5">
-                                                        <SwatchStrip colors={b.colors} className="h-9 w-9 shrink-0" />
-                                                        <div className="min-w-0 flex-1">
-                                                            <p className="truncate text-[13px] font-medium text-white">
-                                                                {b.name}
-                                                            </p>
-                                                            <p className="truncate text-[11px] text-gray-400">
-                                                                {b.origin ?? 'The stock r2modmac look'}
-                                                            </p>
-                                                        </div>
-                                                        {isSelected && (
-                                                            <AppIcon name="apply" className="h-4 w-4 shrink-0 text-fg-accent" />
-                                                        )}
-                                                    </div>
+                                                    <SwatchStrip colors={b.colors} className="h-8 w-8 shrink-0" />
+                                                    <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-white">
+                                                        {b.name}
+                                                    </span>
+                                                    {isSelected && (
+                                                        <AppIcon name="apply" className="h-4 w-4 shrink-0 text-fg-accent" />
+                                                    )}
                                                 </button>
                                             );
                                         })}
@@ -1078,7 +1072,7 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
                                         </button>
 
                                         {open && (
-                                            <div className="space-y-1.5">
+                                            <div className="space-y-1">
                                                 {list.map((t) => {
                                                     const isSelected = selectedId === t.file_name;
                                                     const colors = listColors.get(t.file_name) ?? DEFAULT_THEME.colors;
@@ -1086,30 +1080,31 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
                                                         <button
                                                             key={t.file_name}
                                                             onClick={() => void handleSelect(t.file_name)}
-                                                            className={`w-full rounded-xl border p-2.5 text-left transition-colors ${
+                                                            title={t.error ? `${t.file_name} — ${t.error}` : t.file_name}
+                                                            className={`flex w-full items-center gap-2.5 rounded-lg border p-2 text-left transition-colors ${
                                                                 isSelected
                                                                     ? 'border-blue-500/60 bg-blue-500/10'
-                                                                    : 'border-gray-700 hover:border-gray-600 hover:bg-gray-800'
+                                                                    : t.error
+                                                                      ? 'border-fg-danger/40 hover:border-fg-danger/60 hover:bg-gray-800'
+                                                                      : 'border-gray-700 hover:border-gray-600 hover:bg-gray-800'
                                                             }`}
                                                         >
-                                                            <div className="flex items-center gap-2.5">
-                                                                <SwatchStrip colors={colors} className="h-9 w-9 shrink-0" />
-                                                                <div className="min-w-0 flex-1">
-                                                                    <p className="truncate text-[13px] font-medium text-white">
-                                                                        {t.name}
-                                                                    </p>
-                                                                    {t.error ? (
-                                                                        <p className="truncate text-[11px] text-fg-danger">{t.error}</p>
-                                                                    ) : (
-                                                                        <p className="truncate font-mono text-[11px] text-gray-400">{t.file_name}</p>
-                                                                    )}
-                                                                </div>
-                                                                {isSelected && dirty ? (
-                                                                    <span className="h-2 w-2 shrink-0 rounded-full bg-amber-400" title="Unsaved changes" />
-                                                                ) : isSelected ? (
-                                                                    <AppIcon name="apply" className="h-4 w-4 shrink-0 text-fg-accent" />
-                                                                ) : null}
-                                                            </div>
+                                                            <SwatchStrip colors={colors} className="h-8 w-8 shrink-0" />
+                                                            <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-white">
+                                                                {t.name}
+                                                            </span>
+                                                            {/* A file that will not parse keeps a marker of its own: with
+                                                                the description line gone there is nowhere else for the
+                                                                reason to live, and a theme that silently stops applying
+                                                                is the one case worth interrupting the list for. */}
+                                                            {t.error && (
+                                                                <AppIcon name="warning" className="h-4 w-4 shrink-0 text-fg-danger" />
+                                                            )}
+                                                            {isSelected && dirty ? (
+                                                                <span className="h-2 w-2 shrink-0 rounded-full bg-amber-400" title="Unsaved changes" />
+                                                            ) : isSelected ? (
+                                                                <AppIcon name="apply" className="h-4 w-4 shrink-0 text-fg-accent" />
+                                                            ) : null}
                                                         </button>
                                                     );
                                                 })}
