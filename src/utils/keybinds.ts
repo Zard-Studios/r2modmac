@@ -529,6 +529,27 @@ export function isTextEditingAccelerator(
     return canonical !== null && TEXT_EDITING_ACCELERATORS.has(canonical);
 }
 
+/**
+ * Whether a key event landed in something the user is typing into.
+ *
+ * The other half of the rule above: a shortcut only has to stand aside when
+ * there is a field to stand aside for. Anywhere a document-level listener
+ * claims an editing gesture, both halves have to be asked, or the listener
+ * takes Command-Z away from every text box on the screen.
+ */
+export function isTextFieldTarget(
+    target: { tagName?: string; isContentEditable?: boolean } | null | undefined
+): boolean {
+    if (!target) return false;
+    const tag = target.tagName?.toUpperCase();
+    return (
+        tag === 'INPUT' ||
+        tag === 'TEXTAREA' ||
+        tag === 'SELECT' ||
+        target.isContentEditable === true
+    );
+}
+
 /** The action a key event triggers, if any. */
 export function actionForEvent(
     event: Pick<KeyboardEvent, 'code' | 'ctrlKey' | 'altKey' | 'shiftKey' | 'metaKey'>,

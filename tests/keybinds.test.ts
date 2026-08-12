@@ -9,6 +9,7 @@ import {
     findKeybindConflicts,
     formatAccelerator,
     isTextEditingAccelerator,
+    isTextFieldTarget,
     isUsableAccelerator,
     normalizeAccelerator,
     overridesFromKeybinds,
@@ -201,6 +202,15 @@ test('shortcuts are printed the way each platform writes them', () => {
     assert.equal(formatAccelerator('Mod+,', 'other'), 'Ctrl+,');
 });
 
+test('the editor undo hints name the key the platform actually uses', () => {
+    // The theme and config editors used to print ⌘Z on every platform, telling
+    // Windows and Linux users about a key their keyboard does not have.
+    assert.equal(formatAccelerator('Mod+Z', 'apple'), '⌘Z');
+    assert.equal(formatAccelerator('Mod+Shift+Z', 'apple'), '⇧⌘Z');
+    assert.equal(formatAccelerator('Mod+Z', 'other'), 'Ctrl+Z');
+    assert.equal(formatAccelerator('Mod+Shift+Z', 'other'), 'Ctrl+Shift+Z');
+});
+
 test('off macOS Control and the command modifier are one key, not two', () => {
     // `Ctrl+Mod+K` would otherwise ask for the same key twice and never match.
     assert.equal(normalizeAccelerator('Ctrl+K', 'other'), 'Mod+K');
@@ -264,4 +274,17 @@ test('catalogue actions without a default start off but can be assigned', () => 
 test('the editing gestures are recognised on Windows and Linux too', () => {
     assert.equal(isTextEditingAccelerator('Ctrl+A', 'other'), true);
     assert.equal(isTextEditingAccelerator('Ctrl+R', 'other'), false);
+});
+
+test('a field the user is typing into is recognised however it is built', () => {
+    // Undo listeners live on the document, so this is what decides whether
+    // Command-Z rolls back a colour or the letter just typed into the theme's
+    // name box.
+    assert.equal(isTextFieldTarget({ tagName: 'INPUT' }), true);
+    assert.equal(isTextFieldTarget({ tagName: 'TEXTAREA' }), true);
+    assert.equal(isTextFieldTarget({ tagName: 'SELECT' }), true);
+    assert.equal(isTextFieldTarget({ tagName: 'DIV', isContentEditable: true }), true);
+    assert.equal(isTextFieldTarget({ tagName: 'DIV' }), false);
+    assert.equal(isTextFieldTarget({ tagName: 'BUTTON' }), false);
+    assert.equal(isTextFieldTarget(null), false);
 });

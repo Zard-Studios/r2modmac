@@ -38,6 +38,7 @@ import {
     type ThemeColors,
 } from '../../utils/theme';
 import { allBuiltinThemes, isBuiltinId, type ThemePreset } from '../../utils/themePresets';
+import { formatAccelerator, isTextFieldTarget } from '../../utils/keybinds';
 import type { ThemeSummary } from '../../types/electron';
 
 interface ThemeEditorModalProps {
@@ -698,13 +699,17 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
         const onKeyDown = (e: KeyboardEvent) => {
             const modifier = e.metaKey || e.ctrlKey;
             const key = e.key.toLowerCase();
-            if (view === 'colours' && modifier && key === 'z') {
+            // The name and author boxes are text fields inside the editor, and
+            // this listener sits on the document: without standing aside, undo
+            // there rolled back a colour instead of the letter just typed.
+            const editingText = isTextFieldTarget(e.target as HTMLElement | null);
+            if (view === 'colours' && modifier && !editingText && key === 'z') {
                 e.preventDefault();
                 if (e.shiftKey) redoVisual();
                 else undoVisual();
                 return;
             }
-            if (view === 'colours' && modifier && key === 'y') {
+            if (view === 'colours' && modifier && !editingText && key === 'y') {
                 e.preventDefault();
                 redoVisual();
                 return;
@@ -828,7 +833,12 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
                                     <input
                                         value={draft.name}
                                         disabled={!editable}
-                                        onChange={(e) => applyVisualEdit((theme) => ({ ...theme, name: e.target.value }))}
+                                        // Typed text is one gesture, like dragging a slider is:
+                                        // recording a step per keystroke buried every colour
+                                        // change under the letters of the name above it.
+                                        onFocus={beginVisualGesture}
+                                        onBlur={endVisualGesture}
+                                        onChange={(e) => applyVisualEdit((theme) => ({ ...theme, name: e.target.value }), false)}
                                         aria-label="Theme name"
                                         placeholder="Theme Name"
                                         className="text-xl font-bold text-white tracking-tight bg-transparent border border-transparent rounded-lg px-2 py-0.5 hover:border-gray-700 focus:border-blue-500 focus:bg-gray-800 focus:outline-none disabled:hover:border-transparent min-w-0"
@@ -842,7 +852,9 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
                                     value={draft.author ?? ''}
                                     disabled={!editable}
                                     placeholder="Author name"
-                                    onChange={(e) => applyVisualEdit((theme) => ({ ...theme, author: e.target.value || undefined }))}
+                                    onFocus={beginVisualGesture}
+                                    onBlur={endVisualGesture}
+                                    onChange={(e) => applyVisualEdit((theme) => ({ ...theme, author: e.target.value || undefined }), false)}
                                     aria-label="Theme author"
                                     className="text-xs text-gray-400 bg-transparent border border-transparent rounded-lg px-2 py-0.5 hover:border-gray-700 focus:border-blue-500 focus:bg-gray-800 focus:outline-none disabled:hover:border-transparent min-w-0"
                                 />
@@ -872,7 +884,7 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
                                     type="button"
                                     onClick={undoVisual}
                                     disabled={!editable || visualUndo.length === 0}
-                                    title="Undo (⌘Z)"
+                                    title={`Undo (${formatAccelerator('Mod+Z')})`}
                                     aria-label="Undo visual change"
                                     className="p-1.5 rounded text-gray-400 hover:text-white hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                                 >
@@ -884,7 +896,7 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
                                     type="button"
                                     onClick={redoVisual}
                                     disabled={!editable || visualRedo.length === 0}
-                                    title="Redo (⇧⌘Z)"
+                                    title={`Redo (${formatAccelerator('Mod+Shift+Z')})`}
                                     aria-label="Redo visual change"
                                     className="p-1.5 rounded text-gray-400 hover:text-white hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                                 >

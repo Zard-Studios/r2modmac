@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 
 import { useKeybindStore } from '../store/useKeybindStore';
-import { acceleratorFromEvent, actionForEvent, isTextEditingAccelerator, type KeybindActionId } from '../utils/keybinds';
+import { acceleratorFromEvent, actionForEvent, isTextEditingAccelerator, isTextFieldTarget, type KeybindActionId } from '../utils/keybinds';
 
 type Handlers = Partial<Record<KeybindActionId, () => void>>;
 
@@ -40,13 +40,7 @@ export function KeyboardShortcuts({ handlers, enabled = true }: KeyboardShortcut
             // Bailing out of every shortcut instead would strand the ones that
             // matter most on screens whose search box takes focus on arrival —
             // the game list being exactly that.
-            const target = event.target as HTMLElement | null;
-            const inTextField =
-                !!target &&
-                (target.tagName === 'INPUT' ||
-                    target.tagName === 'TEXTAREA' ||
-                    target.tagName === 'SELECT' ||
-                    target.isContentEditable);
+            const inTextField = isTextFieldTarget(event.target as HTMLElement | null);
 
             const accelerator = acceleratorFromEvent(event);
             if (!accelerator) return;

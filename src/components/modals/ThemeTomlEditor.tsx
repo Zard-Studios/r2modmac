@@ -8,6 +8,7 @@ import {
     stepForward,
     type EditorHistory,
 } from '../../utils/editorHistory';
+import { formatAccelerator } from '../../utils/keybinds';
 
 /**
  * The theme file, edited as text.
@@ -170,7 +171,7 @@ export function ThemeTomlEditor({
                         type="button"
                         onClick={undo}
                         disabled={!editable || history.undo.length === 0}
-                        title="Undo (⌘Z)"
+                        title={`Undo (${formatAccelerator('Mod+Z')})`}
                         aria-label="Undo"
                         className={iconButton}
                     >
@@ -182,7 +183,7 @@ export function ThemeTomlEditor({
                         type="button"
                         onClick={redo}
                         disabled={!editable || history.redo.length === 0}
-                        title="Redo (⇧⌘Z)"
+                        title={`Redo (${formatAccelerator('Mod+Shift+Z')})`}
                         aria-label="Redo"
                         className={iconButton}
                     >
