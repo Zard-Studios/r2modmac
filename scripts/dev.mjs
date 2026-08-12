@@ -6,13 +6,33 @@ import path from 'node:path';
 const repoRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const workerDir = path.join(repoRoot, 'services/adtention-worker');
 const proxyUrl = 'http://127.0.0.1:3000/api/sponsor';
-const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-const appCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+const npmCliPath = process.env.npm_execpath;
+const npmCommand = npmCliPath ? process.execPath : process.platform === 'win32' ? 'npm.cmd' : 'npm';
+const npmArgsPrefix = npmCliPath ? [npmCliPath] : [];
+const npmNeedsShell = !npmCliPath && process.platform === 'win32';
 let stopping = false;
 
+function runNpm(args, options) {
+  return spawn(npmCommand, [...npmArgsPrefix, ...args], {
+    ...options,
+    ...(npmNeedsShell ? { shell: true } : {}),
+  });
+}
+
+function runNpmSync(args, options) {
+  return spawnSync(npmCommand, [...npmArgsPrefix, ...args], {
+    ...options,
+    ...(npmNeedsShell ? { shell: true } : {}),
+  });
+}
+
 function stop(child) {
-  if (!child || child.exitCode !== null) return;
-  child.kill('SIGTERM');
+  if (!child || child.exitCode !== null || child.killed) return;
+  try {
+    child.kill('SIGTERM');
+  } catch {
+    // cacca
+  }
 }
 
 // wrangler is a local devDependency of the worker, unlike the old `npx
@@ -21,18 +41,23 @@ function stop(child) {
 // The only network call now is this one-time install on a fresh clone.
 if (!existsSync(path.join(workerDir, 'node_modules'))) {
   console.log('[dev] Installing services/adtention-worker dependencies (first run only)...');
-  const install = spawnSync(npmCommand, ['install'], { cwd: workerDir, stdio: 'inherit' });
+  const install = runNpmSync(['install'], { cwd: workerDir, stdio: 'inherit' });
   if (install.status !== 0) {
     console.error('[dev] Failed to install services/adtention-worker dependencies.');
     process.exit(install.status ?? 1);
   }
 }
 
-const proxy = spawn(npmCommand, ['run', 'dev'], { stdio: 'inherit', cwd: workerDir });
+const proxy = runNpm(['run', 'dev'], { stdio: 'inherit', cwd: workerDir });
+let proxyStartError;
+proxy.once('error', (error) => {
+  proxyStartError = error;
+});
 
 async function waitForProxy() {
   const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
+    if (proxyStartError) throw proxyStartError;
     if (proxy.exitCode !== null) throw new Error('The local sponsor Worker stopped before it was ready.');
     try {
       const response = await fetch(proxyUrl, { method: 'GET' });
@@ -47,8 +72,9 @@ async function waitForProxy() {
 
 try {
   await waitForProxy();
-  const app = spawn(appCommand, ['exec', 'tauri', 'dev'], {
+  const app = runNpm(['exec', 'tauri', 'dev'], {
     stdio: 'inherit',
+    cwd: repoRoot,
     env: { ...process.env, R2MODMAC_SPONSOR_PROXY_URL: proxyUrl },
   });
 
@@ -60,6 +86,12 @@ try {
   };
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
+
+  app.on('error', (error) => {
+    console.error(`[dev] Failed to start Tauri: ${error.message}`);
+    shutdown();
+    process.exitCode = 1;
+  });
 
   app.on('exit', (code) => {
     shutdown();
