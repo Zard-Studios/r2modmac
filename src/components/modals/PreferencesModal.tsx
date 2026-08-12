@@ -120,7 +120,7 @@ const ROW_ICON_COLORS: Record<PreferencesIconName, string> = {
     folder: 'text-orange-400',
     game: 'text-teal-400',
     profile: 'text-purple-400',
-    theme: 'text-pink-400',
+    theme: 'text-fg-accent',
     keyboard: 'text-amber-400',
 };
 
