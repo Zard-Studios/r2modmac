@@ -1,4 +1,5 @@
 use crate::models::shared::*;
+use crate::tracing::{perfetto_te_ns, scoped_track_event, EventContext, TrackEventDebugArg};
 use base64::Engine;
 use std::fs;
 use std::io::{Seek, Write};
@@ -160,6 +161,13 @@ pub async fn import_profile_configs(
     let app_data_dir = crate::utils::paths::app_data_dir(&app).map_err(|e| e.to_string())?;
     let backup_dir = crate::utils::config_backup::profile_backup_dir(&app_data_dir, &profile_id);
 
+    scoped_track_event!(
+        "config",
+        "import_profile_configs",
+        |ctx: &mut EventContext| {
+            ctx.add_debug_arg("profile", TrackEventDebugArg::String(profile_id.as_str()));
+        }
+    );
     let file = fs::File::open(&archive_path).map_err(|e| e.to_string())?;
     let mut archive = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
     let restored = extract_config_entries(&backup_dir, &mut archive)?;
@@ -283,6 +291,9 @@ pub async fn export_profile(
     app: AppHandle,
     profile_id: String,
 ) -> Result<serde_json::Value, String> {
+    scoped_track_event!("config", "export_profile", |ctx: &mut EventContext| {
+        ctx.add_debug_arg("profile", TrackEventDebugArg::String(profile_id.as_str()));
+    });
     let profile = find_profile(&app, &profile_id)?;
 
     let temp_dir = std::env::temp_dir().join(format!("r2modmac-export-{}", profile_id));

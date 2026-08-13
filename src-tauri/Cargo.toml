@@ -1,6 +1,6 @@
 [package]
 name = "r2modmac"
-version = "0.8.5"
+version = "1.0.0"
 description = "A Tauri App"
 authors = ["Zard Studios"]
 license = ""
@@ -53,6 +53,7 @@ sha2 = "0.10"
 # Themes are user-authored TOML. Parsing only — theme files are written from the
 # frontend, which emits the commented, self-documenting layout users read.
 toml = { version = "0.9", default-features = false, features = ["parse", "serde"] }
+perfetto-sdk = "1.0.3"
 
 [target.'cfg(not(target_os = "windows"))'.dependencies]
 mimalloc = { version = "0.1", default-features = false }

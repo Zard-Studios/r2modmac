@@ -1,4 +1,5 @@
 use crate::models::shared::*;
+use crate::tracing::{perfetto_te_ns, scoped_track_event, EventContext, TrackEventDebugArg};
 use futures_util::stream::{self, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -18,6 +19,9 @@ fn read_gz_json_cache<T: serde::de::DeserializeOwned>(
     use std::io::Read;
     let cache_dir = crate::utils::paths::app_cache_dir(app).ok()?;
     let cache_file = cache_dir.join(file_name);
+    scoped_track_event!("fs", "read_gz_json_cache", |ctx: &mut EventContext| {
+        ctx.add_debug_arg("file", TrackEventDebugArg::String(file_name));
+    });
     let file = std::fs::File::open(&cache_file).ok()?;
     let mut gz = flate2::read::GzDecoder::new(file);
     let mut data = Vec::new();
@@ -47,6 +51,7 @@ fn write_gz_json_cache<T: serde::Serialize>(app: &AppHandle, file_name: &str, va
 }
 
 async fn fetch_communities_live() -> Result<Vec<serde_json::Value>, String> {
+    scoped_track_event!("network", "fetch_communities_live");
     let mut url = Some("https://thunderstore.io/api/experimental/community/".to_string());
     let mut all_results = Vec::new();
 
@@ -2085,5 +2090,18 @@ mod tests {
         assert!(username.is_ok());
         let name = username.unwrap();
         assert!(!name.trim().is_empty());
+    }
+}
+
+#[cfg(test)]
+mod version_bump_tests {
+    use super::compare_versions;
+
+    #[test]
+    fn a_major_bump_is_offered_to_every_older_build() {
+        assert!(compare_versions("1.0.0", "0.8.5"));
+        assert!(compare_versions("1.0.0", "0.9.9"));
+        assert!(!compare_versions("1.0.0", "1.0.0"));
+        assert!(!compare_versions("0.8.5", "1.0.0"));
     }
 }

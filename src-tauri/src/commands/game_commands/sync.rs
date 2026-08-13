@@ -1,4 +1,5 @@
 use super::*;
+use crate::tracing::{perfetto_te_ns, scoped_track_event, EventContext, TrackEventDebugArg};
 
 fn ensure_finalize_ready(finalize: bool, missing_payloads: usize) -> Result<(), String> {
     if finalize && missing_payloads > 0 {
@@ -19,6 +20,14 @@ pub async fn sync_profile_to_game(
     use_legacy_cache: Option<bool>,
     finalize: Option<bool>,
 ) -> Result<serde_json::Value, String> {
+    scoped_track_event!(
+        "install",
+        "sync_profile_to_game",
+        |ctx: &mut EventContext| {
+            ctx.add_debug_arg("profile", TrackEventDebugArg::String(profile_id.as_str()));
+            ctx.add_debug_arg("game", TrackEventDebugArg::String(game_identifier.as_str()));
+        }
+    );
     let use_cache = use_legacy_cache.unwrap_or(false);
     let finalize = finalize.unwrap_or(false);
 

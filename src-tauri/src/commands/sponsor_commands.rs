@@ -58,10 +58,6 @@ struct ProxySponsorMessage {
     sponsor_name: Option<String>,
     message: String,
     url: Option<String>,
-    #[serde(default)]
-    category: Option<String>,
-    #[serde(default)]
-    billable: bool,
 }
 
 fn sponsor_state_path(app: &AppHandle) -> Result<PathBuf, String> {

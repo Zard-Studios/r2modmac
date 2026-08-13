@@ -1,5 +1,6 @@
 pub mod commands;
 pub mod models;
+pub mod tracing;
 pub mod utils;
 
 // Use mimalloc as the global allocator. It returns freed memory pages back to
@@ -117,6 +118,16 @@ fn set_verbose_logging(enabled: bool) {
     apply_log_level(enabled);
 }
 
+#[tauri::command]
+fn start_perfetto_trace(duration_secs: Option<u32>) -> bool {
+    tracing::start(duration_secs)
+}
+
+#[tauri::command]
+fn stop_perfetto_trace() -> bool {
+    tracing::stop()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -151,6 +162,13 @@ pub fn run() {
 
             utils::volume_watcher::start_volume_watcher(app.handle().clone());
             commands::theme_commands::start_theme_watcher(app.handle().clone());
+
+            let trace_dir = utils::paths::app_data_dir(app)
+                .map(|dir| dir.join("traces"))
+                .unwrap_or_else(|_| std::env::temp_dir().join("r2modmac-traces"));
+            let _ = std::fs::create_dir_all(&trace_dir);
+            tracing::init(trace_dir);
+            tracing::auto_record_if_requested();
 
             // Migrate old directories
             #[cfg(target_os = "windows")]
@@ -499,6 +517,8 @@ pub fn run() {
             get_app_logs_size,
             clear_app_logs,
             set_verbose_logging,
+            start_perfetto_trace,
+            stop_perfetto_trace,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

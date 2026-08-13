@@ -2828,6 +2828,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "paste"
+version = "1.0.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
+
+[[package]]
 name = "pathdiff"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2850,6 +2856,27 @@ name = "percent-encoding"
 version = "2.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
+
+[[package]]
+name = "perfetto-sdk"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "95d9029adc72ecb45f1ec27e94e549b2eca01d2c666de553ec513508ae13faed"
+dependencies = [
+ "bitflags 2.10.0",
+ "paste",
+ "perfetto-sdk-sys",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "perfetto-sdk-sys"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "64f66149aa1005923614599742bdc7eff2cb102f8c251c955b0457ed00b949d8"
+dependencies = [
+ "cc",
+]
 
 [[package]]
 name = "phf"
@@ -3225,7 +3252,7 @@ checksum = "69cdb34c158ceb288df11e18b4bd39de994f6657d83847bdffdbd7f346754b0f"
 
 [[package]]
 name = "r2modmac"
-version = "0.8.5"
+version = "1.0.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -3237,6 +3264,7 @@ dependencies = [
  "mimalloc",
  "notify",
  "open",
+ "perfetto-sdk",
  "regex",
  "reqwest 0.11.27",
  "serde",

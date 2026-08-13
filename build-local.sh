@@ -14,6 +14,12 @@ if command -v sccache &>/dev/null; then
 fi
 
 
+# Tauri re-runs beforeBuildCommand (npm run build) for every target. The
+# frontend is already built once, up front, so every target after the first
+# would rebuild it for nothing.
+SKIP_BEFORE='{"build":{"beforeBuildCommand":"","devUrl":null}}'
+SKIP_BEFORE_MACOS='{"build":{"beforeBuildCommand":""}}'
+
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 DIST_DIR="$ROOT_DIR/dist-local"
 SPONSOR_PROXY_URL="https://r2modmac-sponsor-production.notfy-stream.workers.dev/api/sponsor"
@@ -31,8 +37,12 @@ Usage:
 
 Build shipping artifacts into dist-local/.
 
-  --all, all                  Build macOS on macOS, then Linux x64 and ARM64.
+  --all, all                  Build every artifact this host can produce.
   --macos, macos              Build Apple Silicon and Intel macOS DMGs.
+  --windows, windows          Build Windows x64, x86 and ARM64 zips.
+  --windows-x64, windows-x64      Build only r2modmac_windows_x64.zip.
+  --windows-x86, windows-x86      Build only r2modmac_windows_x86.zip.
+  --windows-arm64, windows-arm64  Build only r2modmac_windows_arm64.zip.
   --linux, linux              Build Linux x64 and ARM64 tarballs.
   --linux-x64, linux-x64      Build only r2modmac_linux_x64.tar.gz.
   --linux-arm64, linux-arm64  Build only r2modmac_linux_arm64.tar.gz.
@@ -50,6 +60,32 @@ USAGE
 }
 
 log() { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
+
+# Phase timings, printed as a summary at the end so a long build says where the
+# time actually went instead of leaving it to guesswork.
+PHASE_NAMES=()
+PHASE_SECONDS=()
+timed() {
+  local label="$1"; shift
+  local started elapsed
+  started=$SECONDS
+  "$@"
+  elapsed=$(( SECONDS - started ))
+  PHASE_NAMES+=("$label")
+  PHASE_SECONDS+=("$elapsed")
+  printf '\033[1;32m    %s: %dm %02ds\033[0m\n' "$label" "$(( elapsed / 60 ))" "$(( elapsed % 60 ))"
+}
+
+print_timings() {
+  [[ ${#PHASE_NAMES[@]} -gt 0 ]] || return 0
+  log "Where the time went"
+  local i total=0
+  for i in "${!PHASE_NAMES[@]}"; do
+    printf '  %-28s %4dm %02ds\n' "${PHASE_NAMES[$i]}" "$(( PHASE_SECONDS[$i] / 60 ))" "$(( PHASE_SECONDS[$i] % 60 ))"
+    total=$(( total + PHASE_SECONDS[$i] ))
+  done
+  printf '  %-28s %4dm %02ds\n' "TOTAL" "$(( total / 60 ))" "$(( total % 60 ))"
+}
 warn() { printf '\033[1;33mwarning: %s\033[0m\n' "$*" >&2; }
 die() { printf '\033[1;31merror: %s\033[0m\n' "$*" >&2; exit 1; }
 require() { command -v "$1" >/dev/null 2>&1 || die "Required command not found: $1"; }
@@ -93,12 +129,21 @@ cd "$ROOT_DIR"
 [[ -f package.json && -f src-tauri/Cargo.toml && -f src-tauri/tauri.conf.json ]] \
   || die "Run this script from the r2modmac repository root."
 
+_CONTAINER_STARTED=0
+stop_container_system() {
+  if [[ "$_CONTAINER_STARTED" == "1" ]]; then
+    container system stop >/dev/null 2>&1 || true
+    _CONTAINER_STARTED=0
+  fi
+}
+
 cleanup_paths=()
 cleanup() {
   local path
   for path in "${cleanup_paths[@]:-}"; do
     [[ -n "$path" ]] && rm -rf -- "$path"
   done
+  stop_container_system
 }
 trap cleanup EXIT INT TERM
 
@@ -136,20 +181,35 @@ verify_sponsor_endpoint() {
 
 install_frontend_dependencies() {
   require npm
+  local stamp="node_modules/.r2modmac-lock-hash"
+  local current
+  current="$(sha256_file package-lock.json | awk '{print $1}')"
+  if [[ -f "$stamp" && "$(cat "$stamp")" == "$current" ]]; then
+    log "Frontend dependencies already match package-lock.json"
+    return
+  fi
   log "Installing locked frontend dependencies"
   npm ci --prefer-offline --no-audit --no-fund
+  printf '%s' "$current" > "$stamp"
 }
 
 run_checks() {
   require cargo
+  require npx
   log "Checking Rust formatting"
   cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
 
+  # No `cargo check` afterwards: it compiles the dev profile, shares nothing
+  # with the release builds below, and `cargo test` has already type-checked
+  # every crate.
   log "Running Rust tests"
   cargo test --manifest-path src-tauri/Cargo.toml --locked
 
-  log "Checking the native application"
-  cargo check --manifest-path src-tauri/Cargo.toml --locked
+  log "Type-checking the frontend"
+  npx tsc --noEmit
+
+  log "Running frontend tests"
+  npm test
 }
 
 build_frontend() {
@@ -198,7 +258,8 @@ build_macos_target() {
   log "Building macOS $asset_arch"
   rustup target add "$rust_target"
   unset R2MODMAC_SPONSOR_PROXY_URL
-  npm run tauri build -- --target "$rust_target" --bundles app
+  npm run tauri build -- --target "$rust_target" --bundles app \
+    --config "$SKIP_BEFORE_MACOS" -- --locked
 
   local app_path="$ROOT_DIR/src-tauri/target/$rust_target/release/bundle/macos/r2modmac.app"
   [[ -d "$app_path" ]] || die "macOS app bundle was not produced at $app_path"
@@ -236,14 +297,12 @@ build_macos_target() {
 
 build_macos() {
   [[ "$(uname -s)" == "Darwin" ]] || die "macOS artifacts must be built on macOS."
-  build_macos_target "aarch64-apple-darwin" "aarch64"
-  build_macos_target "x86_64-apple-darwin" "x86_64"
+  timed "macOS aarch64" build_macos_target "aarch64-apple-darwin" "aarch64"
+  timed "macOS x86_64"  build_macos_target "x86_64-apple-darwin" "x86_64"
 }
 
 # --- Linux via apple/container -----------------------------------------------
 # The container system service is started on demand and shut down on script exit.
-
-_CONTAINER_STARTED=0
 
 start_container_system() {
   if [[ "$_CONTAINER_STARTED" == "0" ]]; then
@@ -262,23 +321,6 @@ start_container_system() {
     _CONTAINER_STARTED=1
   fi
 }
-
-stop_container_system() {
-  if [[ "$_CONTAINER_STARTED" == "1" ]]; then
-    container prune >/dev/null 2>&1 || true
-    container system stop >/dev/null 2>&1 || true
-    _CONTAINER_STARTED=0
-  fi
-}
-
-# Extend the existing cleanup trap to also stop the container service
-_original_cleanup() {
-  local path
-  for path in "${cleanup_paths[@]:-}"; do
-    [[ -n "$path" ]] && rm -rf -- "$path"
-  done
-}
-cleanup() { _original_cleanup; stop_container_system; }
 
 build_linux_target() {
   local container_arch="$1"   # arm64 or x86_64
@@ -306,12 +348,15 @@ build_linux_target() {
   local archive="$DIST_DIR/$archive_name"
   rm -f "$archive"
 
+  mkdir -p "$HOME/.cache/sccache"
+
   container run --rm -i \
     --arch "$container_arch" \
     -m 8G \
     -v "$ROOT_DIR:$ROOT_DIR" \
     -v "$HOME/.cargo/registry:/root/.cargo/registry" \
     -v "$HOME/.cargo/git:/root/.cargo/git" \
+    -v "$HOME/.cache/sccache:/root/.cache/sccache" \
     -w "$ROOT_DIR" \
     "$img" \
     /bin/bash -s -- "$rust_target" "$ROOT_DIR" "$archive_name" "$SPONSOR_PROXY_URL" <<'INNER'
@@ -323,6 +368,17 @@ ARCHIVE_NAME="$3"
 SPONSOR_PROXY_URL="$4"
 
 export PATH="/root/.cargo/bin:$PATH"
+# The builder image ships gcc/g++, not clang. Left to itself the `cc` crate
+# reaches for clang++ and the perfetto-sdk-sys build script dies with 127.
+export CC="${CC:-gcc}"
+export CXX="${CXX:-g++}"
+# Only if the image carries sccache: an unset wrapper is far better than one
+# pointing at a binary that is not there.
+if command -v sccache >/dev/null 2>&1; then
+  export RUSTC_WRAPPER="$(command -v sccache)"
+  export SCCACHE_DIR=/root/.cache/sccache
+  unset CARGO_INCREMENTAL
+fi
 export TAURI_CONFIG='{"build":{"beforeBuildCommand":"","devUrl":null}}'
 export TAURI_ENV_TARGET_TRIPLE="$RUST_TARGET"
 
@@ -352,8 +408,8 @@ INNER
   sha256_file "$archive"
 }
 
-build_linux_x64()   { build_linux_target "x86_64" "x64"   "x86_64-unknown-linux-gnu"; }
-build_linux_arm64() { build_linux_target "arm64"  "arm64" "aarch64-unknown-linux-gnu"; }
+build_linux_x64()   { timed "Linux x64"   build_linux_target "x86_64" "x64"   "x86_64-unknown-linux-gnu"; }
+build_linux_arm64() { timed "Linux arm64" build_linux_target "arm64"  "arm64" "aarch64-unknown-linux-gnu"; }
 
 
 write_checksums() {
@@ -361,7 +417,11 @@ write_checksums() {
   : > "$output"
   local file
   while IFS= read -r file; do
-    [[ "$(basename "$file")" == "SHA256SUMS.txt" ]] && continue
+    local name
+    name="$(basename "$file")"
+    # Skip the sums file itself and anything the operating system dropped in
+    # here, like .DS_Store: only shipped artifacts belong in the manifest.
+    [[ "$name" == "SHA256SUMS.txt" || "$name" == .* ]] && continue
     (cd "$DIST_DIR" && sha256_file "$(basename "$file")") >> "$output"
   done < <(find "$DIST_DIR" -maxdepth 1 -type f -print | LC_ALL=C sort)
   log "Checksums written to $output"
@@ -373,16 +433,18 @@ verify_sponsor_endpoint
 
 if [[ "$CLEAN" == "1" ]]; then
   log "Cleaning local build outputs"
-  rm -rf -- "$DIST_DIR" "$ROOT_DIR"/src-tauri/target-local-linux-*
+  # The containers build into src-tauri/target/<triple>, which is what has to
+  # go; the old target-local-linux-* paths never existed.
+  rm -rf -- "$DIST_DIR"
+  rm -rf -- "$ROOT_DIR"/src-tauri/target/*-unknown-linux-gnu
 fi
 mkdir -p "$DIST_DIR"
 
-install_frontend_dependencies
-build_frontend
-if [[ "$SKIP_CHECKS" == "0" ]]; then run_checks; else warn "Shipping checks were skipped by explicit request."; fi
+timed "npm dependencies" install_frontend_dependencies
+timed "frontend build" build_frontend
+if [[ "$SKIP_CHECKS" == "0" ]]; then timed "checks and tests" run_checks; else warn "Shipping checks were skipped by explicit request."; fi
 
 # --- Windows via cargo-xwin --------------------------------------------------
-SKIP_BEFORE='{"build":{"beforeBuildCommand":"","devUrl":null}}'
 
 build_windows_target() {
   local rust_target="$1"   # e.g. x86_64-pc-windows-msvc
@@ -418,9 +480,9 @@ build_windows_target() {
   sha256_file "$zip"
 }
 
-build_windows_x64()   { build_windows_target "x86_64-pc-windows-msvc"  "x64"; }
-build_windows_x86()   { build_windows_target "i686-pc-windows-msvc"    "x86"; }
-build_windows_arm64() { build_windows_target "aarch64-pc-windows-msvc" "arm64"; }
+build_windows_x64()   { timed "Windows x64"   build_windows_target "x86_64-pc-windows-msvc"  "x64"; }
+build_windows_x86()   { timed "Windows x86"   build_windows_target "i686-pc-windows-msvc"    "x86"; }
+build_windows_arm64() { timed "Windows arm64" build_windows_target "aarch64-pc-windows-msvc" "arm64"; }
 
 build_windows() {
   build_windows_x64
@@ -447,4 +509,5 @@ case "$MODE" in
 esac
 
 write_checksums
+print_timings
 log "Shipping artifacts are ready in $DIST_DIR"

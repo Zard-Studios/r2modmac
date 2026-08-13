@@ -1,3 +1,4 @@
+use crate::tracing::{perfetto_te_ns, scoped_track_event, EventContext, TrackEventDebugArg};
 use std::fs;
 use std::{
     collections::HashMap,
@@ -27,6 +28,16 @@ const DEQUARANTINE_COOLDOWN_MS: u128 = 10 * 60 * 1000;
 /// volumes, or a destination that already exists) so callers fall back to a
 /// regular copy.
 pub fn try_clone_tree(source: &std::path::Path, destination: &std::path::Path) -> bool {
+    scoped_track_event!("fs", "try_clone_tree", |ctx: &mut EventContext| {
+        ctx.add_debug_arg(
+            "src",
+            TrackEventDebugArg::String(source.to_string_lossy().as_ref()),
+        );
+        ctx.add_debug_arg(
+            "dst",
+            TrackEventDebugArg::String(destination.to_string_lossy().as_ref()),
+        );
+    });
     #[cfg(target_os = "macos")]
     {
         use std::os::unix::ffi::OsStrExt;
@@ -64,6 +75,16 @@ pub fn try_clone_tree(source: &std::path::Path, destination: &std::path::Path) -
 }
 
 pub fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
+    scoped_track_event!("fs", "copy_dir_recursive", |ctx: &mut EventContext| {
+        ctx.add_debug_arg(
+            "src",
+            TrackEventDebugArg::String(src.to_string_lossy().as_ref()),
+        );
+        ctx.add_debug_arg(
+            "dst",
+            TrackEventDebugArg::String(dst.to_string_lossy().as_ref()),
+        );
+    });
     if !dst.exists() {
         fs::create_dir_all(dst)?;
     }
@@ -131,6 +152,12 @@ pub fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::
 
 /// Calculate directory size recursively
 pub fn calculate_dir_size(path: &std::path::Path) -> std::io::Result<u64> {
+    scoped_track_event!("fs", "calculate_dir_size", |ctx: &mut EventContext| {
+        ctx.add_debug_arg(
+            "path",
+            TrackEventDebugArg::String(path.to_string_lossy().as_ref()),
+        );
+    });
     let mut size = 0;
     if path.is_dir() {
         for entry in fs::read_dir(path)? {
@@ -233,6 +260,16 @@ pub fn dequarantine_recursive(path: &std::path::Path) {
 }
 
 pub fn migrate_root_plugins_into_bepinex(game_path: &std::path::Path) -> Result<(), String> {
+    scoped_track_event!(
+        "install",
+        "migrate_root_plugins_into_bepinex",
+        |ctx: &mut EventContext| {
+            ctx.add_debug_arg(
+                "game",
+                TrackEventDebugArg::String(game_path.to_string_lossy().as_ref()),
+            );
+        }
+    );
     let migrations = [
         ("plugins", "plugins"),
         ("patchers", "patchers"),
@@ -281,6 +318,16 @@ pub fn migrate_root_plugins_into_bepinex(game_path: &std::path::Path) -> Result<
 }
 
 pub fn repair_backslash_named_entries(root: &std::path::Path) -> Result<(), String> {
+    scoped_track_event!(
+        "fs",
+        "repair_backslash_named_entries",
+        |ctx: &mut EventContext| {
+            ctx.add_debug_arg(
+                "root",
+                TrackEventDebugArg::String(root.to_string_lossy().as_ref()),
+            );
+        }
+    );
     if !root.exists() {
         return Ok(());
     }

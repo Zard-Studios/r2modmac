@@ -1,3 +1,4 @@
+use crate::tracing::{perfetto_te_ns, scoped_track_event, EventContext, TrackEventDebugArg};
 use reqwest::header::{ACCEPT_ENCODING, CONTENT_RANGE, ETAG, IF_RANGE, LAST_MODIFIED, RANGE};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -175,6 +176,14 @@ pub async fn download_persistent<F>(
 where
     F: FnMut(DownloadProgress),
 {
+    scoped_track_event!(
+        "network",
+        "download_persistent",
+        |ctx: &mut EventContext| {
+            ctx.add_debug_arg("url", TrackEventDebugArg::String(url));
+            ctx.add_debug_arg("mod", TrackEventDebugArg::String(mod_name));
+        }
+    );
     download_persistent_with_attempts(
         client,
         cache_dir,

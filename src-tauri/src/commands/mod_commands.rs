@@ -1,5 +1,6 @@
 use crate::commands::game_commands::get_game_path;
 use crate::models::shared::*;
+use crate::tracing::{perfetto_te_ns, scoped_track_event, EventContext, TrackEventDebugArg};
 use crate::utils::file_ops::*;
 use crate::utils::mod_manifest::{
     backup_existing_mod_files, save_owned_mod_manifest, GAME_MANIFEST_SCOPE,
@@ -369,6 +370,12 @@ fn is_executable_like(path: &str) -> bool {
 }
 
 fn hash_file(path: &std::path::Path) -> Result<String, String> {
+    scoped_track_event!("hash", "hash_file", |ctx: &mut EventContext| {
+        ctx.add_debug_arg(
+            "path",
+            TrackEventDebugArg::String(path.to_string_lossy().as_ref()),
+        );
+    });
     let mut file = fs::File::open(path).map_err(|e| e.to_string())?;
     let mut hasher = Sha256::new();
     let mut buffer = [0u8; 64 * 1024];
@@ -384,6 +391,9 @@ fn hash_file(path: &std::path::Path) -> Result<String, String> {
 }
 
 fn hash_bytes(bytes: &[u8]) -> String {
+    scoped_track_event!("hash", "hash_bytes", |ctx: &mut EventContext| {
+        ctx.add_debug_arg("bytes", TrackEventDebugArg::Int64(bytes.len() as i64));
+    });
     let mut hasher = Sha256::new();
     hasher.update(bytes);
     format!("{:x}", hasher.finalize())
@@ -1069,6 +1079,12 @@ fn copy_file_with_cancel(
     source_path: &std::path::Path,
     target_path: &std::path::Path,
 ) -> Result<u64, String> {
+    scoped_track_event!("fs", "copy_file_with_cancel", |ctx: &mut EventContext| {
+        ctx.add_debug_arg(
+            "src",
+            TrackEventDebugArg::String(source_path.to_string_lossy().as_ref()),
+        );
+    });
     check_custom_mod_cancelled()?;
     if let Some(parent) = target_path.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
@@ -2109,6 +2125,7 @@ fn newtonsoft_json_nuget_url() -> String {
 }
 
 async fn download_newtonsoft_json_dll() -> Result<Vec<u8>, String> {
+    scoped_track_event!("network", "download_newtonsoft_json_dll");
     let client = reqwest::Client::builder()
         .user_agent(APP_USER_AGENT)
         .build()
@@ -2291,6 +2308,7 @@ fn extract_lovely_tarball_to_game_root(
     bytes: &[u8],
     game_dir: &std::path::Path,
 ) -> Result<(), String> {
+    scoped_track_event!("install", "extract_lovely_tarball");
     let gz = flate2::read::GzDecoder::new(bytes);
     let mut archive = tar::Archive::new(gz);
 
@@ -2331,6 +2349,13 @@ fn lovely_asset_name_for_current_arch() -> &'static str {
 }
 
 async fn download_official_lovely_runtime(version: &str) -> Result<Vec<u8>, String> {
+    scoped_track_event!(
+        "network",
+        "download_official_lovely_runtime",
+        |ctx: &mut EventContext| {
+            ctx.add_debug_arg("version", TrackEventDebugArg::String(version));
+        }
+    );
     let client = reqwest::Client::builder()
         .user_agent(APP_USER_AGENT)
         .build()
@@ -2805,6 +2830,14 @@ async fn download_bepinex_release_asset(
     api_url: &str,
     context: &str,
 ) -> Result<Option<Vec<u8>>, String> {
+    scoped_track_event!(
+        "network",
+        "download_bepinex_release_asset",
+        |ctx: &mut EventContext| {
+            ctx.add_debug_arg("api", TrackEventDebugArg::String(api_url));
+            ctx.add_debug_arg("context", TrackEventDebugArg::String(context));
+        }
+    );
     let response = match client.get(api_url).send().await {
         Ok(response) => response,
         Err(_) => return Ok(None),
@@ -2842,6 +2875,13 @@ async fn download_bepinex_release_asset(
 async fn download_official_macos_bepinex_pack(
     thunderstore_version: &str,
 ) -> Result<Vec<u8>, String> {
+    scoped_track_event!(
+        "network",
+        "download_official_macos_bepinex_pack",
+        |ctx: &mut EventContext| {
+            ctx.add_debug_arg("version", TrackEventDebugArg::String(thunderstore_version));
+        }
+    );
     let version_candidates = official_bepinex_version_candidates(thunderstore_version);
     let client = reqwest::Client::builder()
         .user_agent(APP_USER_AGENT)
@@ -3554,6 +3594,10 @@ pub async fn install_mod(
     game_path: String,
     use_profile_cache: Option<bool>,
 ) -> Result<serde_json::Value, String> {
+    scoped_track_event!("install", "install_mod", |ctx: &mut EventContext| {
+        ctx.add_debug_arg("mod", TrackEventDebugArg::String(mod_name.as_str()));
+        ctx.add_debug_arg("profile", TrackEventDebugArg::String(profile_id.as_str()));
+    });
     let client = download_client()?;
     let cache_dir = crate::utils::paths::app_cache_dir(&app).map_err(|e| e.to_string())?;
     let progress_app = app.clone();
@@ -3652,6 +3696,10 @@ async fn install_mod_bytes(
     use_profile_cache: Option<bool>,
     bytes: Vec<u8>,
 ) -> Result<serde_json::Value, String> {
+    scoped_track_event!("install", "install_mod_bytes", |ctx: &mut EventContext| {
+        ctx.add_debug_arg("mod", TrackEventDebugArg::String(mod_name.as_str()));
+        ctx.add_debug_arg("bytes", TrackEventDebugArg::Int64(bytes.len() as i64));
+    });
     // Install DIRECTLY to game folder
     let game_dir = std::path::Path::new(&game_path);
     let target_is_macos = is_macos_game_dir(game_dir);

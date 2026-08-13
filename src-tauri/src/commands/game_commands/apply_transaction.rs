@@ -1,4 +1,5 @@
 use super::*;
+use crate::tracing::{perfetto_te_ns, scoped_track_event, EventContext, TrackEventDebugArg};
 use tauri::command;
 
 const APPLY_BACKUP_DIR: &str = "apply-transaction";
@@ -127,6 +128,20 @@ fn copy_target_with_progress(
     destination: &std::path::Path,
     on_copied: &mut impl FnMut(u64),
 ) -> Result<(), String> {
+    scoped_track_event!(
+        "fs",
+        "copy_target_with_progress",
+        |ctx: &mut EventContext| {
+            ctx.add_debug_arg(
+                "src",
+                TrackEventDebugArg::String(source.to_string_lossy().as_ref()),
+            );
+            ctx.add_debug_arg(
+                "dst",
+                TrackEventDebugArg::String(destination.to_string_lossy().as_ref()),
+            );
+        }
+    );
     if source.is_dir() {
         fs::create_dir_all(destination).map_err(|error| error.to_string())?;
         for entry in fs::read_dir(source).map_err(|error| error.to_string())? {
@@ -172,6 +187,12 @@ fn restore_snapshot(
     backup_root: &std::path::Path,
     targets: &[std::path::PathBuf],
 ) -> Result<(), String> {
+    scoped_track_event!("install", "restore_snapshot", |ctx: &mut EventContext| {
+        ctx.add_debug_arg(
+            "backup",
+            TrackEventDebugArg::String(backup_root.to_string_lossy().as_ref()),
+        );
+    });
     for (index, target) in targets.iter().enumerate() {
         remove_target(target)?;
         let backup = backup_root.join(backup_name(index));
@@ -188,6 +209,14 @@ pub async fn begin_profile_apply_transaction(
     profile_id: String,
     game_identifier: String,
 ) -> Result<bool, String> {
+    scoped_track_event!(
+        "install",
+        "begin_profile_apply_transaction",
+        |ctx: &mut EventContext| {
+            ctx.add_debug_arg("profile", TrackEventDebugArg::String(profile_id.as_str()));
+            ctx.add_debug_arg("game", TrackEventDebugArg::String(game_identifier.as_str()));
+        }
+    );
     let targets = transaction_targets(&app, &profile_id, &game_identifier).await?;
     let backup_root = transaction_dir(&targets, &profile_id)?;
     let legacy_backup_root = legacy_transaction_dir(&app, &profile_id)?;
@@ -275,6 +304,14 @@ pub async fn rollback_profile_apply_transaction(
     profile_id: String,
     game_identifier: String,
 ) -> Result<bool, String> {
+    scoped_track_event!(
+        "install",
+        "rollback_profile_apply_transaction",
+        |ctx: &mut EventContext| {
+            ctx.add_debug_arg("profile", TrackEventDebugArg::String(profile_id.as_str()));
+            ctx.add_debug_arg("game", TrackEventDebugArg::String(game_identifier.as_str()));
+        }
+    );
     let targets = transaction_targets(&app, &profile_id, &game_identifier).await?;
     let backup_roots = [
         transaction_dir(&targets, &profile_id)?,
@@ -315,6 +352,14 @@ pub async fn commit_profile_apply_transaction(
     profile_id: String,
     game_identifier: String,
 ) -> Result<bool, String> {
+    scoped_track_event!(
+        "install",
+        "commit_profile_apply_transaction",
+        |ctx: &mut EventContext| {
+            ctx.add_debug_arg("profile", TrackEventDebugArg::String(profile_id.as_str()));
+            ctx.add_debug_arg("game", TrackEventDebugArg::String(game_identifier.as_str()));
+        }
+    );
     let targets = transaction_targets(&app, &profile_id, &game_identifier).await?;
     for backup_root in [
         transaction_dir(&targets, &profile_id)?,

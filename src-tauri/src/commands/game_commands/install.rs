@@ -1,4 +1,5 @@
 use super::*;
+use crate::tracing::{perfetto_te_ns, scoped_track_event, EventContext, TrackEventDebugArg};
 use tauri::command;
 
 #[command]
@@ -9,6 +10,10 @@ pub async fn install_to_game(
     disabled_mods: Vec<String>,
     is_vanilla_override: Option<bool>,
 ) -> Result<(), String> {
+    scoped_track_event!("install", "install_to_game", |ctx: &mut EventContext| {
+        ctx.add_debug_arg("profile", TrackEventDebugArg::String(profile_id.as_str()));
+        ctx.add_debug_arg("game", TrackEventDebugArg::String(game_identifier.as_str()));
+    });
     let profile_platform = get_profile_platform(&app, &profile_id);
     let is_mac_profile = profile_platform == "mac";
     let settings = load_settings_impl(&app);

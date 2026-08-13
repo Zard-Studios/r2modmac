@@ -2,6 +2,7 @@ use crate::models::shared::{
     get_owml_dir, is_balatro_game_path, is_balatro_identifier, is_outerwilds_game_path,
     is_outerwilds_identifier,
 };
+use crate::tracing::{perfetto_te_ns, scoped_track_event, EventContext, TrackEventDebugArg};
 use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -65,6 +66,14 @@ pub fn apply_profile_configs(
     runtime_game_path: &Path,
     game_identifier: &str,
 ) {
+    scoped_track_event!(
+        "config",
+        "apply_profile_configs",
+        |ctx: &mut EventContext| {
+            ctx.add_debug_arg("profile", TrackEventDebugArg::String(profile_id));
+            ctx.add_debug_arg("game", TrackEventDebugArg::String(game_identifier));
+        }
+    );
     let roots = config_roots(game_path, runtime_game_path, game_identifier);
     if roots.is_empty() {
         return;
@@ -119,6 +128,14 @@ pub fn capture_profile_configs(
     runtime_game_path: &Path,
     game_identifier: &str,
 ) -> usize {
+    scoped_track_event!(
+        "config",
+        "capture_profile_configs",
+        |ctx: &mut EventContext| {
+            ctx.add_debug_arg("profile", TrackEventDebugArg::String(profile_id));
+            ctx.add_debug_arg("game", TrackEventDebugArg::String(game_identifier));
+        }
+    );
     let roots = config_roots(game_path, runtime_game_path, game_identifier);
     if roots.is_empty() {
         return 0;
@@ -203,6 +220,17 @@ fn restore_root(root: &ConfigRoot, backup_dir: &Path, prune: bool) -> usize {
 }
 
 fn mirror(from: &Path, to: &Path, file_names: Option<&[&str]>, prune: bool) -> usize {
+    scoped_track_event!("fs", "config_mirror", |ctx: &mut EventContext| {
+        ctx.add_debug_arg(
+            "from",
+            TrackEventDebugArg::String(from.to_string_lossy().as_ref()),
+        );
+        ctx.add_debug_arg(
+            "to",
+            TrackEventDebugArg::String(to.to_string_lossy().as_ref()),
+        );
+        ctx.add_debug_arg("prune", TrackEventDebugArg::Bool(prune));
+    });
     let sources = collect_files(from, file_names);
     let mut copied = 0;
 

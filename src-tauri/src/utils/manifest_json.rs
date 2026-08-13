@@ -11,6 +11,8 @@
 //! Everything here is BOM-driven, so a well-formed UTF-8 manifest takes the
 //! fast path and is parsed without any copying or re-encoding.
 
+use crate::tracing::{perfetto_te_ns, scoped_track_event, EventContext, TrackEventDebugArg};
+
 const UTF8_BOM: &[u8] = &[0xEF, 0xBB, 0xBF];
 const UTF16LE_BOM: &[u8] = &[0xFF, 0xFE];
 const UTF16BE_BOM: &[u8] = &[0xFE, 0xFF];
@@ -52,6 +54,14 @@ fn decode_utf16(bytes: &[u8], to_unit: fn([u8; 2]) -> u16) -> Option<String> {
 /// `context` is folded into the error message so callers can name the mod that
 /// failed instead of surfacing a bare parser error.
 pub fn parse_manifest_bytes(bytes: &[u8], context: &str) -> Result<serde_json::Value, String> {
+    scoped_track_event!(
+        "config",
+        "parse_manifest_bytes",
+        |ctx: &mut EventContext| {
+            ctx.add_debug_arg("context", TrackEventDebugArg::String(context));
+            ctx.add_debug_arg("bytes", TrackEventDebugArg::Int64(bytes.len() as i64));
+        }
+    );
     let text = decode_manifest_text(bytes).ok_or_else(|| {
         format!(
             "Invalid manifest.json in {}: file is not valid UTF-8 or UTF-16 text",
