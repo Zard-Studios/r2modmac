@@ -9,17 +9,22 @@ use tauri::{command, AppHandle};
 use url::Url;
 use uuid::Uuid;
 
-const CACHE_SECONDS: i64 = 15 * 60;
+const SPONSOR_ROTATION_SECONDS: i64 = 20;
+const _: () = assert!(SPONSOR_ROTATION_SECONDS > 15);
+
+const DISMISS_QUIET_SECONDS: i64 = SPONSOR_ROTATION_SECONDS;
 const SESSION_SUBJECT_COOLDOWN_SECS: i64 = 60;
 
 const PREFERENCES_PLACEMENT: &str = "preferences-support";
 const HOME_PLACEMENT: &str = "home-support";
 const PROFILE_SELECTOR_PLACEMENT: &str = "profile-selector-support";
 const CATALOG_PLACEMENT: &str = "catalog-support";
+const SPONSOR_CATEGORY: &str = "general";
+
 const PRODUCTION_PROXY_URL: &str =
     "https://r2modmac-sponsor-production.notfy-stream.workers.dev/api/sponsor";
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SponsorMessage {
     pub id: String,
@@ -35,7 +40,7 @@ struct SponsorState {
     session_subject: Option<String>,
     session_subject_minted_at: Option<i64>,
     recent_ids: Vec<String>,
-    dismissed_ids: Vec<String>,
+    dismissed_until: Option<i64>,
     cached: Option<CachedSponsor>,
     attempt_count: u64,
 }
@@ -53,6 +58,10 @@ struct ProxySponsorMessage {
     sponsor_name: Option<String>,
     message: String,
     url: Option<String>,
+    #[serde(default)]
+    category: Option<String>,
+    #[serde(default)]
+    billable: bool,
 }
 
 fn sponsor_state_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -107,7 +116,7 @@ pub fn rotate_session_subject(app: &AppHandle) {
         state.session_subject = Some(Uuid::new_v4().to_string());
         state.session_subject_minted_at = Some(now);
         state.recent_ids.clear();
-        state.dismissed_ids.clear();
+        state.dismissed_until = None;
         state.cached = None;
     }
 
@@ -123,13 +132,33 @@ fn is_allowed_placement(placement: &str) -> bool {
 
 fn prune_state(state: &mut SponsorState, now: i64) {
     state.recent_ids.truncate(8);
-    state.dismissed_ids.truncate(8);
+    if state.dismissed_until.is_some_and(|until| until <= now) {
+        state.dismissed_until = None;
+    }
     if state
         .cached
         .as_ref()
         .is_some_and(|cached| cached.expires_at <= now)
     {
         state.cached = None;
+    }
+}
+
+#[derive(Debug, PartialEq)]
+enum CacheDecision {
+    Serve(SponsorMessage),
+    StayQuiet,
+    Fetch,
+}
+
+fn decide_from_cache(state: &SponsorState, now: i64) -> CacheDecision {
+    if state.dismissed_until.is_some_and(|until| until > now) {
+        return CacheDecision::StayQuiet;
+    }
+
+    match &state.cached {
+        Some(cached) => CacheDecision::Serve(cached.message.clone()),
+        None => CacheDecision::Fetch,
     }
 }
 
@@ -192,7 +221,7 @@ async fn request_proxy(subject: &str, placement: &str) -> Option<SponsorMessage>
         .post(endpoint_url)
         .header("content-type", "application/json")
         .json(&serde_json::json!({
-            "category": "gaming-mod-manager",
+            "category": SPONSOR_CATEGORY,
             "placement": placement,
             "subject": subject
         }))
@@ -247,12 +276,10 @@ async fn request_sponsor_with_options(
         return Ok(request_proxy(&subject, placement).await);
     }
 
-    if let Some(cached) = &state.cached {
-        if !state.recent_ids.contains(&cached.message.id)
-            && !state.dismissed_ids.contains(&cached.message.id)
-        {
-            return Ok(Some(cached.message.clone()));
-        }
+    match decide_from_cache(&state, now) {
+        CacheDecision::Serve(message) => return Ok(Some(message)),
+        CacheDecision::StayQuiet => return Ok(None),
+        CacheDecision::Fetch => {}
     }
 
     state.attempt_count = state.attempt_count.wrapping_add(1);
@@ -266,15 +293,13 @@ async fn request_sponsor_with_options(
     let Some(message) = request_proxy(&subject, placement).await else {
         return Ok(None);
     };
-    if state.recent_ids.contains(&message.id) || state.dismissed_ids.contains(&message.id) {
-        return Ok(None);
-    }
 
     state.cached = Some(CachedSponsor {
         message: message.clone(),
-        expires_at: now + CACHE_SECONDS,
+        expires_at: now + SPONSOR_ROTATION_SECONDS,
     });
     save_state(&app, &state)?;
+
     Ok(Some(message))
 }
 
@@ -301,17 +326,15 @@ pub async fn dismiss_sponsor(app: AppHandle, sponsor_id: String) -> Result<(), S
     let now = Utc::now().timestamp();
     let mut state = load_state(&app);
     prune_state(&mut state, now);
-    let is_current_or_seen = state
+    let is_current = state
         .cached
         .as_ref()
-        .map(|cached| cached.message.id.as_str() == sponsor_id)
-        .unwrap_or(false)
-        || state.recent_ids.iter().any(|id| id == &sponsor_id);
-    if !is_current_or_seen {
+        .is_some_and(|cached| cached.message.id == sponsor_id);
+    if !is_current {
         return Ok(());
     }
-    state.dismissed_ids.retain(|id| id != &sponsor_id);
-    state.dismissed_ids.insert(0, sponsor_id);
+    state.cached = None;
+    state.dismissed_until = Some(now + DISMISS_QUIET_SECONDS);
     save_state(&app, &state)
 }
 
@@ -609,6 +632,83 @@ mod tests {
     // ──────────────────────────────────────────────────────────────────────────
 
     #[test]
+    fn the_cached_ad_expires_so_the_next_one_can_take_its_place() {
+        let mut state = cached_state("imp_1");
+        state.cached.as_mut().unwrap().expires_at = 1_000 + SPONSOR_ROTATION_SECONDS;
+
+        prune_state(&mut state, 1_000 + SPONSOR_ROTATION_SECONDS);
+
+        assert_eq!(
+            decide_from_cache(&state, 1_000 + SPONSOR_ROTATION_SECONDS),
+            CacheDecision::Fetch,
+            "once the window passes the surface must ask for the next sponsor"
+        );
+    }
+
+    fn cached_state(id: &str) -> SponsorState {
+        SponsorState {
+            cached: Some(CachedSponsor {
+                message: SponsorMessage {
+                    id: id.into(),
+                    sponsor_name: None,
+                    message: "Text".into(),
+                    url: None,
+                },
+                expires_at: i64::MAX,
+            }),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn an_ad_that_was_already_shown_is_still_served_from_cache() {
+        let mut state = cached_state("imp_1");
+        state.recent_ids = vec!["imp_1".into()];
+
+        match decide_from_cache(&state, 1_000) {
+            CacheDecision::Serve(message) => assert_eq!(message.id, "imp_1"),
+            other => panic!("a shown ad must stay cached, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn dismissing_keeps_the_surface_quiet_without_asking_the_network_again() {
+        let mut state = cached_state("imp_1");
+        state.dismissed_until = Some(2_000);
+
+        assert_eq!(decide_from_cache(&state, 1_000), CacheDecision::StayQuiet);
+    }
+
+    #[test]
+    fn a_dismissal_wears_off_and_the_same_creative_may_return() {
+        let mut state = cached_state("imp_1");
+        state.dismissed_until = Some(2_000);
+        prune_state(&mut state, 2_000);
+
+        assert_eq!(state.dismissed_until, None);
+        match decide_from_cache(&state, 2_000) {
+            CacheDecision::Serve(message) => assert_eq!(message.id, "imp_1"),
+            other => panic!("the quiet window must expire, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn an_empty_cache_is_the_only_reason_to_go_to_the_network() {
+        assert_eq!(
+            decide_from_cache(&SponsorState::default(), 1_000),
+            CacheDecision::Fetch
+        );
+    }
+
+    #[test]
+    fn a_fresh_ad_is_served() {
+        match decide_from_cache(&cached_state("imp_2"), 1_000) {
+            CacheDecision::Serve(message) => assert_eq!(message.id, "imp_2"),
+            other => panic!("expected Serve, got {:?}", other),
+        }
+    }
+
+    #[test]
     fn prune_state_clears_expired_cache() {
         let msg = SponsorMessage {
             id: "id1".into(),
@@ -657,13 +757,13 @@ mod tests {
     }
 
     #[test]
-    fn prune_state_trims_dismissed_ids_to_eight() {
+    fn prune_state_keeps_a_quiet_window_that_has_not_elapsed() {
         let mut state = SponsorState {
-            dismissed_ids: (0..15).map(|i| i.to_string()).collect(),
+            dismissed_until: Some(2_000),
             ..Default::default()
         };
-        prune_state(&mut state, 0);
-        assert_eq!(state.dismissed_ids.len(), 8);
+        prune_state(&mut state, 1_999);
+        assert_eq!(state.dismissed_until, Some(2_000));
     }
 
     // ──────────────────────────────────────────────────────────────────────────

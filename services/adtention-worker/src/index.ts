@@ -1,19 +1,20 @@
-import { SponsorSlot, type AdtentionError } from '@adtention/sdk';
+import { SponsorSlot, type AdtentionError, type Category } from '@adtention/sdk';
 import { normalizeSponsor, text, validateSponsorRequest } from './sponsor';
 
 const SPONSOR_PATH = '/api/sponsor';
 const MAX_REQUEST_BYTES = 2_048;
-const ADTENTION_CATEGORIES = ['web', 'systems', 'devops', 'data', 'web3'] as const;
 
-function shuffleArray<T>(array: readonly T[]): T[] {
-  const result = [...array];
-  for (let i = result.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    const temp = result[i];
-    result[i] = result[j];
-    result[j] = temp;
-  }
-  return result;
+const ALL_CATEGORIES: readonly Category[] = [
+  'general',
+  'web',
+  'devops',
+  'data',
+  'systems',
+  'web3',
+];
+
+function categoriesToTry(requested: Category): Category[] {
+  return [requested, ...ALL_CATEGORIES.filter((category) => category !== requested)];
 }
 
 const RESPONSE_HEADERS = {
@@ -85,9 +86,8 @@ export default {
 
     try {
       let sdkError: AdtentionError | undefined;
-      const categories = shuffleArray(ADTENTION_CATEGORIES);
 
-      for (const category of categories) {
+      for (const category of categoriesToTry(body.category)) {
         const slot = new SponsorSlot({
           publisherId,
           serveOnly: true,

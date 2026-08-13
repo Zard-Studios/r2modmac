@@ -3,7 +3,7 @@ import test from 'node:test';
 import { normalizeSponsor, validateSponsorRequest } from '../src/sponsor.ts';
 
 const validRequest = {
-  category: 'gaming-mod-manager',
+  category: 'general' as const,
   placement: 'home-support',
   subject: '6f7c41f4-a42d-4cb5-bd44-123456789abc',
 };
@@ -13,6 +13,25 @@ test('accepts only the minimal expected request', () => {
   assert.equal(validateSponsorRequest({ ...validRequest, profile: 'private' }), undefined);
   assert.equal(validateSponsorRequest({ ...validRequest, subject: 'username' }), undefined);
   assert.equal(validateSponsorRequest({ ...validRequest, placement: 'unknown' }), undefined);
+});
+
+test('takes any of the network\'s six categories and refuses invented ones', () => {
+  for (const category of ['web3', 'web', 'devops', 'data', 'systems', 'general']) {
+    assert.deepEqual(
+      validateSponsorRequest({ ...validRequest, category }),
+      { ...validRequest, category },
+      category,
+    );
+  }
+  assert.equal(validateSponsorRequest({ ...validRequest, category: 'gaming' }), undefined);
+  assert.equal(validateSponsorRequest({ ...validRequest, category: 42 }), undefined);
+});
+
+test('the category every released build sends is read as general, not rejected', () => {
+  assert.deepEqual(
+    validateSponsorRequest({ ...validRequest, category: 'gaming-mod-manager' }),
+    { ...validRequest, category: 'general' },
+  );
 });
 
 test('normalizes only bounded sponsor copy and HTTPS links', () => {
@@ -29,8 +48,25 @@ test('normalizes only bounded sponsor copy and HTTPS links', () => {
   assert.deepEqual(normalizeSponsor(base), {
     id: 'imp_test_123',
     message: 'A short sponsor message',
+    billable: true,
+    category: 'general',
     url: 'https://example.com/',
   });
   assert.equal(normalizeSponsor({ ...base, clickUrl: 'http://example.com/' }), undefined);
   assert.equal(normalizeSponsor({ ...base, text: 'x'.repeat(281) }), undefined);
+});
+
+test('carries the billable flag through, so a filled impression that earned nothing is visible', () => {
+  const base = {
+    impressionId: 'imp_test_456',
+    text: 'A short sponsor message',
+    clickUrl: null,
+    adId: 'ad_1',
+    category: 'general' as const,
+    credit: 0,
+    fromCache: false,
+  };
+
+  assert.equal(normalizeSponsor({ ...base, billable: false })?.billable, false);
+  assert.equal(normalizeSponsor({ ...base, billable: true })?.billable, true);
 });

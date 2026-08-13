@@ -25,11 +25,15 @@ file, path, or application activity.
 
 The request to the r2modmac proxy also contains only these static values:
 
-- category: `gaming-mod-manager`
+- category: `general`
 - placement: one of `preferences-support`, `home-support`, `profile-selector-support`, or
   `catalog-support`
 
-The proxy maps the fixed r2modmac category to ADtention's documented `general` category. The SDK
+ADtention defines exactly six targeting categories — `web3`, `web`, `devops`, `data`, `systems`
+and `general` — and an integrator picks one rather than inventing its own. A mod manager for
+players is none of the five technical buckets, so r2modmac sends `general`, which is also the
+bucket that always fills from broad campaigns. The proxy validates the category against those six
+and falls back to `general` when a targeted one has no inventory. The SDK
 then sends ADtention exactly these JSON fields for a delivery request:
 
 - `publisher_id`: the public, project-level ADtention publisher ID; it is not user-specific

@@ -1,6 +1,7 @@
-import type { Sponsor } from '@adtention/sdk';
+import { isCategory, type Category, type Sponsor } from '@adtention/sdk';
 
-const CATEGORY = 'gaming-mod-manager';
+const LEGACY_CATEGORY = 'gaming-mod-manager';
+
 const PLACEMENTS = new Set([
   'preferences-support',
   'home-support',
@@ -10,7 +11,7 @@ const PLACEMENTS = new Set([
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export type SponsorRequest = {
-  category: string;
+  category: Category;
   placement: string;
   subject: string;
 };
@@ -19,6 +20,10 @@ export type SponsorPayload = {
   id: string;
   message: string;
   url?: string;
+  /** Which bucket actually served the ad. Absent on a deduped replay. */
+  category?: string;
+  /** `false` when the serve was throttled, daily-capped, or a deduped replay. */
+  billable: boolean;
 };
 
 export function text(value: unknown, maximum: number): string | undefined {
@@ -45,14 +50,22 @@ export function normalizeSponsor(candidate: Sponsor | null): SponsorPayload | un
   const rawUrl = candidate.clickUrl;
   const url = rawUrl === null ? undefined : httpsUrl(rawUrl);
   if (!id || !message || (rawUrl !== null && !url)) return undefined;
-  return { id, message, ...(url ? { url } : {}) };
+  return {
+    id,
+    message,
+    billable: candidate.billable === true,
+    ...(candidate.category ? { category: candidate.category } : {}),
+    ...(url ? { url } : {}),
+  };
 }
 
 export function validateSponsorRequest(candidate: unknown): SponsorRequest | undefined {
   if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return undefined;
   const body = candidate as Record<string, unknown>;
+  const category = body.category === LEGACY_CATEGORY ? 'general' : body.category;
+
   if (
-    body.category !== CATEGORY
+    !isCategory(category)
     || typeof body.placement !== 'string'
     || !PLACEMENTS.has(body.placement)
     || typeof body.subject !== 'string'
@@ -62,7 +75,7 @@ export function validateSponsorRequest(candidate: unknown): SponsorRequest | und
     return undefined;
   }
   return {
-    category: CATEGORY,
+    category,
     placement: body.placement,
     subject: body.subject,
   };

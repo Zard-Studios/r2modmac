@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev --port 3000 --ip 127.0.0.1",
+    "dev": "wrangler dev --port 3000 --ip 127.0.0.1 --log-level warn",
     "check": "tsc --noEmit",
     "test": "node --experimental-strip-types --test test/*.test.ts",
     "types": "wrangler types",
