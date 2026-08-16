@@ -49,7 +49,7 @@ fn macos_bepinex_took_over(
 
 /// The message shown when the game started but the mods did not load.
 fn macos_mods_not_loaded_error() -> String {
-    "The game started, but BepInEx never loaded, so it is running unmodded. The loader could not attach to the game — this is not a problem with your mods. The r2modmac logs in the game folder record what Doorstop reported."
+    "The game started, but BepInEx never loaded, so it is running unmodded. The loader could not attach to the game, this is not a problem with your mods. The r2modmac logs in the game folder record what Doorstop reported."
         .to_string()
 }
 
