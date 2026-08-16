@@ -66,32 +66,106 @@ pub(crate) fn cancelled_launch_should_close_steam(steam_was_running: bool) -> bo
     !steam_was_running
 }
 
+/// How long to keep asking Steam to close before giving up on it.
+#[cfg(target_os = "macos")]
+const STEAM_QUIT_TOTAL_MS: u64 = 30_000;
+
+/// How long to wait for one request to take effect before trying the other.
+#[cfg(target_os = "macos")]
+const STEAM_QUIT_ROUND_MS: u64 = 3_000;
+
 /// Ask the native macOS Steam to quit, the way its own menu does.
 ///
-/// `steam://exit` is Valve's own shutdown route, so the client closes its
-/// sessions and writes its files first. Nothing here force-kills: killing
-/// Steam mid-boot is what left it crashing on the next start.
+/// Two routes, alternated rather than tried once each, because a Steam that is
+/// still booting answers neither — and a launch is cancelled precisely while
+/// Steam is booting:
+///
+/// * `tell application id "com.valvesoftware.steam" to quit` — the AppleScript
+///   quit, addressed by bundle id rather than by name so it also finds the copy
+///   Steam's own updater keeps under
+///   `~/Library/Application Support/Steam/Steam.AppBundle`, which is the one
+///   that actually runs.
+/// * `steam://exit` — Valve's shutdown URL, which a booting client ignores
+///   outright (measured: still up twenty seconds later) but a booted one
+///   answers in a few seconds.
+///
+/// Repeating both every few seconds is what makes this land: whichever route
+/// Steam becomes able to answer first ends it, usually within a handful of
+/// seconds of the client finishing its boot.
+///
+/// Whether Steam actually went away is decided by looking for its processes,
+/// never by an exit code: the AppleScript quit reports error -128 ("cancelled
+/// by the user") while quitting Steam perfectly well.
+///
+/// Nothing here force-kills. Killing Steam mid-boot is what left it crashing on
+/// the next start, so a client that keeps refusing is left alone and the log
+/// says so.
+///
+/// Runs on its own thread: the user pressed stop, and the button has to come
+/// back now rather than when Steam has finished closing.
 #[cfg(target_os = "macos")]
 pub(crate) fn shut_down_steam_after_cancel() {
-    log::info!("[cancel_game_launch] Asking Steam to quit; r2modmac started it for this launch.");
+    std::thread::spawn(|| {
+        log::info!(
+            "[cancel_game_launch] Asking Steam to quit; r2modmac started it for this launch."
+        );
 
-    if std::process::Command::new("/usr/bin/open")
-        .arg("steam://exit")
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .is_ok()
-    {
-        return;
+        let started = std::time::Instant::now();
+        let mut rounds = 0u32;
+
+        while started.elapsed() < std::time::Duration::from_millis(STEAM_QUIT_TOTAL_MS) {
+            rounds += 1;
+
+            let _ = std::process::Command::new("/usr/bin/osascript")
+                .args([
+                    "-e",
+                    "tell application id \"com.valvesoftware.steam\" to quit",
+                ])
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status();
+            if wait_for_macos_steam_to_exit(STEAM_QUIT_ROUND_MS) {
+                break;
+            }
+
+            let _ = std::process::Command::new("/usr/bin/open")
+                .arg("steam://exit")
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status();
+            if wait_for_macos_steam_to_exit(STEAM_QUIT_ROUND_MS) {
+                break;
+            }
+        }
+
+        if super::is_steam_running_on_macos() {
+            // Deliberately the end of the road: the alternative is killing a
+            // client that may be mid-write, which is worse than leaving it up.
+            log::warn!(
+                "[cancel_game_launch] Steam did not close after {} rounds. Leaving it running rather than killing it.",
+                rounds
+            );
+        } else {
+            log::info!(
+                "[cancel_game_launch] Steam closed after {} round(s), {}ms.",
+                rounds,
+                started.elapsed().as_millis()
+            );
+        }
+    });
+}
+
+/// Poll until Steam's processes are gone, or the deadline passes.
+#[cfg(target_os = "macos")]
+fn wait_for_macos_steam_to_exit(timeout_ms: u64) -> bool {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
+    while std::time::Instant::now() < deadline {
+        if !super::is_steam_running_on_macos() {
+            return true;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(400));
     }
-
-    // Only if the URL handler is not registered — an install Steam has never
-    // been run from, most likely.
-    let _ = std::process::Command::new("/usr/bin/osascript")
-        .args(["-e", "tell application \"Steam\" to quit"])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn();
+    !super::is_steam_running_on_macos()
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -131,6 +205,41 @@ mod tests {
         begin_launch();
         assert!(!launch_cancelled());
         assert!(ensure_not_cancelled().is_ok());
+    }
+
+    /// The real thing, against the real Steam on this machine.
+    ///
+    /// Ignored by default because it starts and closes Steam, which no ordinary
+    /// test run should do. Run it deliberately when the shutdown routes need
+    /// checking — they are macOS behaviour, not ours, and they have already
+    /// changed once (a booting Steam ignores `steam://exit`):
+    ///
+    /// ```text
+    /// cargo test --lib shuts_a_booting_steam_down_for_real -- --ignored --nocapture
+    /// ```
+    #[test]
+    #[ignore = "starts and closes the real Steam"]
+    #[cfg(target_os = "macos")]
+    fn shuts_a_booting_steam_down_for_real() {
+        // Start Steam the way a launch does, then cancel while it is booting —
+        // the exact situation issue #36 is about.
+        let _ = std::process::Command::new("/usr/bin/open")
+            .args(["-b", "com.valvesoftware.steam"])
+            .status();
+        std::thread::sleep(std::time::Duration::from_secs(3));
+        assert!(
+            super::super::is_steam_running_on_macos(),
+            "Steam did not start, so there is nothing to shut down"
+        );
+
+        let started = std::time::Instant::now();
+        shut_down_steam_after_cancel();
+
+        // The shutdown runs on its own thread so the button comes back at once;
+        // give it both routes' worth of time before believing it failed.
+        let closed = wait_for_macos_steam_to_exit(STEAM_QUIT_TOTAL_MS + 5_000);
+        println!("Steam closed: {} after {:?}", closed, started.elapsed());
+        assert!(closed, "Steam was still running after both quit routes");
     }
 
     #[test]

@@ -19,9 +19,10 @@ The rule behind the table: **r2modmac only closes the Steam it opened itself.** 
 already had running may be downloading something or signed into something you care about,
 so it is never closed behind your back.
 
-Steam is asked to quit the same way its own menu does — `steam://exit` on macOS,
-`steam.exe -shutdown` under Wine, CrossOver, Sikarugir and on Windows. Nothing is
-force-killed: killing Steam mid-boot is what used to leave it crashing on the next start.
+Steam is asked to quit the same way its own menu does — never force-killed, because
+killing Steam mid-boot is what used to leave it crashing on the next start. It takes
+Steam a few seconds to answer (measured at 8 seconds from a cold start on macOS), and
+that happens in the background: the button comes back immediately.
 
 ## Why the game can still appear after you press stop
 
@@ -31,6 +32,32 @@ was already open, nothing is sent to it at all, so the game will normally start.
 
 This is a limit of what Steam offers, not a bug: a `steam://run` request cannot be recalled.
 When it happens, the button simply becomes the Stop Game button, which does stop the game.
+
+## How Steam is asked to close
+
+On **macOS** two routes are alternated every few seconds until Steam goes away, for up to
+30 seconds:
+
+| Route | Behaviour |
+| --- | --- |
+| `osascript -e 'tell application id "com.valvesoftware.steam" to quit'` | Addresses Steam by bundle id, so it finds the copy under `~/Library/Application Support/Steam/Steam.AppBundle` that actually runs — not just an install in `/Applications` |
+| `open steam://exit` | Valve's shutdown URL. A **booting** Steam ignores it outright; a booted one answers in a few seconds |
+
+Neither route works on a Steam that is still early in its boot, which is exactly when a
+launch gets cancelled — hence the alternating retries rather than one attempt each. Success
+is decided by looking for Steam's processes, never by an exit code: the AppleScript quit
+reports error -128 ("cancelled by the user") while quitting Steam perfectly well.
+
+Under **Wine, CrossOver, Sikarugir and on Windows** it is `steam.exe -shutdown`, Steam's own
+documented shutdown switch, sent through whichever runner started the client.
+
+This behaviour belongs to macOS and to Steam, not to r2modmac, and it has already changed
+once during development. There is a test that exercises the real thing against the real
+Steam, ignored by default because it starts and closes it:
+
+```
+cd src-tauri && cargo test --lib shuts_a_booting_steam_down_for_real -- --ignored --nocapture
+```
 
 ## Platforms
 
