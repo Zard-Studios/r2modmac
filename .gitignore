@@ -54,3 +54,9 @@ agent.md
 # Build artifacts
 dist-local/
 src-tauri/target*/
+
+# Agents
+agent.md
+AGENTS.md
+CLAUDE.md
+.claude/
