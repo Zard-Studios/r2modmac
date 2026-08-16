@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { SponsorMessage } from '../../types/electron';
 
 const INITIAL_REQUEST_DELAY_MS = 900;
-const SPONSOR_ROTATION_INTERVAL_MS = 20_000;
+const SPONSOR_ROTATION_INTERVAL_MS = 15_000;
 
 // Screen routes mount separate sponsor surfaces. Keep the current line outside
 // React so navigating never blanks or recounts an already visible sponsor.

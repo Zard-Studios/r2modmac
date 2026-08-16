@@ -9,8 +9,8 @@ use tauri::{command, AppHandle};
 use url::Url;
 use uuid::Uuid;
 
-const SPONSOR_ROTATION_SECONDS: i64 = 20;
-const _: () = assert!(SPONSOR_ROTATION_SECONDS > 15);
+const SPONSOR_ROTATION_SECONDS: i64 = 15;
+const _: () = assert!(SPONSOR_ROTATION_SECONDS >= 15);
 
 const DISMISS_QUIET_SECONDS: i64 = SPONSOR_ROTATION_SECONDS;
 const SESSION_SUBJECT_COOLDOWN_SECS: i64 = 60;
@@ -80,7 +80,7 @@ fn save_state(app: &AppHandle, state: &SponsorState) -> Result<(), String> {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
     let temporary_path = path.with_extension("json.tmp");
-    let raw = serde_json::to_string(state).map_err(|error| error.to_string())?;
+    let raw = crate::utils::stable_json::to_pretty_string(state)?;
     fs::write(&temporary_path, raw).map_err(|error| error.to_string())?;
     fs::rename(temporary_path, path).map_err(|error| error.to_string())
 }
