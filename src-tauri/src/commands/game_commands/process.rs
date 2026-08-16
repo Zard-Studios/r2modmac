@@ -154,6 +154,95 @@ pub(crate) fn is_process_running_for_patterns(patterns: &[String]) -> bool {
     false
 }
 
+/// Does any candidate of one process match, without being an excluded one?
+///
+/// Pulled out of the poll so the exclusion rule can be tested directly.
+#[cfg_attr(unix, allow(dead_code))]
+fn process_matches_excluding(
+    candidates: &[String],
+    patterns: &[regex::Regex],
+    exclude: &str,
+) -> bool {
+    if candidates
+        .iter()
+        .any(|candidate| candidate.contains(exclude))
+    {
+        return false;
+    }
+    candidates
+        .iter()
+        .any(|candidate| patterns.iter().any(|pattern| pattern.is_match(candidate)))
+}
+
+/// Decide, from the command lines `pgrep -fl` printed, whether anything is
+/// still running that is not one of ours.
+///
+/// Separated from the call to `pgrep` so the rule can be tested against the
+/// real lines seen on a machine, without needing those processes to exist.
+fn any_line_is_a_live_match(lines: &str, exclude: &str) -> bool {
+    lines
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        // `pgrep -f` matches whole command lines, including the command that
+        // asked the question.
+        .filter(|line| !line.contains("pgrep"))
+        .any(|line| !line.contains(exclude))
+}
+
+/// Like [`is_process_running_for_patterns`], but blind to processes whose
+/// command line contains `exclude`.
+///
+/// Needed to watch a Wine-hosted Steam close. `steam.exe -shutdown` is itself a
+/// process carrying the path of `steam.exe`, and it does not exit once it has
+/// delivered the request, so a watch that counts it never sees Steam go away —
+/// measured at seventy seconds of chasing its own tail while Steam had in fact
+/// closed within twenty.
+///
+/// Reads the command lines from `pgrep -fl` rather than from sysinfo, because
+/// sysinfo does not expose the arguments of a Wine-hosted process: our
+/// `steam.exe -shutdown` appears there as nothing more than a copy of
+/// `steam.exe` in Wine's temp directory, which made an exclusion built on
+/// sysinfo silently useless.
+#[cfg(unix)]
+pub(crate) fn is_process_running_for_patterns_excluding(
+    patterns: &[String],
+    exclude: &str,
+) -> bool {
+    patterns.iter().any(|pattern| {
+        let Ok(output) = std::process::Command::new("/usr/bin/pgrep")
+            .arg("-fl")
+            .arg(pattern)
+            .output()
+        else {
+            return false;
+        };
+        any_line_is_a_live_match(&String::from_utf8_lossy(&output.stdout), exclude)
+    })
+}
+
+/// Windows has no `pgrep`, and no Wine in the way either: sysinfo reports the
+/// arguments of a native process, so the same exclusion works from there.
+#[cfg(not(unix))]
+pub(crate) fn is_process_running_for_patterns_excluding(
+    patterns: &[String],
+    exclude: &str,
+) -> bool {
+    let compiled: Vec<regex::Regex> = patterns
+        .iter()
+        .filter_map(|pattern| regex::Regex::new(pattern).ok())
+        .collect();
+    if compiled.is_empty() {
+        return false;
+    }
+
+    let mut system = System::new();
+    system.refresh_processes(ProcessesToUpdate::All, true);
+    system.processes().values().any(|process| {
+        process_matches_excluding(&process_text_candidates(process), &compiled, exclude)
+    })
+}
+
 pub(crate) fn is_process_running_for_executable(executable_path: &std::path::Path) -> bool {
     #[cfg(target_os = "macos")]
     {
@@ -629,5 +718,62 @@ mod start_wait_cancellation_tests {
         // already called off.
         let outcome = wait_for_start_with(60_000, true, || true, || true, no_sleep);
         assert_eq!(outcome, StartWait::Cancelled);
+    }
+}
+
+#[cfg(test)]
+mod process_exclusion_tests {
+    use super::{any_line_is_a_live_match, process_matches_excluding};
+
+    /// Real `pgrep -fl` output from a cancelled CrossOver launch, once Steam
+    /// had closed: all that is left are our own shutdown commands.
+    const ONLY_OUR_SHUTDOWNS: &str = concat!(
+        "13763 /Applications/CrossOver.app/Contents/SharedSupport/CrossOver/lib/wine/x86_64-windows/winewrapper.exe --run -- /Bottles/Steam/drive_c/Program Files (x86)/Steam/steam.exe -shutdown\n",
+        "13766 C:\\Program Files (x86)\\Steam\\steam.exe -shutdown\n"
+    );
+
+    /// The same, with the client still up.
+    const STEAM_STILL_UP: &str = concat!(
+        "86276 C:\\Program Files (x86)\\Steam\\steam.exe -applaunch 1229490\n",
+        "13766 C:\\Program Files (x86)\\Steam\\steam.exe -shutdown\n"
+    );
+
+    #[test]
+    fn our_own_shutdown_commands_do_not_count_as_a_running_steam() {
+        // They linger after Steam has closed and carry the same path, which is
+        // what made the watch run its full window every time.
+        assert!(!any_line_is_a_live_match(ONLY_OUR_SHUTDOWNS, "-shutdown"));
+    }
+
+    #[test]
+    fn a_steam_that_is_still_up_is_still_seen() {
+        assert!(any_line_is_a_live_match(STEAM_STILL_UP, "-shutdown"));
+    }
+
+    #[test]
+    fn the_asking_pgrep_does_not_count_as_a_match() {
+        let lines = "500 pgrep -fl steam\\.exe\n";
+        assert!(!any_line_is_a_live_match(lines, "-shutdown"));
+    }
+
+    #[test]
+    fn nothing_running_is_nothing_running() {
+        assert!(!any_line_is_a_live_match("", "-shutdown"));
+        assert!(!any_line_is_a_live_match("   \n", "-shutdown"));
+    }
+
+    #[test]
+    fn the_candidate_rule_used_on_windows_excludes_the_same_thing() {
+        let patterns = [regex::Regex::new("steam.exe").unwrap()];
+        assert!(process_matches_excluding(
+            &[r"C:\Program Files (x86)\Steam\steam.exe -applaunch 1229490".to_string()],
+            &patterns,
+            "-shutdown"
+        ));
+        assert!(!process_matches_excluding(
+            &[r"C:\Program Files (x86)\Steam\steam.exe -shutdown".to_string()],
+            &patterns,
+            "-shutdown"
+        ));
     }
 }

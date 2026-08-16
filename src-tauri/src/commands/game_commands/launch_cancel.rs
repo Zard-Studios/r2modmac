@@ -16,7 +16,7 @@
 //! the flag directly, which is what keeps them testable without a real Steam —
 //! the same shape the "is it running yet?" checks already use.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 /// Reported when a wait ended because the user asked for it.
 ///
@@ -27,12 +27,33 @@ pub(crate) const LAUNCH_CANCELLED_MESSAGE: &str = "Launch cancelled.";
 
 static LAUNCH_CANCELLED: AtomicBool = AtomicBool::new(false);
 
+/// Bumped by every launch, so work left over from a cancelled one can tell that
+/// it has been superseded and stand down.
+static LAUNCH_GENERATION: AtomicU64 = AtomicU64::new(0);
+
 /// Clear any cancellation left over from a previous attempt.
 ///
 /// Called as a launch begins, so pressing Play after cancelling starts from a
 /// clean slate rather than aborting instantly.
 pub(crate) fn begin_launch() {
     LAUNCH_CANCELLED.store(false, Ordering::Release);
+    LAUNCH_GENERATION.fetch_add(1, Ordering::AcqRel);
+}
+
+/// Which launch this is. Taken by anything that keeps working after a launch
+/// has returned, and handed back to [`launch_superseded`].
+pub(crate) fn launch_generation() -> u64 {
+    LAUNCH_GENERATION.load(Ordering::Acquire)
+}
+
+/// Has another launch started since `generation` was taken?
+///
+/// Shutting Steam down after a cancellation takes a while — Steam has to exist
+/// before it can be closed. If the user presses Play again in the meantime, that
+/// work must stop immediately: closing Steam under a launch that is starting it
+/// would be a far worse bug than the one being fixed.
+pub(crate) fn launch_superseded(generation: u64) -> bool {
+    launch_generation() != generation
 }
 
 /// Has the user asked for the launch in flight to stop?
@@ -66,106 +87,124 @@ pub(crate) fn cancelled_launch_should_close_steam(steam_was_running: bool) -> bo
     !steam_was_running
 }
 
-/// How long to keep asking Steam to close before giving up on it.
-#[cfg(target_os = "macos")]
-const STEAM_QUIT_TOTAL_MS: u64 = 30_000;
+/// How long to keep watching for the Steam a cancelled launch started.
+///
+/// Long enough to cover a cold boot: the user can press stop a second after
+/// pressing Play, when Steam does not exist yet and there is nothing to close.
+/// Standing down at that moment is what let Steam boot on regardless and start
+/// the game anyway — so the watch outlives the boot instead.
+const STEAM_QUIT_TOTAL_MS: u64 = 60_000;
 
-/// How long to wait for one request to take effect before trying the other.
-#[cfg(target_os = "macos")]
+/// How long one quit request is given to take effect before the next.
 const STEAM_QUIT_ROUND_MS: u64 = 3_000;
 
-/// Ask the native macOS Steam to quit, the way its own menu does.
+/// How often the watch looks at the world while it waits.
+const STEAM_QUIT_POLL_MS: u64 = 500;
+
+/// Keep asking the Steam a cancelled launch started to close, until it does.
 ///
-/// Two routes, alternated rather than tried once each, because a Steam that is
-/// still booting answers neither — and a launch is cancelled precisely while
-/// Steam is booting:
+/// Written as a watch rather than a request because of what the log showed: the
+/// user cancels about a second after pressing Play, long before Steam is up,
+/// so a single request lands on nothing and Steam boots on to start the game.
+/// The watch instead waits for Steam to appear, asks it to close, and keeps
+/// asking until its processes are gone.
+///
+/// A quit is only ever sent while Steam is actually visible. `steam://exit`
+/// goes through the URL handler, which would *start* Steam if it were not
+/// running — the exact opposite of the point.
+///
+/// Two routes are alternated, because a Steam that is still booting answers
+/// neither reliably:
 ///
 /// * `tell application id "com.valvesoftware.steam" to quit` — the AppleScript
 ///   quit, addressed by bundle id rather than by name so it also finds the copy
 ///   Steam's own updater keeps under
 ///   `~/Library/Application Support/Steam/Steam.AppBundle`, which is the one
 ///   that actually runs.
-/// * `steam://exit` — Valve's shutdown URL, which a booting client ignores
-///   outright (measured: still up twenty seconds later) but a booted one
-///   answers in a few seconds.
+/// * `steam://exit` — Valve's shutdown URL. A booting client ignores it
+///   outright (measured: still up twenty seconds later); a booted one answers
+///   in a few seconds.
 ///
-/// Repeating both every few seconds is what makes this land: whichever route
-/// Steam becomes able to answer first ends it, usually within a handful of
-/// seconds of the client finishing its boot.
+/// Whether Steam went away is decided by looking for its processes, never by an
+/// exit code: the AppleScript quit reports error -128 ("cancelled by the user")
+/// while quitting Steam perfectly well.
 ///
-/// Whether Steam actually went away is decided by looking for its processes,
-/// never by an exit code: the AppleScript quit reports error -128 ("cancelled
-/// by the user") while quitting Steam perfectly well.
-///
-/// Nothing here force-kills. Killing Steam mid-boot is what left it crashing on
-/// the next start, so a client that keeps refusing is left alone and the log
-/// says so.
-///
-/// Runs on its own thread: the user pressed stop, and the button has to come
-/// back now rather than when Steam has finished closing.
+/// Nothing force-kills. Killing Steam mid-boot is what left it crashing on the
+/// next start, so a client that keeps refusing is left running and the log says
+/// so. The watch also stands down the moment another launch begins.
 #[cfg(target_os = "macos")]
 pub(crate) fn shut_down_steam_after_cancel() {
-    std::thread::spawn(|| {
+    let generation = launch_generation();
+
+    std::thread::spawn(move || {
         log::info!(
-            "[cancel_game_launch] Asking Steam to quit; r2modmac started it for this launch."
+            "[cancel_game_launch] Watching for the Steam this launch started, to close it again."
         );
 
         let started = std::time::Instant::now();
+        let mut seen_running = false;
         let mut rounds = 0u32;
 
         while started.elapsed() < std::time::Duration::from_millis(STEAM_QUIT_TOTAL_MS) {
+            if launch_superseded(generation) {
+                log::info!(
+                    "[cancel_game_launch] A new launch started; leaving Steam alone after {} round(s).",
+                    rounds
+                );
+                return;
+            }
+
+            if !super::is_steam_running_on_macos() {
+                if seen_running {
+                    log::info!(
+                        "[cancel_game_launch] Steam closed after {} round(s), {}ms.",
+                        rounds,
+                        started.elapsed().as_millis()
+                    );
+                    return;
+                }
+                // Not up yet. Steam takes its time; keep watching rather than
+                // sending a request that would start it.
+                std::thread::sleep(std::time::Duration::from_millis(STEAM_QUIT_POLL_MS));
+                continue;
+            }
+
+            seen_running = true;
             rounds += 1;
-
-            let _ = std::process::Command::new("/usr/bin/osascript")
-                .args([
-                    "-e",
-                    "tell application id \"com.valvesoftware.steam\" to quit",
-                ])
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .status();
-            if wait_for_macos_steam_to_exit(STEAM_QUIT_ROUND_MS) {
-                break;
+            if rounds % 2 == 1 {
+                let _ = std::process::Command::new("/usr/bin/osascript")
+                    .args([
+                        "-e",
+                        "tell application id \"com.valvesoftware.steam\" to quit",
+                    ])
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .status();
+            } else {
+                let _ = std::process::Command::new("/usr/bin/open")
+                    .arg("steam://exit")
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .status();
             }
 
-            let _ = std::process::Command::new("/usr/bin/open")
-                .arg("steam://exit")
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .status();
-            if wait_for_macos_steam_to_exit(STEAM_QUIT_ROUND_MS) {
-                break;
-            }
+            std::thread::sleep(std::time::Duration::from_millis(STEAM_QUIT_ROUND_MS));
         }
 
-        if super::is_steam_running_on_macos() {
-            // Deliberately the end of the road: the alternative is killing a
-            // client that may be mid-write, which is worse than leaving it up.
+        if seen_running && !super::is_steam_running_on_macos() {
+            log::info!(
+                "[cancel_game_launch] Steam closed after {} round(s).",
+                rounds
+            );
+        } else if seen_running {
             log::warn!(
-                "[cancel_game_launch] Steam did not close after {} rounds. Leaving it running rather than killing it.",
+                "[cancel_game_launch] Steam did not close after {} round(s). Leaving it running rather than killing it.",
                 rounds
             );
         } else {
-            log::info!(
-                "[cancel_game_launch] Steam closed after {} round(s), {}ms.",
-                rounds,
-                started.elapsed().as_millis()
-            );
+            log::info!("[cancel_game_launch] Steam never came up; nothing to close.");
         }
     });
-}
-
-/// Poll until Steam's processes are gone, or the deadline passes.
-#[cfg(target_os = "macos")]
-fn wait_for_macos_steam_to_exit(timeout_ms: u64) -> bool {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
-    while std::time::Instant::now() < deadline {
-        if !super::is_steam_running_on_macos() {
-            return true;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(400));
-    }
-    !super::is_steam_running_on_macos()
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -235,11 +274,74 @@ mod tests {
         let started = std::time::Instant::now();
         shut_down_steam_after_cancel();
 
-        // The shutdown runs on its own thread so the button comes back at once;
-        // give it both routes' worth of time before believing it failed.
-        let closed = wait_for_macos_steam_to_exit(STEAM_QUIT_TOTAL_MS + 5_000);
+        // The watch runs on its own thread so the button comes back at once;
+        // give it the whole window before believing it failed.
+        let deadline = std::time::Instant::now()
+            + std::time::Duration::from_millis(STEAM_QUIT_TOTAL_MS + 5_000);
+        let mut closed = false;
+        while std::time::Instant::now() < deadline {
+            if !super::super::is_steam_running_on_macos() {
+                closed = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(400));
+        }
         println!("Steam closed: {} after {:?}", closed, started.elapsed());
-        assert!(closed, "Steam was still running after both quit routes");
+        assert!(closed, "Steam was still running after the whole watch");
+    }
+
+    /// The case the log caught: stop pressed one second after Play, before
+    /// Steam exists. A single request would land on nothing and Steam would
+    /// boot on to start the game — the watch has to outlive the boot.
+    #[test]
+    #[ignore = "starts and closes the real Steam"]
+    #[cfg(target_os = "macos")]
+    fn shuts_steam_down_even_when_cancelled_before_it_appears() {
+        begin_launch();
+        let _ = std::process::Command::new("/usr/bin/open")
+            .args(["-b", "com.valvesoftware.steam"])
+            .status();
+
+        // One second in: this is what the user actually does.
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        let started = std::time::Instant::now();
+        shut_down_steam_after_cancel();
+
+        let deadline = started + std::time::Duration::from_millis(STEAM_QUIT_TOTAL_MS + 5_000);
+        let mut ever_seen = false;
+        let mut closed = false;
+        while std::time::Instant::now() < deadline {
+            if super::super::is_steam_running_on_macos() {
+                ever_seen = true;
+            } else if ever_seen {
+                closed = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(400));
+        }
+        println!(
+            "Steam came up: {}, then closed: {} after {:?}",
+            ever_seen,
+            closed,
+            started.elapsed()
+        );
+        assert!(ever_seen, "Steam never started, so nothing was proven");
+        assert!(closed, "Steam was left running after a cancel it did not see");
+    }
+
+    #[test]
+    fn a_new_launch_stands_the_leftover_shutdown_down() {
+        // Cancel, then press Play again while Steam is still closing: the old
+        // watch must not close the Steam the new launch is starting.
+        begin_launch();
+        let generation = launch_generation();
+        assert!(!launch_superseded(generation));
+
+        begin_launch();
+        assert!(
+            launch_superseded(generation),
+            "the leftover watch would have kept closing Steam under the new launch"
+        );
     }
 
     #[test]

@@ -150,6 +150,18 @@ pub(crate) fn launch_windows_direct_game_with_working_dir(
     Ok(())
 }
 
+/// How long to keep watching for the Steam a cancelled launch started, and how
+/// long each request is given to take effect. Matched to the macOS watch: a
+/// cold Steam under Wine takes just as long to come up.
+const STEAM_QUIT_TOTAL_MS: u64 = 60_000;
+
+/// Steam's own shutdown switch — and the marker that tells our own shutdown
+/// commands apart from the client, since they carry the same executable path
+/// and linger after delivering the request.
+const SHUTDOWN_ARGUMENT: &str = "-shutdown";
+const STEAM_QUIT_ROUND_MS: u64 = 3_000;
+const STEAM_QUIT_POLL_MS: u64 = 500;
+
 /// How to ask the Windows Steam that r2modmac just started to close again.
 ///
 /// `steam.exe -shutdown` is Steam's own documented shutdown switch, so the
@@ -178,7 +190,89 @@ enum WindowsSteamShutdown {
 }
 
 impl WindowsSteamShutdown {
-    fn run(&self) {
+    /// Keep asking the Steam this launch started to close, until it does.
+    ///
+    /// Same shape as the macOS watch, and for the same reason the log showed:
+    /// the user cancels about a second after pressing Play, long before Steam
+    /// exists, so a single request lands on nothing and Steam boots on to start
+    /// the game. This waits for Steam to appear, asks, and keeps asking until
+    /// its processes are gone.
+    ///
+    /// Nothing here is specific to one Wine launcher. The route is whichever
+    /// one started this Steam — a Sikarugir/Wineskin wrapper, a CrossOver or
+    /// Wine runner, or Windows itself — so a launcher that can start a game can
+    /// stop it, without this code knowing which launcher it is. The command is
+    /// Steam's own `-shutdown` in every case, and "did it work?" is answered by
+    /// looking for Steam's processes on the host, which is equally
+    /// launcher-agnostic.
+    ///
+    /// Runs on its own thread so the button comes back at once, and stands down
+    /// the moment another launch begins.
+    fn watch_until_closed(self, steam_patterns: Vec<String>) {
+        let generation = crate::commands::game_commands::launch_cancel::launch_generation();
+
+        std::thread::spawn(move || {
+            log::info!(
+                "[launch_windows_steam_game] Watching for the Steam this launch started, to close it again."
+            );
+
+            let started = std::time::Instant::now();
+            let mut seen_running = false;
+            let mut rounds = 0u32;
+
+            while started.elapsed() < std::time::Duration::from_millis(STEAM_QUIT_TOTAL_MS) {
+                if crate::commands::game_commands::launch_cancel::launch_superseded(generation) {
+                    log::info!(
+                        "[launch_windows_steam_game] A new launch started; leaving Steam alone after {} round(s).",
+                        rounds
+                    );
+                    return;
+                }
+
+                if !is_process_running_for_patterns_excluding(&steam_patterns, SHUTDOWN_ARGUMENT) {
+                    if seen_running {
+                        log::info!(
+                            "[launch_windows_steam_game] Steam closed after {} round(s), {}ms.",
+                            rounds,
+                            started.elapsed().as_millis()
+                        );
+                        return;
+                    }
+                    // Steam is not up yet. `-shutdown` on an absent client only
+                    // starts one, so wait for it rather than send anything.
+                    std::thread::sleep(std::time::Duration::from_millis(STEAM_QUIT_POLL_MS));
+                    continue;
+                }
+
+                seen_running = true;
+                rounds += 1;
+                self.dispatch();
+                std::thread::sleep(std::time::Duration::from_millis(STEAM_QUIT_ROUND_MS));
+            }
+
+            if seen_running
+                && !is_process_running_for_patterns_excluding(&steam_patterns, SHUTDOWN_ARGUMENT)
+            {
+                log::info!(
+                    "[launch_windows_steam_game] Steam closed after {} round(s).",
+                    rounds
+                );
+            } else if seen_running {
+                // Almost always a client sitting on the login window: it
+                // ignores -shutdown, and it cannot start a game either, so
+                // there is nothing left to undo by force.
+                log::warn!(
+                    "[launch_windows_steam_game] Steam did not close after {} round(s). Leaving it running rather than killing it; it is most likely waiting to be signed in.",
+                    rounds
+                );
+            } else {
+                log::info!("[launch_windows_steam_game] Steam never came up; nothing to close.");
+            }
+        });
+    }
+
+    /// One `-shutdown`, by the route that started this Steam.
+    fn dispatch(&self) {
         match self {
             #[cfg(all(unix, target_os = "macos"))]
             WindowsSteamShutdown::Wineskin {
@@ -194,7 +288,7 @@ impl WindowsSteamShutdown {
                     bundle,
                     prefix,
                     steam_executable,
-                    &["-shutdown".to_string()],
+                    &[SHUTDOWN_ARGUMENT.to_string()],
                     None,
                     "cancel_windows_steam_launch",
                 ) {
@@ -226,7 +320,7 @@ impl WindowsSteamShutdown {
                 }
                 let _ = command
                     .arg(steam_executable)
-                    .arg("-shutdown")
+                    .arg(SHUTDOWN_ARGUMENT)
                     .stdout(std::process::Stdio::null())
                     .stderr(std::process::Stdio::null())
                     .spawn();
@@ -237,7 +331,7 @@ impl WindowsSteamShutdown {
                     "[launch_windows_steam_game] Asking Steam to shut down; r2modmac started it for this launch."
                 );
                 let _ = std::process::Command::new(steam_executable)
-                    .arg("-shutdown")
+                    .arg(SHUTDOWN_ARGUMENT)
                     .spawn();
             }
         }
@@ -357,7 +451,9 @@ pub(super) fn launch_windows_steam_game(
                                         prefix: prefix_root_path.to_path_buf(),
                                         steam_executable: steam_executable.clone(),
                                     }
-                                    .run();
+                                    .watch_until_closed(build_windows_process_match_patterns(
+                                        &steam_executable,
+                                    ));
                                 }
                                 return Err(crate::commands::game_commands::launch_cancel::LAUNCH_CANCELLED_MESSAGE.to_string());
                             }
@@ -466,8 +562,10 @@ pub(super) fn launch_windows_steam_game(
             if crate::commands::game_commands::launch_cancel::cancelled_launch_should_close_steam(
                 steam_was_running,
             ) {
-                if let Some(shutdown) = steam_shutdown.as_ref() {
-                    shutdown.run();
+                if let Some(shutdown) = steam_shutdown {
+                    shutdown.watch_until_closed(build_windows_process_match_patterns(
+                        &steam_executable,
+                    ));
                 }
             }
             Err(crate::commands::game_commands::launch_cancel::LAUNCH_CANCELLED_MESSAGE.to_string())
@@ -531,5 +629,101 @@ pub(crate) fn launch_windows_game(
             "This game is installed through Steam, but r2modmac could not find the Windows Steam client that owns it. Set the Windows Steam directory (the folder that contains steam.exe, inside your CrossOver/Wine bottle) in Settings and try again."
                 .to_string(),
         ),
+    }
+}
+
+#[cfg(all(test, unix))]
+mod wine_steam_shutdown_tests {
+    use super::*;
+
+    /// The real thing, against a real Wine-hosted Steam.
+    ///
+    /// Ignored by default, and skipped unless pointed at a launcher, because
+    /// there is no single Wine setup to test against: CrossOver, Sikarugir,
+    /// Whisky, plain Wine and Windows all differ, and no one machine has them
+    /// all. Anyone with one can check it on theirs by pointing these at it:
+    ///
+    /// ```text
+    /// R2MODMAC_TEST_WINE_RUNNER="/Applications/CrossOver.app/Contents/SharedSupport/CrossOver/CrossOver-Hosted Application/wine" \
+    /// R2MODMAC_TEST_WINE_PREFIX="/path/to/bottle-or-prefix" \
+    /// R2MODMAC_TEST_STEAM_EXE="/path/to/drive_c/Program Files (x86)/Steam/steam.exe" \
+    /// cargo test --lib shuts_a_wine_steam_down_for_real -- --ignored --nocapture
+    /// ```
+    ///
+    /// It reproduces the case the log caught: Steam started, cancelled one
+    /// second later — before Steam exists — and expected to be closed anyway.
+    ///
+    /// **Steam must be signed in for this to pass.** A client parked on the
+    /// login window ignores `-shutdown` entirely (measured: still up ninety
+    /// seconds later), and nothing short of killing it changes that — see
+    /// `docs/stopping-a-launch.md` for why that line is not crossed. It does
+    /// not matter in practice: a signed-out Steam cannot start a game either,
+    /// so there is no launch left to undo.
+    #[test]
+    #[ignore = "starts and closes a real Wine-hosted Steam"]
+    fn shuts_a_wine_steam_down_for_real() {
+        let (Ok(runner), Ok(prefix), Ok(steam_executable)) = (
+            std::env::var("R2MODMAC_TEST_WINE_RUNNER"),
+            std::env::var("R2MODMAC_TEST_WINE_PREFIX"),
+            std::env::var("R2MODMAC_TEST_STEAM_EXE"),
+        ) else {
+            println!(
+                "skipped: set R2MODMAC_TEST_WINE_RUNNER, R2MODMAC_TEST_WINE_PREFIX and R2MODMAC_TEST_STEAM_EXE to run this"
+            );
+            return;
+        };
+
+        let runner = std::path::PathBuf::from(runner);
+        let prefix = std::path::PathBuf::from(prefix);
+        let steam_executable = std::path::PathBuf::from(steam_executable);
+        let patterns = build_windows_process_match_patterns(&steam_executable);
+
+        crate::commands::game_commands::launch_cancel::begin_launch();
+
+        // Start Steam the way a launch does, through the same runner plumbing.
+        let mut command = std::process::Command::new(&runner);
+        configure_host_compat_runner_command(&mut command, &runner, Some(&prefix)).unwrap();
+        // Left running deliberately: this is Steam starting up, and the point
+        // of the test is what closes it.
+        let mut steam = command
+            .arg(&steam_executable)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("could not start Steam through the runner");
+
+        // One second in: what the user actually does.
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        let started = std::time::Instant::now();
+
+        WindowsSteamShutdown::Runner {
+            runner: runner.clone(),
+            prefix: Some(prefix),
+            steam_executable,
+        }
+        .watch_until_closed(patterns.clone());
+
+        let deadline = started + std::time::Duration::from_millis(STEAM_QUIT_TOTAL_MS + 10_000);
+        let mut ever_seen = false;
+        let mut closed = false;
+        while std::time::Instant::now() < deadline {
+            if is_process_running_for_patterns_excluding(&patterns, SHUTDOWN_ARGUMENT) {
+                ever_seen = true;
+            } else if ever_seen {
+                closed = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(500));
+        }
+
+        println!(
+            "Steam came up: {}, then closed: {} after {:?}",
+            ever_seen,
+            closed,
+            started.elapsed()
+        );
+        let _ = steam.try_wait();
+        assert!(ever_seen, "Steam never started, so nothing was proven");
+        assert!(closed, "Steam was left running after a cancel it did not see");
     }
 }

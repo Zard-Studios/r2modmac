@@ -33,6 +33,18 @@ was already open, nothing is sent to it at all, so the game will normally start.
 This is a limit of what Steam offers, not a bug: a `steam://run` request cannot be recalled.
 When it happens, the button simply becomes the Stop Game button, which does stop the game.
 
+## Timing
+
+Cancelling stops the *waiting* instantly. Closing Steam takes longer, because Steam has to
+finish coming up before it can be told to go away. Measured on a cold start:
+
+| Platform | Steam closed after |
+| --- | --- |
+| macOS native | ~8 seconds (~15 when stop is pressed 1 second after Play) |
+| CrossOver (Wine) | ~19 seconds |
+
+The button comes back immediately either way — the closing happens in the background.
+
 ## How Steam is asked to close
 
 On **macOS** two routes are alternated every few seconds until Steam goes away, for up to
@@ -49,7 +61,43 @@ is decided by looking for Steam's processes, never by an exit code: the AppleScr
 reports error -128 ("cancelled by the user") while quitting Steam perfectly well.
 
 Under **Wine, CrossOver, Sikarugir and on Windows** it is `steam.exe -shutdown`, Steam's own
-documented shutdown switch, sent through whichever runner started the client.
+shutdown switch, sent through whichever runner started the client — the Wineskin wrapper, the
+CrossOver or Wine runner, or Windows itself. Nothing here knows *which* launcher it is
+talking to: the route is simply the one that started this Steam, so a launcher that can start
+a game can stop it.
+
+Two measured details that are easy to get wrong:
+
+- **Wait for Steam before asking.** The user cancels about a second after pressing Play,
+  when Steam does not exist yet. A single request at that moment lands on nothing and Steam
+  boots on to start the game — which is what made this look broken. The watch waits for
+  Steam to appear, then asks, and keeps asking.
+- **Do not count your own requests.** `steam.exe -shutdown` is itself a process carrying the
+  path of `steam.exe`, and it does not exit after delivering the request. A watch that counts
+  it never sees Steam go away. Worse, `sysinfo` does not report the arguments of Wine-hosted
+  processes — our shutdown command appears there only as a copy of `steam.exe` in Wine's temp
+  directory — so the exclusion reads command lines from `pgrep -fl` instead.
+
+### What is never done
+
+- **`taskkill /F`** — force termination. Wine's `taskkill` sends `WM_CLOSE` without `/F` and
+  terminates with it ([wine source](https://github.com/wine-mirror/wine/blob/master/programs/taskkill/taskkill.c)).
+- **`wineserver -k`** — kills every Wine process in the prefix, which would take the game and
+  anything else in that bottle with it ([WineHQ forums](https://forum.winehq.org/viewtopic.php?t=6330)).
+- **Killing the native macOS Steam.** Killing Steam mid-boot is what left it crashing on the
+  next start, and forcing a Steam client down is a known way to corrupt its `.vdf`/`.acf`
+  files, after which games go missing or need verifying
+  ([Proton issue #114](https://github.com/ValveSoftware/Proton/issues/114)).
+
+A Steam that refuses to close is therefore left running, and the log says so.
+
+### The one case where Steam refuses
+
+A Wine Steam sitting on the **login window** ignores `-shutdown` completely — measured still
+up ninety seconds later. It is left running.
+
+This costs nothing in practice: a Steam that is not signed in cannot start a game either, so
+there is no launch left to undo. The game does not appear; only the Steam window stays.
 
 This behaviour belongs to macOS and to Steam, not to r2modmac, and it has already changed
 once during development. There is a test that exercises the real thing against the real
@@ -58,6 +106,18 @@ Steam, ignored by default because it starts and closes it:
 ```
 cd src-tauri && cargo test --lib shuts_a_booting_steam_down_for_real -- --ignored --nocapture
 ```
+
+The Wine side has the same test, and since no machine has every launcher installed, it is
+pointed at whichever one you have — CrossOver, Sikarugir, Whisky, plain Wine:
+
+```
+R2MODMAC_TEST_WINE_RUNNER="/Applications/CrossOver.app/Contents/SharedSupport/CrossOver/CrossOver-Hosted Application/wine" \
+R2MODMAC_TEST_WINE_PREFIX="/path/to/bottle-or-prefix" \
+R2MODMAC_TEST_STEAM_EXE="/path/to/drive_c/Program Files (x86)/Steam/steam.exe" \
+cargo test --lib shuts_a_wine_steam_down_for_real -- --ignored --nocapture
+```
+
+It skips itself when those are unset, and needs a Steam that is signed in (see above).
 
 ## Platforms
 
