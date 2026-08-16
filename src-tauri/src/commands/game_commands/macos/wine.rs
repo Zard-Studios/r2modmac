@@ -242,10 +242,12 @@ pub(crate) fn launch_macos_wineskin_program(
     // Open the bundle as a new macOS application instance.
     let mut open_command = std::process::Command::new("open");
     open_command.arg("-n");
-    if working_dir.is_some_and(|path| path.join("version.dll").is_file()) {
+    // The loader's proxy DLL has to win over Wine's builtin, and its name comes
+    // from the pack the game uses (version.dll, d3d12.dll for Hades II, ...).
+    if let Some(overrides) = working_dir.and_then(crate::models::loaders::wine_dll_override_value) {
         open_command
             .arg("--env")
-            .arg("WINEDLLOVERRIDES=version=n,b");
+            .arg(format!("WINEDLLOVERRIDES={overrides}"));
     }
     let open_status = open_command
         .arg(bundle_path)

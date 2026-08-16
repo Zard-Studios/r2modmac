@@ -63,8 +63,7 @@ pub async fn sync_profile_to_game(
         && !is_balatro_game_path(game_path)
         && !is_outerwilds_identifier(&game_identifier)
         && !is_outerwilds_game_path(game_path)
-        && !is_risk_of_rain_returns_identifier(&game_identifier)
-        && !is_risk_of_rain_returns_game_path(game_path)
+        && !crate::models::loaders::uses_return_of_modding(&game_identifier, game_path)
     {
         let resolved = resolve_macos_runtime_root(game_path);
         if resolved != game_path {
@@ -112,8 +111,8 @@ pub async fn sync_profile_to_game(
 
     let is_outerwilds_profile =
         is_outerwilds_identifier(&game_identifier) || is_outerwilds_game_path(game_path);
-    let is_risk_of_rain_returns_profile = is_risk_of_rain_returns_identifier(&game_identifier)
-        || is_risk_of_rain_returns_game_path(game_path);
+    let is_return_of_modding_profile =
+        crate::models::loaders::uses_return_of_modding(&game_identifier, game_path);
 
     // Get list of mod names from profile (format: "Author-ModName-Version")
     // We keep the full name for matching
@@ -139,7 +138,7 @@ pub async fn sync_profile_to_game(
     if is_mac_profile
         && !is_balatro_profile
         && !is_outerwilds_profile
-        && !is_risk_of_rain_returns_profile
+        && !is_return_of_modding_profile
         && profile_requires_bepinex
     {
         validate_macos_bepinex_support(runtime_game_path)?;

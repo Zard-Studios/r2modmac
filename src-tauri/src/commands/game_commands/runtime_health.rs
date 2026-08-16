@@ -108,15 +108,31 @@ fn inspect_lovely(game_path: &std::path::Path) -> RuntimeHealth {
     health("lovely", missing)
 }
 
+/// ReturnOfModding is present when its proxy DLL sits next to the game exe.
+///
+/// The proxy's name is per-pack, not per-loader: ReturnOfModding ships
+/// `version.dll` while Hell2Modding (Hades II) ships `d3d12.dll`, so the check
+/// accepts any of the pack proxy names rather than the one Risk of Rain Returns
+/// happens to use. A vanilla profile keeps the loader renamed to `*_DISABLED`,
+/// which still counts as installed.
 fn inspect_return_of_modding(game_path: &std::path::Path, vanilla: bool) -> RuntimeHealth {
-    let loader = if vanilla && game_path.join("version.dll_DISABLED").is_file() {
-        game_path.join("version.dll_DISABLED")
-    } else {
-        game_path.join("version.dll")
-    };
-    if loader.is_file() {
+    let proxies = crate::models::loaders::return_of_modding_proxies(game_path);
+    let installed = proxies.iter().any(|proxy| {
+        let disabled = proxy
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.ends_with("_DISABLED"));
+        !disabled || vanilla
+    });
+    if installed {
         health("returnofmodding", Vec::new())
     } else {
+        log::debug!(
+            "[runtime_health] No ReturnOfModding proxy in {:?} (looked for {:?}); folder contains: {:?}",
+            game_path,
+            crate::models::loaders::RETURN_OF_MODDING_PROXY_NAMES,
+            list_directory_entries(game_path, 40)
+        );
         health("returnofmodding", vec!["runtime".to_string()])
     }
 }
@@ -206,6 +222,17 @@ pub async fn check_profile_runtime_health(
     platform: Option<String>,
 ) -> Result<RuntimeHealth, String> {
     let profile_platform = platform.unwrap_or_else(|| get_profile_platform(&app, &profile_id));
+    // Even the answers that stop short of looking at the game folder name the
+    // right loader, so the sidebar does not tell a Hades II user that BepInEx
+    // is what they are missing.
+    let declared_runtime = if is_outerwilds_identifier(&game_identifier) {
+        "owml".to_string()
+    } else {
+        crate::models::loaders::loader_for_community(&game_identifier)
+            .unwrap_or(crate::models::loaders::PackageLoader::BepInEx)
+            .runtime_name()
+            .to_string()
+    };
     log::debug!(
         "[runtime_health] Checking profile={} game={} platform={}",
         profile_id,
@@ -218,7 +245,7 @@ pub async fn check_profile_runtime_health(
             profile_platform
         );
         return Ok(RuntimeHealth {
-            runtime: "bepinex".to_string(),
+            runtime: declared_runtime,
             status: "unsupported".to_string(),
             missing_components: Vec::new(),
             repairable: false,
@@ -237,7 +264,7 @@ pub async fn check_profile_runtime_health(
             profile_platform
         );
         return Ok(RuntimeHealth {
-            runtime: "bepinex".to_string(),
+            runtime: declared_runtime,
             status: "unconfigured".to_string(),
             missing_components: Vec::new(),
             repairable: false,
@@ -251,20 +278,44 @@ pub async fn check_profile_runtime_health(
         game_path,
         vanilla
     );
-    if is_outerwilds_identifier(&game_identifier) || is_outerwilds_game_path(game_path) {
-        return Ok(inspect_owml(game_path, vanilla));
-    }
+    // Which loader the game needs is a property of the community, not of this
+    // app's list of special cases: Hades II runs on ReturnOfModding through
+    // Hell2Modding, and reporting a missing BepInEx for it sent the user into a
+    // repair that had no package to install (issue #38).
+    let loader = crate::models::loaders::resolve_loader(&game_identifier, game_path);
+    log::debug!(
+        "[runtime_health] Loader for {}: {}",
+        game_identifier,
+        loader.runtime_name()
+    );
 
-    if is_risk_of_rain_returns_identifier(&game_identifier)
-        || is_risk_of_rain_returns_game_path(game_path)
-    {
-        return Ok(inspect_return_of_modding(game_path, vanilla));
-    }
-
-    if profile_platform == "mac"
-        && (is_balatro_identifier(&game_identifier) || is_balatro_game_path(game_path))
-    {
-        return Ok(inspect_lovely(game_path));
+    match &loader {
+        crate::models::loaders::PackageLoader::Owml => return Ok(inspect_owml(game_path, vanilla)),
+        crate::models::loaders::PackageLoader::ReturnOfModding => {
+            return Ok(inspect_return_of_modding(game_path, vanilla))
+        }
+        crate::models::loaders::PackageLoader::Lovely => {
+            if profile_platform == "mac" {
+                return Ok(inspect_lovely(game_path));
+            }
+        }
+        crate::models::loaders::PackageLoader::Unsupported(slug) => {
+            // Saying "unsupported" is the honest answer: r2modmac installs
+            // BepInEx, ReturnOfModding, Lovely and OWML, and nothing it could
+            // download would make this game run on one of them.
+            log::info!(
+                "[runtime_health] {} uses the {} loader, which r2modmac cannot install",
+                game_identifier,
+                slug
+            );
+            return Ok(RuntimeHealth {
+                runtime: slug.clone(),
+                status: "unsupported".to_string(),
+                missing_components: Vec::new(),
+                repairable: false,
+            });
+        }
+        crate::models::loaders::PackageLoader::BepInEx => {}
     }
 
     if profile_platform == "mac" {
@@ -377,6 +428,19 @@ mod tests {
         fs::rename(root.join("version.dll"), root.join("version.dll_DISABLED")).unwrap();
         assert_eq!(inspect_return_of_modding(&root, true).status, "healthy");
         assert_eq!(inspect_return_of_modding(&root, false).status, "missing");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn return_of_modding_accepts_a_pack_that_ships_another_proxy_name() {
+        // Hades II is served by Hell2Modding, whose pack installs d3d12.dll.
+        // Looking only for version.dll reported the runtime as missing and sent
+        // the user into a BepInEx repair that had nothing to install (#38).
+        let root = test_dir("hell2modding");
+        fs::create_dir_all(&root).unwrap();
+        assert_eq!(inspect_return_of_modding(&root, false).status, "missing");
+        fs::write(root.join("d3d12.dll"), b"loader").unwrap();
+        assert_eq!(inspect_return_of_modding(&root, false).status, "healthy");
         fs::remove_dir_all(root).unwrap();
     }
 

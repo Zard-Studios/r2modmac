@@ -1,0 +1,688 @@
+{
+  "source": "https://thunderstore.io/api/experimental/schema/dev/latest/",
+  "schemaVersion": "0.3.0",
+  "generatedFrom": "thunderstore ecosystem schema",
+  "communities": {
+    "20-minutes-till-dawn": "bepinex",
+    "9-kings": "bepinex",
+    "a-dance-of-fire-and-ice": "umm",
+    "a-gentlemens-dispute": "bepinex",
+    "across-the-obelisk": "bepinex",
+    "aeruta": "bepinex",
+    "against": "bepinex",
+    "against-the-storm": "bepinex",
+    "ale-and-tale-tavern": "bepinex",
+    "aloft": "bepinex",
+    "among-us": "bepinex",
+    "an-unfinished-game": "recursive-melonloader",
+    "ancient-dungeon-vr": "none",
+    "aneurism-iv": "bepinex",
+    "angry-birds-vr-isle-of-pigs": "recursive-melonloader",
+    "another-crabs-treasure": "bepinex",
+    "arcus-chroma": "bepinex",
+    "aska": "bepinex",
+    "astroneer": "shimloader",
+    "atlyss": "bepinex",
+    "atomicrops": "bepinex",
+    "atrio-the-dark-wild": "bepinex",
+    "baby-steps": "recursive-melonloader",
+    "back-to-the-dawn": "bepinex",
+    "backpack-hero": "melonloader",
+    "bad-north": "bepinex",
+    "balatro": "lovely",
+    "beetleball": "recursive-melonloader",
+    "below-the-stone": "bepinex",
+    "bendy-and-the-ink-machine": "bepinex",
+    "beton-brutal": "recursive-melonloader",
+    "betrayal-beach": "bepinex",
+    "big-ambitions": "recursive-melonloader",
+    "big-walk": "bepinex",
+    "block-story": "bepinex",
+    "bloons-td-6": "recursive-melonloader",
+    "blue-prince": "bepinex",
+    "bomb-rush-cyberfunk": "bepinex",
+    "bonelab": "melonloader",
+    "boneworks": "melonloader",
+    "book-of-travels": "bepinex",
+    "bopl-battle": "bepinex",
+    "broforce": "umm",
+    "brotato": "godotml",
+    "brutalistick-vr": "recursive-melonloader",
+    "burglin-gnomes": "bepinex",
+    "cairn": "recursive-melonloader",
+    "carrier-deck": "bepinex",
+    "castle-story": "bepinex",
+    "cats-are-liquid": "bepinex",
+    "cave-crawlers": "bepinex",
+    "chill-with-you": "bepinex",
+    "chrono-ark": "bepinex",
+    "cities-skylines-ii": "bepinex",
+    "clover-pit": "bepinex",
+    "content-warning": "bepinex",
+    "core-keeper": "bepinex",
+    "crab-game": "bepinex",
+    "crashout-crew": "bepinex",
+    "crawlspace": "bepinex",
+    "crawlspace-2": "bepinex",
+    "crime-simulator": "bepinex",
+    "cryo": "recursive-melonloader",
+    "cult-of-the-lamb": "bepinex",
+    "cursed-words": "recursive-melonloader",
+    "dale-dawson-stationery-supplies": "recursive-melonloader",
+    "darkwater": "bepinex",
+    "deadly-delivery": "bepinex",
+    "deep-rock-galactic-survivor": "bepinex",
+    "depo": "bepinex",
+    "disco-elysium": "bepinex",
+    "distance": "bepinex",
+    "dome-keeper": "godotml",
+    "dredge": "bepinex",
+    "ducks-can-drive": "recursive-melonloader",
+    "dusk": "bepinex",
+    "dyson-sphere-program": "bepinex",
+    "easy-delivery-co": "bepinex",
+    "ena-dream-bbq": "bepinex",
+    "enter-the-gungeon": "bepinex",
+    "erenshor": "bepinex",
+    "everything-is-crab": "bepinex",
+    "factory-planner": "bepinex",
+    "five-nights-at-freddys-into-the-pit": "bepinex",
+    "football-manager-26": "bepinex",
+    "for-the-king": "bepinex",
+    "forsaken-frontiers": "recursive-melonloader",
+    "gamble-with-your-friends": "bepinex",
+    "gang-beasts": "recursive-melonloader",
+    "garfield-kart-furious-racing": "bepinex",
+    "gatekeeper": "bepinex",
+    "getting-over-it": "bepinex",
+    "gladio-mori": "bepinex",
+    "gloomwood": "bepinex",
+    "goblin-buster": "bepinex",
+    "goblin-cleanup": "bepinex",
+    "goodbye-volcano-high": "bepinex",
+    "gorebox": "bepinex",
+    "gorilla-tag": "recursive-melonloader",
+    "grain-rot": "shimloader",
+    "granny-chapter-two": "bepinex",
+    "green-hell-vr": "bepinex",
+    "grey-hack": "bepinex",
+    "grime": "bepinex",
+    "gtfo": "bepinex",
+    "guilty-as-sock": "bepinex",
+    "h3vr": "bepinex",
+    "hades-ii": "return-of-modding",
+    "hard-bullet": "melonloader",
+    "hard-time-3": "bepinex",
+    "hollow-knight-silksong": "bepinex",
+    "home-safety-hotline": "recursive-melonloader",
+    "hot-lava": "bepinex",
+    "hotds": "bepinex",
+    "house-of-legacy": "bepinex",
+    "human-fall-flat": "bepinex",
+    "i-am-your-beast": "bepinex",
+    "inscryption": "bepinex",
+    "inside-the-backrooms": "recursive-melonloader",
+    "iron-nest": "recursive-melonloader",
+    "island-market-simulator": "bepinex",
+    "jump-scare-mansion": "bepinex",
+    "jump-space": "recursive-melonloader",
+    "keywe": "bepinex",
+    "labyrinthine": "recursive-melonloader",
+    "last-train-outta-wormtown": "bepinex",
+    "lens-island": "bepinex",
+    "lethal-company": "bepinex",
+    "lethal-league-blaze": "bepinex",
+    "logic-world": "bepinex",
+    "lootun": "bepinex",
+    "lost-skies": "bepinex",
+    "lost-skies-ic": "bepinex",
+    "lucky-shot": "bepinex",
+    "lumentale-memories-of-trey": "bepinex",
+    "lycans": "bepinex",
+    "mage-arena": "bepinex",
+    "magicite": "bepinex",
+    "magicraft": "bepinex",
+    "malteses-fluffy-onsen": "bepinex",
+    "meccha-chameleon": "shimloader",
+    "mechanica": "bepinex",
+    "meeple-station": "bepinex",
+    "megabonk": "bepinex",
+    "mimesis": "recursive-melonloader",
+    "mine-mogul": "bepinex",
+    "minos": "shimloader",
+    "miside": "bepinex",
+    "miside-zero": "recursive-melonloader",
+    "modulus-factory-automation": "bepinex",
+    "monster-train-2": "bepinex",
+    "muck": "bepinex",
+    "my-dream-setup": "bepinex",
+    "mycopunk": "bepinex",
+    "nasb": "bepinex",
+    "nearly-dead": "bepinex",
+    "necropolis": "bepinex",
+    "nine-sols": "bepinex",
+    "northstar": "northstar",
+    "nuclear-option": "bepinex",
+    "odd-remedy": "bepinex",
+    "old-market-simulator": "bepinex",
+    "on-together": "bepinex",
+    "ostranauts": "bepinex",
+    "outward": "bepinex",
+    "pac-man-world-re-pac": "bepinex",
+    "painting-vr": "recursive-melonloader",
+    "pair-a-dice": "godotml",
+    "palworld": "shimloader",
+    "panicore": "shimloader",
+    "paper-animal-adventure": "bepinex",
+    "paquerette-down-the-bunburrows": "bepinex",
+    "paralives": "bepinex",
+    "patapon-1-2-replay": "bepinex",
+    "patch-quest": "melonloader",
+    "peak": "bepinex",
+    "peaks-of-yore": "bepinex",
+    "peglin": "bepinex",
+    "pigface": "bepinex",
+    "pikuniku": "bepinex",
+    "pit-of-goblin": "recursive-melonloader",
+    "plasma": "bepinex",
+    "potion-craft": "bepinex",
+    "project-arrhythmia": "bepinex",
+    "project-gorgon": "bepinex",
+    "pulsar-lost-colony": "bepinex",
+    "pushing-it-together-sisyphus": "bepinex",
+    "puttler": "recursive-melonloader",
+    "random-access-mayhem": "godotml",
+    "ravenfield": "bepinex",
+    "receiver-2": "bepinex",
+    "repo": "bepinex",
+    "resonite": "bepisloader",
+    "return-from-core": "bepinex",
+    "return-of-the-obra-dinn": "bepinex",
+    "risk-of-rain-returns": "return-of-modding",
+    "riskofrain2": "bepinex",
+    "roadside-research": "bepinex",
+    "rogue-genesia": "bepinex",
+    "rogue-tower": "bepinex",
+    "romestead": "bepinex",
+    "rounds": "bepinex",
+    "rumble": "melonloader",
+    "rv-there-yet": "shimloader",
+    "sailwind": "bepinex",
+    "schedule-i": "recursive-melonloader",
+    "scrap-mechanic": "rivet",
+    "screw-drivers": "bepinex",
+    "shadows-of-doubt": "bepinex",
+    "shadows-over-loathing": "bepinex",
+    "shapez-2": "bepinex",
+    "shift-at-midnight": "bepinex",
+    "side-effects": "bepinex",
+    "sineus-arena-survivors": "bepinex",
+    "skul-the-hero-slayer": "bepinex",
+    "slashers-keep": "bepinex",
+    "sledding-game": "recursive-melonloader",
+    "slip-skid": "bepinex",
+    "slipstream-rogue-space": "bepinex",
+    "smushi-come-home": "bepinex",
+    "songs-of-conquest": "bepinex",
+    "sons-of-the-forest": "bepinex",
+    "soulcalibur-vi": "shimloader",
+    "stacklands": "bepinex",
+    "starsand": "bepinex",
+    "stick-fight-the-game": "bepinex",
+    "stolen-realm": "bepinex",
+    "straftat": "bepinex",
+    "subnautica": "bepinex",
+    "subnautica-below-zero": "bepinex",
+    "subterranauts": "bepinex",
+    "subterror": "bepinex",
+    "sulfur": "bepinex",
+    "sun-haven": "bepinex",
+    "sunkenland": "bepinex",
+    "super-battle-golf": "bepinex",
+    "super-fantasy-kingdom": "bepinex",
+    "super-psycho-baseball": "bepinex",
+    "superhot": "recursive-melonloader",
+    "superhot-mind-control-delete": "recursive-melonloader",
+    "supermarket-together": "bepinex",
+    "talespire": "bepinex",
+    "tank-team": "bepinex",
+    "tcg-card-shop-simulator": "bepinex",
+    "techtonica": "bepinex",
+    "the-farmer-was-replaced": "bepinex",
+    "the-lab": "bepinex",
+    "the-ouroboros-king": "bepinex",
+    "the-planet-crafter": "bepinex",
+    "the-spell-brigade": "bepinex",
+    "thronefall": "bepinex",
+    "timberborn": "bepinex",
+    "totally-accurate-battle-simulator": "bepinex",
+    "touhou-lost-branch-of-legend": "bepinex",
+    "trombone-champ": "bepinex",
+    "ultimate-chicken-horse": "bepinex",
+    "ultrakill": "bepinex",
+    "unfair-flips": "bepinex",
+    "v-rising": "bepinex",
+    "valheim": "bepinex",
+    "vampire-crawlers": "bepinex",
+    "vellum": "recursive-melonloader",
+    "vertigo-2": "bepinex",
+    "very-very-valet": "bepinex",
+    "vigil": "recursive-melonloader",
+    "voices-of-the-void": "shimloader",
+    "void-crew": "bepinex",
+    "voodoo-fishin": "bepinex",
+    "vtol-vr": "bepinex",
+    "waterpark-simulator": "bepinex",
+    "we-love-katamari-reroll-royal-reverie": "bepinex",
+    "webfishing": "gdweave",
+    "west-of-loathing": "bepinex",
+    "white-knuckle": "bepinex",
+    "wildfrost": "bepinex",
+    "windrose": "shimloader",
+    "wizard-of-legend": "bepinex",
+    "wizard-with-a-gun": "bepinex",
+    "wobbly-life": "bepinex",
+    "word-play": "bepinex",
+    "wrestling-empire": "bepinex",
+    "yapyap": "bepinex",
+    "zort": "bepinex"
+  },
+  "loaderPackages": {
+    "bepinex": [
+      {
+        "packageId": "1F31A-BepInEx_Valheim_Full",
+        "rootFolder": "BepInEx_Valheim_Full"
+      },
+      {
+        "packageId": "bbepis-BepInEx_Rogue_Tower",
+        "rootFolder": ""
+      },
+      {
+        "packageId": "bbepis-BepInExPack",
+        "rootFolder": "BepInExPack"
+      },
+      {
+        "packageId": "bbepisTaleSpire-BepInExPack",
+        "rootFolder": "BepInExPack"
+      },
+      {
+        "packageId": "BepInEx_Wormtown-BepInExPack",
+        "rootFolder": "BepInExPack"
+      },
+      {
+        "packageId": "BepInEx-BepInExPack",
+        "rootFolder": "BepInExPack"
+      },
+      {
+        "packageId": "BepInEx-BepInExPack_AcrossTheObelisk",
+        "rootFolder": "BepInExPack_AcrossTheObelisk"
+      },
+      {
+        "packageId": "BepInEx-BepInExPack_Aeruta",
+        "rootFolder": "BepInExPack"
+      },
+      {
+        "packageId": "BepInEx-BepInExPack_AGAINST",
+        "rootFolder": "BepInExPack_AGAINST"
+      },
+      {
+        "packageId": "BepInEx-BepInExPack_Aloft",
+        "rootFolder": "BepInExPack_Aloft"
+      },
+      {
+        "packageId": "BepInEx-BepInExPack_AmongUs",
+        "rootFolder": "BepInExPack_AmongUs"
+      },
+      {
+        "packageId": "BepInEx-BepInExPack_BadNorth",
+        "rootFolder": "BepInExPack"
+      },
+      {
+        "packageId": "BepInEx-BepInExPack_CaLABP",
+        "rootFolder": "BepInExPack_CaLABP"
+      },
+      {
+        "packageId": "BepInEx-BepInExPack_Chrono_Ark",
+        "rootFolder": "BepInExPack_Chrono_Ark"
+      },
+      {
+        "packageId": "BepInEx-BepInExPack_Core_Keeper",
+        "rootFolder": "BepInExPack_Core-Keeper"
+      },
+      {
+        "packageId": "BepInEx-BepInExPack_CrabGame",
+        "rootFolder": "BepInExPack"
+      },
+      {
+        "packageId": "BepInEx-BepInExPack_CultOfTheLamb",
+        "rootFolder": "BepInExPack_CultOfTheLamb"
+      },
+      {
+        "packageId": "BepInEx-BepInExPack_EtG",
+        "rootFolder": "BepInExPack_EtG"
+      },
+      {
+        "packageId": "BepInEx-BepInExPack_FootballManager26",
+        "rootFolder": "BepInExPack"
+      },
+      {
+        "packageId": "BepInEx-BepInExPack_ForTheKing",
+        "rootFolder": "BepInExPack_ForTheKing"
+      },
+      {
+        "packageId": "BepInEx-BepInExPack_GTFO",
+        "rootFolder": "BepInExPack_GTFO"
+      },
+      {
+        "packageId": "BepInEx-BepInExPack_H3VR",
+        "rootFolder": "BepInExPack_H3VR"
+      },
+      {
+        "packageId": "BepInEx-BepInExPack_HOTDS",
+        "rootFolder": "BepInExPack_HOTDS"
+      },
+      {
+        "packageId": "BepInEx-BepInExPack_HumanFallFlat",
+        "rootFolder": "BepInExPack_HumanFallFlat"
+      },
+      {
+        "packageId": "BepInEx-BepInExPack_IL2CPP",
+        "rootFolder": "BepInExPack"
+      },
+      {
+        "packageId": "BepInEx-BepInExPack_Inscryption",
+        "rootFolder": "BepInExPack_Inscryption"
+      },
+      {
+        "packageId": "BepInEx-BepInExPack_InSilence",
+        "rootFolder": "BepInExPack"
+      },
+      {
+        "packageId": "BepInEx-BepInExPack_LensIsland",
+        "rootFolder": "BepInExPack"
+      },
+      {
+        "packageId": "BepInEx-BepInExPack_LLBlaze",
+        "rootFolder": "BepInExPack_LLBlaze"
+      },
+      {
+        "packageId": "BepInEx-BepInExPack_LostSkies",
+        "rootFolder": "BepInExPack"
+      },
+      {
+        "packageId": "BepInEx-BepInExPack_Magicite",
+        "rootFolder": "BepInExPack_Magicite"
+      },
+      {
+        "packageId": "BepInEx-BepInExPack_Muck",
+        "rootFolder": "BepInExPack_Muck"
+      },
+      {
+        "packageId": "BepInEx-BepInExPack_Mycopunk",
+        "rootFolder": "BepInExPack_Mycopunk"
+      },
+      {
+        "packageId": "BepInEx-BepInExPack_NASB",
+        "rootFolder": "BepInExPack_NASB"
+      },
+      {
+        "packageId": "BepInEx-BepInExPack_NearlyDead",
+        "rootFolder": "BepInExPack_NearlyDead"
+      },
+      {
+        "packageId": "BepInEx-BepInExPack_Necropolis",
+        "rootFolder": "BepInExPack"
+      },
+      {
+        "packageId": "BepInEx-BepInExPack_Ostranauts",
+        "rootFolder": "BepInExPack"
+      },
+      {
+        "packageId": "BepInEx-BepInExPack_Outward",
+        "rootFolder": "BepInExPack_Outward"
+      },
+      {
+        "packageId": "BepInEx-BepInExPack_Patapon",
+        "rootFolder": "BepInExPack"
+      },
+      {
+        "packageId": "BepInEx-BepInExPack_PEAK",
+        "rootFolder": "BepInExPack_PEAK"
+      },
+      {
+        "packageId": "BepInEx-BepInExPack_Peglin",
+        "rootFolder": "BepInExPack_Peglin"
+      },
+      {
+        "packageId": "BepInEx-BepInExPack_PotionCraft",
+        "rootFolder": "BepInExPack_PotionCraft"
+      },
+      {
+        "packageId": "BepInEx-BepInExPack_Ravenfield",
+        "rootFolder": "BepInExPack_Ravenfield"
+      },
+      {
+        "packageId": "BepInEx-BepInExPack_RogueGenesia",
+        "rootFolder": "BepInExPack_RogueGenesia"
+      },
+      {
+        "packageId": "BepInEx-BepInExPack_ROUNDS",
+        "rootFolder": "BepInExPack_ROUNDS"
+      },
+      {
+        "packageId": "BepInEx-BepInExPack_Silksong",
+        "rootFolder": "BepInExPack"
+      },
+      {
+        "packageId": "BepInEx-BepInExPack_Skul",
+        "rootFolder": "BepInExPack"
+      },
+      {
+        "packageId": "BepInEx-BepInExPack_SlashersKeep",
+        "rootFolder": "BepInExPack"
+      },
+      {
+        "packageId": "BepInEx-BepInExPack_Stacklands",
+        "rootFolder": "BepInExPack_Stacklands"
+      },
+      {
+        "packageId": "BepInEx-BepInExPack_Starsand",
+        "rootFolder": "BepInExPack_Starsand"
+      },
+      {
+        "packageId": "BepInEx-BepInExPack_TABS",
+        "rootFolder": "BepInExPack_TABS"
+      },
+      {
+        "packageId": "BepInEx-BepInExPack_Thronefall",
+        "rootFolder": "BepInExPack"
+      },
+      {
+        "packageId": "BepInEx-BepInExPack_Timberborn",
+        "rootFolder": "BepInExPack_Timberborn"
+      },
+      {
+        "packageId": "BepInEx-BepInExPack_TromboneChamp",
+        "rootFolder": "BepInExPack_TromboneChamp"
+      },
+      {
+        "packageId": "BepInEx-BepInExPack_V_Rising",
+        "rootFolder": "BepInExPack_V_Rising"
+      },
+      {
+        "packageId": "BepInEx-BepInExPack_VTOL_VR",
+        "rootFolder": "BepInExPack_VTOL_VR"
+      },
+      {
+        "packageId": "BepInEx-BepInExPack_WizardWithAGun",
+        "rootFolder": "BepInExPack"
+      },
+      {
+        "packageId": "BepInEx-BepInExPack_x86",
+        "rootFolder": "BepInExPack"
+      },
+      {
+        "packageId": "BepInExPackMTD-BepInExPack_20MTD",
+        "rootFolder": "BepInExPack_20MTD"
+      },
+      {
+        "packageId": "denikson-BepInExPack_Valheim",
+        "rootFolder": "BepInExPack_Valheim"
+      },
+      {
+        "packageId": "GoblinCleanupModding-BepInExPack_GoblinCleanup",
+        "rootFolder": "BepInExPack"
+      },
+      {
+        "packageId": "grime_modding-BepInExPack_Grime",
+        "rootFolder": "BepInExPack"
+      },
+      {
+        "packageId": "Modding_Council-BepInExPack_of_Legend",
+        "rootFolder": "BepInExPack_of_Legend"
+      },
+      {
+        "packageId": "PCVR_Modders-BepInExPack_GHVR",
+        "rootFolder": "BepInExPack_GHVR"
+      },
+      {
+        "packageId": "Romestead_Modding-BepInExPack_Romestead",
+        "rootFolder": "BepInExPack"
+      },
+      {
+        "packageId": "SFTG_Modding-BepInExPack_SFTG",
+        "rootFolder": "BepInExPack"
+      },
+      {
+        "packageId": "silksong_modding-BepInExPack_Silksong",
+        "rootFolder": "BepInExPack"
+      },
+      {
+        "packageId": "SlipSkid_Modding-BepInExPack_SlipSkid",
+        "rootFolder": "BepInExPack"
+      },
+      {
+        "packageId": "Subnautica_Modding-BepInExPack",
+        "rootFolder": "BepInExPack"
+      },
+      {
+        "packageId": "Subnautica_Modding-BepInExPack_BelowZero",
+        "rootFolder": "BepInExPack_BelowZero"
+      },
+      {
+        "packageId": "Subnautica_Modding-BepInExPack_Subnautica",
+        "rootFolder": "BepInExPack_Subnautica"
+      },
+      {
+        "packageId": "Subnautica_Modding-BepInExPack_Subnautica_Experimental",
+        "rootFolder": "BepInExPack_Subnautica_Experimental"
+      },
+      {
+        "packageId": "SunkenlandModding-BepInExPack_Sunkenland",
+        "rootFolder": "BepInExPack_Sunkenland"
+      },
+      {
+        "packageId": "xiaoxiao921-BepInExPack",
+        "rootFolder": "BepInExPack"
+      },
+      {
+        "packageId": "xiaoye97-BepInEx",
+        "rootFolder": "BepInExPack"
+      },
+      {
+        "packageId": "Zinal001-BepInExPack_MECHANICA",
+        "rootFolder": "BepInExPack_MECHANICA"
+      }
+    ],
+    "bepisloader": [
+      {
+        "packageId": "ResoniteModding-BepInExRenderer",
+        "rootFolder": "BepInExPack"
+      },
+      {
+        "packageId": "ResoniteModding-BepisLoader",
+        "rootFolder": "BepInExPack"
+      }
+    ],
+    "gdweave": [
+      {
+        "packageId": "NotNet-GDWeave",
+        "rootFolder": ""
+      }
+    ],
+    "godotml": [
+      {
+        "packageId": "GodotModding-GodotModLoader",
+        "rootFolder": ""
+      }
+    ],
+    "lovely": [
+      {
+        "packageId": "Thunderstore-lovely",
+        "rootFolder": ""
+      }
+    ],
+    "melonloader": [
+      {
+        "packageId": "LavaGang-MelonLoader",
+        "rootFolder": ""
+      }
+    ],
+    "northstar": [
+      {
+        "packageId": "northstar-Northstar",
+        "rootFolder": "Northstar"
+      }
+    ],
+    "recursive-melonloader": [
+      {
+        "packageId": "HomeSafetyHotline_Modding-MelonLoader_HomeSafetyHotline",
+        "rootFolder": ""
+      },
+      {
+        "packageId": "LavaGang-MelonLoader",
+        "rootFolder": ""
+      },
+      {
+        "packageId": "SHMCD_Modding-MelonLoader_SHMCD",
+        "rootFolder": ""
+      }
+    ],
+    "return-of-modding": [
+      {
+        "packageId": "Hell2Modding-Hell2Modding",
+        "rootFolder": "ReturnOfModdingPack"
+      },
+      {
+        "packageId": "ReturnOfModding-ReturnOfModding",
+        "rootFolder": "ReturnOfModdingPack"
+      }
+    ],
+    "rivet": [
+      {
+        "packageId": "ReDoIngMods-Rivet",
+        "rootFolder": "Rivet"
+      }
+    ],
+    "shimloader": [
+      {
+        "packageId": "0xFFF7-votv_shimloader",
+        "rootFolder": ""
+      },
+      {
+        "packageId": "Thunderstore-unreal_shimloader",
+        "rootFolder": ""
+      }
+    ],
+    "umm": [
+      {
+        "packageId": "ADOFAI_Modding-UMM_ADOFAI",
+        "rootFolder": "UMM"
+      },
+      {
+        "packageId": "UMM-UMM",
+        "rootFolder": "UMM"
+      }
+    ]
+  }
+}

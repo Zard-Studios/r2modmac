@@ -160,6 +160,16 @@ pub fn run() {
             apply_log_level(models::shared::load_settings_impl(app.handle()).verbose_logging);
             commands::sponsor_commands::rotate_session_subject(app.handle());
 
+            // Which loader a community uses comes from the Thunderstore
+            // ecosystem schema. The embedded snapshot answers immediately; the
+            // cached copy and the background refresh keep communities added
+            // after this build from falling back to a BepInEx assumption.
+            models::loaders::load_cached_map(app.handle());
+            let loader_map_app = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                models::loaders::refresh_loader_map(loader_map_app).await;
+            });
+
             utils::volume_watcher::start_volume_watcher(app.handle().clone());
             commands::theme_commands::start_theme_watcher(app.handle().clone());
 

@@ -101,12 +101,12 @@ pub async fn install_to_game(
         && (is_balatro_identifier(&game_identifier) || is_balatro_game_path(game_path));
     let is_outerwilds_profile =
         is_outerwilds_identifier(&game_identifier) || is_outerwilds_game_path(game_path);
-    let is_risk_of_rain_returns_profile = is_risk_of_rain_returns_identifier(&game_identifier)
-        || is_risk_of_rain_returns_game_path(game_path);
+    let is_return_of_modding_profile =
+        crate::models::loaders::uses_return_of_modding(&game_identifier, game_path);
     let runtime_game_path_buf = if is_mac_profile
         && !is_balatro_profile
         && !is_outerwilds_profile
-        && !is_risk_of_rain_returns_profile
+        && !is_return_of_modding_profile
     {
         let resolved = resolve_macos_runtime_root(game_path);
         if resolved != game_path {
@@ -125,14 +125,14 @@ pub async fn install_to_game(
         && !is_vanilla
         && !is_balatro_profile
         && !is_outerwilds_profile
-        && !is_risk_of_rain_returns_profile
+        && !is_return_of_modding_profile
         && has_complete_macos_bepinex_runtime(runtime_game_path);
 
     if is_mac_profile
         && !is_vanilla
         && !is_balatro_profile
         && !is_outerwilds_profile
-        && !is_risk_of_rain_returns_profile
+        && !is_return_of_modding_profile
     {
         validate_macos_bepinex_support(runtime_game_path)?;
     }
@@ -166,22 +166,28 @@ pub async fn install_to_game(
         return Ok(());
     }
 
-    if is_risk_of_rain_returns_profile {
-        let loader = game_path.join("version.dll");
-        let disabled_loader = game_path.join("version.dll_DISABLED");
-        if is_vanilla {
-            if loader.exists() {
-                if disabled_loader.exists() {
-                    fs::remove_file(&disabled_loader).map_err(|error| error.to_string())?;
+    if is_return_of_modding_profile {
+        // Vanilla mode parks the loader beside the game instead of deleting it.
+        // The file to rename is whichever proxy the pack installed - version.dll
+        // for ReturnOfModding, d3d12.dll for Hell2Modding on Hades II - so both
+        // directions work off the names a pack can ship rather than one of them.
+        for name in crate::models::loaders::RETURN_OF_MODDING_PROXY_NAMES {
+            let loader = game_path.join(name);
+            let disabled_loader = game_path.join(format!("{name}_DISABLED"));
+            if is_vanilla {
+                if loader.is_file() {
+                    if disabled_loader.exists() {
+                        fs::remove_file(&disabled_loader).map_err(|error| error.to_string())?;
+                    }
+                    fs::rename(&loader, &disabled_loader)
+                        .map_err(|error| format!("Failed to disable ReturnOfModding: {error}"))?;
                 }
-                fs::rename(&loader, &disabled_loader)
-                    .map_err(|error| format!("Failed to disable ReturnOfModding: {error}"))?;
+            } else if disabled_loader.is_file() && !loader.exists() {
+                fs::rename(&disabled_loader, &loader)
+                    .map_err(|error| format!("Failed to enable ReturnOfModding: {error}"))?;
             }
-        } else if disabled_loader.exists() && !loader.exists() {
-            fs::rename(&disabled_loader, &loader)
-                .map_err(|error| format!("Failed to enable ReturnOfModding: {error}"))?;
         }
-        log::debug!("[install_to_game] Risk of Rain Returns profile - skipping BepInEx operations");
+        log::debug!("[install_to_game] ReturnOfModding profile - skipping BepInEx operations");
         return Ok(());
     }
 

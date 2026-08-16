@@ -80,7 +80,12 @@ export interface ThemeSummary {
 }
 
 export interface RuntimeHealth {
-    runtime: 'bepinex' | 'owml' | 'lovely' | 'returnofmodding';
+    /**
+     * The loader the community actually uses. The four r2modmac installs are
+     * named explicitly; any other value is the ecosystem's own slug for a
+     * loader this app cannot install (reported with status 'unsupported').
+     */
+    runtime: 'bepinex' | 'owml' | 'lovely' | 'returnofmodding' | (string & {});
     status: 'healthy' | 'missing' | 'incomplete' | 'unconfigured' | 'unsupported';
     missingComponents: string[];
     repairable: boolean;

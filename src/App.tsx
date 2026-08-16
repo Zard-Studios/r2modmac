@@ -41,6 +41,7 @@ import { useProfileActions } from './hooks/useProfileActions';
 import { useGameSync } from './hooks/useGameSync';
 import { compareVersions, findPinnedVersion, parsePackageReference } from './utils/modVersioning';
 import { getProfileModKey, hasPendingRuntimeInstall, migratePendingSyncBaselines, restoreInstalledMod } from './utils/profileSync';
+import { isLoaderPackage, loaderDisplayName, loaderPackageIds } from './utils/loaderPackages';
 import { isTextEntryTarget, shouldReleaseSearchFocus } from './utils/searchField';
 
 const QUICK_MAC_HINTS = new Set([
@@ -1737,6 +1738,13 @@ function App() {
     if (health?.status === 'healthy' || hasPendingRuntimeInstall(profile, health?.runtime)) return true;
     if (!health || !health.repairable) {
       if (health?.status === 'unconfigured') setShowSettings(true);
+      if (health?.status === 'unsupported') {
+        await window.ipcRenderer.alert(
+          'Loader Not Supported',
+          `This game is modded through ${loaderDisplayName(health.runtime)}, which r2modmac cannot install yet. ` +
+          'r2modmac manages BepInEx, ReturnOfModding, Lovely and OWML games.'
+        );
+      }
       return false;
     }
 
@@ -1755,22 +1763,8 @@ function App() {
       await window.ipcRenderer.beginProfileApplyTransaction(profile.id, community);
       repairTransactionStarted = true;
 
-      const matchesRuntime = (pkg: Package) => {
-        const name = `${pkg.full_name} ${pkg.name}`.toLowerCase();
-        if (health.runtime === 'owml') return pkg.name.toLowerCase() === 'owml' || name.includes('-owml');
-        if (health.runtime === 'lovely') return name.includes('thunderstore-lovely') || pkg.name.toLowerCase() === 'lovely';
-        if (health.runtime === 'returnofmodding') {
-          return pkg.full_name.toLowerCase() === 'returnofmodding-returnofmodding';
-        }
-        return name.includes('bepinexpack');
-      };
-      const registeredLoader = profile.mods.find(mod => {
-        const name = mod.fullName.toLowerCase();
-        if (health.runtime === 'owml') return name.includes('owml');
-        if (health.runtime === 'lovely') return name.includes('-lovely-');
-        if (health.runtime === 'returnofmodding') return name.startsWith('returnofmodding-returnofmodding-');
-        return name.includes('bepinexpack');
-      });
+      const matchesRuntime = (pkg: Package) => isLoaderPackage(health.runtime, pkg.full_name);
+      const registeredLoader = profile.mods.find(mod => isLoaderPackage(health.runtime, mod.fullName));
 
       let loaderPackage = registeredLoader
         ? await window.ipcRenderer.fetchPackageByName(
@@ -1779,18 +1773,28 @@ function App() {
           )
         : null;
       if (!loaderPackage || !matchesRuntime(loaderPackage)) {
-        const query = health.runtime === 'owml'
-          ? 'OWML'
-          : health.runtime === 'lovely'
-            ? 'lovely'
-            : health.runtime === 'returnofmodding'
-              ? 'ReturnOfModding'
-              : 'BepInExPack';
-        const result = await window.ipcRenderer.getPackages(community, 0, 30, query, 'downloads');
+        // The loader package differs per community - Hades II is served by
+        // Hell2Modding, not by ReturnOfModding - so the candidates come from
+        // the ecosystem schema and are asked for by name. Only BepInEx falls
+        // back to a search, because communities keep publishing their own
+        // BepInExPack forks.
+        for (const packageId of loaderPackageIds(health.runtime)) {
+          const packageName = packageId.split('-').slice(1).join('-');
+          const candidate = await window.ipcRenderer.fetchPackageByName(packageName, community).catch(() => null);
+          if (candidate && matchesRuntime(candidate) && candidate.versions.length > 0) {
+            loaderPackage = candidate;
+            break;
+          }
+        }
+      }
+      if ((!loaderPackage || !matchesRuntime(loaderPackage)) && health.runtime === 'bepinex') {
+        const result = await window.ipcRenderer.getPackages(community, 0, 30, 'BepInExPack', 'downloads');
         loaderPackage = result.items.find(matchesRuntime) || null;
       }
       if (!loaderPackage || loaderPackage.versions.length === 0) {
-        throw new Error(`No compatible ${health.runtime} loader was found for this community.`);
+        throw new Error(
+          `No ${loaderDisplayName(health.runtime)} loader package was found for this community.`
+        );
       }
 
       const newestVersion = loaderPackage.versions.reduce((newest, candidate) =>
@@ -1937,7 +1941,7 @@ function App() {
     if (health && (health.status === 'missing' || health.status === 'incomplete') && !hasPendingRuntimeInstall(original, health.runtime)) {
       const confirmedRepair = await window.ipcRenderer.confirm(
         'Repair Runtime Before Sync?',
-        `${health.runtime === 'bepinex' ? 'BepInEx' : health.runtime === 'owml' ? 'OWML' : health.runtime === 'returnofmodding' ? 'ReturnOfModding' : 'Lovely'} is ${health.status}. Repair it before synchronizing this selection?`
+        `${loaderDisplayName(health.runtime)} is ${health.status}. Repair it before synchronizing this selection?`
       );
       if (!confirmedRepair || !await repairProfileRuntime()) return;
     }
@@ -2509,7 +2513,7 @@ function App() {
         if (health && (health.status === 'missing' || health.status === 'incomplete') && !hasPendingRuntimeInstall(activeProfile, health.runtime)) {
           const confirmedRepair = await window.ipcRenderer.confirm(
             'Repair Runtime Before Apply?',
-            `${health.runtime === 'bepinex' ? 'BepInEx' : health.runtime === 'owml' ? 'OWML' : health.runtime === 'returnofmodding' ? 'ReturnOfModding' : 'Lovely'} is ${health.status}. ` +
+            `${loaderDisplayName(health.runtime)} is ${health.status}. ` +
             'The working files will be repaired before the profile is synchronized.'
           );
           if (!confirmedRepair || !await repairProfileRuntime()) return;

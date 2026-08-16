@@ -5,6 +5,7 @@ import type {
     Profile,
 } from '../types/profile.ts';
 import { parsePackageReference } from './modVersioning.ts';
+import { isLoaderPackage } from './loaderPackages.ts';
 import type { RuntimeHealth } from '../types/electron';
 
 export interface ProfileSyncInspectionMod {
@@ -16,7 +17,7 @@ export interface ProfileSyncInspectionMod {
 
 export interface ProfileSyncInspection {
     status: 'ready' | 'unconfigured' | 'unsupported';
-    runtime: 'bepinex' | 'owml' | 'lovely' | 'returnofmodding';
+    runtime: RuntimeHealth['runtime'];
     mods: ProfileSyncInspectionMod[];
     unresolvedKeys: string[];
 }
@@ -67,11 +68,7 @@ export const hasPendingRuntimeInstall = (
     if (!profile || !runtime) return false;
     return profile.mods.some(mod => {
         if (!mod.pending_sync || !mod.enabled || mod.pending_sync_kind === 'disable') return false;
-        const packageName = parsePackageReference(mod.fullName).packageName.toLowerCase();
-        if (runtime === 'bepinex') return packageName.includes('bepinexpack');
-        if (runtime === 'owml') return packageName === 'owml' || packageName.endsWith('-owml');
-        if (runtime === 'lovely') return packageName === 'lovely' || packageName.includes('thunderstore-lovely');
-        return packageName === 'returnofmodding' || packageName.endsWith('-returnofmodding');
+        return isLoaderPackage(runtime, mod.fullName);
     });
 };
 

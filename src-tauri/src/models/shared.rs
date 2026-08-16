@@ -321,14 +321,6 @@ pub fn is_outerwilds_identifier(game_identifier: &str) -> bool {
     normalize_for_matching(game_identifier) == "outerwilds"
 }
 
-pub fn is_risk_of_rain_returns_identifier(game_identifier: &str) -> bool {
-    normalize_for_matching(game_identifier) == "riskofrainreturns"
-}
-
-pub fn is_risk_of_rain_returns_game_path(path: &std::path::Path) -> bool {
-    path.join("Risk of Rain Returns.exe").is_file() || path.join("Risk of Rain Returns").is_file()
-}
-
 pub fn is_outerwilds_game_path(path: &std::path::Path) -> bool {
     // Detect by OuterWilds.exe in the game directory or inside a bottle prefix
     if path.join("OuterWilds.exe").exists() {
@@ -826,11 +818,17 @@ mod settings_stable_order_tests {
             .filter(|(a, b)| a != b)
             .count();
         assert_eq!(before.lines().count(), after.lines().count());
-        assert_eq!(changed, 1, "expected a one-line diff, got {} lines", changed);
+        assert_eq!(
+            changed, 1,
+            "expected a one-line diff, got {} lines",
+            changed
+        );
     }
 
     #[test]
     fn the_file_ends_with_a_newline() {
-        assert!(to_pretty_string(&Settings::default()).unwrap().ends_with("\n"));
+        assert!(to_pretty_string(&Settings::default())
+            .unwrap()
+            .ends_with("\n"));
     }
 }

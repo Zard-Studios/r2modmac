@@ -1284,8 +1284,16 @@ fn balatro_target_folder_name(mod_name: &str) -> String {
     }
 }
 
+/// Whether this package is the ReturnOfModding loader itself.
+///
+/// More than one package ships the loader: Risk of Rain Returns installs
+/// `ReturnOfModding-ReturnOfModding`, Hades II installs
+/// `Hell2Modding-Hell2Modding`, and the ecosystem schema is what says so.
 fn is_return_of_modding_loader(mod_name: &str) -> bool {
-    extract_mod_key(mod_name) == "returnofmodding-returnofmodding"
+    crate::models::loaders::is_loader_package(
+        &crate::models::loaders::PackageLoader::ReturnOfModding,
+        mod_name,
+    )
 }
 
 /// The folder name ReturnOfModding expects for a package: `Author-ModName`.
@@ -3707,13 +3715,12 @@ async fn install_mod_bytes(
         || is_balatro_game_path(game_dir);
     let target_is_outerwilds = crate::models::shared::is_outerwilds_identifier(&game_identifier)
         || crate::models::shared::is_outerwilds_game_path(game_dir);
-    let target_is_risk_of_rain_returns =
-        crate::models::shared::is_risk_of_rain_returns_identifier(&game_identifier)
-            || crate::models::shared::is_risk_of_rain_returns_game_path(game_dir);
+    let target_is_return_of_modding =
+        crate::models::loaders::uses_return_of_modding(&game_identifier, game_dir);
     let install_into_disabled_runtime = target_is_macos
         && !target_is_balatro
         && !target_is_outerwilds
-        && !target_is_risk_of_rain_returns
+        && !target_is_return_of_modding
         && profile_is_vanilla(&app, &profile_id);
 
     log::debug!(
@@ -3725,7 +3732,7 @@ async fn install_mod_bytes(
     let mut runtime_bytes = bytes;
     validate_downloaded_archive_version(&runtime_bytes, &mod_name)?;
 
-    if target_is_risk_of_rain_returns {
+    if target_is_return_of_modding {
         let cursor = std::io::Cursor::new(&runtime_bytes);
         let mut archive = zip::ZipArchive::new(cursor).map_err(|error| error.to_string())?;
         let managed_files = collect_return_of_modding_files(&mut archive, &mod_name)?;
@@ -4363,21 +4370,13 @@ pub async fn open_mod_folder(
     let game_root = std::path::Path::new(&game_path);
     let mod_key = extract_mod_key(&mod_name);
 
-    if crate::models::shared::is_risk_of_rain_returns_identifier(&game_identifier)
-        || crate::models::shared::is_risk_of_rain_returns_game_path(game_root)
-    {
+    if crate::models::loaders::uses_return_of_modding(&game_identifier, game_root) {
         if is_return_of_modding_loader(&mod_name) {
-            let loader = if game_root.join("version.dll").is_file() {
-                game_root.join("version.dll")
-            } else {
-                game_root.join("version.dll_DISABLED")
-            };
-            if loader.is_file() {
-                open::that(game_root)
-                    .map_err(|error| format!("Failed to open game root: {error}"))?;
-                return Ok(());
+            if crate::models::loaders::return_of_modding_proxies(game_root).is_empty() {
+                return Err("MODS_NOT_APPLIED".to_string());
             }
-            return Err("MODS_NOT_APPLIED".to_string());
+            open::that(game_root).map_err(|error| format!("Failed to open game root: {error}"))?;
+            return Ok(());
         }
 
         let target = game_root
@@ -4762,17 +4761,19 @@ pub async fn copy_mod_from_cache(
     let game_identifier = get_profile_game_identifier(&app, &profile_id).unwrap_or_default();
     let target_is_outerwilds = crate::models::shared::is_outerwilds_identifier(&game_identifier)
         || crate::models::shared::is_outerwilds_game_path(game_dir);
-    let target_is_risk_of_rain_returns =
-        crate::models::shared::is_risk_of_rain_returns_identifier(&game_identifier)
-            || crate::models::shared::is_risk_of_rain_returns_game_path(game_dir);
+    let target_is_return_of_modding =
+        crate::models::loaders::uses_return_of_modding(&game_identifier, game_dir);
 
-    if target_is_risk_of_rain_returns {
+    if target_is_return_of_modding {
         if is_return_of_modding_loader(&mod_name) {
-            let source = profile_dir.join("version.dll");
-            if source.is_file() {
-                fs::copy(source, game_dir.join("version.dll"))
-                    .map_err(|error| error.to_string())?;
-                return Ok(serde_json::json!({ "success": true, "copied": true }));
+            // The pack's proxy DLL carries the pack's own name, so the cached
+            // copy is found by name rather than assumed to be version.dll.
+            for name in crate::models::loaders::RETURN_OF_MODDING_PROXY_NAMES {
+                let source = profile_dir.join(name);
+                if source.is_file() {
+                    fs::copy(source, game_dir.join(name)).map_err(|error| error.to_string())?;
+                    return Ok(serde_json::json!({ "success": true, "copied": true }));
+                }
             }
         } else {
             // The game folder may still hold author-less folders from an older

@@ -8,6 +8,7 @@ import { Button, HoverMarquee } from '../ui';
 import { KeyboardShortcuts } from '../KeyboardShortcuts';
 import { compareVersions, hasNewerVersion, latestVersionNumber, parsePackageReference } from '../../utils/modVersioning';
 import { hasPendingRuntimeInstall, restoreInstalledMod } from '../../utils/profileSync';
+import { loaderDisplayName } from '../../utils/loaderPackages';
 import { getProfileAvatarGradient } from '../../utils/profileAvatar';
 import { runWithConcurrency } from '../../utils/concurrency';
 
@@ -867,7 +868,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                 </div>
             </div>
 
-            {runtimeHealth && !runtimeQueuedForSync && ['missing', 'incomplete', 'unconfigured'].includes(runtimeHealth.status) && (
+            {runtimeHealth && !runtimeQueuedForSync && ['missing', 'incomplete', 'unconfigured', 'unsupported'].includes(runtimeHealth.status) && (
                 <div className="profile-sidebar-motion-item [--sidebar-motion-order:2] mx-4 mb-2 flex items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2.5">
                     <svg className="h-4 w-4 flex-shrink-0 text-fg-warning" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
                         <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l6.518 11.597c.75 1.334-.213 2.98-1.742 2.98H3.48c-1.53 0-2.493-1.646-1.743-2.98L8.257 3.1zM11 14a1 1 0 10-2 0 1 1 0 002 0zm-1-6a1 1 0 00-1 1v3a1 1 0 102 0V9a1 1 0 00-1-1z" clipRule="evenodd" />
@@ -876,20 +877,27 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                         <div className="truncate text-xs font-medium text-fg-warning">
                             {runtimeHealth.status === 'unconfigured'
                                 ? 'Game path not configured'
-                                : `${runtimeHealth.runtime === 'bepinex' ? 'BepInEx' : runtimeHealth.runtime === 'owml' ? 'OWML' : runtimeHealth.runtime === 'returnofmodding' ? 'ReturnOfModding' : 'Lovely'} runtime ${runtimeHealth.status}`}
+                                : runtimeHealth.status === 'unsupported'
+                                    ? `${loaderDisplayName(runtimeHealth.runtime)} loader not supported`
+                                    : `${loaderDisplayName(runtimeHealth.runtime)} runtime ${runtimeHealth.status}`}
                         </div>
-                        {runtimeHealth.missingComponents.length > 0 ? (
+                        {runtimeHealth.status === 'unsupported' ? (
+                            // Naming the loader is the useful part: this game is
+                            // not modded through anything r2modmac installs, so
+                            // there is no repair to offer.
+                            <div className="truncate text-[10px] text-fg-warning/70">This game is modded through {loaderDisplayName(runtimeHealth.runtime)}</div>
+                        ) : runtimeHealth.missingComponents.length > 0 ? (
                             <div className="truncate text-[10px] text-fg-warning/70">Missing: {runtimeHealth.missingComponents.join(', ')}</div>
                         ) : null}
                     </div>
-                    <button
+                    {runtimeHealth.status === 'unsupported' ? null : <button
                         type="button"
                         onClick={runtimeHealth.status === 'unconfigured' ? onOpenSettings : () => { void onRepairRuntime(); }}
                         disabled={isRepairingRuntime || (runtimeHealth.status !== 'unconfigured' && !runtimeHealth.repairable)}
                         className="flex-shrink-0 rounded-lg border border-amber-500/35 bg-amber-500/15 px-2.5 py-1.5 text-xs font-medium text-fg-warning disabled:opacity-50"
                     >
                         {runtimeHealth.status === 'unconfigured' ? 'Settings' : isRepairingRuntime ? 'Repairing…' : 'Repair'}
-                    </button>
+                    </button>}
                 </div>
             )}
 

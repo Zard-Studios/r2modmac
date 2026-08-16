@@ -61,14 +61,16 @@ async fn transaction_targets(
         return Ok(targets);
     }
 
-    if is_risk_of_rain_returns_identifier(game_identifier)
-        || is_risk_of_rain_returns_game_path(&game_root)
-    {
-        return Ok(vec![
-            game_root.join("version.dll"),
-            game_root.join("version.dll_DISABLED"),
-            game_root.join("ReturnOfModding"),
-        ]);
+    if crate::models::loaders::uses_return_of_modding(game_identifier, &game_root) {
+        // The pack's proxy DLL is named per pack (version.dll for
+        // ReturnOfModding, d3d12.dll for Hell2Modding), so every name a pack
+        // can install has to be part of the transaction snapshot.
+        let mut targets = vec![game_root.join("ReturnOfModding")];
+        for name in crate::models::loaders::RETURN_OF_MODDING_PROXY_NAMES {
+            targets.push(game_root.join(name));
+            targets.push(game_root.join(format!("{name}_DISABLED")));
+        }
+        return Ok(targets);
     }
 
     let runtime_root = if platform == "mac" {

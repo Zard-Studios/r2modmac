@@ -27,19 +27,21 @@ pub struct ProfileSyncInspection {
     unresolved_keys: Vec<String>,
 }
 
-fn runtime_name(game_identifier: &str) -> &'static str {
-    let normalized = game_identifier.to_ascii_lowercase();
-    if normalized.contains("outerwilds") || normalized.contains("outer-wilds") {
-        "owml"
-    } else if normalized.contains("balatro") {
-        "lovely"
-    } else if normalized.contains("riskofrainreturns")
-        || normalized.contains("risk-of-rain-returns")
-    {
-        "returnofmodding"
-    } else {
-        "bepinex"
+/// The loader a community runs on, per the Thunderstore ecosystem schema.
+///
+/// Substring matching on the game identifier only ever knew the three games
+/// that had been special-cased, so every other non-BepInEx community - Hades II
+/// among them - was inspected as if it were a BepInEx game.
+fn runtime_name(game_identifier: &str) -> String {
+    // Outer Wilds is modded through OWML and is not a Thunderstore community,
+    // so it has no schema entry to consult.
+    if crate::models::shared::is_outerwilds_identifier(game_identifier) {
+        return "owml".to_string();
     }
+    crate::models::loaders::loader_for_community(game_identifier)
+        .unwrap_or(crate::models::loaders::PackageLoader::BepInEx)
+        .runtime_name()
+        .to_string()
 }
 
 fn manifest_files_present(target_root: &Path, files: &[String]) -> bool {
@@ -56,7 +58,7 @@ pub async fn inspect_profile_sync_state(
     game_identifier: String,
     platform: Option<String>,
 ) -> Result<ProfileSyncInspection, String> {
-    let runtime = runtime_name(&game_identifier).to_string();
+    let runtime = runtime_name(&game_identifier);
     let Some(game_path_string) =
         get_game_path(app.clone(), game_identifier, platform.clone()).await?
     else {
@@ -166,6 +168,7 @@ mod tests {
         assert_eq!(runtime_name("outerwilds"), "owml");
         assert_eq!(runtime_name("balatro"), "lovely");
         assert_eq!(runtime_name("risk-of-rain-returns"), "returnofmodding");
+        assert_eq!(runtime_name("hades-ii"), "returnofmodding");
         assert_eq!(runtime_name("lethal-company"), "bepinex");
     }
 

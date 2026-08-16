@@ -6,12 +6,18 @@ pub(crate) use self::process::*;
 
 use super::*;
 
-fn configure_native_version_dll_override(
+/// Tell Wine to load the loader's proxy DLL instead of its own builtin.
+///
+/// Which proxy that is depends on the pack the game uses, so the value is
+/// derived from the files present rather than assuming `version.dll`: Hades II
+/// is hooked through Hell2Modding's `d3d12.dll` and would otherwise launch
+/// unmodded under Wine.
+fn configure_native_loader_dll_override(
     command: &mut std::process::Command,
     game_path: &std::path::Path,
 ) {
-    if game_path.join("version.dll").is_file() {
-        command.env("WINEDLLOVERRIDES", "version=n,b");
+    if let Some(value) = crate::models::loaders::wine_dll_override_value(game_path) {
+        command.env("WINEDLLOVERRIDES", value);
     }
 }
 
@@ -94,7 +100,7 @@ pub(crate) fn launch_windows_direct_game_with_working_dir(
                 &runner_path,
                 prefix_root.as_deref(),
             )?;
-            configure_native_version_dll_override(&mut command, game_path);
+            configure_native_loader_dll_override(&mut command, game_path);
             log::info!(
                 "[launch_windows_direct_game] Launching Windows executable directly: {:?}",
                 executable_path
@@ -488,7 +494,7 @@ pub(super) fn launch_windows_steam_game(
 
         let mut command = std::process::Command::new(&runner_path);
         configure_host_compat_runner_command(&mut command, &runner_path, prefix_root.as_deref())?;
-        configure_native_version_dll_override(&mut command, game_path);
+        configure_native_loader_dll_override(&mut command, game_path);
         log::info!(
 			"[launch_windows_steam_game] Launching Steam app {} via {:?} using steam executable {:?}",
 			app_id, runner_path, steam_executable
@@ -587,11 +593,11 @@ pub(super) fn launch_windows_steam_game(
 
 #[cfg(test)]
 mod tests {
-    use super::configure_native_version_dll_override;
+    use super::configure_native_loader_dll_override;
     use std::ffi::OsStr;
 
     #[test]
-    fn return_of_modding_loader_enables_native_version_dll_under_wine() {
+    fn return_of_modding_loader_enables_its_own_proxy_dll_under_wine() {
         let root = std::env::temp_dir().join(format!(
             "r2modmac-rom-wine-{}-{}",
             std::process::id(),
@@ -603,9 +609,29 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(root.join("version.dll"), b"loader").unwrap();
         let mut command = std::process::Command::new("wine");
-        configure_native_version_dll_override(&mut command, &root);
+        configure_native_loader_dll_override(&mut command, &root);
         assert!(command.get_envs().any(|(key, value)| {
             key == OsStr::new("WINEDLLOVERRIDES") && value == Some(OsStr::new("version=n,b"))
+        }));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn hell2modding_proxy_is_overridden_under_wine() {
+        let root = std::env::temp_dir().join(format!(
+            "r2modmac-h2m-wine-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("d3d12.dll"), b"loader").unwrap();
+        let mut command = std::process::Command::new("wine");
+        configure_native_loader_dll_override(&mut command, &root);
+        assert!(command.get_envs().any(|(key, value)| {
+            key == OsStr::new("WINEDLLOVERRIDES") && value == Some(OsStr::new("d3d12=n,b"))
         }));
         std::fs::remove_dir_all(root).unwrap();
     }
@@ -724,6 +750,9 @@ mod wine_steam_shutdown_tests {
         );
         let _ = steam.try_wait();
         assert!(ever_seen, "Steam never started, so nothing was proven");
-        assert!(closed, "Steam was left running after a cancel it did not see");
+        assert!(
+            closed,
+            "Steam was left running after a cancel it did not see"
+        );
     }
 }
