@@ -224,6 +224,9 @@ export const tauriAPI: IElectronAPI = {
     launchGameVanilla: async (gameIdentifier: string, profileId: string, platform?: 'windows' | 'mac') => {
         return await invoke('launch_game_vanilla', { gameIdentifier, profileId, platform });
     },
+    cancelGameLaunch: async () => {
+        return await invoke<boolean>('cancel_game_launch');
+    },
     stopGame: async (gameIdentifier: string, platform?: 'windows' | 'mac') => {
         return await invoke('stop_game', { gameIdentifier, platform });
     },

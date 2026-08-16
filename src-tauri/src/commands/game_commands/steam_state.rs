@@ -222,6 +222,9 @@ pub(crate) enum LaunchWaitOutcome {
     Blocked(String),
     /// Nothing observable happened before the deadline.
     TimedOut,
+    /// The user stopped waiting (issue #36). Not a failure: the deadline was
+    /// never reached, so nothing here is worth explaining to them.
+    Cancelled,
 }
 
 const POLL_INTERVAL_MS: u64 = 250;
@@ -232,12 +235,15 @@ const POLL_INTERVAL_MS: u64 = 250;
 /// as soon as Steam records it, rather than after the caller's full timeout —
 /// a Steam Cloud conflict shows up within a couple of seconds, so there is no
 /// reason to make the user stare at a spinner for a minute first.
+/// `should_cancel` is polled on every tick so pressing the button again ends a
+/// three-minute cold-Steam wait within a quarter of a second.
 pub(crate) fn wait_for_launch_or_blocker(
     client_root: &Path,
     library_root: &Path,
     app_id: &str,
     timeout_ms: u64,
     is_started: impl Fn() -> bool,
+    should_cancel: impl Fn() -> bool,
 ) -> LaunchWaitOutcome {
     // Reading a 256 KB log tail every tick would be wasteful; Steam takes a
     // moment to write the prompt line anyway.
@@ -247,6 +253,10 @@ pub(crate) fn wait_for_launch_or_blocker(
     let mut confirmation = crate::commands::game_commands::process::StartConfirmation::new();
 
     for attempt in 0..attempts {
+        if should_cancel() {
+            return LaunchWaitOutcome::Cancelled;
+        }
+
         let was_pending = confirmation.is_pending();
         if confirmation.observe(is_started()) {
             return LaunchWaitOutcome::Started;
@@ -281,6 +291,9 @@ pub(crate) fn wait_for_launch_or_blocker(
         std::thread::sleep(std::time::Duration::from_millis(POLL_INTERVAL_MS));
     }
 
+    if should_cancel() {
+        return LaunchWaitOutcome::Cancelled;
+    }
     if is_started() {
         return LaunchWaitOutcome::Started;
     }
@@ -322,7 +335,7 @@ mod tests {
     #[test]
     fn wait_reports_started_without_consulting_steam() {
         let root = fake_steam_root("1229490", 4, "");
-        let outcome = wait_for_launch_or_blocker(&root, &root, "1229490", 5_000, || true);
+        let outcome = wait_for_launch_or_blocker(&root, &root, "1229490", 5_000, || true, || false);
         assert!(matches!(outcome, LaunchWaitOutcome::Started));
         std::fs::remove_dir_all(root).unwrap();
     }
@@ -334,7 +347,7 @@ mod tests {
         let started = std::time::Instant::now();
         // A generous deadline: the point is that it returns as soon as Steam's
         // state is readable, not that it waits it out.
-        let outcome = wait_for_launch_or_blocker(&root, &root, "3527290", 60_000, || false);
+        let outcome = wait_for_launch_or_blocker(&root, &root, "3527290", 60_000, || false, || false);
         let elapsed = started.elapsed();
         match outcome {
             LaunchWaitOutcome::Blocked(reason) => {
@@ -353,7 +366,7 @@ mod tests {
     fn wait_reports_a_pending_update_as_blocked() {
         // StateFlags 1030 — PEAK's observed state with a pending download.
         let root = fake_steam_root("3527290", 1030, "");
-        match wait_for_launch_or_blocker(&root, &root, "3527290", 30_000, || false) {
+        match wait_for_launch_or_blocker(&root, &root, "3527290", 30_000, || false, || false) {
             LaunchWaitOutcome::Blocked(reason) => assert!(reason.contains("updating"), "{reason}"),
             _ => panic!("expected Blocked"),
         }
@@ -371,7 +384,7 @@ mod tests {
             polls.set(seen + 1);
             // Present for the first two polls, then gone for good.
             seen < 2
-        });
+        }, || false);
 
         assert!(
             matches!(outcome, LaunchWaitOutcome::TimedOut),
@@ -386,7 +399,7 @@ mod tests {
         let root = fake_steam_root("1229490", 4, "");
         let started = std::time::Instant::now();
 
-        let outcome = wait_for_launch_or_blocker(&root, &root, "1229490", 60_000, || true);
+        let outcome = wait_for_launch_or_blocker(&root, &root, "1229490", 60_000, || true, || false);
 
         assert!(matches!(outcome, LaunchWaitOutcome::Started));
         assert!(
@@ -400,7 +413,7 @@ mod tests {
     #[test]
     fn wait_times_out_when_steam_reports_nothing() {
         let root = fake_steam_root("1229490", 4, "");
-        let outcome = wait_for_launch_or_blocker(&root, &root, "1229490", 1_000, || false);
+        let outcome = wait_for_launch_or_blocker(&root, &root, "1229490", 1_000, || false, || false);
         assert!(matches!(outcome, LaunchWaitOutcome::TimedOut));
         std::fs::remove_dir_all(root).unwrap();
     }
@@ -411,7 +424,51 @@ mod tests {
         // otherwise a leftover line would fail a launch that actually worked.
         let log = "[20:07:37] GameAction [AppID 3527290, ActionID 1] : LaunchApp waiting for user response to SynchronizingCloud \"pendingcloudsessions\"\n";
         let root = fake_steam_root("3527290", 4, log);
-        let outcome = wait_for_launch_or_blocker(&root, &root, "3527290", 10_000, || true);
+        let outcome = wait_for_launch_or_blocker(&root, &root, "3527290", 10_000, || true, || false);
+        assert!(matches!(outcome, LaunchWaitOutcome::Started));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// Issue #36: the Windows/CrossOver/Sikarugir side of the same hang. A
+    /// cold Steam gets a three-minute deadline; cancelling must not wait it out.
+    #[test]
+    fn a_cancelled_wait_ends_promptly_and_is_not_reported_as_a_failure() {
+        let root = fake_steam_root("1229490", 4, "");
+        let started = std::time::Instant::now();
+
+        let outcome =
+            wait_for_launch_or_blocker(&root, &root, "1229490", 180_000, || false, || true);
+
+        assert!(
+            matches!(outcome, LaunchWaitOutcome::Cancelled),
+            "a cancelled wait is neither a timeout nor a blocked launch"
+        );
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(5),
+            "cancelling must be near-instant, took {:?}",
+            started.elapsed()
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A blocked launch has something worth telling the user; a cancelled one
+    /// does not. When both are true at once, the user's decision wins.
+    #[test]
+    fn cancelling_wins_over_a_steam_blocker() {
+        // StateFlags 1030: Steam is updating the game.
+        let root = fake_steam_root("3527290", 1030, "");
+        let outcome =
+            wait_for_launch_or_blocker(&root, &root, "3527290", 30_000, || false, || true);
+        assert!(matches!(outcome, LaunchWaitOutcome::Cancelled));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// The flag is only read while waiting: a launch that was never cancelled
+    /// must keep behaving exactly as before.
+    #[test]
+    fn an_uncancelled_wait_is_unaffected() {
+        let root = fake_steam_root("1229490", 4, "");
+        let outcome = wait_for_launch_or_blocker(&root, &root, "1229490", 60_000, || true, || false);
         assert!(matches!(outcome, LaunchWaitOutcome::Started));
         std::fs::remove_dir_all(root).unwrap();
     }

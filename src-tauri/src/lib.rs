@@ -479,6 +479,7 @@ pub fn run() {
             commands::game_commands::launch::is_game_running,
             commands::game_commands::launch::launch_game_with_mods,
             commands::game_commands::launch::launch_game_vanilla,
+            commands::game_commands::launch_cancel::cancel_game_launch,
             commands::game_commands::launch::stop_game,
             commands::game_commands::sync::sync_profile_to_game,
             commands::game_commands::sync_state::inspect_profile_sync_state,

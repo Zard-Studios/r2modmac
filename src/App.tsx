@@ -28,7 +28,7 @@ import { flushSync } from 'react-dom';
 import { AppModals } from './components/screens/AppModals';
 import { UpdateAllModal } from './components/modals/UpdateAllModal';
 import { LaunchIssueModal } from './components/modals/LaunchIssueModal';
-import { describeLaunchIssue, type LaunchIssue } from './utils/launchIssue';
+import { describeLaunchIssue, isLaunchCancelled, type LaunchIssue } from './utils/launchIssue';
 import type { AppSettings, RuntimeHealth, UpdateInfo } from './types/electron';
 import type { InstalledMod } from './types/profile';
 import { MAC_IMAGE_CACHE_KEY, MAC_PLATFORM_CACHE_KEY } from './constants/cacheKeys';
@@ -315,6 +315,7 @@ function App() {
   const [isCustomModDragValid, setIsCustomModDragValid] = useState(true)
   const [showSettings, setShowSettings] = useState(false)
   const [isLaunchingProfile, setIsLaunchingProfile] = useState(false)
+  const [isCancellingLaunch, setIsCancellingLaunch] = useState(false)
   const [isStoppingProfile, setIsStoppingProfile] = useState(false)
   const [isGameRunning, setIsGameRunning] = useState(false)
   const [isSteamRestarting, setIsSteamRestarting] = useState(false)
@@ -2956,10 +2957,15 @@ function App() {
         // Shown in r2modmac's own UI rather than a native alert: these are
         // usually a Steam-side condition the user can clear in seconds, not a
         // crash, and the wording matters.
-        setLaunchIssue(describeLaunchIssue(String(error?.message || error || 'Failed to launch the modded game.')));
+        // A launch the user called off is not a failure to explain: they
+        // pressed the button, they already know.
+        if (!isLaunchCancelled(error)) {
+          setLaunchIssue(describeLaunchIssue(String(error?.message || error || 'Failed to launch the modded game.')));
+        }
       } finally {
         profileActionLockRef.current = false;
         setIsLaunchingProfile(false);
+        setIsCancellingLaunch(false);
       }
     };
 
@@ -2990,10 +2996,13 @@ function App() {
         clearSteamRestartingState();
         clearLaunchGraceWindow();
         setIsGameRunning(false);
-        setLaunchIssue(describeLaunchIssue(String(error?.message || error || 'Failed to launch the vanilla game.')));
+        if (!isLaunchCancelled(error)) {
+          setLaunchIssue(describeLaunchIssue(String(error?.message || error || 'Failed to launch the vanilla game.')));
+        }
       } finally {
         profileActionLockRef.current = false;
         setIsLaunchingProfile(false);
+        setIsCancellingLaunch(false);
       }
     };
 
@@ -3004,6 +3013,20 @@ function App() {
         return;
       }
       await handleLaunchModdedDirect();
+    };
+
+    // Issue #36: waiting on Steam can take minutes, and the button used to be
+    // dead for all of it. This stops the waiting only — a game that starts
+    // anyway is picked up by the running-state poll, as always.
+    const handleCancelLaunch = async () => {
+      if (!isLaunchingProfile) return;
+      setIsCancellingLaunch(true);
+      try {
+        await window.ipcRenderer.cancelGameLaunch();
+      } catch (error) {
+        console.error('Failed to cancel the launch', error);
+        setIsCancellingLaunch(false);
+      }
     };
 
     const handleDuplicateActiveProfile = async () => {
@@ -3228,6 +3251,9 @@ function App() {
         }}
         onInstallToGame={handleInstallToGameRequest}
         onLaunchProfile={handleLaunchProfileDirect}
+        onCancelLaunch={handleCancelLaunch}
+        canCancelLaunch={isLaunchingProfile}
+        isCancellingLaunch={isCancellingLaunch}
         onStopProfile={handleStopProfileDirect}
         isApplying={isApplyingToGame}
         isLaunching={isLaunchingProfile || isStoppingProfile}

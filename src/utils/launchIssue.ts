@@ -18,6 +18,28 @@ export interface LaunchIssue {
     pointsAtSteam: boolean;
 }
 
+/**
+ * The sentence the backend returns when the user stopped a launch themselves.
+ * Kept in step with `LAUNCH_CANCELLED_MESSAGE` in
+ * `src-tauri/src/commands/game_commands/launch_cancel.rs`.
+ */
+export const LAUNCH_CANCELLED_MESSAGE = 'Launch cancelled.';
+
+/**
+ * Did this launch end because the user pressed the button again?
+ *
+ * A cancellation travels back as a rejected launch, like every other ending,
+ * but it is not a problem to explain: the user asked for it and already knows.
+ * Every launch path reports it with the same sentence, whichever platform it
+ * came from — native macOS, macOS through Steam, or Windows under CrossOver,
+ * Sikarugir or Wine.
+ */
+export function isLaunchCancelled(raw: unknown): boolean {
+    return String((raw as { message?: string })?.message ?? raw ?? '')
+        .toLowerCase()
+        .includes('launch cancelled');
+}
+
 export function describeLaunchIssue(raw: string): LaunchIssue {
     const message = raw.trim() || 'The game could not be started.';
     const lower = message.toLowerCase();
@@ -41,6 +63,12 @@ export function describeLaunchIssue(raw: string): LaunchIssue {
     }
     if (lower.includes('waiting for an answer') || lower.includes('prompt')) {
         return { title: 'Steam Prompt Waiting', message, pointsAtSteam: true };
+    }
+    // The game is running, so this is not a launch failure: it started without
+    // its mods. Naming that plainly matters, because everything else on screen
+    // says the launch worked.
+    if (lower.includes('bepinex never loaded')) {
+        return { title: 'Mods Did Not Load', message, pointsAtSteam: false };
     }
     if (lower.includes('not signed in')) {
         return { title: 'Steam Not Signed In', message, pointsAtSteam: true };

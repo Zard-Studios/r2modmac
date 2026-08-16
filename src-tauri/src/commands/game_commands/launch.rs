@@ -9,6 +9,9 @@ pub async fn launch_game_with_mods(
     profile_id: String,
     platform: Option<String>,
 ) -> Result<(), String> {
+    // Clears any cancellation left by a previous attempt, so pressing Play
+    // after stopping one launch does not abort the next one instantly.
+    launch_cancel::begin_launch();
     let is_windows_profile = normalized_platform(platform.as_deref()) == Some("windows");
     let game_path_str = get_game_path(app.clone(), game_identifier.clone(), platform)
         .await?
@@ -72,6 +75,9 @@ pub async fn launch_game_vanilla(
     profile_id: String,
     platform: Option<String>,
 ) -> Result<(), String> {
+    // Clears any cancellation left by a previous attempt, so pressing Play
+    // after stopping one launch does not abort the next one instantly.
+    launch_cancel::begin_launch();
     let is_windows_profile = normalized_platform(platform.as_deref()) == Some("windows");
     let game_path_str = get_game_path(app.clone(), game_identifier.clone(), platform)
         .await?

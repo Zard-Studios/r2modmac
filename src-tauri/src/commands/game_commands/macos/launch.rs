@@ -1,6 +1,58 @@
 use super::super::owml_patcher;
 use super::super::*;
 
+/// How long to wait for BepInEx to announce itself after the game is up.
+const BEPINEX_LOG_GRACE_MS: u64 = 20_000;
+
+/// Did BepInEx actually take over this launch?
+///
+/// Doorstop is injected by the launch script and reports its own progress, but
+/// nothing downstream checks whether it reached BepInEx: the game starts either
+/// way, so a loader that silently failed to hook the Mono runtime looks exactly
+/// like a successful modded launch.
+///
+/// Two signals, because neither alone is enough. `LogOutput.log` is missing on
+/// games whose disk logging is off — Muck runs BepInEx and never writes one —
+/// while `cache/` is written by the preloader as it patches assemblies. Either
+/// one appearing after the launch means BepInEx got control.
+fn macos_bepinex_took_over(
+    game_path: &std::path::Path,
+    launched_at: std::time::SystemTime,
+) -> bool {
+    let bepinex = game_path.join("BepInEx");
+    let signals = [bepinex.join("LogOutput.log"), bepinex.join("cache")];
+    let deadline =
+        std::time::Instant::now() + std::time::Duration::from_millis(BEPINEX_LOG_GRACE_MS);
+
+    while std::time::Instant::now() < deadline {
+        // The user can stop waiting here too: this grace period runs after the
+        // game is already up, so there is nothing to gain by making them sit
+        // through it.
+        if super::super::launch_cancel::launch_cancelled() {
+            return false;
+        }
+
+        for signal in &signals {
+            // Anything left over from an earlier session proves nothing.
+            if std::fs::metadata(signal)
+                .and_then(|meta| meta.modified())
+                .is_ok_and(|modified| modified >= launched_at)
+            {
+                return true;
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    }
+
+    false
+}
+
+/// The message shown when the game started but the mods did not load.
+fn macos_mods_not_loaded_error() -> String {
+    "The game started, but BepInEx never loaded, so it is running unmodded. The loader could not attach to the game — this is not a problem with your mods. The r2modmac logs in the game folder record what Doorstop reported."
+        .to_string()
+}
+
 pub(crate) async fn launch_game_with_mods_for_macos(
     app: &AppHandle,
     game_identifier: &str,
@@ -82,7 +134,9 @@ pub(crate) async fn launch_game_with_mods_for_macos(
             .map_err(|e| format!("Failed to launch run_lovely_macos.sh: {}", e))?;
 
         if let Some(executable_path) = executable_path.as_ref() {
-            if !wait_for_process_start(executable_path, 60_000) {
+            let observed = wait_for_process_start(executable_path, 60_000);
+            observed.ok_unless_cancelled()?;
+            if !observed.started() {
                 log::warn!(
                     "[launch_game_with_mods] run_lovely_macos.sh launch request succeeded, but the game process was not observed in time. Continuing optimistically."
                 );
@@ -120,7 +174,15 @@ pub(crate) async fn launch_game_with_mods_for_macos(
             );
             ensure_macos_steam_launch_options(app, game_path, true, true)?;
         }
-        return launch_via_steam_for_game_path(app, game_path);
+        let launched_at = std::time::SystemTime::now();
+        launch_via_steam_for_game_path(app, game_path)?;
+        if !macos_bepinex_took_over(&runtime_game_path, launched_at) {
+            // A cancelled wait proves nothing about the loader, so it must not
+            // be reported as mods that failed to load.
+            super::super::launch_cancel::ensure_not_cancelled()?;
+            return Err(macos_mods_not_loaded_error());
+        }
+        return Ok(());
     }
 
     if launch_macos_bepinex_wrapper(
@@ -141,7 +203,9 @@ pub(crate) async fn launch_game_with_mods_for_macos(
         }
         let _ = open::that(&bundle);
         if let Some(executable_path) = executable_path.as_ref() {
-            if !wait_for_process_start(executable_path, MACOS_LAUNCH_OBSERVE_TIMEOUT_MS) {
+            let observed = wait_for_process_start(executable_path, MACOS_LAUNCH_OBSERVE_TIMEOUT_MS);
+            observed.ok_unless_cancelled()?;
+            if !observed.started() {
                 log::warn!(
                     "[launch_game_with_mods] App bundle launch request succeeded, but the game process was not observed in time. Continuing optimistically."
                 );
@@ -331,7 +395,9 @@ pub(crate) async fn launch_game_vanilla_for_macos(
         }
         open::that(&bundle).map_err(|e| format!("Failed to launch app bundle: {}", e))?;
         if let Some(executable_path) = executable_path.as_ref() {
-            if !wait_for_process_start(executable_path, MACOS_LAUNCH_OBSERVE_TIMEOUT_MS) {
+            let observed = wait_for_process_start(executable_path, MACOS_LAUNCH_OBSERVE_TIMEOUT_MS);
+            observed.ok_unless_cancelled()?;
+            if !observed.started() {
                 log::warn!(
                     "[launch_game_vanilla] App bundle launch request succeeded, but the game process was not observed in time. Continuing optimistically."
                 );
@@ -348,7 +414,9 @@ pub(crate) async fn launch_game_vanilla_for_macos(
         }
         open::that(executable).map_err(|e| format!("Failed to launch game executable: {}", e))?;
         if let Some(executable_path) = executable_path.as_ref() {
-            if !wait_for_process_start(executable_path, MACOS_LAUNCH_OBSERVE_TIMEOUT_MS) {
+            let observed = wait_for_process_start(executable_path, MACOS_LAUNCH_OBSERVE_TIMEOUT_MS);
+            observed.ok_unless_cancelled()?;
+            if !observed.started() {
                 log::warn!(
                     "[launch_game_vanilla] Executable launch request succeeded, but the game process was not observed in time. Continuing optimistically."
                 );
@@ -364,7 +432,9 @@ pub(crate) async fn launch_game_vanilla_for_macos(
     }
     open::that(&game_path).map_err(|e| format!("Failed to launch game: {}", e))?;
     if let Some(executable_path) = executable_path.as_ref() {
-        if !wait_for_process_start(executable_path, MACOS_LAUNCH_OBSERVE_TIMEOUT_MS) {
+        let observed = wait_for_process_start(executable_path, MACOS_LAUNCH_OBSERVE_TIMEOUT_MS);
+        observed.ok_unless_cancelled()?;
+        if !observed.started() {
             return Err("Game did not start in time.".to_string());
         }
     }

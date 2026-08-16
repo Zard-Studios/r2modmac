@@ -60,7 +60,9 @@ pub(crate) fn launch_macos_bepinex_wrapper(
         .map_err(|e| format!("Failed to launch run_bepinex.sh: {}", e))?;
 
     if let Some(executable_path) = executable_path.as_ref() {
-        if !wait_for_process_start(executable_path, MACOS_LAUNCH_OBSERVE_TIMEOUT_MS) {
+        let observed = wait_for_process_start(executable_path, MACOS_LAUNCH_OBSERVE_TIMEOUT_MS);
+        observed.ok_unless_cancelled()?;
+        if !observed.started() {
             log::debug!(
                 "[{}] run_bepinex.sh launch request succeeded, but the game process was not observed in time. Continuing optimistically.",
                 context

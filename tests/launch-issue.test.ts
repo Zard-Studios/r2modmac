@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { describeLaunchIssue } from '../src/utils/launchIssue.ts';
+import { describeLaunchIssue, isLaunchCancelled, LAUNCH_CANCELLED_MESSAGE } from '../src/utils/launchIssue.ts';
 
 // The exact strings the backend produces, so a reworded message on either side
 // shows up here rather than as a mislabelled dialog in front of a user.
@@ -93,4 +93,42 @@ test('a native launch that timed out is reported as the game not starting', () =
     );
     assert.equal(issue.title, 'Game Did Not Start');
     assert.equal(issue.pointsAtSteam, true);
+});
+
+test('a game that started without its mods is named as such, not as a launch failure', () => {
+    const issue = describeLaunchIssue(
+        'The game started, but BepInEx never loaded, so it is running unmodded. The loader could not attach to the game — this is not a problem with your mods.'
+    );
+    assert.equal(issue.title, 'Mods Did Not Load');
+    assert.equal(issue.pointsAtSteam, false);
+});
+
+// Issue #36: the launch that could not be stopped. A cancellation comes back
+// through the same rejected promise as every failure, so telling the two apart
+// is what keeps an error dialog off the screen after the user pressed stop.
+test('a launch the user cancelled is recognised, whatever shape the error arrives in', () => {
+    assert.equal(isLaunchCancelled(LAUNCH_CANCELLED_MESSAGE), true);
+    assert.equal(isLaunchCancelled(new Error(LAUNCH_CANCELLED_MESSAGE)), true);
+    assert.equal(isLaunchCancelled({ message: LAUNCH_CANCELLED_MESSAGE }), true);
+    // Tauri stringifies backend errors, sometimes with context around them.
+    assert.equal(isLaunchCancelled('invoke error: Launch cancelled.'), true);
+});
+
+test('a real launch failure is not mistaken for a cancellation', () => {
+    for (const failure of [
+        'Steam accepted the launch but the game did not start. Open Steam to check for a prompt or an error waiting for you there.',
+        'This game has a Steam Cloud conflict. Resolve the conflict in Steam before launching.',
+        'Game did not start in time.',
+        '',
+        undefined,
+        null,
+    ]) {
+        assert.equal(isLaunchCancelled(failure), false, String(failure));
+    }
+});
+
+test('the cancellation message matches the one the backend sends', () => {
+    // Kept in step with LAUNCH_CANCELLED_MESSAGE in launch_cancel.rs; the two
+    // sides only agree by string, so this is the seam that guards it.
+    assert.equal(LAUNCH_CANCELLED_MESSAGE, 'Launch cancelled.');
 });

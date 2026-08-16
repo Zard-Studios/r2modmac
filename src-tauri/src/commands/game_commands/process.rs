@@ -213,33 +213,106 @@ impl StartConfirmation {
 
 // ── Process polling helpers ───────────────────────────────────────────────────
 
-#[cfg(not(target_os = "macos"))]
-pub(crate) fn wait_for_process_start_pattern(pattern: &str, timeout_ms: u64) -> bool {
-    let poll_interval = 250u64;
-    let attempts = std::cmp::max(1, timeout_ms / poll_interval);
-    for _ in 0..attempts {
-        if is_process_running_for_pattern(pattern) {
-            return true;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(poll_interval));
-    }
-    is_process_running_for_pattern(pattern)
+/// How a wait for a game process ended.
+///
+/// `Cancelled` exists so a launch the user called off is not reported as a
+/// game that failed to start: the deadline was never reached, the user simply
+/// stopped waiting (issue #36).
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum StartWait {
+    Started,
+    TimedOut,
+    Cancelled,
 }
 
-pub(crate) fn wait_for_process_start_patterns(patterns: &[String], timeout_ms: u64) -> bool {
-    let poll_interval = 250u64;
-    let attempts = std::cmp::max(1, timeout_ms / poll_interval);
+impl StartWait {
+    pub(crate) fn started(&self) -> bool {
+        matches!(self, StartWait::Started)
+    }
+
+    /// `Err(LAUNCH_CANCELLED_MESSAGE)` when the user called the launch off, so
+    /// a launch path can hand the decision straight back to the caller with a
+    /// `?` and leave its own "did not start" wording for a real timeout.
+    pub(crate) fn ok_unless_cancelled(&self) -> Result<(), String> {
+        if matches!(self, StartWait::Cancelled) {
+            Err(super::launch_cancel::LAUNCH_CANCELLED_MESSAGE.to_string())
+        } else {
+            Ok(())
+        }
+    }
+}
+
+const START_POLL_INTERVAL_MS: u64 = 250;
+
+/// The decision behind every start wait, with both the world and the user's
+/// patience passed in as closures so it can be exercised without either.
+fn wait_for_start_with(
+    timeout_ms: u64,
+    confirm_immediately: bool,
+    is_running: impl Fn() -> bool,
+    should_cancel: impl Fn() -> bool,
+    sleep: impl Fn(std::time::Duration),
+) -> StartWait {
+    let attempts = std::cmp::max(1, timeout_ms / START_POLL_INTERVAL_MS);
     let mut confirmation = StartConfirmation::new();
+
     for _ in 0..attempts {
-        if confirmation.observe(is_process_running_for_patterns(patterns)) {
-            return true;
+        // Checked before the first poll too: a cancellation that arrives while
+        // the previous step was still running must not buy another full wait.
+        if should_cancel() {
+            return StartWait::Cancelled;
         }
-        std::thread::sleep(std::time::Duration::from_millis(poll_interval));
+        let running = is_running();
+        if confirm_immediately && running {
+            return StartWait::Started;
+        }
+        if !confirm_immediately && confirmation.observe(running) {
+            return StartWait::Started;
+        }
+        sleep(std::time::Duration::from_millis(START_POLL_INTERVAL_MS));
     }
-    confirmation.observe(is_process_running_for_patterns(patterns))
+
+    if should_cancel() {
+        return StartWait::Cancelled;
+    }
+    let running = is_running();
+    let started = if confirm_immediately {
+        running
+    } else {
+        confirmation.observe(running)
+    };
+    if started {
+        StartWait::Started
+    } else {
+        StartWait::TimedOut
+    }
 }
 
-pub(crate) fn wait_for_process_start(executable_path: &std::path::Path, timeout_ms: u64) -> bool {
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn wait_for_process_start_pattern(pattern: &str, timeout_ms: u64) -> StartWait {
+    wait_for_start_with(
+        timeout_ms,
+        true,
+        || is_process_running_for_pattern(pattern),
+        super::launch_cancel::launch_cancelled,
+        std::thread::sleep,
+    )
+}
+
+pub(crate) fn wait_for_process_start_patterns(patterns: &[String], timeout_ms: u64) -> StartWait {
+    wait_for_start_with(
+        timeout_ms,
+        false,
+        || is_process_running_for_patterns(patterns),
+        super::launch_cancel::launch_cancelled,
+        std::thread::sleep,
+    )
+}
+
+pub(crate) fn wait_for_process_start(
+    executable_path: &std::path::Path,
+    timeout_ms: u64,
+) -> StartWait {
     #[cfg(target_os = "macos")]
     {
         wait_for_process_start_patterns(
@@ -476,5 +549,85 @@ mod start_confirmation_tests {
             !confirmation.observe(true),
             "the window must be served again from scratch"
         );
+    }
+}
+
+#[cfg(test)]
+mod start_wait_cancellation_tests {
+    use super::*;
+    use std::cell::Cell;
+
+    /// Nothing in these tests may actually sleep: a cancelled wait has to be
+    /// quick, and a test that slept its way through a three-minute deadline
+    /// would prove nothing about that.
+    fn no_sleep(_: std::time::Duration) {}
+
+    #[test]
+    fn a_cancelled_wait_stops_at_once_instead_of_running_out_the_deadline() {
+        let polls = Cell::new(0u32);
+
+        let outcome = wait_for_start_with(
+            180_000, // the cold-Steam deadline: three minutes of dead time
+            false,
+            || {
+                polls.set(polls.get() + 1);
+                false
+            },
+            || polls.get() >= 3, // the user presses the button again
+            no_sleep,
+        );
+
+        assert_eq!(outcome, StartWait::Cancelled);
+        assert!(
+            polls.get() <= 4,
+            "should stop within a poll of the cancellation, polled {} times",
+            polls.get()
+        );
+    }
+
+    #[test]
+    fn a_cancellation_that_arrives_before_the_first_poll_is_honoured() {
+        let outcome = wait_for_start_with(60_000, false, || false, || true, no_sleep);
+        assert_eq!(outcome, StartWait::Cancelled);
+    }
+
+    #[test]
+    fn a_game_that_starts_is_still_reported_as_started() {
+        // Cancellation must not get in the way of the normal path.
+        let outcome = wait_for_start_with(60_000, true, || true, || false, no_sleep);
+        assert_eq!(outcome, StartWait::Started);
+        assert!(outcome.started());
+    }
+
+    #[test]
+    fn a_game_that_never_appears_still_times_out_rather_than_reporting_cancelled() {
+        let outcome = wait_for_start_with(1_000, true, || false, || false, no_sleep);
+        assert_eq!(outcome, StartWait::TimedOut);
+        assert!(!outcome.started());
+    }
+
+    #[test]
+    fn only_a_cancelled_wait_reports_the_message_the_frontend_watches_for() {
+        // The frontend decides whether to show an error dialog by matching this
+        // exact sentence (src/utils/launchIssue.ts), so the two sides only
+        // agree by string — pin it on this side too.
+        assert_eq!(
+            StartWait::Cancelled.ok_unless_cancelled().unwrap_err(),
+            "Launch cancelled."
+        );
+        assert!(StartWait::Started.ok_unless_cancelled().is_ok());
+        // A timeout keeps its own wording: the caller explains what did not
+        // start, which is a different thing to tell the user.
+        assert!(StartWait::TimedOut.ok_unless_cancelled().is_ok());
+    }
+
+    #[test]
+    fn a_game_that_starts_in_the_same_tick_as_the_cancellation_counts_as_cancelled() {
+        // Deliberate: the user asked to stop waiting, and the running-state
+        // poll picks the game up anyway if it really did come up. Reporting a
+        // start here would leave the button lying about a launch the user
+        // already called off.
+        let outcome = wait_for_start_with(60_000, true, || true, || true, no_sleep);
+        assert_eq!(outcome, StartWait::Cancelled);
     }
 }

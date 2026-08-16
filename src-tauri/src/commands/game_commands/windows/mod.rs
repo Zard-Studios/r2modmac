@@ -66,7 +66,9 @@ pub(crate) fn launch_windows_direct_game_with_working_dir(
                     "launch_windows_direct_game",
                 ) {
                     Ok(()) => {
-                        if !wait_for_process_start_patterns(&wait_patterns, 30_000) {
+                        let observed = wait_for_process_start_patterns(&wait_patterns, 30_000);
+                        observed.ok_unless_cancelled()?;
+                        if !observed.started() {
                             log::warn!(
                                 "[launch_windows_direct_game] Wineskin bundle started but game process not observed in time. Continuing optimistically."
                             );
@@ -139,7 +141,9 @@ pub(crate) fn launch_windows_direct_game_with_working_dir(
             })?;
     }
 
-    if !wait_for_process_start_patterns(&process_patterns, 20_000) {
+    let observed = wait_for_process_start_patterns(&process_patterns, 20_000);
+    observed.ok_unless_cancelled()?;
+    if !observed.started() {
         return Err("Game did not start in time.".to_string());
     }
 
@@ -231,6 +235,7 @@ pub(super) fn launch_windows_steam_game(
                             &app_id,
                             timeout_ms,
                             || is_process_running_for_patterns(&process_patterns),
+                            crate::commands::game_commands::launch_cancel::launch_cancelled,
                         ) {
                             crate::commands::game_commands::steam_state::LaunchWaitOutcome::Started => return Ok(()),
                             crate::commands::game_commands::steam_state::LaunchWaitOutcome::Blocked(reason) => {
@@ -240,6 +245,13 @@ pub(super) fn launch_windows_steam_game(
                                     reason
                                 );
                                 return Err(reason);
+                            }
+                            crate::commands::game_commands::steam_state::LaunchWaitOutcome::Cancelled => {
+                                log::info!(
+                                    "[launch_windows_steam_game] Stopped waiting for app {} because the user cancelled the launch.",
+                                    app_id
+                                );
+                                return Err(crate::commands::game_commands::launch_cancel::LAUNCH_CANCELLED_MESSAGE.to_string());
                             }
                             crate::commands::game_commands::steam_state::LaunchWaitOutcome::TimedOut => {
                                 log::warn!(
@@ -316,6 +328,7 @@ pub(super) fn launch_windows_steam_game(
         &app_id,
         timeout_ms,
         || is_process_running_for_patterns(&process_patterns),
+        crate::commands::game_commands::launch_cancel::launch_cancelled,
     ) {
         crate::commands::game_commands::steam_state::LaunchWaitOutcome::Started => Ok(()),
         crate::commands::game_commands::steam_state::LaunchWaitOutcome::Blocked(reason) => {
@@ -325,6 +338,13 @@ pub(super) fn launch_windows_steam_game(
                 reason
             );
             Err(reason)
+        }
+        crate::commands::game_commands::steam_state::LaunchWaitOutcome::Cancelled => {
+            log::info!(
+                "[launch_windows_steam_game] Stopped waiting for app {} because the user cancelled the launch.",
+                app_id
+            );
+            Err(crate::commands::game_commands::launch_cancel::LAUNCH_CANCELLED_MESSAGE.to_string())
         }
         crate::commands::game_commands::steam_state::LaunchWaitOutcome::TimedOut => {
             log::warn!(

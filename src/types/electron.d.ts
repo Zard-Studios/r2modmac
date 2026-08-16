@@ -188,6 +188,8 @@ export interface IElectronAPI {
     isGameRunning: (gameIdentifier: string, platform?: 'windows' | 'mac') => Promise<boolean>;
     launchGameWithMods: (gameIdentifier: string, profileId: string, platform?: 'windows' | 'mac') => Promise<void>;
     launchGameVanilla: (gameIdentifier: string, profileId: string, platform?: 'windows' | 'mac') => Promise<void>;
+    /** Stops waiting on the launch in flight; nothing is killed. */
+    cancelGameLaunch: () => Promise<boolean>;
     stopGame: (gameIdentifier: string, platform?: 'windows' | 'mac') => Promise<void>;
     listProfileConfigFiles: (profileId: string, gameIdentifier?: string, platform?: string) => Promise<ConfigFileInfo[]>;
     readProfileConfigFile: (profileId: string, relativePath: string, root?: string) => Promise<string>;

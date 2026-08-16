@@ -131,6 +131,12 @@ interface ProfileSidebarProps {
     onUninstallMod: (mod: InstalledMod) => Promise<void> | void;
     onInstallToGame: (isVanillaOverride?: boolean) => void;
     onLaunchProfile: () => Promise<void> | void;
+    /** Stops waiting on a launch in flight (issue #36). Kills nothing. */
+    onCancelLaunch?: () => Promise<void> | void;
+    /** True while a launch is in flight and can still be called off. */
+    canCancelLaunch?: boolean;
+    /** True once the user has asked to stop and the wait is unwinding. */
+    isCancellingLaunch?: boolean;
     onStopProfile: () => Promise<void> | void;
     isApplying?: boolean;
     isLaunching?: boolean;
@@ -169,6 +175,9 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
     onUninstallMod,
     onInstallToGame,
     onLaunchProfile,
+    onCancelLaunch,
+    canCancelLaunch = false,
+    isCancellingLaunch = false,
     onStopProfile,
     isApplying = false,
     isLaunching = false,
@@ -446,9 +455,18 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
     }, [activeProfile, selectedModIdSet]);
     const selectionMode = effectiveSelectedModIds.length > 0;
     const launchActionBlocked = !isGameRunning && (isCheckingGamePath || !hasConfiguredGamePath);
+    // A launch that is still waiting on Steam can be called off: that wait runs
+    // for minutes on a cold Steam, and leaving the button dead for all of it is
+    // what issue #36 reports. Cancelling stays available whatever the platform,
+    // since every launch path waits the same way.
+    const launchIsCancellable = !!onCancelLaunch && canCancelLaunch && !isGameRunning && !isCancellingLaunch;
     let launchActionTitle = 'Game directory is not configured. Open Settings and set the path before launching.';
     if (isGameRunning) {
         launchActionTitle = 'Stop Game';
+    } else if (isCancellingLaunch) {
+        launchActionTitle = 'Stopping the launch...';
+    } else if (launchIsCancellable) {
+        launchActionTitle = 'Waiting for the game to start — click to stop waiting';
     } else if (isSteamRestarting) {
         launchActionTitle = 'Steam is restarting to apply launch options...';
     } else if (isCheckingGamePath) {
@@ -467,25 +485,41 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                     void onStopProfile();
                     return;
                 }
+                if (launchIsCancellable) {
+                    void onCancelLaunch?.();
+                    return;
+                }
                 void onLaunchProfile();
             }}
-            disabled={isLaunching || isApplying || isSteamRestarting || launchActionBlocked}
+            disabled={launchIsCancellable
+                ? false
+                : isLaunching || isApplying || isSteamRestarting || launchActionBlocked}
             // The glyph takes the ink of whichever fill is under it. A single
             // `text-white` washed out on green once the theme's text colour
             // stopped being white.
-            className={`w-14 flex items-center justify-center rounded-xl border shadow-sm ${(isLaunching || isApplying || isSteamRestarting)
-                ? 'bg-gray-700 border-gray-600 text-on-surface cursor-wait opacity-70'
-                : launchActionBlocked
-                    ? 'bg-gray-700 border-gray-600 text-on-surface cursor-not-allowed opacity-60'
-                    : isGameRunning
-                        ? 'bg-red-600 border-red-500 text-on-danger'
-                        : 'bg-green-600 border-green-500 text-on-success'
+            className={`w-14 flex items-center justify-center rounded-xl border shadow-sm ${launchIsCancellable
+                ? 'bg-amber-600 border-amber-500 text-on-warning cursor-pointer'
+                : (isLaunching || isApplying || isSteamRestarting)
+                    ? 'bg-gray-700 border-gray-600 text-on-surface cursor-wait opacity-70'
+                    : launchActionBlocked
+                        ? 'bg-gray-700 border-gray-600 text-on-surface cursor-not-allowed opacity-60'
+                        : isGameRunning
+                            ? 'bg-red-600 border-red-500 text-on-danger'
+                            : 'bg-green-600 border-green-500 text-on-success'
                 }`}
             title={launchActionTitle}
         >
             {isGameRunning ? (
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
                     <rect width="10" height="10" x="3" y="3" rx="1.5" />
+                </svg>
+            ) : launchIsCancellable ? (
+                // Still spinning, because the launch is still in flight — with
+                // the stop square inside it, because it can be ended.
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <circle cx="8" cy="8" r="6.25" stroke="currentColor" strokeOpacity="0.3" strokeWidth="1.5" />
+                    <path d="M8 1.75a6.25 6.25 0 0 1 6.25 6.25" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="animate-spin" style={{ transformOrigin: '8px 8px' }} />
+                    <rect width="6" height="6" x="5" y="5" rx="1" fill="currentColor" />
                 </svg>
             ) : isLaunching || isApplying || isSteamRestarting ? (
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 animate-spin" viewBox="0 0 16 16" fill="none" aria-hidden="true">

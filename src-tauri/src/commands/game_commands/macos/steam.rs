@@ -140,6 +140,7 @@ fn observe_macos_steam_launch(
     console_offsets: &[(std::path::PathBuf, u64)],
     is_started: impl Fn() -> bool,
     mut retry_dispatch: impl FnMut(),
+    should_cancel: impl Fn() -> bool,
 ) -> Result<(), String> {
     let observe_started = std::time::Instant::now();
     let mut retried_dispatch = false;
@@ -149,6 +150,16 @@ fn observe_macos_steam_launch(
     let mut confirmation = StartConfirmation::new();
 
     while observe_started.elapsed().as_millis() < u128::from(timeout_ms) {
+        // Checked first, and before any retry: once the user has called the
+        // launch off there is nothing left worth dispatching or explaining.
+        if should_cancel() {
+            log::info!(
+                "[launch_via_steam_for_game_path] Stopped waiting for app {} because the user cancelled the launch.",
+                app_id
+            );
+            return Err(super::super::launch_cancel::LAUNCH_CANCELLED_MESSAGE.to_string());
+        }
+
         let was_pending = confirmation.is_pending();
         if confirmation.observe(is_started()) {
             return Ok(());
@@ -283,15 +294,20 @@ pub(crate) fn launch_via_steam_for_game_path(
                     ),
                 }
                 },
+                crate::commands::game_commands::launch_cancel::launch_cancelled,
             )?;
         }
 
         #[cfg(not(target_os = "macos"))]
-        if !wait_for_process_start(executable_path, MACOS_LAUNCH_OBSERVE_TIMEOUT_MS) {
-            log::warn!(
-                "[launch_via_steam_for_game_path] Steam accepted the launch request for app {}, but the game process was not observed in time. Continuing optimistically.",
-                app_id
-            );
+        {
+            let observed = wait_for_process_start(executable_path, MACOS_LAUNCH_OBSERVE_TIMEOUT_MS);
+            observed.ok_unless_cancelled()?;
+            if !observed.started() {
+                log::warn!(
+                    "[launch_via_steam_for_game_path] Steam accepted the launch request for app {}, but the game process was not observed in time. Continuing optimistically.",
+                    app_id
+                );
+            }
         }
     }
 
@@ -322,6 +338,7 @@ mod tests {
             &[],
             || started_at.elapsed() >= appears_after,
             || panic!("no Steam error was recorded, so no retry should be dispatched"),
+            || false,
         );
 
         assert!(outcome.is_ok(), "{outcome:?}");
@@ -347,6 +364,7 @@ mod tests {
                 (300..600).contains(&elapsed)
             },
             || {},
+            || false,
         );
 
         assert!(
@@ -359,7 +377,7 @@ mod tests {
     /// success and leaving the UI to guess.
     #[test]
     fn a_game_that_never_appears_is_reported_as_a_failure() {
-        let outcome = observe_macos_steam_launch("1625450", 1_000, &[], || false, || {});
+        let outcome = observe_macos_steam_launch("1625450", 1_000, &[], || false, || {}, || false);
 
         let message = outcome.expect_err("a launch that never started is not a success");
         assert!(message.contains("did not start"), "{message}");
@@ -384,11 +402,69 @@ mod tests {
             &offsets,
             || false,
             || retries.set(retries.get() + 1),
+            || false,
         );
 
         let message = outcome.expect_err("Steam refused the launch");
         assert!(message.contains("Steam refused"), "{message}");
         assert_eq!(retries.get(), 1, "the launch is retried exactly once");
+        std::fs::remove_file(log_path).unwrap();
+    }
+
+    /// Issue #36: the launch that hangs. Steam is not running, the game never
+    /// appears, and the wait is three minutes long — pressing the button again
+    /// has to end it in a moment, and say so rather than blaming the game.
+    #[test]
+    fn a_cancelled_launch_stops_waiting_instead_of_running_the_deadline_out() {
+        let started_at = std::time::Instant::now();
+        let cancelled_after = std::time::Duration::from_millis(600);
+
+        let outcome = observe_macos_steam_launch(
+            "1625450",
+            180_000,
+            &[],
+            || false,
+            || panic!("a cancelled launch must not be retried"),
+            || started_at.elapsed() >= cancelled_after,
+        );
+
+        let message = outcome.expect_err("a cancelled launch is not a started game");
+        assert_eq!(
+            message,
+            crate::commands::game_commands::launch_cancel::LAUNCH_CANCELLED_MESSAGE
+        );
+        assert!(
+            started_at.elapsed() < std::time::Duration::from_secs(5),
+            "cancelling must be near-instant, took {:?}",
+            started_at.elapsed()
+        );
+    }
+
+    /// Cancelling is the user's decision, not Steam's: even with a refusal in
+    /// the log, the message must be the cancellation, and no retry may fire.
+    #[test]
+    fn cancelling_wins_over_a_steam_side_refusal_and_skips_the_retry() {
+        let log_path = unique_temp_log_path("cancelled_apperror18");
+        std::fs::write(
+            &log_path,
+            "GameAction [AppID 1625450] : LaunchApp failed with AppError_18\n",
+        )
+        .unwrap();
+        let offsets = vec![(log_path.clone(), 0u64)];
+
+        let outcome = observe_macos_steam_launch(
+            "1625450",
+            180_000,
+            &offsets,
+            || false,
+            || panic!("a cancelled launch must not be retried"),
+            || true,
+        );
+
+        assert_eq!(
+            outcome.expect_err("cancelled"),
+            crate::commands::game_commands::launch_cancel::LAUNCH_CANCELLED_MESSAGE
+        );
         std::fs::remove_file(log_path).unwrap();
     }
 
