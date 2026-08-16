@@ -123,6 +123,24 @@ pub async fn get_game_source(
     ))
 }
 
+/// The library folder itself, which a folder chooser hands back if the user
+/// presses Open from inside it. A loader installed there would scatter across
+/// every game in the library.
+fn is_steam_library_root(path: &std::path::Path) -> bool {
+    let is_named_common = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.eq_ignore_ascii_case("common"));
+
+    let parent_is_steamapps = path
+        .parent()
+        .and_then(|parent| parent.file_name())
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.eq_ignore_ascii_case("steamapps"));
+
+    is_named_common && parent_is_steamapps
+}
+
 #[command]
 pub async fn set_game_path(
     app: AppHandle,
@@ -130,6 +148,13 @@ pub async fn set_game_path(
     path: String,
     platform: Option<String>,
 ) -> Result<(), String> {
+    if is_steam_library_root(std::path::Path::new(&path)) {
+        return Err(format!(
+            "{} is the Steam library that holds all your games, not a game folder. Pick the game's own folder inside it.",
+            path
+        ));
+    }
+
     let mut settings = load_settings_impl(&app);
     let key = if let Some(p) = normalized_platform(platform.as_deref()) {
         format!("{}::{}", game_identifier, p)
@@ -181,4 +206,32 @@ pub async fn find_game_executable(game_path: String) -> Result<Option<String>, S
     }
 
     Ok(None)
+}
+
+#[cfg(test)]
+mod manual_game_path_tests {
+    use super::is_steam_library_root;
+    use std::path::Path;
+
+    #[test]
+    fn the_library_that_holds_every_game_is_not_a_game_folder() {
+        for root in [
+            "/Volumes/Feduzi/SteamLibrary/steamapps/common",
+            "/Users/x/Library/Application Support/Steam/steamapps/common",
+            "/Volumes/Feduzi/SteamLibrary/steamapps/Common",
+        ] {
+            assert!(is_steam_library_root(Path::new(root)), "{root}");
+        }
+    }
+
+    #[test]
+    fn a_game_inside_the_library_is_accepted() {
+        for game in [
+            "/Volumes/Feduzi/SteamLibrary/steamapps/common/Inscryption",
+            "/Users/x/Library/Application Support/Steam/steamapps/common/Muck",
+            "/Users/x/Games/common",
+        ] {
+            assert!(!is_steam_library_root(Path::new(game)), "{game}");
+        }
+    }
 }

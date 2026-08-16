@@ -1,26 +1,13 @@
-//! Byte-for-byte reproducible JSON for everything the app stores on disk.
+//! Byte-for-byte reproducible JSON for everything the app stores on disk, so a
+//! git repo of the app data directory shows only what changed (issue #37).
 //!
-//! The application support directory is worth tracking in a git repository —
-//! it is where profiles, settings and mod bookkeeping live, so a commit of it
-//! is a backup that can be restored anywhere. That only works if a save that
-//! changes one value produces a diff of one line: a file whose keys come back
-//! in a different order every time buries the real change in noise.
-//!
-//! Two rules keep the output stable, and both are enforced here rather than at
-//! each call site:
-//!
-//! * Key order is fixed. Struct fields serialize in declaration order, and maps
-//!   must be a [`std::collections::BTreeMap`] (or `serde_json::Value`, whose
-//!   object type is one) so their keys come out sorted. A `HashMap` reorders on
-//!   every run and must never be serialized into a stored file — see
-//!   `Settings` in `models/shared.rs`.
-//! * The file ends with a newline, so git sees a normal text file instead of
-//!   appending "\ No newline at end of file" to every diff.
+//! Maps written through here must be a [`std::collections::BTreeMap`] — a
+//! `HashMap` reorders on every run.
 
 use serde::Serialize;
 use std::path::Path;
 
-/// Pretty-printed JSON with a trailing newline, ready to be written to disk.
+/// Pretty-printed, with a trailing newline so git sees a normal text file.
 pub fn to_pretty_string<T>(value: &T) -> Result<String, String>
 where
     T: ?Sized + Serialize,
@@ -30,7 +17,7 @@ where
     Ok(json)
 }
 
-/// Same, written straight to `path`, creating the parent directory if needed.
+/// Same, written to `path`, creating the parent directory if needed.
 pub fn write_file<T>(path: &Path, value: &T) -> Result<(), String>
 where
     T: ?Sized + Serialize,
@@ -78,8 +65,7 @@ mod tests {
 
     #[test]
     fn json_values_keep_their_object_keys_sorted_too() {
-        // Profiles arrive from the frontend as free-form values, so this is the
-        // guarantee that profiles.json does not churn either.
+        // The guarantee that profiles.json does not churn either.
         let value: serde_json::Value =
             serde_json::from_str(r#"{"name":"a","id":"b","mods":[{"z":1,"a":2}]}"#).unwrap();
         assert_eq!(

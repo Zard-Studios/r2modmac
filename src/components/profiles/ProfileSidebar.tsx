@@ -132,11 +132,8 @@ interface ProfileSidebarProps {
     onUninstallMod: (mod: InstalledMod) => Promise<void> | void;
     onInstallToGame: (isVanillaOverride?: boolean) => void;
     onLaunchProfile: () => Promise<void> | void;
-    /** Stops waiting on a launch in flight (issue #36). Kills nothing. */
     onCancelLaunch?: () => Promise<void> | void;
-    /** True while a launch is in flight and can still be called off. */
     canCancelLaunch?: boolean;
-    /** True once the user has asked to stop and the wait is unwinding. */
     isCancellingLaunch?: boolean;
     onStopProfile: () => Promise<void> | void;
     isApplying?: boolean;
@@ -456,10 +453,6 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
     }, [activeProfile, selectedModIdSet]);
     const selectionMode = effectiveSelectedModIds.length > 0;
     const launchActionBlocked = !isGameRunning && (isCheckingGamePath || !hasConfiguredGamePath);
-    // A launch that is still waiting on Steam can be called off: that wait runs
-    // for minutes on a cold Steam, and leaving the button dead for all of it is
-    // what issue #36 reports. Cancelling stays available whatever the platform,
-    // since every launch path waits the same way.
     const launchIsCancellable = !!onCancelLaunch && canCancelLaunch && !isGameRunning && !isCancellingLaunch;
     let launchActionTitle = 'Game directory is not configured. Open Settings and set the path before launching.';
     if (isGameRunning) {

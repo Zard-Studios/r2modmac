@@ -2961,8 +2961,6 @@ function App() {
         // Shown in r2modmac's own UI rather than a native alert: these are
         // usually a Steam-side condition the user can clear in seconds, not a
         // crash, and the wording matters.
-        // A launch the user called off is not a failure to explain: they
-        // pressed the button, they already know.
         if (!isLaunchCancelled(error)) {
           setLaunchIssue(describeLaunchIssue(String(error?.message || error || 'Failed to launch the modded game.')));
         }
@@ -3019,9 +3017,6 @@ function App() {
       await handleLaunchModdedDirect();
     };
 
-    // Issue #36: waiting on Steam can take minutes, and the button used to be
-    // dead for all of it. This stops the waiting only — a game that starts
-    // anyway is picked up by the running-state poll, as always.
     const handleCancelLaunch = async () => {
       if (!isLaunchingProfile) return;
       setIsCancellingLaunch(true);

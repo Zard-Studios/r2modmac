@@ -154,9 +154,6 @@ pub(crate) fn is_process_running_for_patterns(patterns: &[String]) -> bool {
     false
 }
 
-/// Does any candidate of one process match, without being an excluded one?
-///
-/// Pulled out of the poll so the exclusion rule can be tested directly.
 #[cfg_attr(unix, allow(dead_code))]
 fn process_matches_excluding(
     candidates: &[String],
@@ -174,12 +171,30 @@ fn process_matches_excluding(
         .any(|candidate| patterns.iter().any(|pattern| pattern.is_match(candidate)))
 }
 
-/// Decide, from the command lines `pgrep -fl` printed, whether anything is
-/// still running that is not one of ours.
+/// Is this `pgrep -fl` line a process that *is* the executable, rather than one
+/// that merely mentions it? `steamwebhelper.exe -steampath=…\steam.exe` and
+/// `winewrapper.exe --run -- /…/steam.exe` both name it without being it, and
+/// both outlive the client.
 ///
-/// Separated from the call to `pgrep` so the rule can be tested against the
-/// real lines seen on a machine, without needing those processes to exist.
-fn any_line_is_a_live_match(lines: &str, exclude: &str) -> bool {
+/// The program is the first `.exe` on the line: the path has spaces, and
+/// launchers append environment assignments with no leading dash, so neither
+/// split works.
+fn line_runs_the_executable(line: &str, executable_suffix: &str) -> bool {
+    // `pgrep -fl` prints "<pid> <command line>".
+    let command = line
+        .split_once(char::is_whitespace)
+        .map(|(_pid, rest)| rest)
+        .unwrap_or(line)
+        .to_ascii_lowercase();
+
+    let Some(extension_at) = command.find(".exe") else {
+        return false;
+    };
+    command[..extension_at + ".exe".len()].ends_with(&executable_suffix.to_ascii_lowercase())
+}
+
+/// Separated from the `pgrep` call so the rule can be tested against real lines.
+fn any_line_is_a_live_match(lines: &str, executable_suffix: &str, exclude: &str) -> bool {
     lines
         .lines()
         .map(str::trim)
@@ -187,26 +202,20 @@ fn any_line_is_a_live_match(lines: &str, exclude: &str) -> bool {
         // `pgrep -f` matches whole command lines, including the command that
         // asked the question.
         .filter(|line| !line.contains("pgrep"))
-        .any(|line| !line.contains(exclude))
+        .filter(|line| !line.contains(exclude))
+        .any(|line| line_runs_the_executable(line, executable_suffix))
 }
 
 /// Like [`is_process_running_for_patterns`], but blind to processes whose
-/// command line contains `exclude`.
+/// command line contains `exclude` — `steam.exe -shutdown` carries the path of
+/// `steam.exe` and lingers after delivering the request.
 ///
-/// Needed to watch a Wine-hosted Steam close. `steam.exe -shutdown` is itself a
-/// process carrying the path of `steam.exe`, and it does not exit once it has
-/// delivered the request, so a watch that counts it never sees Steam go away —
-/// measured at seventy seconds of chasing its own tail while Steam had in fact
-/// closed within twenty.
-///
-/// Reads the command lines from `pgrep -fl` rather than from sysinfo, because
-/// sysinfo does not expose the arguments of a Wine-hosted process: our
-/// `steam.exe -shutdown` appears there as nothing more than a copy of
-/// `steam.exe` in Wine's temp directory, which made an exclusion built on
-/// sysinfo silently useless.
+/// Reads `pgrep -fl` rather than sysinfo, which does not expose the arguments of
+/// a Wine-hosted process.
 #[cfg(unix)]
 pub(crate) fn is_process_running_for_patterns_excluding(
     patterns: &[String],
+    executable_suffix: &str,
     exclude: &str,
 ) -> bool {
     patterns.iter().any(|pattern| {
@@ -217,17 +226,22 @@ pub(crate) fn is_process_running_for_patterns_excluding(
         else {
             return false;
         };
-        any_line_is_a_live_match(&String::from_utf8_lossy(&output.stdout), exclude)
+        any_line_is_a_live_match(
+            &String::from_utf8_lossy(&output.stdout),
+            executable_suffix,
+            exclude,
+        )
     })
 }
 
-/// Windows has no `pgrep`, and no Wine in the way either: sysinfo reports the
-/// arguments of a native process, so the same exclusion works from there.
+/// No `pgrep` on Windows, but sysinfo reports a native process's arguments.
 #[cfg(not(unix))]
 pub(crate) fn is_process_running_for_patterns_excluding(
     patterns: &[String],
+    executable_suffix: &str,
     exclude: &str,
 ) -> bool {
+    let _ = executable_suffix;
     let compiled: Vec<regex::Regex> = patterns
         .iter()
         .filter_map(|pattern| regex::Regex::new(pattern).ok())
@@ -241,6 +255,72 @@ pub(crate) fn is_process_running_for_patterns_excluding(
     system.processes().values().any(|process| {
         process_matches_excluding(&process_text_candidates(process), &compiled, exclude)
     })
+}
+
+#[cfg(unix)]
+fn pids_running_executable(
+    patterns: &[String],
+    executable_suffix: &str,
+    exclude: &str,
+) -> Vec<u32> {
+    let mut pids = Vec::new();
+    for pattern in patterns {
+        let Ok(output) = std::process::Command::new("/usr/bin/pgrep")
+            .arg("-fl")
+            .arg(pattern)
+            .output()
+        else {
+            continue;
+        };
+        for line in String::from_utf8_lossy(&output.stdout).lines() {
+            let line = line.trim();
+            if line.is_empty() || line.contains("pgrep") || line.contains(exclude) {
+                continue;
+            }
+            if !line_runs_the_executable(line, executable_suffix) {
+                continue;
+            }
+            if let Some(pid) = line
+                .split_whitespace()
+                .next()
+                .and_then(|pid| pid.parse::<u32>().ok())
+            {
+                if !pids.contains(&pid) {
+                    pids.push(pid);
+                }
+            }
+        }
+    }
+    pids
+}
+
+/// A Wine-hosted program is a real process here, so signalling it is what ends
+/// it, whichever launcher started it. Narrower than `wineserver -k`, which would
+/// take everything else in the prefix. Callers ask politely first.
+#[cfg(unix)]
+pub(crate) fn terminate_processes_running_executable(
+    patterns: &[String],
+    executable_suffix: &str,
+    exclude: &str,
+    force: bool,
+) -> usize {
+    let pids = pids_running_executable(patterns, executable_suffix, exclude);
+    for pid in &pids {
+        let signal = if force { "-KILL" } else { "-TERM" };
+        log::info!(
+            "[terminate_processes_running_executable] {} {} ({})",
+            signal,
+            pid,
+            executable_suffix
+        );
+        let _ = std::process::Command::new("/bin/kill")
+            .arg(signal)
+            .arg(pid.to_string())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+    }
+    pids.len()
 }
 
 pub(crate) fn is_process_running_for_executable(executable_path: &std::path::Path) -> bool {
@@ -302,11 +382,8 @@ impl StartConfirmation {
 
 // ── Process polling helpers ───────────────────────────────────────────────────
 
-/// How a wait for a game process ended.
-///
-/// `Cancelled` exists so a launch the user called off is not reported as a
-/// game that failed to start: the deadline was never reached, the user simply
-/// stopped waiting (issue #36).
+/// `Cancelled` keeps a launch the user called off from being reported as a game
+/// that failed to start.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum StartWait {
     Started,
@@ -319,9 +396,6 @@ impl StartWait {
         matches!(self, StartWait::Started)
     }
 
-    /// `Err(LAUNCH_CANCELLED_MESSAGE)` when the user called the launch off, so
-    /// a launch path can hand the decision straight back to the caller with a
-    /// `?` and leave its own "did not start" wording for a real timeout.
     pub(crate) fn ok_unless_cancelled(&self) -> Result<(), String> {
         if matches!(self, StartWait::Cancelled) {
             Err(super::launch_cancel::LAUNCH_CANCELLED_MESSAGE.to_string())
@@ -333,8 +407,7 @@ impl StartWait {
 
 const START_POLL_INTERVAL_MS: u64 = 250;
 
-/// The decision behind every start wait, with both the world and the user's
-/// patience passed in as closures so it can be exercised without either.
+/// The world and the user's patience are closures so this is testable.
 fn wait_for_start_with(
     timeout_ms: u64,
     confirm_immediately: bool,
@@ -346,8 +419,6 @@ fn wait_for_start_with(
     let mut confirmation = StartConfirmation::new();
 
     for _ in 0..attempts {
-        // Checked before the first poll too: a cancellation that arrives while
-        // the previous step was still running must not buy another full wait.
         if should_cancel() {
             return StartWait::Cancelled;
         }
@@ -646,9 +717,6 @@ mod start_wait_cancellation_tests {
     use super::*;
     use std::cell::Cell;
 
-    /// Nothing in these tests may actually sleep: a cancelled wait has to be
-    /// quick, and a test that slept its way through a three-minute deadline
-    /// would prove nothing about that.
     fn no_sleep(_: std::time::Duration) {}
 
     #[test]
@@ -656,13 +724,13 @@ mod start_wait_cancellation_tests {
         let polls = Cell::new(0u32);
 
         let outcome = wait_for_start_with(
-            180_000, // the cold-Steam deadline: three minutes of dead time
+            180_000,
             false,
             || {
                 polls.set(polls.get() + 1);
                 false
             },
-            || polls.get() >= 3, // the user presses the button again
+            || polls.get() >= 3,
             no_sleep,
         );
 
@@ -682,7 +750,6 @@ mod start_wait_cancellation_tests {
 
     #[test]
     fn a_game_that_starts_is_still_reported_as_started() {
-        // Cancellation must not get in the way of the normal path.
         let outcome = wait_for_start_with(60_000, true, || true, || false, no_sleep);
         assert_eq!(outcome, StartWait::Started);
         assert!(outcome.started());
@@ -697,25 +764,17 @@ mod start_wait_cancellation_tests {
 
     #[test]
     fn only_a_cancelled_wait_reports_the_message_the_frontend_watches_for() {
-        // The frontend decides whether to show an error dialog by matching this
-        // exact sentence (src/utils/launchIssue.ts), so the two sides only
-        // agree by string — pin it on this side too.
+        // The two sides agree by string only.
         assert_eq!(
             StartWait::Cancelled.ok_unless_cancelled().unwrap_err(),
             "Launch cancelled."
         );
         assert!(StartWait::Started.ok_unless_cancelled().is_ok());
-        // A timeout keeps its own wording: the caller explains what did not
-        // start, which is a different thing to tell the user.
         assert!(StartWait::TimedOut.ok_unless_cancelled().is_ok());
     }
 
     #[test]
     fn a_game_that_starts_in_the_same_tick_as_the_cancellation_counts_as_cancelled() {
-        // Deliberate: the user asked to stop waiting, and the running-state
-        // poll picks the game up anyway if it really did come up. Reporting a
-        // start here would leave the button lying about a launch the user
-        // already called off.
         let outcome = wait_for_start_with(60_000, true, || true, || true, no_sleep);
         assert_eq!(outcome, StartWait::Cancelled);
     }
@@ -723,47 +782,72 @@ mod start_wait_cancellation_tests {
 
 #[cfg(test)]
 mod process_exclusion_tests {
-    use super::{any_line_is_a_live_match, process_matches_excluding};
+    use super::{any_line_is_a_live_match, line_runs_the_executable, process_matches_excluding};
 
-    /// Real `pgrep -fl` output from a cancelled CrossOver launch, once Steam
-    /// had closed: all that is left are our own shutdown commands.
-    const ONLY_OUR_SHUTDOWNS: &str = concat!(
-        "13763 /Applications/CrossOver.app/Contents/SharedSupport/CrossOver/lib/wine/x86_64-windows/winewrapper.exe --run -- /Bottles/Steam/drive_c/Program Files (x86)/Steam/steam.exe -shutdown\n",
-        "13766 C:\\Program Files (x86)\\Steam\\steam.exe -shutdown\n"
-    );
-
-    /// The same, with the client still up.
-    const STEAM_STILL_UP: &str = concat!(
-        "86276 C:\\Program Files (x86)\\Steam\\steam.exe -applaunch 1229490\n",
-        "13766 C:\\Program Files (x86)\\Steam\\steam.exe -shutdown\n"
-    );
+    /// Real `pgrep -fl` lines, copied from a machine mid-launch.
+    const CLIENT: &str = r"86276 C:\Program Files (x86)\Steam\steam.exe -applaunch 1229490";
+    const CLIENT_NO_ARGS: &str = r"66986 C:\Program Files (x86)\Steam\steam.exe";
+    const OUR_SHUTDOWN: &str = r"67026 C:\Program Files (x86)\Steam\steam.exe -shutdown";
+    const WEB_HELPER: &str = r"67069 C:\Program Files (x86)\Steam\bin\cef\cef.win64\steamwebhelper.exe -nocrashdialog -lang=it_IT -steampath=C:\Program Files (x86)\Steam\steam.exe -launcher=0";
+    const WINE_WRAPPER: &str = "66986 /Applications/CrossOver.app/Contents/SharedSupport/CrossOver/lib/wine/x86_64-windows/winewrapper.exe --run -- /Bottles/Steam/drive_c/Program Files (x86)/Steam/steam.exe";
+    const STEAM_SERVICE: &str =
+        r"67085 C:\Program Files (x86)\Common Files\Steam\steamservice.exe /RunAsService";
 
     #[test]
-    fn our_own_shutdown_commands_do_not_count_as_a_running_steam() {
-        // They linger after Steam has closed and carry the same path, which is
-        // what made the watch run its full window every time.
-        assert!(!any_line_is_a_live_match(ONLY_OUR_SHUTDOWNS, "-shutdown"));
+    fn the_client_itself_is_recognised_with_or_without_arguments() {
+        assert!(line_runs_the_executable(CLIENT, "steam.exe"));
+        assert!(line_runs_the_executable(CLIENT_NO_ARGS, "steam.exe"));
+        assert!(line_runs_the_executable(
+            r"68624 C:\Program Files (x86)\Steam\steam.exe SOME_ENV=value",
+            "steam.exe"
+        ));
     }
 
     #[test]
-    fn a_steam_that_is_still_up_is_still_seen() {
-        assert!(any_line_is_a_live_match(STEAM_STILL_UP, "-shutdown"));
+    fn processes_that_only_mention_steam_exe_are_not_the_client() {
+        assert!(!line_runs_the_executable(WEB_HELPER, "steam.exe"));
+        assert!(!line_runs_the_executable(WINE_WRAPPER, "steam.exe"));
+        assert!(!line_runs_the_executable(STEAM_SERVICE, "steam.exe"));
+    }
+
+    #[test]
+    fn a_closed_steam_is_reported_closed_even_with_helpers_left_behind() {
+        let after_shutdown =
+            format!("{OUR_SHUTDOWN}\n{WEB_HELPER}\n{WINE_WRAPPER}\n{STEAM_SERVICE}\n");
+        assert!(!any_line_is_a_live_match(
+            &after_shutdown,
+            "steam.exe",
+            "-shutdown"
+        ));
+    }
+
+    #[test]
+    fn a_running_client_is_still_seen_among_the_same_helpers() {
+        let while_running = format!("{CLIENT}\n{WEB_HELPER}\n{STEAM_SERVICE}\n");
+        assert!(any_line_is_a_live_match(
+            &while_running,
+            "steam.exe",
+            "-shutdown"
+        ));
     }
 
     #[test]
     fn the_asking_pgrep_does_not_count_as_a_match() {
-        let lines = "500 pgrep -fl steam\\.exe\n";
-        assert!(!any_line_is_a_live_match(lines, "-shutdown"));
+        assert!(!any_line_is_a_live_match(
+            "500 pgrep -fl steam\\.exe\n",
+            "steam.exe",
+            "-shutdown"
+        ));
     }
 
     #[test]
     fn nothing_running_is_nothing_running() {
-        assert!(!any_line_is_a_live_match("", "-shutdown"));
-        assert!(!any_line_is_a_live_match("   \n", "-shutdown"));
+        assert!(!any_line_is_a_live_match("", "steam.exe", "-shutdown"));
+        assert!(!any_line_is_a_live_match("   \n", "steam.exe", "-shutdown"));
     }
 
     #[test]
-    fn the_candidate_rule_used_on_windows_excludes_the_same_thing() {
+    fn the_candidate_rule_used_on_windows_excludes_our_own_requests() {
         let patterns = [regex::Regex::new("steam.exe").unwrap()];
         assert!(process_matches_excluding(
             &[r"C:\Program Files (x86)\Steam\steam.exe -applaunch 1229490".to_string()],

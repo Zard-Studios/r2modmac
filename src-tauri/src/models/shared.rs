@@ -128,13 +128,8 @@ pub struct CachedPlatform {
     pub fetched_at: i64,
 }
 
-/// Everything in `settings.json`.
-///
-/// Field order here is the field order on disk, and every map is a
-/// `BTreeMap` so its keys are written sorted. Both matter because users track
-/// the application support directory in git: a `HashMap` here would reshuffle
-/// its entries on every save and turn a one-value change into a whole-file
-/// diff. Add new fields at the end, and never with a `HashMap`.
+/// Field order here is the field order on disk, so new fields go at the end.
+/// Maps are `BTreeMap` — a `HashMap` reshuffles `settings.json` on every save.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Settings {
     pub steam_path: Option<String>,
@@ -780,9 +775,6 @@ mod settings_stable_order_tests {
 
     #[test]
     fn the_same_settings_serialize_to_the_same_bytes_whatever_order_they_were_built_in() {
-        // The whole point of the maps being sorted: two runs that end up with
-        // the same configuration must produce identical files, so a git repo of
-        // the app data directory only shows what actually changed.
         let games = [
             ("lethal-company", "/Games/Lethal Company"),
             ("balatro", "/Games/Balatro"),

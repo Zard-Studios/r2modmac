@@ -347,7 +347,8 @@ mod tests {
         let started = std::time::Instant::now();
         // A generous deadline: the point is that it returns as soon as Steam's
         // state is readable, not that it waits it out.
-        let outcome = wait_for_launch_or_blocker(&root, &root, "3527290", 60_000, || false, || false);
+        let outcome =
+            wait_for_launch_or_blocker(&root, &root, "3527290", 60_000, || false, || false);
         let elapsed = started.elapsed();
         match outcome {
             LaunchWaitOutcome::Blocked(reason) => {
@@ -379,12 +380,19 @@ mod tests {
         let root = fake_steam_root("1229490", 4, "");
         let polls = std::cell::Cell::new(0u32);
 
-        let outcome = wait_for_launch_or_blocker(&root, &root, "1229490", 3_000, || {
-            let seen = polls.get();
-            polls.set(seen + 1);
-            // Present for the first two polls, then gone for good.
-            seen < 2
-        }, || false);
+        let outcome = wait_for_launch_or_blocker(
+            &root,
+            &root,
+            "1229490",
+            3_000,
+            || {
+                let seen = polls.get();
+                polls.set(seen + 1);
+                // Present for the first two polls, then gone for good.
+                seen < 2
+            },
+            || false,
+        );
 
         assert!(
             matches!(outcome, LaunchWaitOutcome::TimedOut),
@@ -399,7 +407,8 @@ mod tests {
         let root = fake_steam_root("1229490", 4, "");
         let started = std::time::Instant::now();
 
-        let outcome = wait_for_launch_or_blocker(&root, &root, "1229490", 60_000, || true, || false);
+        let outcome =
+            wait_for_launch_or_blocker(&root, &root, "1229490", 60_000, || true, || false);
 
         assert!(matches!(outcome, LaunchWaitOutcome::Started));
         assert!(
@@ -413,7 +422,8 @@ mod tests {
     #[test]
     fn wait_times_out_when_steam_reports_nothing() {
         let root = fake_steam_root("1229490", 4, "");
-        let outcome = wait_for_launch_or_blocker(&root, &root, "1229490", 1_000, || false, || false);
+        let outcome =
+            wait_for_launch_or_blocker(&root, &root, "1229490", 1_000, || false, || false);
         assert!(matches!(outcome, LaunchWaitOutcome::TimedOut));
         std::fs::remove_dir_all(root).unwrap();
     }
@@ -424,7 +434,8 @@ mod tests {
         // otherwise a leftover line would fail a launch that actually worked.
         let log = "[20:07:37] GameAction [AppID 3527290, ActionID 1] : LaunchApp waiting for user response to SynchronizingCloud \"pendingcloudsessions\"\n";
         let root = fake_steam_root("3527290", 4, log);
-        let outcome = wait_for_launch_or_blocker(&root, &root, "3527290", 10_000, || true, || false);
+        let outcome =
+            wait_for_launch_or_blocker(&root, &root, "3527290", 10_000, || true, || false);
         assert!(matches!(outcome, LaunchWaitOutcome::Started));
         std::fs::remove_dir_all(root).unwrap();
     }
@@ -468,7 +479,8 @@ mod tests {
     #[test]
     fn an_uncancelled_wait_is_unaffected() {
         let root = fake_steam_root("1229490", 4, "");
-        let outcome = wait_for_launch_or_blocker(&root, &root, "1229490", 60_000, || true, || false);
+        let outcome =
+            wait_for_launch_or_blocker(&root, &root, "1229490", 60_000, || true, || false);
         assert!(matches!(outcome, LaunchWaitOutcome::Started));
         std::fs::remove_dir_all(root).unwrap();
     }

@@ -41,7 +41,7 @@ finish coming up before it can be told to go away. Measured on a cold start:
 | Platform | Steam closed after |
 | --- | --- |
 | macOS native | ~8 seconds (~15 when stop is pressed 1 second after Play) |
-| CrossOver (Wine) | ~19 seconds |
+| CrossOver (Wine) | ~9.5 seconds, from a stop pressed 1 second after Play |
 
 The button comes back immediately either way — the closing happens in the background.
 
@@ -77,6 +77,13 @@ Two measured details that are easy to get wrong:
   it never sees Steam go away. Worse, `sysinfo` does not report the arguments of Wine-hosted
   processes — our shutdown command appears there only as a copy of `steam.exe` in Wine's temp
   directory — so the exclusion reads command lines from `pgrep -fl` instead.
+- **Ask which program a process *is*, not which one it mentions.** Steam's UI helper runs as
+  `steamwebhelper.exe … -steampath=C:\…\steam.exe …` and outlives the client by a long way;
+  the Wine launcher runs as `winewrapper.exe --run -- /…/steam.exe`. Counting either one means
+  concluding Steam is still up long after it has closed. The program is the first `.exe` on
+  the line — not split on whitespace, because `C:\Program Files (x86)\Steam\steam.exe` has
+  spaces in it, and not split on the first argument, because launchers append environment
+  assignments with no leading dash.
 
 ### What is never done
 
@@ -89,15 +96,45 @@ Two measured details that are easy to get wrong:
   files, after which games go missing or need verifying
   ([Proton issue #114](https://github.com/ValveSoftware/Proton/issues/114)).
 
-A Steam that refuses to close is therefore left running, and the log says so.
+On macOS, a Steam that refuses to close is therefore left running, and the log says so. Under
+Wine the ladder above applies instead.
 
-### The one case where Steam refuses
+### The ladder used under Wine
 
-A Wine Steam sitting on the **login window** ignores `-shutdown` completely — measured still
-up ninety seconds later. It is left running.
+Asking politely is not enough on its own. A Steam client that is still booting answers
+`-shutdown` with nothing at all — measured still deaf three minutes in, on a bottle on an
+external disk — while booting straight into the `-applaunch` it was handed. Waiting politely
+means watching the game start.
 
-This costs nothing in practice: a Steam that is not signed in cannot start a game either, so
-there is no launch left to undo. The game does not appear; only the Steam window stays.
+So the shutdown follows the ladder a Wine session manager uses
+([winetop](https://github.com/akovari/winetop)), stopping short of its last rung:
+
+| Rung | What it is | When |
+| --- | --- | --- |
+| 1 | `steam.exe -shutdown` | first three rounds, ~9 seconds |
+| 2 | `SIGTERM` to the client's host process | if Steam is still up |
+| 3 | `SIGKILL` to the same process | if it survived `SIGTERM` |
+| — | ~~`wineserver -k`~~ | **never** |
+
+A Wine-hosted Windows program is a real process on this side, so signalling that process is
+what actually ends it: measured, the client was gone one second after `SIGTERM`, its wrapper
+with it. Nothing about the launcher is involved — the process is found by which executable it
+*runs*, not by any name the launcher gives it, so the same code reaches a client started by
+CrossOver, Sikarugir, Whisky or plain Wine.
+
+`wineserver -k` is refused because it ends every process in the prefix
+([WineHQ](https://forum.winehq.org/viewtopic.php?t=6330)) and would take a game running in the
+same bottle with it. `taskkill /F` is the same idea from the inside
+([wine source](https://github.com/wine-mirror/wine/blob/master/programs/taskkill/taskkill.c)).
+
+Escalating early is deliberate, and it is also when it costs least: forcing a Steam client
+down can corrupt its `.vdf`/`.acf` files, after which games go missing or need verifying
+([Proton issue #114](https://github.com/ValveSoftware/Proton/issues/114)) — but a client a few
+seconds into its boot has barely written anything, and it is exactly then that stopping it is
+the difference between a cancelled launch and a game that starts anyway.
+
+**macOS native does not use this ladder.** The AppleScript quit works there, so nothing is
+signalled: a Steam that refuses is left running.
 
 This behaviour belongs to macOS and to Steam, not to r2modmac, and it has already changed
 once during development. There is a test that exercises the real thing against the real

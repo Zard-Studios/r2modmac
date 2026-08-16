@@ -156,25 +156,23 @@ pub(crate) fn launch_windows_direct_game_with_working_dir(
     Ok(())
 }
 
-/// How long to keep watching for the Steam a cancelled launch started, and how
-/// long each request is given to take effect. Matched to the macOS watch: a
-/// cold Steam under Wine takes just as long to come up.
-const STEAM_QUIT_TOTAL_MS: u64 = 60_000;
+/// Matches the cold-Steam launch deadline: a booting client answers nothing.
+const STEAM_QUIT_TOTAL_MS: u64 = 180_000;
 
-/// Steam's own shutdown switch — and the marker that tells our own shutdown
-/// commands apart from the client, since they carry the same executable path
-/// and linger after delivering the request.
+/// Also the marker that tells our own requests apart from the client: they
+/// carry the same path and linger after delivering it.
 const SHUTDOWN_ARGUMENT: &str = "-shutdown";
+
+const STEAM_EXECUTABLE_NAME: &str = "steam.exe";
 const STEAM_QUIT_ROUND_MS: u64 = 3_000;
 const STEAM_QUIT_POLL_MS: u64 = 500;
 
-/// How to ask the Windows Steam that r2modmac just started to close again.
-///
-/// `steam.exe -shutdown` is Steam's own documented shutdown switch, so the
-/// client exits the way it does from its own menu — nothing is killed. Which
-/// route carries it depends on how the client was started in the first place:
-/// through a Sikarugir/Wineskin wrapper, through a Wine or CrossOver runner, or
-/// natively on Windows.
+/// How many times Steam is asked to close on its own terms before its process
+/// is signalled, and how many times it is signalled before that is forced.
+const POLITE_ROUNDS: u32 = 3;
+const SIGNAL_ROUNDS: u32 = 2;
+
+/// How to reach the Steam this launch started: whichever route started it.
 #[allow(dead_code)]
 enum WindowsSteamShutdown {
     #[cfg(all(unix, target_os = "macos"))]
@@ -196,24 +194,9 @@ enum WindowsSteamShutdown {
 }
 
 impl WindowsSteamShutdown {
-    /// Keep asking the Steam this launch started to close, until it does.
-    ///
-    /// Same shape as the macOS watch, and for the same reason the log showed:
-    /// the user cancels about a second after pressing Play, long before Steam
-    /// exists, so a single request lands on nothing and Steam boots on to start
-    /// the game. This waits for Steam to appear, asks, and keeps asking until
-    /// its processes are gone.
-    ///
-    /// Nothing here is specific to one Wine launcher. The route is whichever
-    /// one started this Steam — a Sikarugir/Wineskin wrapper, a CrossOver or
-    /// Wine runner, or Windows itself — so a launcher that can start a game can
-    /// stop it, without this code knowing which launcher it is. The command is
-    /// Steam's own `-shutdown` in every case, and "did it work?" is answered by
-    /// looking for Steam's processes on the host, which is equally
-    /// launcher-agnostic.
-    ///
-    /// Runs on its own thread so the button comes back at once, and stands down
-    /// the moment another launch begins.
+    /// Waits for Steam to appear, then works the ladder in
+    /// `docs/stopping-a-launch.md` until its processes are gone. Runs on its own
+    /// thread, and stands down when another launch begins.
     fn watch_until_closed(self, steam_patterns: Vec<String>) {
         let generation = crate::commands::game_commands::launch_cancel::launch_generation();
 
@@ -235,7 +218,11 @@ impl WindowsSteamShutdown {
                     return;
                 }
 
-                if !is_process_running_for_patterns_excluding(&steam_patterns, SHUTDOWN_ARGUMENT) {
+                if !is_process_running_for_patterns_excluding(
+                    &steam_patterns,
+                    STEAM_EXECUTABLE_NAME,
+                    SHUTDOWN_ARGUMENT,
+                ) {
                     if seen_running {
                         log::info!(
                             "[launch_windows_steam_game] Steam closed after {} round(s), {}ms.",
@@ -244,29 +231,53 @@ impl WindowsSteamShutdown {
                         );
                         return;
                     }
-                    // Steam is not up yet. `-shutdown` on an absent client only
-                    // starts one, so wait for it rather than send anything.
+                    // `-shutdown` on an absent client only starts one. Nor does
+                    // stopping our own launch command help: under Wine the
+                    // client belongs to the prefix's wineserver.
                     std::thread::sleep(std::time::Duration::from_millis(STEAM_QUIT_POLL_MS));
                     continue;
                 }
 
                 seen_running = true;
                 rounds += 1;
-                self.dispatch();
+
+                // Ask, then signal, then force. Escalating early is deliberate:
+                // a booting client cannot answer `-shutdown` at all, and it is
+                // booting into the `-applaunch` it was handed — while having
+                // written almost nothing yet.
+                if rounds <= POLITE_ROUNDS {
+                    self.dispatch();
+                } else {
+                    let force = rounds > POLITE_ROUNDS + SIGNAL_ROUNDS;
+                    let signalled = terminate_processes_running_executable(
+                        &steam_patterns,
+                        STEAM_EXECUTABLE_NAME,
+                        SHUTDOWN_ARGUMENT,
+                        force,
+                    );
+                    log::info!(
+                        "[launch_windows_steam_game] Steam ignored {} shutdown request(s); signalled {} process(es){}.",
+                        POLITE_ROUNDS,
+                        signalled,
+                        if force { " (forced)" } else { "" }
+                    );
+                }
+
                 std::thread::sleep(std::time::Duration::from_millis(STEAM_QUIT_ROUND_MS));
             }
 
             if seen_running
-                && !is_process_running_for_patterns_excluding(&steam_patterns, SHUTDOWN_ARGUMENT)
+                && !is_process_running_for_patterns_excluding(
+                    &steam_patterns,
+                    STEAM_EXECUTABLE_NAME,
+                    SHUTDOWN_ARGUMENT,
+                )
             {
                 log::info!(
                     "[launch_windows_steam_game] Steam closed after {} round(s).",
                     rounds
                 );
             } else if seen_running {
-                // Almost always a client sitting on the login window: it
-                // ignores -shutdown, and it cannot start a game either, so
-                // there is nothing left to undo by force.
                 log::warn!(
                     "[launch_windows_steam_game] Steam did not close after {} round(s). Leaving it running rather than killing it; it is most likely waiting to be signed in.",
                     rounds
@@ -277,7 +288,6 @@ impl WindowsSteamShutdown {
         });
     }
 
-    /// One `-shutdown`, by the route that started this Steam.
     fn dispatch(&self) {
         match self {
             #[cfg(all(unix, target_os = "macos"))]
@@ -401,9 +411,7 @@ pub(super) fn launch_windows_steam_game(
         steam_was_running
     );
 
-    // Recorded as the client is started, and used only if the user cancels: by
-    // then the request has already gone out, so ending the wait alone would
-    // leave Steam booting and the game starting anyway.
+    // Used only if the user cancels.
     #[allow(unused_mut, unused_assignments)]
     let mut steam_shutdown: Option<WindowsSteamShutdown> = None;
 
@@ -507,7 +515,6 @@ pub(super) fn launch_windows_steam_game(
             .spawn()
             .map_err(|e| format!("Failed to launch Steam app {}: {}", app_id, e))?;
 
-        // Same runner, same prefix: whatever started this Steam can stop it.
         steam_shutdown = Some(WindowsSteamShutdown::Runner {
             runner: runner_path.clone(),
             prefix: prefix_root.clone(),
@@ -662,12 +669,7 @@ pub(crate) fn launch_windows_game(
 mod wine_steam_shutdown_tests {
     use super::*;
 
-    /// The real thing, against a real Wine-hosted Steam.
-    ///
-    /// Ignored by default, and skipped unless pointed at a launcher, because
-    /// there is no single Wine setup to test against: CrossOver, Sikarugir,
-    /// Whisky, plain Wine and Windows all differ, and no one machine has them
-    /// all. Anyone with one can check it on theirs by pointing these at it:
+    /// Skipped unless pointed at a launcher, since no machine has them all:
     ///
     /// ```text
     /// R2MODMAC_TEST_WINE_RUNNER="/Applications/CrossOver.app/Contents/SharedSupport/CrossOver/CrossOver-Hosted Application/wine" \
@@ -676,15 +678,7 @@ mod wine_steam_shutdown_tests {
     /// cargo test --lib shuts_a_wine_steam_down_for_real -- --ignored --nocapture
     /// ```
     ///
-    /// It reproduces the case the log caught: Steam started, cancelled one
-    /// second later — before Steam exists — and expected to be closed anyway.
-    ///
-    /// **Steam must be signed in for this to pass.** A client parked on the
-    /// login window ignores `-shutdown` entirely (measured: still up ninety
-    /// seconds later), and nothing short of killing it changes that — see
-    /// `docs/stopping-a-launch.md` for why that line is not crossed. It does
-    /// not matter in practice: a signed-out Steam cannot start a game either,
-    /// so there is no launch left to undo.
+    /// Steam is started, then cancelled one second later — before it exists.
     #[test]
     #[ignore = "starts and closes a real Wine-hosted Steam"]
     fn shuts_a_wine_steam_down_for_real() {
@@ -706,11 +700,8 @@ mod wine_steam_shutdown_tests {
 
         crate::commands::game_commands::launch_cancel::begin_launch();
 
-        // Start Steam the way a launch does, through the same runner plumbing.
         let mut command = std::process::Command::new(&runner);
         configure_host_compat_runner_command(&mut command, &runner, Some(&prefix)).unwrap();
-        // Left running deliberately: this is Steam starting up, and the point
-        // of the test is what closes it.
         let mut steam = command
             .arg(&steam_executable)
             .stdout(std::process::Stdio::null())
@@ -718,7 +709,6 @@ mod wine_steam_shutdown_tests {
             .spawn()
             .expect("could not start Steam through the runner");
 
-        // One second in: what the user actually does.
         std::thread::sleep(std::time::Duration::from_secs(1));
         let started = std::time::Instant::now();
 
@@ -733,7 +723,11 @@ mod wine_steam_shutdown_tests {
         let mut ever_seen = false;
         let mut closed = false;
         while std::time::Instant::now() < deadline {
-            if is_process_running_for_patterns_excluding(&patterns, SHUTDOWN_ARGUMENT) {
+            if is_process_running_for_patterns_excluding(
+                &patterns,
+                STEAM_EXECUTABLE_NAME,
+                SHUTDOWN_ARGUMENT,
+            ) {
                 ever_seen = true;
             } else if ever_seen {
                 closed = true;
