@@ -275,7 +275,7 @@ pub(crate) fn launch_via_steam_for_game_path(
                 observe_timeout_ms
             );
 
-            observe_macos_steam_launch(
+            let observed = observe_macos_steam_launch(
                 &app_id,
                 observe_timeout_ms,
                 &console_offsets,
@@ -295,7 +295,21 @@ pub(crate) fn launch_via_steam_for_game_path(
                 }
                 },
                 crate::commands::game_commands::launch_cancel::launch_cancelled,
-            )?;
+            );
+
+            if let Err(error) = observed {
+                // Ending the wait is not enough on its own: Steam was already
+                // started and `steam://run` already dispatched, so without this
+                // the game comes up anyway a minute after the user pressed stop.
+                if error == crate::commands::game_commands::launch_cancel::LAUNCH_CANCELLED_MESSAGE
+                    && crate::commands::game_commands::launch_cancel::cancelled_launch_should_close_steam(
+                        steam_was_running,
+                    )
+                {
+                    crate::commands::game_commands::launch_cancel::shut_down_steam_after_cancel();
+                }
+                return Err(error);
+            }
         }
 
         #[cfg(not(target_os = "macos"))]

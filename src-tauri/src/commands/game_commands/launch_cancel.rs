@@ -50,6 +50,53 @@ pub(crate) fn ensure_not_cancelled() -> Result<(), String> {
     }
 }
 
+/// Should a cancelled launch also shut Steam down?
+///
+/// Only when r2modmac started Steam for this launch. By the time the button
+/// can be pressed again the request has already gone out — Steam was started
+/// and `steam://run` was dispatched — so ending the wait alone leaves Steam
+/// booting and the game coming up regardless, which is not what "stop" means
+/// to anyone watching.
+///
+/// A Steam the user already had open is never touched: they were using it
+/// before this launch and closing it would cost them whatever else it was
+/// doing. That is also exactly the case issue #36 is about — the hang happens
+/// when Steam is *not* running.
+pub(crate) fn cancelled_launch_should_close_steam(steam_was_running: bool) -> bool {
+    !steam_was_running
+}
+
+/// Ask the native macOS Steam to quit, the way its own menu does.
+///
+/// `steam://exit` is Valve's own shutdown route, so the client closes its
+/// sessions and writes its files first. Nothing here force-kills: killing
+/// Steam mid-boot is what left it crashing on the next start.
+#[cfg(target_os = "macos")]
+pub(crate) fn shut_down_steam_after_cancel() {
+    log::info!("[cancel_game_launch] Asking Steam to quit; r2modmac started it for this launch.");
+
+    if std::process::Command::new("/usr/bin/open")
+        .arg("steam://exit")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .is_ok()
+    {
+        return;
+    }
+
+    // Only if the URL handler is not registered — an install Steam has never
+    // been run from, most likely.
+    let _ = std::process::Command::new("/usr/bin/osascript")
+        .args(["-e", "tell application \"Steam\" to quit"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+}
+
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn shut_down_steam_after_cancel() {}
+
 /// Stop waiting on the launch in flight.
 ///
 /// Safe to call when nothing is launching: the flag is cleared by the next
@@ -84,5 +131,17 @@ mod tests {
         begin_launch();
         assert!(!launch_cancelled());
         assert!(ensure_not_cancelled().is_ok());
+    }
+
+    #[test]
+    fn cancelling_closes_only_the_steam_r2modmac_started_itself() {
+        // The hang this fixes happens with Steam down: r2modmac starts it, and
+        // cancelling has to undo that, or Steam boots and launches the game
+        // anyway — a "stop" that stops nothing.
+        assert!(cancelled_launch_should_close_steam(false));
+
+        // A Steam the user already had open stays open. It was not ours to
+        // close, and they may be mid-download in it.
+        assert!(!cancelled_launch_should_close_steam(true));
     }
 }

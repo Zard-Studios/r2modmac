@@ -150,6 +150,100 @@ pub(crate) fn launch_windows_direct_game_with_working_dir(
     Ok(())
 }
 
+/// How to ask the Windows Steam that r2modmac just started to close again.
+///
+/// `steam.exe -shutdown` is Steam's own documented shutdown switch, so the
+/// client exits the way it does from its own menu — nothing is killed. Which
+/// route carries it depends on how the client was started in the first place:
+/// through a Sikarugir/Wineskin wrapper, through a Wine or CrossOver runner, or
+/// natively on Windows.
+#[allow(dead_code)]
+enum WindowsSteamShutdown {
+    #[cfg(all(unix, target_os = "macos"))]
+    Wineskin {
+        bundle: std::path::PathBuf,
+        prefix: std::path::PathBuf,
+        steam_executable: std::path::PathBuf,
+    },
+    #[cfg(unix)]
+    Runner {
+        runner: std::path::PathBuf,
+        prefix: Option<std::path::PathBuf>,
+        steam_executable: std::path::PathBuf,
+    },
+    #[cfg(windows)]
+    Native {
+        steam_executable: std::path::PathBuf,
+    },
+}
+
+impl WindowsSteamShutdown {
+    fn run(&self) {
+        match self {
+            #[cfg(all(unix, target_os = "macos"))]
+            WindowsSteamShutdown::Wineskin {
+                bundle,
+                prefix,
+                steam_executable,
+            } => {
+                log::info!(
+                    "[launch_windows_steam_game] Asking Steam to shut down through {:?}; r2modmac started it for this launch.",
+                    bundle
+                );
+                if let Err(error) = launch_macos_wineskin_program(
+                    bundle,
+                    prefix,
+                    steam_executable,
+                    &["-shutdown".to_string()],
+                    None,
+                    "cancel_windows_steam_launch",
+                ) {
+                    log::warn!(
+                        "[launch_windows_steam_game] Could not shut Steam down after the cancellation: {}",
+                        error
+                    );
+                }
+            }
+            #[cfg(unix)]
+            WindowsSteamShutdown::Runner {
+                runner,
+                prefix,
+                steam_executable,
+            } => {
+                log::info!(
+                    "[launch_windows_steam_game] Asking Steam to shut down through {:?}; r2modmac started it for this launch.",
+                    runner
+                );
+                let mut command = std::process::Command::new(runner);
+                if let Err(error) =
+                    configure_host_compat_runner_command(&mut command, runner, prefix.as_deref())
+                {
+                    log::warn!(
+                        "[launch_windows_steam_game] Could not prepare the Steam shutdown command: {}",
+                        error
+                    );
+                    return;
+                }
+                let _ = command
+                    .arg(steam_executable)
+                    .arg("-shutdown")
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .spawn();
+            }
+            #[cfg(windows)]
+            WindowsSteamShutdown::Native { steam_executable } => {
+                log::info!(
+                    "[launch_windows_steam_game] Asking Steam to shut down; r2modmac started it for this launch."
+                );
+                let _ = std::process::Command::new(steam_executable)
+                    .arg("-shutdown")
+                    .spawn();
+            }
+        }
+    }
+}
+
 pub(super) fn launch_windows_steam_game(
     game_path: &std::path::Path,
     target: &SteamLaunchTarget,
@@ -207,6 +301,12 @@ pub(super) fn launch_windows_steam_game(
         steam_was_running
     );
 
+    // Recorded as the client is started, and used only if the user cancels: by
+    // then the request has already gone out, so ending the wait alone would
+    // leave Steam booting and the game starting anyway.
+    #[allow(unused_mut, unused_assignments)]
+    let mut steam_shutdown: Option<WindowsSteamShutdown> = None;
+
     #[cfg(unix)]
     {
         let prefix_root = find_wine_prefix_root(&steam_executable)
@@ -251,6 +351,14 @@ pub(super) fn launch_windows_steam_game(
                                     "[launch_windows_steam_game] Stopped waiting for app {} because the user cancelled the launch.",
                                     app_id
                                 );
+                                if crate::commands::game_commands::launch_cancel::cancelled_launch_should_close_steam(steam_was_running) {
+                                    WindowsSteamShutdown::Wineskin {
+                                        bundle: bundle_path.clone(),
+                                        prefix: prefix_root_path.to_path_buf(),
+                                        steam_executable: steam_executable.clone(),
+                                    }
+                                    .run();
+                                }
                                 return Err(crate::commands::game_commands::launch_cancel::LAUNCH_CANCELLED_MESSAGE.to_string());
                             }
                             crate::commands::game_commands::steam_state::LaunchWaitOutcome::TimedOut => {
@@ -296,6 +404,13 @@ pub(super) fn launch_windows_steam_game(
             .current_dir(&steam_root)
             .spawn()
             .map_err(|e| format!("Failed to launch Steam app {}: {}", app_id, e))?;
+
+        // Same runner, same prefix: whatever started this Steam can stop it.
+        steam_shutdown = Some(WindowsSteamShutdown::Runner {
+            runner: runner_path.clone(),
+            prefix: prefix_root.clone(),
+            steam_executable: steam_executable.clone(),
+        });
     }
 
     #[cfg(windows)]
@@ -311,6 +426,10 @@ pub(super) fn launch_windows_steam_game(
             .current_dir(&steam_root)
             .spawn()
             .map_err(|e| format!("Failed to launch Steam app {}: {}", app_id, e))?;
+
+        steam_shutdown = Some(WindowsSteamShutdown::Native {
+            steam_executable: steam_executable.clone(),
+        });
     }
 
     // Steam can take the request and never create the process — parked on a
@@ -344,6 +463,13 @@ pub(super) fn launch_windows_steam_game(
                 "[launch_windows_steam_game] Stopped waiting for app {} because the user cancelled the launch.",
                 app_id
             );
+            if crate::commands::game_commands::launch_cancel::cancelled_launch_should_close_steam(
+                steam_was_running,
+            ) {
+                if let Some(shutdown) = steam_shutdown.as_ref() {
+                    shutdown.run();
+                }
+            }
             Err(crate::commands::game_commands::launch_cancel::LAUNCH_CANCELLED_MESSAGE.to_string())
         }
         crate::commands::game_commands::steam_state::LaunchWaitOutcome::TimedOut => {
