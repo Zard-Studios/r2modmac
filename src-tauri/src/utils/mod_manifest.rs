@@ -243,9 +243,7 @@ pub fn save_owned_mod_manifest(
         target_root_hint: Some(canonicalize_target_root_string(target_root)),
     };
 
-    let json = serde_json::to_string_pretty(&manifest).map_err(|e| e.to_string())?;
-    fs::write(&manifest_path, json).map_err(|e| e.to_string())?;
-    Ok(())
+    crate::utils::stable_json::write_file(&manifest_path, &manifest)
 }
 
 pub fn backup_existing_mod_files(

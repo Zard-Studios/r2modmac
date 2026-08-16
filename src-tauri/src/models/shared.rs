@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -128,6 +128,13 @@ pub struct CachedPlatform {
     pub fetched_at: i64,
 }
 
+/// Everything in `settings.json`.
+///
+/// Field order here is the field order on disk, and every map is a
+/// `BTreeMap` so its keys are written sorted. Both matter because users track
+/// the application support directory in git: a `HashMap` here would reshuffle
+/// its entries on every save and turn a one-value change into a whole-file
+/// diff. Add new fields at the end, and never with a `HashMap`.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Settings {
     pub steam_path: Option<String>,
@@ -138,9 +145,9 @@ pub struct Settings {
     #[serde(default)]
     pub favorite_games: Vec<String>,
     #[serde(default)]
-    pub game_paths: HashMap<String, String>,
+    pub game_paths: BTreeMap<String, String>,
     #[serde(default)]
-    pub steam_launch_option_backups: HashMap<String, String>,
+    pub steam_launch_option_backups: BTreeMap<String, String>,
     #[serde(default)]
     pub legacy_install_mode: bool,
     #[serde(default = "default_true")]
@@ -198,7 +205,7 @@ pub struct Settings {
     /// action this build does not know about is carried through untouched
     /// rather than dropped on the next save.
     #[serde(default)]
-    pub keybinds: HashMap<String, String>,
+    pub keybinds: BTreeMap<String, String>,
 }
 
 impl Settings {
@@ -208,8 +215,8 @@ impl Settings {
             windows_steam_path: None,
             mac_steam_path: None,
             favorite_games: Vec::new(),
-            game_paths: HashMap::new(),
-            steam_launch_option_backups: HashMap::new(),
+            game_paths: BTreeMap::new(),
+            steam_launch_option_backups: BTreeMap::new(),
             legacy_install_mode: false,
             ask_version_before_install: false,
             install_in_parallel: true,
@@ -229,7 +236,7 @@ impl Settings {
             default_game: None,
             default_profile: None,
             active_theme: None,
-            keybinds: HashMap::new(),
+            keybinds: BTreeMap::new(),
         }
     }
 }
@@ -274,9 +281,7 @@ pub fn load_settings_impl(app: &tauri::AppHandle) -> Settings {
 
 pub fn save_settings_impl(app: &tauri::AppHandle, settings: &Settings) -> Result<(), String> {
     let path = get_settings_path(app);
-    let data = serde_json::to_string_pretty(settings).map_err(|e| e.to_string())?;
-    std::fs::write(path, data).map_err(|e| e.to_string())?;
-    Ok(())
+    crate::utils::stable_json::write_file(&path, settings)
 }
 
 pub fn normalize_for_matching(s: &str) -> String {
@@ -755,5 +760,77 @@ mod settings_keybind_tests {
                 .map(String::as_str),
             Some("Mod+K")
         );
+    }
+}
+
+#[cfg(test)]
+mod settings_stable_order_tests {
+    use super::Settings;
+    use crate::utils::stable_json::to_pretty_string;
+
+    fn populated(games: &[(&str, &str)], binds: &[(&str, &str)]) -> Settings {
+        let mut settings = Settings::default();
+        for (game, path) in games {
+            settings
+                .game_paths
+                .insert((*game).to_string(), (*path).to_string());
+            settings
+                .steam_launch_option_backups
+                .insert((*game).to_string(), format!("-applaunch {}", path));
+        }
+        for (action, combination) in binds {
+            settings
+                .keybinds
+                .insert((*action).to_string(), (*combination).to_string());
+        }
+        settings
+    }
+
+    #[test]
+    fn the_same_settings_serialize_to_the_same_bytes_whatever_order_they_were_built_in() {
+        // The whole point of the maps being sorted: two runs that end up with
+        // the same configuration must produce identical files, so a git repo of
+        // the app data directory only shows what actually changed.
+        let games = [
+            ("lethal-company", "/Games/Lethal Company"),
+            ("balatro", "/Games/Balatro"),
+            ("outer-wilds", "/Games/Outer Wilds"),
+        ];
+        let binds = [
+            ("launch-modded", "Mod+Shift+L"),
+            ("open-preferences", "Mod+,"),
+            ("focus-search", "Mod+F"),
+        ];
+
+        let mut reversed_games = games;
+        reversed_games.reverse();
+        let mut reversed_binds = binds;
+        reversed_binds.reverse();
+
+        assert_eq!(
+            to_pretty_string(&populated(&games, &binds)).unwrap(),
+            to_pretty_string(&populated(&reversed_games, &reversed_binds)).unwrap()
+        );
+    }
+
+    #[test]
+    fn changing_one_value_changes_one_line() {
+        let before = to_pretty_string(&Settings::default()).unwrap();
+        let mut settings = Settings::default();
+        settings.stream_mode = true;
+        let after = to_pretty_string(&settings).unwrap();
+
+        let changed = before
+            .lines()
+            .zip(after.lines())
+            .filter(|(a, b)| a != b)
+            .count();
+        assert_eq!(before.lines().count(), after.lines().count());
+        assert_eq!(changed, 1, "expected a one-line diff, got {} lines", changed);
+    }
+
+    #[test]
+    fn the_file_ends_with_a_newline() {
+        assert!(to_pretty_string(&Settings::default()).unwrap().ends_with("\n"));
     }
 }

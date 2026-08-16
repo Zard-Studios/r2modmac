@@ -195,13 +195,8 @@ fn read_owners(path: &Path) -> BTreeMap<String, String> {
 }
 
 fn write_owners(path: &Path, owners: &BTreeMap<String, String>) {
-    if let Some(parent) = path.parent() {
-        let _ = fs::create_dir_all(parent);
-    }
-    if let Ok(serialized) = serde_json::to_string_pretty(owners) {
-        if let Err(e) = fs::write(path, serialized) {
-            log::warn!("[config_backup] Could not write {:?}: {}", path, e);
-        }
+    if let Err(e) = crate::utils::stable_json::write_file(path, owners) {
+        log::warn!("[config_backup] Could not write {:?}: {}", path, e);
     }
 }
 

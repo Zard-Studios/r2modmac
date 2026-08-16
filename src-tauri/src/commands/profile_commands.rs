@@ -58,8 +58,10 @@ pub async fn save_profiles(
         .unwrap()
         .join("profiles.json");
 
-    // Serialize first (fast operation)
-    let data = serde_json::to_string_pretty(&profiles).map_err(|e| e.to_string())?;
+    // Serialize first (fast operation). Object keys come out sorted and the
+    // file ends with a newline, so tracking the app data directory in git
+    // shows only the profile change instead of a reshuffled file.
+    let data = crate::utils::stable_json::to_pretty_string(&profiles)?;
 
     // Write to disk in blocking thread pool to avoid blocking async runtime
     tokio::task::spawn_blocking(move || {

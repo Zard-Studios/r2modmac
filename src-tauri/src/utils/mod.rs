@@ -7,6 +7,7 @@ pub mod mod_manifest;
 pub mod paths;
 #[path = "secure_persistent_download.rs"]
 pub mod persistent_download;
+pub mod stable_json;
 pub mod volume_watcher;
 
 /// Run a long synchronous section without starving the async runtime.

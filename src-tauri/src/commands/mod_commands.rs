@@ -1001,8 +1001,7 @@ fn write_local_mod_metadata(
     dir: &std::path::Path,
     metadata: &StoredLocalModMetadata,
 ) -> Result<(), String> {
-    let content = serde_json::to_string_pretty(metadata).map_err(|e| e.to_string())?;
-    fs::write(dir.join("metadata.json"), content).map_err(|e| e.to_string())
+    crate::utils::stable_json::write_file(&dir.join("metadata.json"), metadata)
 }
 
 fn read_local_mod_metadata(dir: &std::path::Path) -> Option<StoredLocalModMetadata> {
