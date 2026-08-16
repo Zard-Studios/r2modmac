@@ -218,8 +218,11 @@ export function SettingsModal({ isOpen, onClose, selectedGame, activeProfile }: 
                 await window.ipcRenderer.setGamePath(selectedGame, path, activeProfilePlatform);
                 await checkGamePath();
             }
-        } catch (e) {
-            console.error("Failed to set manual game path", e);
+        } catch (e: any) {
+            await window.ipcRenderer.alert(
+                "Game Directory Not Set",
+                e?.message || String(e) || "Failed to set the game directory.",
+            );
         }
     };
 
