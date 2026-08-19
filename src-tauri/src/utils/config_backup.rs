@@ -90,20 +90,30 @@ pub fn apply_profile_configs(
             continue;
         }
 
+        let mut outgoing_is_safe = previous.is_none();
         if let Some(previous_id) = previous.as_deref() {
             if app_data_dir.join("profiles").join(previous_id).is_dir() {
                 let previous_backup = profile_backup_dir(app_data_dir, previous_id).join(&root.key);
                 let captured = capture_root(root, &previous_backup);
+                outgoing_is_safe = true;
                 log::info!(
                     "[config_backup] Backed up {} config file(s) for profile {}",
                     captured,
+                    previous_id
+                );
+            } else {
+                log::warn!(
+                    "[config_backup] Profile {} owns these configs but has no folder left; keeping the files in the game rather than replacing them.",
                     previous_id
                 );
             }
         }
 
         let backup = profile_backup_dir(app_data_dir, profile_id).join(&root.key);
-        let restored = restore_root(root, &backup, previous.is_some());
+        // Pruning is only safe once the outgoing configs are somewhere else.
+        // Without this, a stale owner takes the user's config files with it
+        // (issue #39): they are deleted from the game and saved nowhere.
+        let restored = restore_root(root, &backup, previous.is_some() && outgoing_is_safe);
         if restored > 0 {
             log::info!(
                 "[config_backup] Restored {} config file(s) for profile {}",
@@ -512,6 +522,77 @@ mod tests {
         let backup = profile_backup_dir(&app_data, "ow").join("owml");
         assert!(backup.join("Author.Mod").join("config.json").exists());
         assert!(!backup.join("Author.Mod").join("Author.Mod.dll").exists());
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// Issue #39: configs vanished on apply, and were in no backup either.
+    #[test]
+    fn configs_are_kept_when_their_owner_can_no_longer_hold_them() {
+        let root = temp_dir("stale-owner");
+        let app_data = root.join("app");
+        let game = root.join("game");
+        let live = game.join("BepInEx").join("config");
+
+        fs::create_dir_all(app_data.join("profiles").join("new")).unwrap();
+        write(&live.join("xyz.alcan.comfortcalc.cfg"), "user settings");
+        let mut owners = BTreeMap::new();
+        owners.insert(
+            format!("bepinex|{}", live.to_string_lossy()),
+            "gone".to_string(),
+        );
+        write_owners(&app_data.join(OWNERS_FILE_NAME), &owners);
+        write(
+            &profile_backup_dir(&app_data, "new")
+                .join("bepinex")
+                .join("Other.cfg"),
+            "other",
+        );
+
+        apply_profile_configs(&app_data, "new", &game, &game, "valheim");
+
+        assert_eq!(
+            fs::read_to_string(live.join("xyz.alcan.comfortcalc.cfg")).unwrap(),
+            "user settings"
+        );
+        assert_eq!(fs::read_to_string(live.join("Other.cfg")).unwrap(), "other");
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// The same apply must still replace configs when the outgoing profile did
+    /// get its copy, or profiles would stop having their own settings.
+    #[test]
+    fn switching_between_two_real_profiles_still_swaps_the_configs() {
+        let root = temp_dir("real-switch");
+        let app_data = root.join("app");
+        let game = root.join("game");
+        let live = game.join("BepInEx").join("config");
+        fs::create_dir_all(app_data.join("profiles").join("a")).unwrap();
+        fs::create_dir_all(app_data.join("profiles").join("b")).unwrap();
+
+        apply_profile_configs(&app_data, "a", &game, &game, "valheim");
+        write(&live.join("xyz.alcan.comfortcalc.cfg"), "profile a");
+        capture_profile_configs(&app_data, "a", &game, &game, "valheim");
+        write(
+            &profile_backup_dir(&app_data, "b")
+                .join("bepinex")
+                .join("Other.cfg"),
+            "profile b",
+        );
+
+        apply_profile_configs(&app_data, "b", &game, &game, "valheim");
+        assert!(!live.join("xyz.alcan.comfortcalc.cfg").exists());
+        assert_eq!(
+            fs::read_to_string(live.join("Other.cfg")).unwrap(),
+            "profile b"
+        );
+
+        apply_profile_configs(&app_data, "a", &game, &game, "valheim");
+        assert_eq!(
+            fs::read_to_string(live.join("xyz.alcan.comfortcalc.cfg")).unwrap(),
+            "profile a"
+        );
 
         fs::remove_dir_all(root).unwrap();
     }
