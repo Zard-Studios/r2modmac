@@ -185,6 +185,46 @@ fn remove_target(target: &std::path::Path) -> Result<(), String> {
     }
 }
 
+/// Config files under `target` that the snapshot never saw, as (path, bytes).
+///
+/// A rollback undoes an Apply, and an Apply does not write these: the game does,
+/// while it runs. Restoring the snapshot over them deletes settings the user
+/// spent time on and that no backup holds (issue #39).
+fn configs_written_since_the_snapshot(
+    target: &std::path::Path,
+    backup: &std::path::Path,
+) -> Vec<(std::path::PathBuf, Vec<u8>)> {
+    let live_config = target.join("config");
+    if !live_config.is_dir() {
+        return Vec::new();
+    }
+
+    let mut preserved = Vec::new();
+    let mut pending = vec![live_config.clone()];
+    while let Some(dir) = pending.pop() {
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.filter_map(|entry| entry.ok()) {
+            let path = entry.path();
+            if path.is_dir() {
+                pending.push(path);
+                continue;
+            }
+            let Ok(relative) = path.strip_prefix(target) else {
+                continue;
+            };
+            if backup.join(relative).exists() {
+                continue;
+            }
+            if let Ok(bytes) = fs::read(&path) {
+                preserved.push((relative.to_path_buf(), bytes));
+            }
+        }
+    }
+    preserved
+}
+
 fn restore_snapshot(
     backup_root: &std::path::Path,
     targets: &[std::path::PathBuf],
@@ -196,10 +236,31 @@ fn restore_snapshot(
         );
     });
     for (index, target) in targets.iter().enumerate() {
-        remove_target(target)?;
         let backup = backup_root.join(backup_name(index));
+        let preserved = configs_written_since_the_snapshot(target, &backup);
+
+        remove_target(target)?;
         if backup.exists() {
             copy_target(&backup, target)?;
+        }
+
+        for (relative, bytes) in preserved {
+            let destination = target.join(&relative);
+            if destination.exists() {
+                continue;
+            }
+            if let Some(parent) = destination.parent() {
+                if fs::create_dir_all(parent).is_err() {
+                    continue;
+                }
+            }
+            if let Err(error) = fs::write(&destination, bytes) {
+                log::warn!(
+                    "[apply_transaction] Could not keep {}: {}",
+                    destination.display(),
+                    error
+                );
+            }
         }
     }
     Ok(())
@@ -474,6 +535,82 @@ mod tests {
         assert_eq!(
             fs::read(destination.join("nested/two.bin")).unwrap(),
             b"56789"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod rollback_config_tests {
+    use super::*;
+
+    fn temp_root(label: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!(
+            "r2modmac-rollback-{}-{}-{}",
+            label,
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ))
+    }
+
+    /// Issue #39: an Apply that fails rolls back, and used to take the settings
+    /// the game had written with it.
+    #[test]
+    fn a_rollback_keeps_the_configs_the_game_wrote_after_the_snapshot() {
+        let root = temp_root("keeps");
+        let bepinex = root.join("BepInEx");
+        let backup = root.join("backup");
+        fs::create_dir_all(bepinex.join("config")).unwrap();
+        fs::create_dir_all(bepinex.join("plugins")).unwrap();
+        fs::write(bepinex.join("config/Existing.cfg"), b"before").unwrap();
+        copy_target(&bepinex, &backup.join(backup_name(0))).unwrap();
+
+        fs::write(bepinex.join("config/Existing.cfg"), b"edited by the game").unwrap();
+        fs::write(
+            bepinex.join("config/xyz.alcan.comfortcalc.cfg"),
+            b"user settings",
+        )
+        .unwrap();
+        fs::write(bepinex.join("plugins/half-installed.dll"), b"partial").unwrap();
+
+        restore_snapshot(&backup, std::slice::from_ref(&bepinex)).unwrap();
+
+        assert_eq!(
+            fs::read(bepinex.join("config/xyz.alcan.comfortcalc.cfg")).unwrap(),
+            b"user settings",
+            "a config the snapshot never saw belongs to the user, not to the Apply"
+        );
+        // A config that was in the snapshot is still rolled back: its contents
+        // are part of what the Apply may have changed.
+        assert_eq!(
+            fs::read(bepinex.join("config/Existing.cfg")).unwrap(),
+            b"before"
+        );
+        assert!(
+            !bepinex.join("plugins/half-installed.dll").exists(),
+            "everything outside config is still undone"
+        );
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn nested_config_folders_are_kept_too() {
+        let root = temp_root("nested");
+        let bepinex = root.join("BepInEx");
+        let backup = root.join("backup");
+        fs::create_dir_all(bepinex.join("config/SomeMod")).unwrap();
+        copy_target(&bepinex, &backup.join(backup_name(0))).unwrap();
+        fs::write(bepinex.join("config/SomeMod/settings.cfg"), b"deep").unwrap();
+
+        restore_snapshot(&backup, std::slice::from_ref(&bepinex)).unwrap();
+
+        assert_eq!(
+            fs::read(bepinex.join("config/SomeMod/settings.cfg")).unwrap(),
+            b"deep"
         );
         fs::remove_dir_all(root).unwrap();
     }
