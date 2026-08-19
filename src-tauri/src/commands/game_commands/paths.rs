@@ -42,7 +42,13 @@ pub async fn get_game_path(
 
     if steam_paths_to_check.is_empty() {
         if is_windows_profile {
-            return Err("No Windows Steam path configured. Go to Settings and set your Steam directory inside the Wine/CrossOver/Wineskin prefix, or set the game directory manually.".to_string());
+            // A Windows profile means a compatibility prefix only when the host
+            // is not Windows itself; on Windows the prefix wording is nonsense.
+            return Err(if cfg!(target_os = "windows") {
+                "No Steam path configured. Go to Settings and set your Steam directory (for example C:\\Program Files (x86)\\Steam), or set the game directory manually.".to_string()
+            } else {
+                "No Windows Steam path configured. Go to Settings and set your Steam directory inside the Wine/CrossOver/Wineskin prefix, or set the game directory manually.".to_string()
+            });
         }
         return Err("No Steam installation found (Native macOS or CrossOver)".to_string());
     }

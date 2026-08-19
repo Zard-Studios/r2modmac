@@ -1,4 +1,4 @@
-import React, { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { Community, Package } from '../../types/thunderstore';
 import type { Profile, InstalledMod } from '../../types/profile';
@@ -131,6 +131,7 @@ interface ProfileSidebarProps {
     onOpenModFolder: (profileId: string, modName: string) => void;
     onUninstallMod: (mod: InstalledMod) => Promise<void> | void;
     onInstallToGame: (isVanillaOverride?: boolean) => void;
+    confirmBeforeApplyToGame?: boolean;
     onLaunchProfile: () => Promise<void> | void;
     onCancelLaunch?: () => Promise<void> | void;
     canCancelLaunch?: boolean;
@@ -172,6 +173,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
     onOpenModFolder,
     onUninstallMod,
     onInstallToGame,
+    confirmBeforeApplyToGame = false,
     onLaunchProfile,
     onCancelLaunch,
     canCancelLaunch = false,
@@ -318,6 +320,17 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
             })),
         ];
     }, [activeProfile, legacyInstallMode]);
+
+    // The pending-changes modal already asks before touching the game, so the
+    // "confirm before apply" option reuses it instead of stacking a second
+    // dialog on top of it.  With nothing pending there is nothing to confirm.
+    const requestApplyToGame = useCallback(() => {
+        if (confirmBeforeApplyToGame && pendingEntries.length > 0) {
+            setSyncConfirmation({ kind: 'sync', ids: pendingEntries.map(entry => entry.id) });
+            return;
+        }
+        onInstallToGame();
+    }, [confirmBeforeApplyToGame, pendingEntries, onInstallToGame]);
     const pendingSyncCount = pendingEntries.length;
     const runtimeQueuedForSync = hasPendingRuntimeInstall(activeProfile, runtimeHealth?.runtime);
     const pendingChangeCounts = useMemo(() => (
@@ -1315,7 +1328,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                 {activeProfile && (
                     <div className="flex gap-2">
                         <button
-                            onClick={() => onInstallToGame()}
+                            onClick={requestApplyToGame}
                             disabled={isApplying}
                             // Ink follows the fill, and the glyph inherits it via
                             // currentColor — so icon and label always agree.

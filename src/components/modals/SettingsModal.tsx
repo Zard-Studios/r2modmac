@@ -3,7 +3,7 @@ import { Button } from '../ui';
 import type { Profile, ProfilePlatform } from '../../types/profile';
 import { ConfigEditorTab } from './ConfigEditorTab';
 import { PathCensor, CensoredInput } from '../ui/PathCensor';
-import { openFolderLabel } from '../../utils/platformUtils';
+import { openFolderLabel, runningOnWindows } from '../../utils/platformUtils';
 
 
 type SettingsTab = 'settings' | 'config-editor';
@@ -32,6 +32,9 @@ export function SettingsModal({ isOpen, onClose, selectedGame, activeProfile }: 
 
 
     const activeProfilePlatform: ProfilePlatform = activeProfile?.platform === 'mac' ? 'mac' : 'windows';
+    // A Windows profile only lives in a compatibility prefix when the host is
+    // not Windows, so the bottle wording has to stay off a real Windows install.
+    const isWindowsHost = runningOnWindows();
     const defaultMacSteamPath = '~/Library/Application Support/Steam';
     const getLegacyMacSteamPath = (legacyPath?: string | null) => {
         if (!legacyPath) return null;
@@ -333,7 +336,9 @@ export function SettingsModal({ isOpen, onClose, selectedGame, activeProfile }: 
                                             className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
                                             placeholder={activeProfilePlatform === 'mac'
                                                 ? defaultMacSteamPath
-                                                : "(BottleName)/drive_c/Program Files (x86)/Steam"}
+                                                : isWindowsHost
+                                                    ? "C:\\Program Files (x86)\\Steam"
+                                                    : "(BottleName)/drive_c/Program Files (x86)/Steam"}
                                         />
                                         <button
                                             onClick={handleBrowse}
@@ -345,7 +350,9 @@ export function SettingsModal({ isOpen, onClose, selectedGame, activeProfile }: 
                                     <p className="text-xs text-gray-500 mt-2">
                                         {activeProfilePlatform === 'mac'
                                             ? "Select your native macOS Steam folder (e.g., ~/Library/Application Support/Steam)."
-                                            : "Select your Steam installation folder (e.g., C:/Program Files (x86)/Steam, or drive_c/Program Files (x86)/Steam inside a compatibility layer)."}
+                                            : isWindowsHost
+                                                ? "Select your Steam installation folder (e.g., C:\\Program Files (x86)\\Steam)."
+                                                : "Select your Steam installation folder (e.g., C:/Program Files (x86)/Steam, or drive_c/Program Files (x86)/Steam inside a compatibility layer)."}
                                     </p>
                                 </div>
                             )}

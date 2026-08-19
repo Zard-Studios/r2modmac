@@ -28,6 +28,7 @@ import { flushSync } from 'react-dom';
 import { AppModals } from './components/screens/AppModals';
 import { UpdateAllModal } from './components/modals/UpdateAllModal';
 import { LaunchIssueModal } from './components/modals/LaunchIssueModal';
+import { ConfirmModal, type ConfirmRequest } from './components/modals/ConfirmModal';
 import { describeLaunchIssue, isLaunchCancelled, type LaunchIssue } from './utils/launchIssue';
 import type { AppSettings, RuntimeHealth, UpdateInfo } from './types/electron';
 import type { InstalledMod } from './types/profile';
@@ -358,6 +359,18 @@ function App() {
   const [askVersionBeforeInstall, setAskVersionBeforeInstall] = useState(false)
   const [installInParallel, setInstallInParallel] = useState(true)
   const [confirmBeforeApplyToGame, setConfirmBeforeApplyToGame] = useState(false)
+  // Confirmations run through the app's own modal: a native OS dialog ignores
+  // the chosen theme and looks like a different program on every platform.
+  const [confirmRequest, setConfirmRequest] = useState<(ConfirmRequest & { resolve: (confirmed: boolean) => void }) | null>(null)
+  const requestConfirm = useCallback((request: ConfirmRequest) => new Promise<boolean>(resolve => {
+    setConfirmRequest({ ...request, resolve });
+  }), [])
+  const resolveConfirm = useCallback((confirmed: boolean) => {
+    setConfirmRequest(current => {
+      current?.resolve(confirmed);
+      return null;
+    });
+  }, [])
   const [writeDebugLogsToGame, setWriteDebugLogsToGame] = useState(false)
   const [verboseLogging, setVerboseLogging] = useState(false)
   const [hideVerboseLogsWarning, setHideVerboseLogsWarning] = useState(false)
@@ -1939,10 +1952,11 @@ function App() {
 
     const health = await refreshRuntimeHealth();
     if (health && (health.status === 'missing' || health.status === 'incomplete') && !hasPendingRuntimeInstall(original, health.runtime)) {
-      const confirmedRepair = await window.ipcRenderer.confirm(
-        'Repair Runtime Before Sync?',
-        `${loaderDisplayName(health.runtime)} is ${health.status}. Repair it before synchronizing this selection?`
-      );
+      const confirmedRepair = await requestConfirm({
+        title: 'Repair Runtime Before Sync?',
+        message: `${loaderDisplayName(health.runtime)} is ${health.status}. Repair it before synchronizing this selection?`,
+        confirmLabel: 'Repair',
+      });
       if (!confirmedRepair || !await repairProfileRuntime()) return;
     }
 
@@ -2151,10 +2165,11 @@ function App() {
 
     if (unknownMods.length > 0) {
       setProgressState(prev => ({ ...prev, isOpen: false, isCancelable: false }));
-      const proceed = await window.ipcRenderer.confirm(
-        'Some mods cannot be found',
-        `${unknownMods.length} mod(s) from "${profileName}" were not found on Thunderstore and will be skipped:\n\n${unknownMods.join('\n')}\n\nContinue importing the remaining mods into "${targetProfile.name}"?`
-      );
+      const proceed = await requestConfirm({
+        title: 'Some mods cannot be found',
+        message: `${unknownMods.length} mod(s) from "${profileName}" were not found on Thunderstore and will be skipped:\n\n${unknownMods.join('\n')}\n\nContinue importing the remaining mods into "${targetProfile.name}"?`,
+        confirmLabel: 'Import the rest',
+      });
       if (!proceed) {
         return { handled: true, cancelled: true, profileName, importedCount: 0, failedMods };
       }
@@ -2498,7 +2513,6 @@ function App() {
   const handleInstallToGameRequest = async (
     isVanillaOverride?: boolean,
     options?: {
-      skipConfirm?: boolean;
       silentSuccess?: boolean;
     }
   ) => {
@@ -2511,29 +2525,19 @@ function App() {
       if (isVanillaOverride === undefined) {
         const health = await refreshRuntimeHealth();
         if (health && (health.status === 'missing' || health.status === 'incomplete') && !hasPendingRuntimeInstall(activeProfile, health.runtime)) {
-          const confirmedRepair = await window.ipcRenderer.confirm(
-            'Repair Runtime Before Apply?',
-            `${loaderDisplayName(health.runtime)} is ${health.status}. ` +
-            'The working files will be repaired before the profile is synchronized.'
-          );
+          const confirmedRepair = await requestConfirm({
+            title: 'Repair Runtime Before Apply?',
+            message: `${loaderDisplayName(health.runtime)} is ${health.status}. ` +
+              'The working files will be repaired before the profile is synchronized.',
+            confirmLabel: 'Repair',
+          });
           if (!confirmedRepair || !await repairProfileRuntime()) return;
         }
       }
-      const runSync = async () => {
-        await handleSyncToGame(isVanillaOverride, { silentSuccess: options?.silentSuccess });
-      };
-      if (options?.skipConfirm || !confirmBeforeApplyToGame || isVanillaOverride !== undefined) {
-        await runSync();
-        return;
-      }
-
-      const confirmed = await window.ipcRenderer.confirm(
-        'Apply Profile to Game?',
-        'This will sync your profile mods into the game directory. Continue?'
-      );
-      if (!confirmed) return;
-
-      await runSync();
+      // Confirming an apply is the pending-changes modal's job in the sidebar,
+      // which lists exactly what is about to change.  A second prompt here only
+      // repeated the question.
+      await handleSyncToGame(isVanillaOverride, { silentSuccess: options?.silentSuccess });
     } finally {
       await refreshRuntimeHealth();
       clearSteamRestartingState();
@@ -3228,10 +3232,12 @@ function App() {
             }
           }
 
-          const confirmed = await window.ipcRenderer.confirm(
-            'Uninstall Mod',
-            `Uninstall ${mod.displayName || mod.fullName}?`
-          );
+          const confirmed = await requestConfirm({
+            title: 'Uninstall Mod',
+            message: `Uninstall ${mod.displayName || mod.fullName}?`,
+            confirmLabel: 'Uninstall',
+            tone: 'danger',
+          });
           if (!confirmed) return;
           await removeMod(activeProfile.id, mod.uuid4, !legacyInstallMode);
         }}
@@ -3249,6 +3255,7 @@ function App() {
           return await window.ipcRenderer.fetchPackageByName(searchName, selectedCommunity);
         }}
         onInstallToGame={handleInstallToGameRequest}
+        confirmBeforeApplyToGame={confirmBeforeApplyToGame}
         onLaunchProfile={handleLaunchProfileDirect}
         onCancelLaunch={handleCancelLaunch}
         canCancelLaunch={isLaunchingProfile}
@@ -3508,6 +3515,7 @@ function App() {
 
 
       {/* Modals */}
+      <ConfirmModal request={confirmRequest} onResolve={resolveConfirm} />
       <LaunchIssueModal issue={launchIssue} onClose={() => setLaunchIssue(null)} />
       <UpdateAllModal
         isOpen={pendingProfileUpdates.length > 0 && !selectedMod}

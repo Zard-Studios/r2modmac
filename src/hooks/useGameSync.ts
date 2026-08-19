@@ -4,6 +4,7 @@ import type { InstalledMod, PendingModRemoval } from '../types/profile';
 import { useProfileStore } from '../store/useProfileStore';
 import type { ModDownloadProgressEvent, ProfileApplySnapshotProgressEvent, ProgressSetter } from '../types/progress';
 import { parsePackageReference } from '../utils/modVersioning';
+import { runningOnWindows } from '../utils/platformUtils';
 import { createFrameScheduler, runWithConcurrency } from '../utils/concurrency';
 
 const MAX_PARALLEL_OPS = 10;
@@ -650,7 +651,9 @@ export function useGameSync({
             }
 
             const syncedProfile = useProfileStore.getState().profiles.find(p => p.id === activeProfileId);
-            if (syncedProfile?.platform !== 'mac' && gamePath) {
+            // The guide covers running a Windows game through a compatibility
+            // layer, which never applies when the host is Windows itself.
+            if (syncedProfile?.platform !== 'mac' && gamePath && !runningOnWindows()) {
                 setShowCrossOverGuide(true);
             }
 

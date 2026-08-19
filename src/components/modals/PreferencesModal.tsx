@@ -6,6 +6,7 @@ import { AppIcon, type IconName } from '../ui/icons';
 import { DefaultGamePickerModal } from './DefaultGamePickerModal';
 import { ThemeEditorModal } from './ThemeEditorModal';
 import { KeybindsModal } from './KeybindsModal';
+import { runningOnWindows } from '../../utils/platformUtils';
 import { UiPreviewLab } from './UiPreviewLab';
 import { overridesFromKeybinds, resolveKeybinds, type KeybindMap } from '../../utils/keybinds';
 import { useThemeStore } from '../../store/useThemeStore';
@@ -628,7 +629,7 @@ export default function PreferencesModal({
                                                     <RowIcon kind="folder" />
                                                     <div>
                                                         <p className="text-[15px] font-medium text-white">Open app logs folder</p>
-                                                        <p className="mt-0.5 text-[13px] leading-snug text-gray-400">Open launch, Steam, and CrossOver/Wine diagnostics.</p>
+                                                        <p className="mt-0.5 text-[13px] leading-snug text-gray-400">{runningOnWindows() ? 'Open launch and Steam diagnostics.' : 'Open launch, Steam, and CrossOver/Wine diagnostics.'}</p>
                                                     </div>
                                                 </div>
                                                 <button

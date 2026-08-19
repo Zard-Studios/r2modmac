@@ -8,6 +8,7 @@ import { CrossOverGuideModal } from '../modals/CrossOverGuideModal';
 import { UpdateModal } from '../modals/UpdateModal';
 import PreferencesModal, { type PreferencesSettings, type PreferencesTarget } from '../modals/PreferencesModal';
 import { VerboseLogsWarningModal } from '../modals/VerboseLogsWarningModal';
+import { runningOnWindows } from '../../utils/platformUtils';
 import type { Package, PackageVersion, Community, CommunityPlatformInfo } from '../../types/thunderstore'
 import type { UpdateInfo } from '../../types/electron';
 
@@ -220,7 +221,9 @@ export function AppModals({
                 />
             )}
 
-            {showCrossOverGuide && !hideCrossOverGuide && (
+            {/* The guide teaches the winhttp override in winecfg, which does not
+                exist on a Windows host: never show it there, whatever asks. */}
+            {showCrossOverGuide && !hideCrossOverGuide && !runningOnWindows() && (
                 <CrossOverGuideModal
                     isOpen={showCrossOverGuide}
                     onClose={() => setShowCrossOverGuide(false)}
