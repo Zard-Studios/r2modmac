@@ -238,6 +238,13 @@ fn restore_snapshot(
     for (index, target) in targets.iter().enumerate() {
         let backup = backup_root.join(backup_name(index));
         let preserved = configs_written_since_the_snapshot(target, &backup);
+        if !preserved.is_empty() {
+            log::info!(
+                "[apply_transaction] Keeping {} config file(s) written since the snapshot in {:?}",
+                preserved.len(),
+                target
+            );
+        }
 
         remove_target(target)?;
         if backup.exists() {
