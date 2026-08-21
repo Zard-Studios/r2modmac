@@ -6964,6 +6964,29 @@ pub async fn lookup_packages_by_names(
     }
 }
 
+/// Whether Thunderstore lists this package in the community that asked for it.
+///
+/// The by-name endpoint is community-agnostic, so asking for a loader by id
+/// answered with another game's build: repairing MECCHA CHAMELEON installed
+/// `0xFFF7-votv_shimloader`, which ships no shim for it. A response without
+/// listings is accepted, since the versioned endpoint omits them.
+fn package_is_listed_in_community(value: &serde_json::Value, game_identifier: &str) -> bool {
+    let Some(listings) = value.get("community_listings").and_then(|v| v.as_array()) else {
+        return true;
+    };
+    if listings.is_empty() {
+        return true;
+    }
+    let wanted = crate::models::shared::normalize_for_matching(game_identifier);
+    listings.iter().any(|listing| {
+        listing
+            .get("community")
+            .and_then(|v| v.as_str())
+            .map(|community| crate::models::shared::normalize_for_matching(community) == wanted)
+            .unwrap_or(false)
+    })
+}
+
 #[command]
 pub async fn fetch_package_by_name(
     app: AppHandle,
@@ -7161,6 +7184,16 @@ pub async fn fetch_package_by_name(
     }
 
     let val: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
+    if let Some(ref requested) = game_id {
+        if !package_is_listed_in_community(&val, requested) {
+            log::debug!(
+                "[fetch_package_by_name] {} is not published in {}",
+                clean_name,
+                requested
+            );
+            return Ok(None);
+        }
+    }
 
     let pkg = if version_str.is_some() {
         // Response is a single version object
@@ -7818,5 +7851,57 @@ mod package_cache_eviction_tests {
     fn keeping_none_removes_everything() {
         let caches = vec![entry("a", 1), entry("b", 2)];
         assert_eq!(package_caches_to_evict(caches, 0).len(), 2);
+    }
+}
+
+#[cfg(test)]
+mod community_listing_tests {
+    use super::package_is_listed_in_community;
+
+    fn listed(communities: &[&str]) -> serde_json::Value {
+        serde_json::json!({
+            "full_name": "0xFFF7-votv_shimloader",
+            "community_listings": communities
+                .iter()
+                .map(|c| serde_json::json!({ "community": c }))
+                .collect::<Vec<_>>()
+        })
+    }
+
+    #[test]
+    fn a_package_from_another_community_is_refused() {
+        // Repairing MECCHA CHAMELEON installed the Voices of the Void build,
+        // which ships no shim for it, because the by-name endpoint ignores the
+        // community.
+        assert!(!package_is_listed_in_community(
+            &listed(&["voices-of-the-void"]),
+            "meccha-chameleon"
+        ));
+    }
+
+    #[test]
+    fn a_package_the_community_publishes_is_accepted() {
+        assert!(package_is_listed_in_community(
+            &listed(&["meccha-chameleon", "palworld"]),
+            "meccha-chameleon"
+        ));
+    }
+
+    #[test]
+    fn identifiers_that_differ_only_in_punctuation_still_match() {
+        // Profiles store `outerwilds`, the ecosystem writes `outer-wilds`.
+        assert!(package_is_listed_in_community(
+            &listed(&["outer-wilds"]),
+            "outerwilds"
+        ));
+    }
+
+    #[test]
+    fn a_response_without_listings_is_left_alone() {
+        // The versioned endpoint returns a single version object.
+        assert!(package_is_listed_in_community(
+            &serde_json::json!({ "version_number": "1.1.7" }),
+            "meccha-chameleon"
+        ));
     }
 }
