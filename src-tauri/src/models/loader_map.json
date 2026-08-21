@@ -41,6 +41,7 @@
     "bloons-td-6": "recursive-melonloader",
     "blue-prince": "bepinex",
     "bomb-rush-cyberfunk": "bepinex",
+    "bombanana": "bepinex",
     "bonelab": "melonloader",
     "boneworks": "melonloader",
     "book-of-travels": "bepinex",
@@ -128,6 +129,7 @@
     "jump-space": "recursive-melonloader",
     "keywe": "bepinex",
     "labyrinthine": "recursive-melonloader",
+    "last-pirates-die-together": "bepinex",
     "last-train-outta-wormtown": "bepinex",
     "lens-island": "bepinex",
     "lethal-company": "bepinex",
@@ -154,6 +156,7 @@
     "miside-zero": "recursive-melonloader",
     "modulus-factory-automation": "bepinex",
     "monster-train-2": "bepinex",
+    "moonlighter": "bepinex",
     "muck": "bepinex",
     "my-dream-setup": "bepinex",
     "mycopunk": "bepinex",
@@ -163,6 +166,7 @@
     "nine-sols": "bepinex",
     "northstar": "northstar",
     "nuclear-option": "bepinex",
+    "nucleares": "bepinex",
     "odd-remedy": "bepinex",
     "old-market-simulator": "bepinex",
     "on-together": "bepinex",
@@ -193,11 +197,13 @@
     "puttler": "recursive-melonloader",
     "random-access-mayhem": "godotml",
     "ravenfield": "bepinex",
+    "re-legend": "bepinex",
     "receiver-2": "bepinex",
     "repo": "bepinex",
     "resonite": "bepisloader",
     "return-from-core": "bepinex",
     "return-of-the-obra-dinn": "bepinex",
+    "rhythm-doctor": "bepinex",
     "risk-of-rain-returns": "return-of-modding",
     "riskofrain2": "bepinex",
     "roadside-research": "bepinex",
@@ -230,6 +236,7 @@
     "starsand": "bepinex",
     "stick-fight-the-game": "bepinex",
     "stolen-realm": "bepinex",
+    "stonewards": "bepinex",
     "straftat": "bepinex",
     "subnautica": "bepinex",
     "subnautica-below-zero": "bepinex",
@@ -526,6 +533,10 @@
         "rootFolder": "BepInExPack_20MTD"
       },
       {
+        "packageId": "BOMBANANA_Modding-BepInExPack_BOMBANANA",
+        "rootFolder": "BepInExPack"
+      },
+      {
         "packageId": "denikson-BepInExPack_Valheim",
         "rootFolder": "BepInExPack_Valheim"
       },
@@ -540,6 +551,10 @@
       {
         "packageId": "Modding_Council-BepInExPack_of_Legend",
         "rootFolder": "BepInExPack_of_Legend"
+      },
+      {
+        "packageId": "Nucleares_Modding-BepInExPack_Nucleares",
+        "rootFolder": "BepInExPack"
       },
       {
         "packageId": "PCVR_Modders-BepInExPack_GHVR",
@@ -684,5 +699,49 @@
         "rootFolder": "UMM"
       }
     ]
+  },
+  "shimloaderGames": {
+    "astroneer": {
+      "dataFolder": "Astro",
+      "pakExtensions": [
+        ".pak"
+      ]
+    },
+    "grain-rot": {
+      "dataFolder": "Helden",
+      "pakExtensions": []
+    },
+    "meccha-chameleon": {
+      "dataFolder": "Chameleon",
+      "pakExtensions": []
+    },
+    "minos": {
+      "dataFolder": "Minos",
+      "pakExtensions": []
+    },
+    "palworld": {
+      "dataFolder": "Pal",
+      "pakExtensions": []
+    },
+    "panicore": {
+      "dataFolder": "Panicore",
+      "pakExtensions": []
+    },
+    "rv-there-yet": {
+      "dataFolder": "Ride",
+      "pakExtensions": []
+    },
+    "soulcalibur-vi": {
+      "dataFolder": "SoulcaliburVI",
+      "pakExtensions": []
+    },
+    "voices-of-the-void": {
+      "dataFolder": "VotV",
+      "pakExtensions": []
+    },
+    "windrose": {
+      "dataFolder": "R5",
+      "pakExtensions": []
+    }
   }
 }

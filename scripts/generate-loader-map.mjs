@@ -29,6 +29,7 @@ if (!response.ok) {
 const schema = await response.json();
 
 const communities = {};
+const shimloaderGames = {};
 for (const [gameKey, game] of Object.entries(schema.games ?? {})) {
   for (const entry of game.r2modman ?? []) {
     const loader = entry.packageLoader;
@@ -43,6 +44,17 @@ for (const [gameKey, game] of Object.entries(schema.games ?? {})) {
       throw new Error(`Community ${community} declares conflicting loaders: ${known} vs ${loader}`);
     }
     communities[community] = loader;
+
+    if (loader === 'shimloader') {
+      // Shimloader hands the game its directories on the command line and
+      // proxies UE4SS from `<game>/<dataFolderName>/Binaries/Win64`, so the
+      // data folder is part of installing it, not just of naming the game.
+      const pakRule = (entry.installRules ?? []).find(rule => rule.route === 'shimloader/pak');
+      shimloaderGames[community] = {
+        dataFolder: entry.dataFolderName ?? '',
+        pakExtensions: pakRule?.defaultFileExtensions ?? [],
+      };
+    }
   }
 }
 
@@ -67,6 +79,7 @@ const map = {
   generatedFrom: 'thunderstore ecosystem schema',
   communities: sortObject(communities),
   loaderPackages: sortObject(loaderPackages),
+  shimloaderGames: sortObject(shimloaderGames),
 };
 
 writeFileSync(OUTPUT, `${JSON.stringify(map, null, 2)}\n`);

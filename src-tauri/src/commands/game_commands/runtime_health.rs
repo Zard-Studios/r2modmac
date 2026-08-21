@@ -137,6 +137,30 @@ fn inspect_return_of_modding(game_path: &std::path::Path, vanilla: bool) -> Runt
     }
 }
 
+/// Shimloader is installed into the profile, not into the game folder.
+///
+/// `dwmapi.dll` and `ue4ss.dll` live in the profile root and only reach
+/// `<game>/<data folder>/Binaries/Win64` when the profile is applied, so the
+/// profile is where "is the loader installed" has to be answered: a game folder
+/// without them may simply be a profile that has not been applied yet.
+fn inspect_shimloader(profile_dir: &std::path::Path) -> RuntimeHealth {
+    let present = |name: &str| profile_dir.join(name).is_file();
+    if !present("dwmapi.dll") && !present("ue4ss.dll") {
+        return health("shimloader", vec!["runtime".to_string()]);
+    }
+    let mut missing = Vec::new();
+    if !present("dwmapi.dll") {
+        missing.push("shim".to_string());
+    }
+    if !present("ue4ss.dll") {
+        missing.push("ue4ss".to_string());
+    }
+    if !present("UE4SS-settings.ini") {
+        missing.push("settings".to_string());
+    }
+    health("shimloader", missing)
+}
+
 /// BepInEx 5 ships the preloader as `BepInEx.Preloader.dll`, while BepInEx 6
 /// (the IL2CPP/Unity.Mono line used by packs such as BepInExPack_GTFO) ships
 /// `BepInEx.Preloader.Core.dll` plus a runtime-specific entry point instead.
@@ -293,6 +317,13 @@ pub async fn check_profile_runtime_health(
         crate::models::loaders::PackageLoader::Owml => return Ok(inspect_owml(game_path, vanilla)),
         crate::models::loaders::PackageLoader::ReturnOfModding => {
             return Ok(inspect_return_of_modding(game_path, vanilla))
+        }
+        crate::models::loaders::PackageLoader::Shimloader => {
+            let profile_dir = crate::utils::paths::app_data_dir(&app)
+                .map_err(|error| error.to_string())?
+                .join("profiles")
+                .join(&profile_id);
+            return Ok(inspect_shimloader(&profile_dir));
         }
         crate::models::loaders::PackageLoader::Lovely => {
             if profile_platform == "mac" {
