@@ -5,7 +5,7 @@ use tauri::AppHandle;
 
 use super::{
     get_game_path, load_owned_mod_manifests, manifest_matches_target_root,
-    resolve_macos_runtime_root, GAME_MANIFEST_SCOPE,
+    resolve_macos_runtime_root, GAME_MANIFEST_SCOPE, PROFILE_MANIFEST_SCOPE,
 };
 use crate::commands::mod_commands::extract_version_number_from_full_name;
 
@@ -70,7 +70,20 @@ pub async fn inspect_profile_sync_state(
         });
     };
     let game_path = Path::new(&game_path_string);
-    let target_root = if platform.as_deref() == Some("mac") && runtime == "bepinex" {
+    // A shimloader profile is its own install target: its mods never leave the
+    // profile folder, so that is where its ownership manifests point.
+    let shimloader = runtime == "shimloader";
+    let scope = if shimloader {
+        PROFILE_MANIFEST_SCOPE
+    } else {
+        GAME_MANIFEST_SCOPE
+    };
+    let target_root = if shimloader {
+        crate::utils::paths::app_data_dir(&app)
+            .map_err(|error| error.to_string())?
+            .join("profiles")
+            .join(&profile_id)
+    } else if platform.as_deref() == Some("mac") && runtime == "bepinex" {
         resolve_macos_runtime_root(game_path)
     } else {
         game_path.to_path_buf()
@@ -110,7 +123,7 @@ pub async fn inspect_profile_sync_state(
 
     let mut seen = HashSet::new();
     let mut mods = Vec::new();
-    for stored in load_owned_mod_manifests(&app, &profile_id, GAME_MANIFEST_SCOPE)? {
+    for stored in load_owned_mod_manifests(&app, &profile_id, scope)? {
         if !manifest_matches_target_root(&stored.manifest, &target_root) {
             continue;
         }
@@ -170,6 +183,7 @@ mod tests {
         assert_eq!(runtime_name("risk-of-rain-returns"), "returnofmodding");
         assert_eq!(runtime_name("hades-ii"), "returnofmodding");
         assert_eq!(runtime_name("lethal-company"), "bepinex");
+        assert_eq!(runtime_name("palworld"), "shimloader");
     }
 
     #[test]
