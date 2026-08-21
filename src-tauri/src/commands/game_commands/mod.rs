@@ -16,7 +16,7 @@ use crate::models::shared::*;
 use crate::utils::file_ops::*;
 use crate::utils::mod_manifest::{
     cleanup_owned_mod_manifests, load_owned_mod_manifests, manifest_matches_target_root,
-    GAME_MANIFEST_SCOPE,
+    GAME_MANIFEST_SCOPE, PROFILE_MANIFEST_SCOPE,
 };
 
 const CANONICAL_MAC_BEPINEX_SCRIPT: &str = "run_bepinex.sh";

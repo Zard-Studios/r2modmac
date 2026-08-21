@@ -342,7 +342,9 @@ pub fn uses_shimloader(game_identifier: &str) -> bool {
 /// The data folder comes from the schema, but the configured game path is
 /// whatever the user pointed at, so a folder that does not hold the expected
 /// data folder is searched one level deep for the `Binaries/Win64` layout
-/// rather than being given up on.
+/// rather than being given up on. `None` means the path holds no Unreal
+/// layout at all, which is a misconfigured game folder rather than a
+/// not-yet-created directory.
 pub fn shimloader_binaries_dir(game_path: &Path, data_folder: &str) -> Option<std::path::PathBuf> {
     let expected = game_path.join(data_folder).join("Binaries").join("Win64");
     if !data_folder.is_empty() && expected.is_dir() {
@@ -355,7 +357,7 @@ pub fn shimloader_binaries_dir(game_path: &Path, data_folder: &str) -> Option<st
             return Some(candidate);
         }
     }
-    (!data_folder.is_empty()).then_some(expected)
+    None
 }
 
 /// True when the community (or the folder) runs on ReturnOfModding.
@@ -632,6 +634,10 @@ mod tests {
         let actual = other.join("Panicore").join("Binaries").join("Win64");
         std::fs::create_dir_all(&actual).unwrap();
         assert_eq!(shimloader_binaries_dir(&other, "Panicore2"), Some(actual));
+
+        let elsewhere = root.join("elsewhere");
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        assert_eq!(shimloader_binaries_dir(&elsewhere, "Pal"), None);
 
         std::fs::remove_dir_all(&root).unwrap();
     }

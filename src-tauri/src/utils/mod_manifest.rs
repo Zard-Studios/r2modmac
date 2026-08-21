@@ -7,6 +7,8 @@ use std::path::{Path, PathBuf};
 use tauri::AppHandle;
 
 pub const GAME_MANIFEST_SCOPE: &str = "game";
+/// For loaders that install into the profile instead of the game folder.
+pub const PROFILE_MANIFEST_SCOPE: &str = "profile";
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ModOwnershipManifest {

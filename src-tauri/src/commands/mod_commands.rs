@@ -3,7 +3,7 @@ use crate::models::shared::*;
 use crate::tracing::{perfetto_te_ns, scoped_track_event, EventContext, TrackEventDebugArg};
 use crate::utils::file_ops::*;
 use crate::utils::mod_manifest::{
-    backup_existing_mod_files, save_owned_mod_manifest, GAME_MANIFEST_SCOPE,
+    backup_existing_mod_files, save_owned_mod_manifest, GAME_MANIFEST_SCOPE, PROFILE_MANIFEST_SCOPE,
 };
 use crate::utils::persistent_download::{
     download_persistent, DownloadProgress, DOWNLOAD_CANCELLED,
@@ -4155,9 +4155,27 @@ async fn install_mod_bytes(
             return Err(format!("{} has no shimloader payload", mod_name));
         }
 
+        let backed_up_files = backup_existing_mod_files(
+            &app,
+            &profile_id,
+            PROFILE_MANIFEST_SCOPE,
+            &mod_name,
+            &profile_dir,
+            &managed_files,
+        )?;
+
         let cursor = std::io::Cursor::new(&runtime_bytes);
         let mut archive = zip::ZipArchive::new(cursor).map_err(|error| error.to_string())?;
         extract_shimloader_to_profile(&mut archive, &profile_dir, &mod_name, &pak_extensions)?;
+        save_owned_mod_manifest(
+            &app,
+            &profile_id,
+            PROFILE_MANIFEST_SCOPE,
+            &mod_name,
+            &profile_dir,
+            &managed_files,
+            &backed_up_files,
+        )?;
         log::debug!(
             "[install_mod] Installed {} into the shimloader profile at {:?}",
             mod_name,
