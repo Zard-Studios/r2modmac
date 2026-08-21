@@ -1305,6 +1305,11 @@ fn is_return_of_modding_loader(mod_name: &str) -> bool {
 /// the second declares a dependency on the first and looks it up as
 /// `mods['LuaENVY-ENVY']`. r2modman installs to this same layout.
 fn return_of_modding_folder_name(full_name: &str) -> String {
+    strip_version_suffix(full_name)
+}
+
+/// `Author-ModName-1.2.3` without the version: the name mods are installed under.
+fn strip_version_suffix(full_name: &str) -> String {
     extract_version_number_from_full_name(full_name)
         .and_then(|version| full_name.strip_suffix(&format!("-{version}")))
         .unwrap_or(full_name)
@@ -1515,6 +1520,404 @@ fn extract_return_of_modding_to_root<R: std::io::Read + std::io::Seek>(
         std::io::copy(&mut file, &mut output).map_err(|error| error.to_string())?;
     }
     Ok(())
+}
+
+/// Whether this package is the shimloader loader itself.
+fn is_shimloader_loader(mod_name: &str) -> bool {
+    crate::models::loaders::is_loader_package(
+        &crate::models::loaders::PackageLoader::Shimloader,
+        mod_name,
+    )
+}
+
+/// The folder a shimloader mod is installed under: `Author-ModName`.
+///
+/// Blueprint mods and Lua mods are addressed by folder name, and two authors
+/// can publish the same package name, so the author stays in it. r2modman
+/// installs to the same layout.
+fn shimloader_folder_name(full_name: &str) -> String {
+    strip_version_suffix(full_name)
+}
+
+/// The directories shimloader is handed on the command line.
+const SHIMLOADER_ROUTES: [&str; 4] = ["mod", "pak", "cfg", "overlay"];
+
+/// Where a file from a shimloader package lands inside the profile.
+///
+/// The routes are the ecosystem schema's `installRules`, which all ten
+/// shimloader communities declare identically: `mod`, `pak` and `overlay` take
+/// a per-package subfolder, while `cfg` is flat and untracked - the game writes
+/// its own settings there, so it must survive an uninstall. A file that is not
+/// under one of those folders is a loose package file and goes to the default
+/// route, `shimloader/mod`, unless its extension is one the community's `pak`
+/// rule claims (only Astroneer declares one).
+fn normalize_shimloader_entry(
+    entry: &std::path::Path,
+    mod_name: &str,
+    pak_extensions: &[String],
+) -> Option<std::path::PathBuf> {
+    let components = entry
+        .components()
+        .filter_map(|component| match component {
+            std::path::Component::Normal(value) => Some(value.to_string_lossy().to_string()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    if components.is_empty() {
+        return None;
+    }
+
+    if is_shimloader_loader(mod_name) {
+        return normalize_shimloader_loader_entry(&components);
+    }
+
+    let route = components[0].to_ascii_lowercase();
+    if components.len() > 1 && SHIMLOADER_ROUTES.contains(&route.as_str()) {
+        let mut target = std::path::PathBuf::from("shimloader").join(&route);
+        if route != "cfg" {
+            target.push(shimloader_folder_name(mod_name));
+        }
+        for component in components.iter().skip(1) {
+            target.push(component);
+        }
+        return Some(target);
+    }
+
+    let name = components.last()?.to_ascii_lowercase();
+    let route = if pak_extensions
+        .iter()
+        .any(|extension| name.ends_with(&extension.to_ascii_lowercase()))
+    {
+        "pak"
+    } else {
+        "mod"
+    };
+    let mut target = std::path::PathBuf::from("shimloader")
+        .join(route)
+        .join(shimloader_folder_name(mod_name));
+    // Loose files keep their path inside the package: flattening them onto the
+    // mod folder makes two files with the same basename overwrite each other.
+    for component in components {
+        target.push(component);
+    }
+    Some(target)
+}
+
+/// Where a file from the shimloader package itself lands inside the profile.
+///
+/// The pack ships the shim as `dwmapi.dll` at its root and UE4SS underneath
+/// `UE4SS/`. Only four things are installed: the shim, `ue4ss.dll`, its
+/// settings file and the bundled UE4SS mods. In particular the pack's own
+/// `UE4SS/dwmapi.dll` is a different binary from the root one and is not what
+/// the game loads, so it is left in the archive.
+fn normalize_shimloader_loader_entry(components: &[String]) -> Option<std::path::PathBuf> {
+    let Some(index) = components
+        .iter()
+        .position(|component| component.eq_ignore_ascii_case("UE4SS"))
+    else {
+        return (components.len() == 1 && components[0].eq_ignore_ascii_case("dwmapi.dll"))
+            .then(|| std::path::PathBuf::from("dwmapi.dll"));
+    };
+
+    // Case varies between releases: 1.1.7 ships `UE4SS/UE4SS.dll` where older
+    // packs shipped `UE4SS/ue4ss.dll` (r2modmanPlus issue #2079).
+    match &components[index + 1..] {
+        [name] if name.eq_ignore_ascii_case("ue4ss.dll") => {
+            Some(std::path::PathBuf::from("ue4ss.dll"))
+        }
+        [name] if name.eq_ignore_ascii_case("UE4SS-settings.ini") => {
+            Some(std::path::PathBuf::from("UE4SS-settings.ini"))
+        }
+        [mods, rest @ ..] if mods.eq_ignore_ascii_case("Mods") && !rest.is_empty() => {
+            let mut target = std::path::PathBuf::from("shimloader").join("mod");
+            for component in rest {
+                target.push(component);
+            }
+            Some(target)
+        }
+        _ => None,
+    }
+}
+
+fn is_shimloader_config(target: &std::path::Path) -> bool {
+    target.starts_with(std::path::Path::new("shimloader").join("cfg"))
+}
+
+fn collect_shimloader_files<R: std::io::Read + std::io::Seek>(
+    archive: &mut zip::ZipArchive<R>,
+    mod_name: &str,
+    pak_extensions: &[String],
+) -> Result<Vec<std::path::PathBuf>, String> {
+    let mut files = Vec::new();
+    for index in 0..archive.len() {
+        let file = archive.by_index(index).map_err(|error| error.to_string())?;
+        if zip_entry_is_dir(file.name()) {
+            continue;
+        }
+        let Some(entry) = normalize_zip_entry_path(file.name()) else {
+            continue;
+        };
+        if let Some(target) = normalize_shimloader_entry(&entry, mod_name, pak_extensions) {
+            if is_shimloader_config(&target) {
+                continue;
+            }
+            files.push(target);
+        }
+    }
+    files.sort();
+    files.dedup();
+    Ok(files)
+}
+
+fn extract_shimloader_to_profile<R: std::io::Read + std::io::Seek>(
+    archive: &mut zip::ZipArchive<R>,
+    profile_dir: &std::path::Path,
+    mod_name: &str,
+    pak_extensions: &[String],
+) -> Result<(), String> {
+    for index in 0..archive.len() {
+        let mut file = archive.by_index(index).map_err(|error| error.to_string())?;
+        let Some(entry) = normalize_zip_entry_path(file.name()) else {
+            continue;
+        };
+        let Some(relative_target) = normalize_shimloader_entry(&entry, mod_name, pak_extensions)
+        else {
+            continue;
+        };
+        let outpath = profile_dir.join(&relative_target);
+        if is_shimloader_config(&relative_target) && outpath.exists() {
+            continue;
+        }
+        if zip_entry_is_dir(file.name()) {
+            fs::create_dir_all(&outpath).map_err(|error| error.to_string())?;
+            continue;
+        }
+        if let Some(parent) = outpath.parent() {
+            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        let mut output = fs::File::create(outpath).map_err(|error| error.to_string())?;
+        std::io::copy(&mut file, &mut output).map_err(|error| error.to_string())?;
+    }
+
+    // Shimloader is handed all four directories on the command line and
+    // refuses to start when one of them is missing, so they exist from the
+    // moment the loader is installed rather than from the first mod that
+    // happens to use them.
+    if is_shimloader_loader(mod_name) {
+        for route in SHIMLOADER_ROUTES {
+            fs::create_dir_all(profile_dir.join("shimloader").join(route))
+                .map_err(|error| error.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+/// The per-package folders a shimloader mod owns inside the profile.
+///
+/// `shimloader/cfg` is deliberately absent: it is flat and shared, and the
+/// schema tracks it as `none` so that the settings the game wrote survive the
+/// mod being removed.
+fn shimloader_mod_folders(
+    profile_dir: &std::path::Path,
+    mod_name: &str,
+) -> Vec<std::path::PathBuf> {
+    let folder = shimloader_folder_name(mod_name);
+    ["mod", "pak", "overlay"]
+        .iter()
+        .map(|route| profile_dir.join("shimloader").join(route).join(&folder))
+        .collect()
+}
+
+#[cfg(test)]
+mod shimloader_tests {
+    use super::*;
+    use std::io::{Cursor, Write};
+
+    fn fixture(entries: &[(&str, &[u8])]) -> Vec<u8> {
+        let mut bytes = Cursor::new(Vec::new());
+        {
+            let mut writer = zip::ZipWriter::new(&mut bytes);
+            let options = zip::write::FileOptions::default();
+            for (name, content) in entries {
+                writer.start_file(*name, options).unwrap();
+                writer.write_all(content).unwrap();
+            }
+            writer.finish().unwrap();
+        }
+        bytes.into_inner()
+    }
+
+    fn temp_root(label: &str) -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "r2modmac-shimloader-{}-{}-{}",
+            label,
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    const PACKAGE: &str = "auth-test_mod-1.0.0";
+
+    fn package_fixture() -> Vec<u8> {
+        fixture(&[
+            ("README.md", b"readme"),
+            ("manifest.json", b"{}"),
+            ("icon.png", b"icon"),
+            ("mod/scripts/main.lua", b"main"),
+            ("mod/dll/mod.dll", b"dll"),
+            ("pak/blueprint.pak", b"pak"),
+            ("cfg/package.cfg", b"cfg"),
+            ("overlay/xinput1_3.dll", b"overlay"),
+        ])
+    }
+
+    #[test]
+    fn a_package_lands_on_the_routes_the_schema_declares() {
+        let root = temp_root("routes");
+        let bytes = package_fixture();
+        let mut archive = zip::ZipArchive::new(Cursor::new(&bytes)).unwrap();
+        extract_shimloader_to_profile(&mut archive, &root, PACKAGE, &[]).unwrap();
+
+        let expected = [
+            ("shimloader/mod/auth-test_mod/README.md", "readme"),
+            ("shimloader/mod/auth-test_mod/manifest.json", "{}"),
+            ("shimloader/mod/auth-test_mod/icon.png", "icon"),
+            ("shimloader/mod/auth-test_mod/scripts/main.lua", "main"),
+            ("shimloader/mod/auth-test_mod/dll/mod.dll", "dll"),
+            ("shimloader/pak/auth-test_mod/blueprint.pak", "pak"),
+            ("shimloader/overlay/auth-test_mod/xinput1_3.dll", "overlay"),
+            ("shimloader/cfg/package.cfg", "cfg"),
+        ];
+        for (path, content) in expected {
+            assert_eq!(
+                fs::read_to_string(root.join(path)).unwrap_or_default(),
+                content,
+                "{path}"
+            );
+        }
+
+        // The config is the game's to keep, so it is not part of what the mod
+        // owns and is not removed with it.
+        let mut archive = zip::ZipArchive::new(Cursor::new(&bytes)).unwrap();
+        let managed = collect_shimloader_files(&mut archive, PACKAGE, &[]).unwrap();
+        assert!(!managed
+            .iter()
+            .any(|file| file.starts_with("shimloader/cfg")));
+        assert!(managed.contains(&std::path::PathBuf::from(
+            "shimloader/pak/auth-test_mod/blueprint.pak"
+        )));
+
+        for folder in shimloader_mod_folders(&root, PACKAGE) {
+            fs::remove_dir_all(&folder).unwrap();
+        }
+        assert!(root.join("shimloader/cfg/package.cfg").is_file());
+        assert!(!root.join("shimloader/mod/auth-test_mod").exists());
+        assert!(!root.join("shimloader/pak/auth-test_mod").exists());
+        assert!(!root.join("shimloader/overlay/auth-test_mod").exists());
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_config_the_game_rewrote_survives_an_update() {
+        let root = temp_root("config");
+        let bytes = package_fixture();
+        let mut archive = zip::ZipArchive::new(Cursor::new(&bytes)).unwrap();
+        extract_shimloader_to_profile(&mut archive, &root, PACKAGE, &[]).unwrap();
+        fs::write(root.join("shimloader/cfg/package.cfg"), b"user edited").unwrap();
+
+        let mut archive = zip::ZipArchive::new(Cursor::new(&bytes)).unwrap();
+        extract_shimloader_to_profile(&mut archive, &root, "auth-test_mod-1.1.0", &[]).unwrap();
+        assert_eq!(
+            fs::read_to_string(root.join("shimloader/cfg/package.cfg")).unwrap(),
+            "user edited"
+        );
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_loose_pak_follows_the_communitys_extension_rule() {
+        let bytes = fixture(&[("manifest.json", b"{}"), ("loose_mod.pak", b"pak")]);
+
+        let root = temp_root("loose-default");
+        let mut archive = zip::ZipArchive::new(Cursor::new(&bytes)).unwrap();
+        // Palworld declares no extensions, so the .pak stays with the mod.
+        extract_shimloader_to_profile(&mut archive, &root, PACKAGE, &[]).unwrap();
+        assert!(root
+            .join("shimloader/mod/auth-test_mod/loose_mod.pak")
+            .is_file());
+        fs::remove_dir_all(&root).unwrap();
+
+        let root = temp_root("loose-pak");
+        let mut archive = zip::ZipArchive::new(Cursor::new(&bytes)).unwrap();
+        // Astroneer declares `.pak`, so the same file is a blueprint mod.
+        extract_shimloader_to_profile(&mut archive, &root, PACKAGE, &[".pak".to_string()]).unwrap();
+        assert!(root
+            .join("shimloader/pak/auth-test_mod/loose_mod.pak")
+            .is_file());
+        assert!(root
+            .join("shimloader/mod/auth-test_mod/manifest.json")
+            .is_file());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn the_loader_package_installs_into_the_profile_root() {
+        let root = temp_root("loader");
+        let bytes = fixture(&[
+            ("dwmapi.dll", b"shim"),
+            ("README.md", b"readme"),
+            ("manifest.json", b"{}"),
+            ("UE4SS/dwmapi.dll", b"ue4ss proxy"),
+            ("UE4SS/UE4SS.dll", b"ue4ss"),
+            ("UE4SS/UE4SS-settings.ini", b"settings"),
+            ("UE4SS/Mods/shared/Types.lua", b"types"),
+            ("UE4SS/Mods/mods.txt", b"mods"),
+        ]);
+        let loader = "Thunderstore-unreal_shimloader-1.1.7";
+        let mut archive = zip::ZipArchive::new(Cursor::new(&bytes)).unwrap();
+        extract_shimloader_to_profile(&mut archive, &root, loader, &[]).unwrap();
+
+        assert_eq!(fs::read_to_string(root.join("dwmapi.dll")).unwrap(), "shim");
+        assert_eq!(
+            fs::read_to_string(root.join("ue4ss.dll")).unwrap(),
+            "ue4ss",
+            "the 1.1.7 pack spells it UE4SS.dll"
+        );
+        assert_eq!(
+            fs::read_to_string(root.join("UE4SS-settings.ini")).unwrap(),
+            "settings"
+        );
+        assert_eq!(
+            fs::read_to_string(root.join("shimloader/mod/shared/Types.lua")).unwrap(),
+            "types"
+        );
+        assert_eq!(
+            fs::read_to_string(root.join("shimloader/mod/mods.txt")).unwrap(),
+            "mods"
+        );
+        // The bundled UE4SS mods are not a package, so they get no subfolder.
+        assert!(!root
+            .join("shimloader/mod/Thunderstore-unreal_shimloader")
+            .exists());
+        // Nothing but the four items is installed.
+        assert!(!root.join("README.md").exists());
+        assert!(!root.join("UE4SS").exists());
+        for route in SHIMLOADER_ROUTES {
+            assert!(
+                root.join("shimloader").join(route).is_dir(),
+                "shimloader is handed {route} on the command line"
+            );
+        }
+
+        fs::remove_dir_all(&root).unwrap();
+    }
 }
 
 #[cfg(test)]
@@ -3732,6 +4135,37 @@ async fn install_mod_bytes(
     let mut runtime_bytes = bytes;
     validate_downloaded_archive_version(&runtime_bytes, &mod_name)?;
 
+    // Shimloader virtualises the game's filesystem: mods, paks and configs stay
+    // in the profile and are handed to the loader on the command line, so the
+    // profile is the install target and the game folder is left alone until the
+    // profile is applied.
+    if crate::models::loaders::uses_shimloader(&game_identifier) {
+        let profile_dir = crate::utils::paths::app_data_dir(&app)
+            .map_err(|error| error.to_string())?
+            .join("profiles")
+            .join(&profile_id);
+        let pak_extensions = crate::models::loaders::shimloader_game(&game_identifier)
+            .map(|game| game.pak_extensions)
+            .unwrap_or_default();
+
+        let cursor = std::io::Cursor::new(&runtime_bytes);
+        let mut archive = zip::ZipArchive::new(cursor).map_err(|error| error.to_string())?;
+        let managed_files = collect_shimloader_files(&mut archive, &mod_name, &pak_extensions)?;
+        if managed_files.is_empty() {
+            return Err(format!("{} has no shimloader payload", mod_name));
+        }
+
+        let cursor = std::io::Cursor::new(&runtime_bytes);
+        let mut archive = zip::ZipArchive::new(cursor).map_err(|error| error.to_string())?;
+        extract_shimloader_to_profile(&mut archive, &profile_dir, &mod_name, &pak_extensions)?;
+        log::debug!(
+            "[install_mod] Installed {} into the shimloader profile at {:?}",
+            mod_name,
+            profile_dir
+        );
+        return Ok(serde_json::json!({ "success": true }));
+    }
+
     if target_is_return_of_modding {
         let cursor = std::io::Cursor::new(&runtime_bytes);
         let mut archive = zip::ZipArchive::new(cursor).map_err(|error| error.to_string())?;
@@ -4311,6 +4745,18 @@ pub async fn remove_mod(
         .join("profiles")
         .join(&profile_id);
     let plugins_dir = profile_dir.join("BepInEx").join("plugins");
+
+    let mut removed_shimloader_folders = false;
+    for folder in shimloader_mod_folders(&profile_dir, &mod_name) {
+        if folder.is_dir() {
+            fs::remove_dir_all(&folder).map_err(|error| error.to_string())?;
+            removed_shimloader_folders = true;
+        }
+    }
+    if removed_shimloader_folders {
+        return Ok(true);
+    }
+
     let return_of_modding_plugins = profile_dir.join("ReturnOfModding").join("plugins");
     let return_of_modding_name = return_of_modding_folder_name(&mod_name);
     let return_of_modding_mod = return_of_modding_plugins.join(&return_of_modding_name);
@@ -4369,6 +4815,28 @@ pub async fn open_mod_folder(
         .ok_or_else(|| "GAME_PATH_NOT_CONFIGURED".to_string())?;
     let game_root = std::path::Path::new(&game_path);
     let mod_key = extract_mod_key(&mod_name);
+
+    if crate::models::loaders::uses_shimloader(&game_identifier) {
+        let profile_dir = crate::utils::paths::app_data_dir(&app)
+            .map_err(|error| error.to_string())?
+            .join("profiles")
+            .join(&_profile_id);
+        if is_shimloader_loader(&mod_name) {
+            if !profile_dir.join("dwmapi.dll").is_file() {
+                return Err("MODS_NOT_APPLIED".to_string());
+            }
+            open::that(&profile_dir)
+                .map_err(|error| format!("Failed to open profile folder: {error}"))?;
+            return Ok(());
+        }
+        let target = shimloader_mod_folders(&profile_dir, &mod_name)
+            .into_iter()
+            .find(|folder| folder.is_dir())
+            .ok_or_else(|| "MOD_NOT_INSTALLED".to_string())?;
+        open::that(&target)
+            .map_err(|error| format!("Failed to open shimloader mod folder: {error}"))?;
+        return Ok(());
+    }
 
     if crate::models::loaders::uses_return_of_modding(&game_identifier, game_root) {
         if is_return_of_modding_loader(&mod_name) {
