@@ -171,6 +171,7 @@ pub fn run() {
             });
 
             utils::volume_watcher::start_volume_watcher(app.handle().clone());
+            commands::legacy_system_commands::refresh_loader_map(app.handle().clone());
             commands::theme_commands::start_theme_watcher(app.handle().clone());
 
             let trace_dir = utils::paths::app_data_dir(app)

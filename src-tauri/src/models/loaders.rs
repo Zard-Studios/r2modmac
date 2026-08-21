@@ -75,12 +75,14 @@ pub enum PackageLoader {
 
 impl PackageLoader {
     fn from_slug(slug: &str) -> Self {
-        match slug {
+        // Normalised, so `return-of-modding` and `return_of_modding` land on
+        // the same loader instead of one of them reading as unsupported.
+        match normalize_slug(slug).as_str() {
             "bepinex" | "bepisloader" => PackageLoader::BepInEx,
-            "return-of-modding" => PackageLoader::ReturnOfModding,
+            "returnofmodding" => PackageLoader::ReturnOfModding,
             "lovely" => PackageLoader::Lovely,
             "owml" => PackageLoader::Owml,
-            other => PackageLoader::Unsupported(other.to_string()),
+            _ => PackageLoader::Unsupported(slug.to_string()),
         }
     }
 
@@ -538,5 +540,39 @@ mod tests {
             Some("return-of-modding")
         );
         assert_eq!(map.loader_packages["return-of-modding"].len(), 1);
+    }
+}
+
+#[cfg(test)]
+mod refreshed_map_tests {
+    use super::*;
+
+    /// A community added to Thunderstore after this build still resolves once
+    /// the schema is refreshed.
+    #[test]
+    fn a_community_missing_from_the_build_resolves_after_a_refresh() {
+        let community = "a-game-released-after-this-build";
+        assert!(loader_for_community(community).is_none());
+
+        let schema = format!(
+            r#"{{"games":{{"newgame":{{"r2modman":[{{"packageLoader":"return_of_modding",
+               "packageIndex":"https://thunderstore.io/c/{community}/api/v1/package/"}}]}}}}}}"#
+        );
+        install_refreshed_map(&schema).unwrap();
+
+        assert_eq!(
+            loader_for_community(community).map(|loader| loader.runtime_name().to_string()),
+            Some("returnofmodding".to_string())
+        );
+
+        // The build's own entries survive the refresh.
+        assert_eq!(
+            loader_for_community("valheim").map(|loader| loader.runtime_name().to_string()),
+            Some("bepinex".to_string())
+        );
+
+        if let Ok(mut guard) = runtime_map().write() {
+            *guard = None;
+        }
     }
 }

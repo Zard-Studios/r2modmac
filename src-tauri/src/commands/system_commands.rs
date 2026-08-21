@@ -50,6 +50,47 @@ fn write_gz_json_cache<T: serde::Serialize>(app: &AppHandle, file_name: &str, va
     let _ = encoder.finish();
 }
 
+const LOADER_SCHEMA_URL: &str = "https://thunderstore.io/api/experimental/schema/dev/latest/";
+const LOADER_SCHEMA_CACHE: &str = "ecosystem_schema.json.gz";
+
+/// Refresh the loader map from Thunderstore, so a game added after this build
+/// still installs with the right loader.
+///
+/// The cached copy is installed first and the network answer replaces it, which
+/// keeps startup offline-safe. Both fall back to the map compiled in.
+pub(crate) fn refresh_loader_map(app: AppHandle) {
+    if let Some(cached) = read_gz_json_cache::<String>(&app, LOADER_SCHEMA_CACHE) {
+        match crate::models::loaders::install_refreshed_map(&cached) {
+            Ok(count) => log::info!("[loaders] Loaded {count} communities from the cached schema"),
+            Err(error) => log::warn!("[loaders] Cached schema is unusable: {error}"),
+        }
+    }
+
+    tauri::async_runtime::spawn(async move {
+        let raw = match reqwest::get(LOADER_SCHEMA_URL).await {
+            Ok(response) => match response.text().await {
+                Ok(raw) => raw,
+                Err(error) => {
+                    log::warn!("[loaders] Could not read the ecosystem schema: {error}");
+                    return;
+                }
+            },
+            Err(error) => {
+                log::warn!("[loaders] Could not reach the ecosystem schema: {error}");
+                return;
+            }
+        };
+
+        match crate::models::loaders::install_refreshed_map(&raw) {
+            Ok(count) => {
+                log::info!("[loaders] Refreshed the loader map: {count} communities");
+                write_gz_json_cache(&app, LOADER_SCHEMA_CACHE, &raw);
+            }
+            Err(error) => log::warn!("[loaders] Downloaded schema is unusable: {error}"),
+        }
+    });
+}
+
 async fn fetch_communities_live() -> Result<Vec<serde_json::Value>, String> {
     scoped_track_event!("network", "fetch_communities_live");
     let mut url = Some("https://thunderstore.io/api/experimental/community/".to_string());
