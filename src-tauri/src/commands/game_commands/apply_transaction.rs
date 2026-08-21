@@ -61,6 +61,23 @@ async fn transaction_targets(
         return Ok(targets);
     }
 
+    // A shimloader apply writes nothing into the game but the runtime, so that
+    // is the whole of what a rollback has to put back.
+    if crate::models::loaders::uses_shimloader(game_identifier) {
+        let data_folder = crate::models::loaders::shimloader_game(game_identifier)
+            .map(|game| game.data_folder)
+            .unwrap_or_default();
+        let Some(binaries_dir) =
+            crate::models::loaders::shimloader_binaries_dir(&game_root, &data_folder)
+        else {
+            return Ok(Vec::new());
+        };
+        return Ok(crate::models::loaders::SHIMLOADER_RUNTIME_FILES
+            .iter()
+            .map(|name| binaries_dir.join(name))
+            .collect());
+    }
+
     if crate::models::loaders::uses_return_of_modding(game_identifier, &game_root) {
         // The pack's proxy DLL is named per pack (version.dll for
         // ReturnOfModding, d3d12.dll for Hell2Modding), so every name a pack

@@ -12,86 +12,6 @@ fn ensure_finalize_ready(finalize: bool, missing_payloads: usize) -> Result<(), 
 }
 use tauri::command;
 
-/// Put the shimloader runtime where the game will load it from.
-///
-/// A shimloader install lives entirely in the profile, but the game does not
-/// know that: it loads `dwmapi.dll` as a proxy from
-/// `<game>/<data folder>/Binaries/Win64`, and that shim then loads `ue4ss.dll`
-/// beside it. r2modman bridges the same gap by copying the profile's root files
-/// into that folder (`ModLinker.getRootFilesDestination`), and nothing else
-/// from the profile follows them. A vanilla profile is the same operation in
-/// reverse: take the runtime out and the game starts unmodded.
-fn link_shimloader_runtime(
-    profile_dir: &std::path::Path,
-    game_path: &std::path::Path,
-    game_identifier: &str,
-    vanilla: bool,
-) -> Result<(), String> {
-    let data_folder = crate::models::loaders::shimloader_game(game_identifier)
-        .map(|game| game.data_folder)
-        .unwrap_or_default();
-    let binaries_dir = crate::models::loaders::shimloader_binaries_dir(game_path, &data_folder)
-        .ok_or_else(|| {
-            format!(
-                "Could not find {}/Binaries/Win64 in {}. Check the game folder in Settings.",
-                if data_folder.is_empty() {
-                    "the game's data folder"
-                } else {
-                    &data_folder
-                },
-                game_path.display()
-            )
-        })?;
-
-    if vanilla {
-        for name in crate::models::loaders::SHIMLOADER_RUNTIME_FILES {
-            let installed = binaries_dir.join(name);
-            if installed.is_file() {
-                fs::remove_file(&installed).map_err(|error| {
-                    format!("Failed to remove {}: {}", installed.display(), error)
-                })?;
-            }
-        }
-        log::info!(
-            "[sync_profile_to_game] Vanilla profile: removed the shimloader runtime from {:?}",
-            binaries_dir
-        );
-        return Ok(());
-    }
-
-    if !profile_dir.join("dwmapi.dll").is_file() {
-        return Err(
-            "Shimloader is not installed in this profile. Install the loader and try again."
-                .to_string(),
-        );
-    }
-
-    fs::create_dir_all(&binaries_dir).map_err(|error| error.to_string())?;
-    for name in crate::models::loaders::SHIMLOADER_RUNTIME_FILES {
-        let source = profile_dir.join(name);
-        if !source.is_file() {
-            log::warn!("[sync_profile_to_game] Profile has no {name}; leaving the game's copy");
-            continue;
-        }
-        fs::copy(&source, binaries_dir.join(name))
-            .map_err(|error| format!("Failed to install {} into the game: {}", name, error))?;
-    }
-
-    // The loader is handed all four directories at launch and will not start
-    // when one of them is missing, so a profile that predates them (or that a
-    // user emptied) gets them back here.
-    for route in ["mod", "pak", "cfg", "overlay"] {
-        fs::create_dir_all(profile_dir.join("shimloader").join(route))
-            .map_err(|error| error.to_string())?;
-    }
-
-    log::info!(
-        "[sync_profile_to_game] Installed the shimloader runtime into {:?}",
-        binaries_dir
-    );
-    Ok(())
-}
-
 #[command]
 pub async fn sync_profile_to_game(
     app: AppHandle,
@@ -305,12 +225,6 @@ pub async fn sync_profile_to_game(
                 &profile_dir,
                 &manifests_to_remove,
                 &manifests_to_keep,
-            )?;
-            link_shimloader_runtime(
-                &profile_dir,
-                game_path,
-                &game_identifier,
-                profile_is_vanilla,
             )?;
         }
 
@@ -1122,86 +1036,7 @@ fn windows_bepinex_runtime_is_installed(game_path: &std::path::Path) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        ensure_finalize_ready, link_shimloader_runtime, windows_bepinex_runtime_is_installed,
-    };
-
-    fn temp_root(label: &str) -> std::path::PathBuf {
-        let root = std::env::temp_dir().join(format!(
-            "r2modmac-sync-{}-{}-{}",
-            label,
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&root).unwrap();
-        root
-    }
-
-    #[test]
-    fn applying_a_shimloader_profile_moves_only_the_runtime_into_the_game() {
-        let root = temp_root("shimloader");
-        let profile = root.join("profile");
-        let game = root.join("game");
-        let binaries = game.join("Pal/Binaries/Win64");
-        std::fs::create_dir_all(&binaries).unwrap();
-        std::fs::create_dir_all(profile.join("shimloader/mod/auth-test_mod")).unwrap();
-        std::fs::write(profile.join("dwmapi.dll"), b"shim").unwrap();
-        std::fs::write(profile.join("ue4ss.dll"), b"ue4ss").unwrap();
-        std::fs::write(profile.join("UE4SS-settings.ini"), b"settings").unwrap();
-        std::fs::write(
-            profile.join("shimloader/mod/auth-test_mod/main.lua"),
-            b"mod",
-        )
-        .unwrap();
-
-        link_shimloader_runtime(&profile, &game, "palworld", false).unwrap();
-
-        assert_eq!(
-            std::fs::read_to_string(binaries.join("dwmapi.dll")).unwrap(),
-            "shim"
-        );
-        assert!(binaries.join("ue4ss.dll").is_file());
-        assert!(binaries.join("UE4SS-settings.ini").is_file());
-        // Mods are handed to the loader by path, never copied into the game.
-        assert!(!binaries.join("Mods").exists());
-        assert!(!game.join("shimloader").exists());
-        for route in ["mod", "pak", "cfg", "overlay"] {
-            assert!(profile.join("shimloader").join(route).is_dir());
-        }
-
-        // Vanilla is the same operation in reverse.
-        link_shimloader_runtime(&profile, &game, "palworld", true).unwrap();
-        assert!(!binaries.join("dwmapi.dll").exists());
-        assert!(!binaries.join("ue4ss.dll").exists());
-        assert!(profile.join("dwmapi.dll").is_file());
-
-        std::fs::remove_dir_all(&root).unwrap();
-    }
-
-    #[test]
-    fn applying_without_the_loader_says_so_instead_of_half_installing() {
-        let root = temp_root("shimloader-bare");
-        let profile = root.join("profile");
-        let game = root.join("game");
-        std::fs::create_dir_all(profile.join("shimloader/mod")).unwrap();
-        std::fs::create_dir_all(game.join("Pal/Binaries/Win64")).unwrap();
-
-        let error = link_shimloader_runtime(&profile, &game, "palworld", false).unwrap_err();
-        assert!(error.contains("not installed"), "{error}");
-
-        // A game folder with no Unreal layout is a misconfigured path, and the
-        // message has to name the folder that was searched.
-        let empty_game = root.join("elsewhere");
-        std::fs::create_dir_all(&empty_game).unwrap();
-        std::fs::write(profile.join("dwmapi.dll"), b"shim").unwrap();
-        let error = link_shimloader_runtime(&profile, &empty_game, "palworld", false).unwrap_err();
-        assert!(error.contains("Binaries/Win64"), "{error}");
-
-        std::fs::remove_dir_all(&root).unwrap();
-    }
+    use super::{ensure_finalize_ready, windows_bepinex_runtime_is_installed};
 
     #[test]
     fn empty_core_folder_does_not_count_as_an_installed_runtime() {
