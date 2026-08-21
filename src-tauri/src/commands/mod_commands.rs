@@ -5197,6 +5197,19 @@ pub async fn copy_mod_from_cache(
         .join(&profile_id);
     let game_dir = std::path::Path::new(&game_path);
     let mod_name_lower = mod_name.to_lowercase();
+
+    // A shimloader mod is installed in the profile and read from there, so
+    // there is nothing to copy: it is either already in place or not installed.
+    if crate::models::loaders::uses_shimloader(
+        &get_profile_game_identifier(&app, &profile_id).unwrap_or_default(),
+    ) {
+        let present = shimloader_mod_folders(&profile_dir, &mod_name)
+            .iter()
+            .any(|folder| folder.is_dir())
+            || (is_shimloader_loader(&mod_name) && profile_dir.join("dwmapi.dll").is_file());
+        return Ok(serde_json::json!({ "success": present, "copied": false }));
+    }
+
     let use_disabled_runtime = profile_is_vanilla(&app, &profile_id)
         && is_macos_game_dir(game_dir)
         && !is_balatro_game_path(game_dir);
