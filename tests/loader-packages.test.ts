@@ -55,7 +55,7 @@ test('every loader id carries its author, since the lookup needs Author-Package'
     // Repairing Balatro asked for "lovely" instead of "Thunderstore-lovely" and
     // came back empty, because fetch_package_by_name splits on the dash and
     // gives up when there is no author.
-    for (const runtime of ['bepinex', 'returnofmodding', 'lovely', 'owml']) {
+    for (const runtime of ['bepinex', 'returnofmodding', 'lovely', 'owml', 'shimloader']) {
         for (const id of loaderPackageIds(runtime)) {
             assert.ok(
                 id.includes('-'),
@@ -63,6 +63,17 @@ test('every loader id carries its author, since the lookup needs Author-Package'
             );
         }
     }
+});
+
+test('the shimloader games have a loader to install, so the sidebar stops calling it unsupported', () => {
+    // Palworld and the nine other unreal-shimloader communities were reported
+    // as "shimloader loader not supported" while the runtime had no packages
+    // to offer.
+    const ids = loaderPackageIds('shimloader');
+    assert.ok(ids.includes('Thunderstore-unreal_shimloader'));
+    assert.ok(isLoaderPackage('shimloader', 'Thunderstore-unreal_shimloader-1.1.7'));
+    assert.ok(!isLoaderPackage('shimloader', 'acitulen-BetterSave-1.0.0'));
+    assert.equal(loaderDisplayName('shimloader'), 'Shimloader');
 });
 
 test('the lovely loader is the package Balatro actually publishes', () => {

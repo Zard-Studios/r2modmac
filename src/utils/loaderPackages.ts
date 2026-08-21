@@ -16,6 +16,7 @@ const SCHEMA_SLUGS: Record<string, string[]> = {
     returnofmodding: ['return-of-modding'],
     lovely: ['lovely'],
     owml: ['owml'],
+    shimloader: ['shimloader'],
 };
 
 const packageKey = (fullName: string) => {
@@ -56,6 +57,7 @@ export const loaderDisplayName = (runtime: string): string => {
         case 'owml': return 'OWML';
         case 'returnofmodding': return 'ReturnOfModding';
         case 'lovely': return 'Lovely';
+        case 'shimloader': return 'Shimloader';
         default:
             // An unsupported loader is reported by its ecosystem slug
             // (`melonloader`, `gdweave`, ...); show it as written rather than

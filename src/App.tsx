@@ -1755,7 +1755,7 @@ function App() {
         await window.ipcRenderer.alert(
           'Loader Not Supported',
           `This game is modded through ${loaderDisplayName(health.runtime)}, which r2modmac cannot install yet. ` +
-          'r2modmac manages BepInEx, ReturnOfModding, Lovely and OWML games.'
+          'r2modmac manages BepInEx, ReturnOfModding, Lovely, OWML and shimloader games.'
         );
       }
       return false;

@@ -332,8 +332,9 @@ pub async fn check_profile_runtime_health(
         }
         crate::models::loaders::PackageLoader::Unsupported(slug) => {
             // Saying "unsupported" is the honest answer: r2modmac installs
-            // BepInEx, ReturnOfModding, Lovely and OWML, and nothing it could
-            // download would make this game run on one of them.
+            // BepInEx, ReturnOfModding, Lovely, OWML and shimloader, and
+            // nothing it could download would make this game run on one of
+            // them.
             log::info!(
                 "[runtime_health] {} uses the {} loader, which r2modmac cannot install",
                 game_identifier,
