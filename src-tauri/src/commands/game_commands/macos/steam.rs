@@ -235,6 +235,13 @@ fn observe_macos_steam_launch(
 /// A game with a pending update starts nothing and says nothing, and the
 /// Windows path already refuses it with an explanation. The library root is
 /// three levels above the game, which sits in `steamapps/common/<Game>`.
+fn stalled_steam_state_for_game_path(game_path: &std::path::Path, app_id: &str) -> Option<String> {
+    let library_root = game_path.parent()?.parent()?.parent()?;
+    let flags =
+        crate::commands::game_commands::steam_state::read_state_flags(library_root, app_id)?;
+    crate::commands::game_commands::steam_state::describe_stalled_state(flags)
+}
+
 fn steam_state_blocker_for_game_path(game_path: &std::path::Path, app_id: &str) -> Option<String> {
     let library_root = game_path.parent()?.parent()?.parent()?;
     let flags =
@@ -319,6 +326,20 @@ pub(crate) fn launch_via_steam_for_game_path(
             );
 
             if let Err(error) = observed {
+                // A launch that produced nothing is often Steam holding an
+                // update it has not started yet, which the timeout wording
+                // never mentioned.
+                if error != crate::commands::game_commands::launch_cancel::LAUNCH_CANCELLED_MESSAGE
+                {
+                    if let Some(reason) = stalled_steam_state_for_game_path(game_path, &app_id) {
+                        log::warn!(
+                            "[launch_via_steam_for_game_path] app {} did not start: {}",
+                            app_id,
+                            reason
+                        );
+                        return Err(reason);
+                    }
+                }
                 // Ending the wait is not enough on its own: Steam was already
                 // started and `steam://run` already dispatched, so without this
                 // the game comes up anyway a minute after the user pressed stop.
@@ -589,6 +610,18 @@ mod steam_state_blocker_tests {
         let blocker = steam_state_blocker_for_game_path(&game, "1625450")
             .expect("a pending update must be reported");
         assert!(blocker.contains("updating"), "{blocker}");
+        fs::remove_dir_all(game.parent().unwrap().parent().unwrap().parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn a_launch_that_produced_nothing_names_the_waiting_update() {
+        // 6 = installed plus update required. Steam takes the launch, fetches
+        // nothing, and the user used to get "the game did not start in time".
+        let game = game_with_state("waiting", "1625450", 6);
+        assert_eq!(steam_state_blocker_for_game_path(&game, "1625450"), None);
+        let reason = stalled_steam_state_for_game_path(&game, "1625450")
+            .expect("a waiting update must explain the stall");
+        assert!(reason.contains("update waiting"), "{reason}");
         fs::remove_dir_all(game.parent().unwrap().parent().unwrap().parent().unwrap()).unwrap();
     }
 

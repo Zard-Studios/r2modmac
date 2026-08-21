@@ -14,7 +14,6 @@ use std::path::Path;
 /// Bits of `StateFlags` in `steamapps/appmanifest_<appid>.acf`.
 mod state_flags {
     pub const UNINSTALLED: u64 = 1;
-    #[allow(dead_code)]
     pub const UPDATE_REQUIRED: u64 = 2;
     pub const FILES_MISSING: u64 = 32;
     pub const FILES_CORRUPT: u64 = 128;
@@ -51,6 +50,22 @@ fn parse_state_flags(manifest: &str) -> Option<u64> {
         return rest.trim().trim_matches('"').parse::<u64>().ok();
     }
     None
+}
+
+/// Describe why a launch that produced no game process is stuck.
+///
+/// Wider than [`describe_state_blocker`], which decides whether to refuse a
+/// launch outright: an update Steam has not started yet does not stop the Play
+/// button, since pressing it usually makes Steam fetch the update and then
+/// launch. Once the wait runs out with nothing running, that pending update is
+/// the answer the user needs.
+pub(crate) fn describe_stalled_state(flags: u64) -> Option<String> {
+    describe_state_blocker(flags).or_else(|| {
+        (flags & state_flags::UPDATE_REQUIRED != 0).then(|| {
+            "Steam has an update waiting for this game. Install it in Steam, then launch again."
+                .to_string()
+        })
+    })
 }
 
 /// Describe why Steam will refuse to launch this app, if it will.
@@ -189,7 +204,7 @@ pub(crate) fn explain_stalled_launch(
     app_id: &str,
 ) -> Option<String> {
     if let Some(flags) = read_state_flags(library_root, app_id) {
-        if let Some(blocker) = describe_state_blocker(flags) {
+        if let Some(blocker) = describe_stalled_state(flags) {
             return Some(blocker);
         }
     }
@@ -483,6 +498,28 @@ mod tests {
             wait_for_launch_or_blocker(&root, &root, "1229490", 60_000, || true, || false);
         assert!(matches!(outcome, LaunchWaitOutcome::Started));
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_game_waiting_to_be_updated_says_so() {
+        // 6 = installed plus update required, what Steam writes when it holds a
+        // new build and refuses to launch the old one. Nothing reported this,
+        // so the Play button did nothing and said nothing.
+        let blocker = describe_stalled_state(6).expect("a waiting update must be reported");
+        assert!(blocker.contains("update waiting"), "{blocker}");
+    }
+
+    #[test]
+    fn a_download_in_progress_still_wins_over_the_waiting_message() {
+        // 1030 carries both bits; the more specific message is the useful one.
+        let blocker = describe_stalled_state(1030).unwrap();
+        assert!(blocker.contains("currently updating"), "{blocker}");
+    }
+
+    #[test]
+    fn an_installed_game_reports_nothing() {
+        assert_eq!(describe_stalled_state(4), None);
+        assert_eq!(describe_state_blocker(4), None);
     }
 
     #[test]
