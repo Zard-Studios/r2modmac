@@ -230,6 +230,18 @@ fn observe_macos_steam_launch(
     )
 }
 
+/// The reason Steam will not start this game, read from its own manifest.
+///
+/// A game with a pending update starts nothing and says nothing, and the
+/// Windows path already refuses it with an explanation. The library root is
+/// three levels above the game, which sits in `steamapps/common/<Game>`.
+fn steam_state_blocker_for_game_path(game_path: &std::path::Path, app_id: &str) -> Option<String> {
+    let library_root = game_path.parent()?.parent()?.parent()?;
+    let flags =
+        crate::commands::game_commands::steam_state::read_state_flags(library_root, app_id)?;
+    crate::commands::game_commands::steam_state::describe_state_blocker(flags)
+}
+
 pub(crate) fn launch_via_steam_for_game_path(
     app: &AppHandle,
     game_path: &std::path::Path,
@@ -243,6 +255,15 @@ pub(crate) fn launch_via_steam_for_game_path(
         app_id,
         game_path.display()
     );
+
+    if let Some(blocker) = steam_state_blocker_for_game_path(game_path, &app_id) {
+        log::warn!(
+            "[launch_via_steam_for_game_path] Refusing to launch app {}: {}",
+            app_id,
+            blocker
+        );
+        return Err(blocker);
+    }
 
     #[cfg(target_os = "macos")]
     let console_offsets = collect_macos_console_log_offsets(app);
@@ -531,5 +552,50 @@ mod tests {
         let offsets = vec![(path.clone(), offset)];
         assert!(console_log_contains_logon_failure(&offsets));
         let _ = fs::remove_file(path);
+    }
+}
+
+#[cfg(test)]
+mod steam_state_blocker_tests {
+    use super::*;
+
+    fn game_with_state(label: &str, app_id: &str, flags: u64) -> std::path::PathBuf {
+        let library = std::env::temp_dir().join(format!(
+            "r2modmac-macstate-{}-{}-{}",
+            label,
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let game = library.join("steamapps").join("common").join("Muck");
+        fs::create_dir_all(&game).unwrap();
+        fs::write(
+            library
+                .join("steamapps")
+                .join(format!("appmanifest_{}.acf", app_id)),
+            format!("\"AppState\"\n{{\n\t\"StateFlags\"\t\t\"{}\"\n}}", flags),
+        )
+        .unwrap();
+        game
+    }
+
+    #[test]
+    fn a_game_steam_is_updating_is_refused_with_a_reason() {
+        // StateFlags 1030: update in progress. Before this the launch was
+        // dispatched anyway and the user watched nothing happen.
+        let game = game_with_state("updating", "1625450", 1030);
+        let blocker = steam_state_blocker_for_game_path(&game, "1625450")
+            .expect("a pending update must be reported");
+        assert!(blocker.contains("updating"), "{blocker}");
+        fs::remove_dir_all(game.parent().unwrap().parent().unwrap().parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn an_installed_game_launches_as_before() {
+        let game = game_with_state("ready", "1625450", 4);
+        assert_eq!(steam_state_blocker_for_game_path(&game, "1625450"), None);
+        fs::remove_dir_all(game.parent().unwrap().parent().unwrap().parent().unwrap()).unwrap();
     }
 }
