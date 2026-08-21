@@ -2,6 +2,30 @@ use super::owml_patcher;
 use super::*;
 use tauri::command;
 
+/// The directories a shimloader launch hands to the loader, when the game runs
+/// on shimloader and the profile is modded.
+fn shimloader_launch_for(
+    app: &AppHandle,
+    game_identifier: &str,
+    profile_id: &str,
+    game_path: &std::path::Path,
+) -> Option<ShimloaderLaunch> {
+    if !crate::models::loaders::uses_shimloader(game_identifier) {
+        return None;
+    }
+    let profile_dir = crate::utils::paths::app_data_dir(app)
+        .ok()?
+        .join("profiles")
+        .join(profile_id);
+    let data_folder = crate::models::loaders::shimloader_game(game_identifier)
+        .map(|game| game.data_folder)
+        .unwrap_or_default();
+    Some(ShimloaderLaunch {
+        binaries_dir: crate::models::loaders::shimloader_binaries_dir(game_path, &data_folder),
+        profile_dir,
+    })
+}
+
 #[command]
 pub async fn launch_game_with_mods(
     app: AppHandle,
@@ -58,11 +82,12 @@ pub async fn launch_game_with_mods(
 
         // 5. Launch OuterWilds.exe — mods are injected via the patched Assembly-CSharp.dll.
         log::info!("[launch_game_with_mods] Launching OuterWilds.exe directly");
-        return launch_windows_game(&app, &game_path);
+        return launch_windows_game(&app, &game_path, None);
     }
 
     if is_windows_profile {
-        return launch_windows_game(&app, &game_path);
+        let shimloader = shimloader_launch_for(&app, &game_identifier, &profile_id, &game_path);
+        return launch_windows_game(&app, &game_path, shimloader.as_ref());
     }
 
     launch_game_with_mods_for_macos(&app, &game_identifier, &profile_id, &game_path).await
@@ -104,11 +129,13 @@ pub async fn launch_game_vanilla(
 
         // Launch OuterWilds.exe directly — vanilla, no mods
         log::info!("[launch_game_vanilla] Launching OuterWilds.exe directly (vanilla)");
-        return launch_windows_game(&app, &game_path);
+        return launch_windows_game(&app, &game_path, None);
     }
 
     if is_windows_profile {
-        return launch_windows_game(&app, &game_path);
+        // No loader arguments: without them the shim has nowhere to read mods
+        // from, which is exactly what a vanilla launch wants.
+        return launch_windows_game(&app, &game_path, None);
     }
 
     launch_game_vanilla_for_macos(&app, &game_identifier, &profile_id, &game_path_str).await

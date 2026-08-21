@@ -291,11 +291,13 @@ pub fn return_of_modding_proxies(game_path: &Path) -> Vec<std::path::PathBuf> {
 /// A loader that hooks the game through a proxy DLL only gets loaded when Wine
 /// is told to prefer the native file over its own builtin. The proxy is named
 /// per pack - `version.dll` for ReturnOfModding, `d3d12.dll` for Hell2Modding on
-/// Hades II, `winhttp.dll` for a BepInEx doorstop - so the value is built from
-/// the proxies actually sitting next to the game.
+/// Hades II, `winhttp.dll` for a BepInEx doorstop, `dwmapi.dll` for the
+/// shimloader shim - so the value is built from the proxies actually sitting
+/// next to the game.
 pub fn wine_dll_override_value(game_path: &Path) -> Option<String> {
     let overrides = RETURN_OF_MODDING_PROXY_NAMES
         .iter()
+        .chain(["dwmapi.dll"].iter())
         .filter(|name| game_path.join(name).is_file())
         .map(|name| format!("{}=n,b", name.trim_end_matches(".dll")))
         .collect::<Vec<_>>();
@@ -309,6 +311,9 @@ pub fn wine_dll_override_value(game_path: &Path) -> Option<String> {
 /// loads `ue4ss.dll` beside it, configured by `UE4SS-settings.ini`. Everything
 /// else (mods, paks, configs) stays in the profile and is handed to the shim on
 /// the command line.
+/// Wine has its own `dwmapi`, and prefers it unless told otherwise.
+pub const SHIMLOADER_DLL_OVERRIDE: &str = "dwmapi=n,b";
+
 pub const SHIMLOADER_RUNTIME_FILES: [&str; 3] = ["dwmapi.dll", "ue4ss.dll", "UE4SS-settings.ini"];
 
 /// The shimloader facts the schema states for a community, if it is one.

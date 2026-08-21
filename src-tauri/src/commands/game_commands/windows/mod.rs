@@ -21,13 +21,61 @@ fn configure_native_loader_dll_override(
     }
 }
 
-pub(crate) fn launch_windows_direct_game(game_path: &std::path::Path) -> Result<(), String> {
-    launch_windows_direct_game_with_working_dir(game_path, None)
+/// Wine ships its own `dwmapi`, so without this the shim next to the game
+/// executable is never the one that gets loaded and the game starts unmodded.
+fn configure_shimloader_dll_override(command: &mut std::process::Command) {
+    command.env(
+        "WINEDLLOVERRIDES",
+        crate::models::loaders::SHIMLOADER_DLL_OVERRIDE,
+    );
+}
+
+/// What a shimloader launch adds to the game's command line.
+///
+/// The loader reads its four directories from the arguments the manager passes,
+/// which is how mods can live in the profile instead of the game folder. The
+/// game is a Windows executable, so on macOS those macOS paths have to be
+/// spelled the way the Wine prefix sees them.
+pub(crate) struct ShimloaderLaunch {
+    pub profile_dir: std::path::PathBuf,
+    pub binaries_dir: Option<std::path::PathBuf>,
+}
+
+impl ShimloaderLaunch {
+    pub fn arguments(&self, prefix_root: Option<&std::path::Path>) -> Vec<String> {
+        let mut arguments = Vec::new();
+        for (flag, route) in [
+            ("--mod-dir", "mod"),
+            ("--pak-dir", "pak"),
+            ("--cfg-dir", "cfg"),
+            ("--overlay-dir", "overlay"),
+        ] {
+            let directory = self.profile_dir.join("shimloader").join(route);
+            let value = prefix_root
+                .and_then(|prefix| map_native_path_to_wine_path(prefix, &directory))
+                .unwrap_or_else(|| directory.to_string_lossy().to_string());
+            arguments.push(flag.to_string());
+            arguments.push(value);
+        }
+        arguments
+    }
+
+    fn proxy_dir(&self) -> Option<&std::path::Path> {
+        self.binaries_dir.as_deref()
+    }
+}
+
+pub(crate) fn launch_windows_direct_game(
+    game_path: &std::path::Path,
+    shimloader: Option<&ShimloaderLaunch>,
+) -> Result<(), String> {
+    launch_windows_direct_game_with_working_dir(game_path, None, shimloader)
 }
 
 pub(crate) fn launch_windows_direct_game_with_working_dir(
     game_path: &std::path::Path,
     working_dir: Option<&std::path::Path>,
+    shimloader: Option<&ShimloaderLaunch>,
 ) -> Result<(), String> {
     let executable_path = find_pe_game_executable_path(game_path).ok_or_else(|| {
         "Could not find a Windows game executable in the selected folder.".to_string()
@@ -63,12 +111,16 @@ pub(crate) fn launch_windows_direct_game_with_working_dir(
                 let wait_patterns = build_windows_wineskin_bundle_patterns(&executable_path)
                     .unwrap_or_else(|| process_patterns.clone());
 
+                let arguments = shimloader
+                    .map(|shimloader| shimloader.arguments(Some(prefix_root_path)))
+                    .unwrap_or_default();
                 match launch_macos_wineskin_program(
                     &bundle_path,
                     prefix_root_path,
                     &executable_path,
-                    &[],
+                    &arguments,
                     Some(executable_dir),
+                    shimloader.and_then(ShimloaderLaunch::proxy_dir),
                     "launch_windows_direct_game",
                 ) {
                     Ok(()) => {
@@ -101,12 +153,20 @@ pub(crate) fn launch_windows_direct_game_with_working_dir(
                 prefix_root.as_deref(),
             )?;
             configure_native_loader_dll_override(&mut command, game_path);
+            if shimloader.is_some() {
+                configure_shimloader_dll_override(&mut command);
+            }
             log::info!(
                 "[launch_windows_direct_game] Launching Windows executable directly: {:?}",
                 executable_path
             );
             command
                 .arg(&executable_path)
+                .args(
+                    shimloader
+                        .map(|shimloader| shimloader.arguments(prefix_root.as_deref()))
+                        .unwrap_or_default(),
+                )
                 .current_dir(executable_dir)
                 .spawn()
                 .map_err(|e| {
@@ -136,6 +196,11 @@ pub(crate) fn launch_windows_direct_game_with_working_dir(
         std::process::Command::new(&executable_path)
             //.arg("-applaunch")
             .arg(&executable_path)
+            .args(
+                shimloader
+                    .map(|shimloader| shimloader.arguments(None))
+                    .unwrap_or_default(),
+            )
             .current_dir(executable_dir)
             .spawn()
             .map_err(|e| {
@@ -306,6 +371,7 @@ impl WindowsSteamShutdown {
                     steam_executable,
                     &[SHUTDOWN_ARGUMENT.to_string()],
                     None,
+                    None,
                     "cancel_windows_steam_launch",
                 ) {
                     log::warn!(
@@ -357,6 +423,7 @@ impl WindowsSteamShutdown {
 pub(super) fn launch_windows_steam_game(
     game_path: &std::path::Path,
     target: &SteamLaunchTarget,
+    shimloader: Option<&ShimloaderLaunch>,
 ) -> Result<(), String> {
     let executable_path = find_pe_game_executable_path(game_path).ok_or_else(|| {
         "Could not find a Windows game executable in the selected folder.".to_string()
@@ -426,13 +493,18 @@ pub(super) fn launch_windows_steam_game(
             if let Some(bundle_path) =
                 find_macos_wineskin_launcher_binary(Some(prefix_root_path), &steam_executable)
             {
-                let args = vec!["-applaunch".to_string(), app_id.clone()];
+                let mut args = vec!["-applaunch".to_string(), app_id.clone()];
+                // Steam hands anything after the app id to the game itself.
+                if let Some(shimloader) = shimloader {
+                    args.extend(shimloader.arguments(Some(prefix_root_path)));
+                }
                 match launch_macos_wineskin_program(
                     &bundle_path,
                     prefix_root_path,
                     &steam_executable,
                     &args,
                     Some(game_path),
+                    shimloader.and_then(ShimloaderLaunch::proxy_dir),
                     "launch_windows_steam_game",
                 ) {
                     Ok(()) => {
@@ -503,6 +575,9 @@ pub(super) fn launch_windows_steam_game(
         let mut command = std::process::Command::new(&runner_path);
         configure_host_compat_runner_command(&mut command, &runner_path, prefix_root.as_deref())?;
         configure_native_loader_dll_override(&mut command, game_path);
+        if shimloader.is_some() {
+            configure_shimloader_dll_override(&mut command);
+        }
         log::info!(
 			"[launch_windows_steam_game] Launching Steam app {} via {:?} using steam executable {:?}",
 			app_id, runner_path, steam_executable
@@ -511,6 +586,11 @@ pub(super) fn launch_windows_steam_game(
             .arg(&steam_executable)
             .arg("-applaunch")
             .arg(&app_id)
+            .args(
+                shimloader
+                    .map(|shimloader| shimloader.arguments(prefix_root.as_deref()))
+                    .unwrap_or_default(),
+            )
             .current_dir(&steam_root)
             .spawn()
             .map_err(|e| format!("Failed to launch Steam app {}: {}", app_id, e))?;
@@ -532,6 +612,11 @@ pub(super) fn launch_windows_steam_game(
         std::process::Command::new(&steam_executable)
             .arg("-applaunch")
             .arg(&app_id)
+            .args(
+                shimloader
+                    .map(|shimloader| shimloader.arguments(None))
+                    .unwrap_or_default(),
+            )
             .current_dir(&steam_root)
             .spawn()
             .map_err(|e| format!("Failed to launch Steam app {}: {}", app_id, e))?;
@@ -600,7 +685,9 @@ pub(super) fn launch_windows_steam_game(
 
 #[cfg(test)]
 mod tests {
-    use super::configure_native_loader_dll_override;
+    use super::{
+        configure_native_loader_dll_override, configure_shimloader_dll_override, ShimloaderLaunch,
+    };
     use std::ffi::OsStr;
 
     #[test]
@@ -620,6 +707,67 @@ mod tests {
         assert!(command.get_envs().any(|(key, value)| {
             key == OsStr::new("WINEDLLOVERRIDES") && value == Some(OsStr::new("version=n,b"))
         }));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn shimloader_is_handed_its_four_directories() {
+        let root = std::env::temp_dir().join(format!(
+            "r2modmac-shimloader-launch-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let prefix = root.join("prefix");
+        let profile_dir = prefix.join("drive_c").join("profiles").join("p1");
+        for route in ["mod", "pak", "cfg", "overlay"] {
+            std::fs::create_dir_all(profile_dir.join("shimloader").join(route)).unwrap();
+        }
+        let launch = ShimloaderLaunch {
+            profile_dir: profile_dir.clone(),
+            binaries_dir: None,
+        };
+
+        // A native Windows launch passes the paths as they are.
+        let native = launch.arguments(None);
+        assert_eq!(
+            native
+                .iter()
+                .step_by(2)
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            vec!["--mod-dir", "--pak-dir", "--cfg-dir", "--overlay-dir"]
+        );
+        assert_eq!(
+            native[1],
+            profile_dir.join("shimloader/mod").to_string_lossy()
+        );
+
+        // Under CrossOver/Wine the game only understands the prefix's drives.
+        let wine = launch.arguments(Some(&prefix));
+        assert_eq!(
+            wine,
+            vec![
+                "--mod-dir",
+                "C:\\profiles\\p1\\shimloader\\mod",
+                "--pak-dir",
+                "C:\\profiles\\p1\\shimloader\\pak",
+                "--cfg-dir",
+                "C:\\profiles\\p1\\shimloader\\cfg",
+                "--overlay-dir",
+                "C:\\profiles\\p1\\shimloader\\overlay",
+            ]
+        );
+
+        // Wine ships its own dwmapi and would load that instead of the shim.
+        let mut command = std::process::Command::new("wine");
+        configure_shimloader_dll_override(&mut command);
+        assert!(command.get_envs().any(|(key, value)| {
+            key == OsStr::new("WINEDLLOVERRIDES") && value == Some(OsStr::new("dwmapi=n,b"))
+        }));
+
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -647,6 +795,7 @@ mod tests {
 pub(crate) fn launch_windows_game(
     app: &AppHandle,
     game_path: &std::path::Path,
+    shimloader: Option<&ShimloaderLaunch>,
 ) -> Result<(), String> {
     let steam_roots = get_steam_roots_for_platform(app, true);
     log::info!(
@@ -656,8 +805,10 @@ pub(crate) fn launch_windows_game(
     );
 
     match plan_windows_launch(&steam_roots, game_path) {
-        WindowsLaunchPlan::ViaSteam(target) => launch_windows_steam_game(game_path, &target),
-        WindowsLaunchPlan::Direct => launch_windows_direct_game(game_path),
+        WindowsLaunchPlan::ViaSteam(target) => {
+            launch_windows_steam_game(game_path, &target, shimloader)
+        }
+        WindowsLaunchPlan::Direct => launch_windows_direct_game(game_path, shimloader),
         WindowsLaunchPlan::SteamClientMissing => Err(
             "This game is installed through Steam, but r2modmac could not find the Windows Steam client that owns it. Set the Windows Steam directory (the folder that contains steam.exe, inside your CrossOver/Wine bottle) in Settings and try again."
                 .to_string(),

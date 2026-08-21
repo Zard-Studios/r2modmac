@@ -109,7 +109,7 @@ pub(crate) async fn launch_game_with_mods_for_macos(
 
         // Launch OuterWilds.exe directly — mods injected via patched Assembly-CSharp.dll
         log::info!("[launch_game_with_mods] Launching OuterWilds.exe directly");
-        return launch_windows_game(app, game_path);
+        return launch_windows_game(app, game_path, None);
     }
 
     if is_balatro_identifier(game_identifier) || is_balatro_game_path(game_path) {
@@ -266,7 +266,7 @@ pub(crate) async fn launch_game_vanilla_for_macos(
 
         // Launch OuterWilds.exe directly — vanilla, no mods
         log::info!("[launch_game_vanilla] Launching OuterWilds.exe directly (vanilla)");
-        return launch_windows_game(app, &game_path);
+        return launch_windows_game(app, &game_path, None);
     }
 
     let executable_path = find_macos_executable_path(&runtime_game_path);

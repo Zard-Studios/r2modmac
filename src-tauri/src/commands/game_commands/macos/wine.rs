@@ -169,6 +169,7 @@ pub(crate) fn launch_macos_wineskin_program(
     executable_path: &std::path::Path,
     args: &[String],
     working_dir: Option<&std::path::Path>,
+    proxy_dir: Option<&std::path::Path>,
     context: &str,
 ) -> Result<(), String> {
     let info_plist = bundle_path.join("Contents").join("Info.plist");
@@ -244,7 +245,12 @@ pub(crate) fn launch_macos_wineskin_program(
     open_command.arg("-n");
     // The loader's proxy DLL has to win over Wine's builtin, and its name comes
     // from the pack the game uses (version.dll, d3d12.dll for Hades II, ...).
-    if let Some(overrides) = working_dir.and_then(crate::models::loaders::wine_dll_override_value) {
+    // Shimloader's proxy sits with the game executable rather than in the
+    // working directory the launch uses, so it is named separately.
+    if let Some(overrides) = proxy_dir
+        .or(working_dir)
+        .and_then(crate::models::loaders::wine_dll_override_value)
+    {
         open_command
             .arg("--env")
             .arg(format!("WINEDLLOVERRIDES={overrides}"));
