@@ -1792,8 +1792,10 @@ function App() {
         // back to a search, because communities keep publishing their own
         // BepInExPack forks.
         for (const packageId of loaderPackageIds(health.runtime)) {
-          const packageName = packageId.split('-').slice(1).join('-');
-          const candidate = await window.ipcRenderer.fetchPackageByName(packageName, community).catch(() => null);
+          // The whole Author-Package id: fetchPackageByName needs the author,
+          // and a bare name comes back empty (Thunderstore-lovely became
+          // "lovely", so repairing Balatro found nothing).
+          const candidate = await window.ipcRenderer.fetchPackageByName(packageId, community).catch(() => null);
           if (candidate && matchesRuntime(candidate) && candidate.versions.length > 0) {
             loaderPackage = candidate;
             break;

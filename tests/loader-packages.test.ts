@@ -50,3 +50,22 @@ test('an unsupported loader is shown under its own name', () => {
     assert.equal(loaderDisplayName('returnofmodding'), 'ReturnOfModding');
     assert.equal(loaderDisplayName('melonloader'), 'melonloader');
 });
+
+test('every loader id carries its author, since the lookup needs Author-Package', () => {
+    // Repairing Balatro asked for "lovely" instead of "Thunderstore-lovely" and
+    // came back empty, because fetch_package_by_name splits on the dash and
+    // gives up when there is no author.
+    for (const runtime of ['bepinex', 'returnofmodding', 'lovely', 'owml']) {
+        for (const id of loaderPackageIds(runtime)) {
+            assert.ok(
+                id.includes('-'),
+                `${runtime}: ${id} has no author, the lookup would return nothing`
+            );
+        }
+    }
+});
+
+test('the lovely loader is the package Balatro actually publishes', () => {
+    assert.deepEqual(loaderPackageIds('lovely'), ['Thunderstore-lovely']);
+    assert.ok(isLoaderPackage('lovely', 'Thunderstore-lovely'));
+});
