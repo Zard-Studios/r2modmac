@@ -127,3 +127,15 @@ test('the cancellation message matches the one the backend sends', () => {
     // The two sides agree by string only.
     assert.equal(LAUNCH_CANCELLED_MESSAGE, 'Launch cancelled.');
 });
+
+test('a pending steam update lands in the same dialog as one already downloading', () => {
+    const downloading = describeLaunchIssue(
+        'Steam is currently updating this game. Wait for the update to finish before launching.'
+    );
+    const waiting = describeLaunchIssue(
+        'Steam has an update waiting for this game. Install it in Steam, then launch again.'
+    );
+    assert.equal(downloading.title, 'Pending Steam Update');
+    assert.equal(waiting.title, 'Pending Steam Update');
+    assert.equal(waiting.pointsAtSteam, true);
+});
