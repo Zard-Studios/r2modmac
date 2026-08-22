@@ -25,14 +25,14 @@ test('a Steam Cloud conflict is titled as such and points at Steam', () => {
 
 test('a pending update is not mistaken for a generic failure', () => {
     const issue = describeLaunchIssue(PENDING_UPDATE);
-    assert.equal(issue.title, 'Pending Steam Update');
+    assert.equal(issue.title, 'Pending Steam update');
     assert.equal(issue.pointsAtSteam, true);
 });
 
 test('an in-progress update is reported as an update', () => {
     assert.equal(
         describeLaunchIssue(UPDATE_RUNNING).title,
-        'Pending Steam Update'
+        'Pending Steam update'
     );
 });
 
@@ -135,7 +135,7 @@ test('a pending steam update lands in the same dialog as one already downloading
     const waiting = describeLaunchIssue(
         'Steam has an update waiting for this game. Install it in Steam, then launch again.'
     );
-    assert.equal(downloading.title, 'Pending Steam Update');
-    assert.equal(waiting.title, 'Pending Steam Update');
+    assert.equal(downloading.title, 'Pending Steam update');
+    assert.equal(waiting.title, 'Pending Steam update');
     assert.equal(waiting.pointsAtSteam, true);
 });

@@ -47,7 +47,7 @@ export function describeLaunchIssue(raw: string): LaunchIssue {
     // 'updat' rather than 'update': the in-progress message says "updating",
     // which does not contain "update".
     if (lower.includes('updat')) {
-        return { title: 'Pending Steam Update', message, pointsAtSteam: true };
+        return { title: 'Pending Steam update', message, pointsAtSteam: true };
     }
     if (lower.includes('waiting for an answer') || lower.includes('prompt')) {
         return { title: 'Steam Prompt Waiting', message, pointsAtSteam: true };
