@@ -635,3 +635,42 @@ mod profile_root_across_games_tests {
         }
     }
 }
+
+#[cfg(all(test, target_os = "macos"))]
+mod real_game_profile_probe {
+    use super::*;
+
+    /// Points a real game's script at a real profile tree, so the launch can be
+    /// tried by hand. Ignored: it writes into an installed game.
+    ///
+    /// ```text
+    /// R2MODMAC_PROBE_GAME=/path/to/game R2MODMAC_PROBE_PROFILE=/path/to/BepInEx \
+    /// cargo test --lib point_a_real_game_at_a_profile -- --ignored --nocapture
+    /// ```
+    #[test]
+    #[ignore = "writes a script into an installed game"]
+    fn point_a_real_game_at_a_profile() {
+        let (Ok(game), Ok(profile)) = (
+            std::env::var("R2MODMAC_PROBE_GAME"),
+            std::env::var("R2MODMAC_PROBE_PROFILE"),
+        ) else {
+            println!("skipped: set R2MODMAC_PROBE_GAME and R2MODMAC_PROBE_PROFILE");
+            return;
+        };
+        let game = std::path::PathBuf::from(game);
+        let profile = std::path::PathBuf::from(profile);
+        let script = game.join("run_profiletest.sh");
+        std::fs::copy(game.join("run_bepinex.sh"), &script).unwrap();
+
+        configure_macos_bepinex_script(&script, &game, false, Some(&profile)).unwrap();
+
+        let written = std::fs::read_to_string(&script).unwrap();
+        for line in written
+            .lines()
+            .filter(|l| l.contains("DOORSTOP_INVOKE_DLL_PATH=") || l.contains("MONO_DLL_SEARCH"))
+        {
+            println!("{line}");
+        }
+        println!("script pronto: {}", script.display());
+    }
+}
