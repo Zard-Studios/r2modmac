@@ -14,6 +14,7 @@ export interface AppSettings {
     active_theme?: string | null;
     game_paths: Record<string, string>;
     legacy_install_mode?: boolean;
+    profile_isolation?: boolean;
     ask_version_before_install?: boolean;
     install_in_parallel?: boolean;
     confirm_before_apply_to_game?: boolean;

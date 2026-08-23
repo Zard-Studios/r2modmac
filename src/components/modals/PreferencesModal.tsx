@@ -36,6 +36,7 @@ function storeLogsExpanded(expanded: boolean): void {
 
 export interface PreferencesSettings {
     legacy_install_mode: boolean;
+    profile_isolation: boolean;
     ask_version_before_install: boolean;
     install_in_parallel: boolean;
     confirm_before_apply_to_game: boolean;
@@ -148,6 +149,7 @@ export default function PreferencesModal({
     onCheckForUpdates,
 }: PreferencesModalProps) {
     const [legacyMode, setLegacyMode] = useState(settings.legacy_install_mode);
+    const [profileIsolation, setProfileIsolation] = useState(settings.profile_isolation);
     const [askVersionBeforeInstall, setAskVersionBeforeInstall] = useState(settings.ask_version_before_install);
     const [installInParallel, setInstallInParallel] = useState(settings.install_in_parallel);
     const [confirmBeforeApply, setConfirmBeforeApply] = useState(settings.confirm_before_apply_to_game);
@@ -191,6 +193,7 @@ export default function PreferencesModal({
         setPrevSettings(settings);
         if (isOpen) {
             setLegacyMode(settings.legacy_install_mode);
+            setProfileIsolation(settings.profile_isolation);
             setAskVersionBeforeInstall(settings.ask_version_before_install);
             setInstallInParallel(settings.install_in_parallel);
             setConfirmBeforeApply(settings.confirm_before_apply_to_game);
@@ -262,6 +265,7 @@ export default function PreferencesModal({
 
     const currentSettings = (currentKeybinds: KeybindMap = keybinds): PreferencesSettings => ({
             legacy_install_mode: legacyMode,
+            profile_isolation: profileIsolation,
             ask_version_before_install: askVersionBeforeInstall,
             install_in_parallel: installInParallel,
             confirm_before_apply_to_game: confirmBeforeApply,
@@ -535,6 +539,17 @@ export default function PreferencesModal({
                                     </div>
                                 </div>
                                 <Toggle value={legacyMode} onChange={setLegacyMode} />
+                            </div>
+
+                            <div id="preference-profile-isolation" className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-surface-hover">
+                                <div className="flex items-center gap-4">
+                                    <RowIcon kind="install" />
+                                    <div>
+                                        <p className="text-[15px] font-medium text-white">Separate folder per profile</p>
+                                        <p className="text-[13px] text-gray-400 mt-0.5 leading-snug">Each profile keeps its own mods and configs, so switching does not reinstall anything.</p>
+                                    </div>
+                                </div>
+                                <Toggle value={profileIsolation} onChange={setProfileIsolation} />
                             </div>
 
                             <div id="preference-ask-version" className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-surface-hover">
