@@ -7,15 +7,31 @@
 
 use std::io::{BufRead, BufReader, Write};
 use std::net::{Ipv4Addr, SocketAddrV4, TcpListener, TcpStream};
-use tauri::AppHandle;
+use tauri::{AppHandle, Emitter};
 
 pub const DEFAULT_PORT: u16 = 47_836;
 
+/// Listened for by the interface in development builds only.
+pub const DISPATCH_EVENT: &str = "dev-bridge-command";
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum DevCommand {
-    Health { profile_id: String },
-    Apply { profile_id: String },
-    Launch { profile_id: String },
+    Health {
+        profile_id: String,
+    },
+    Apply {
+        profile_id: String,
+    },
+    Launch {
+        profile_id: String,
+    },
+    Stop {
+        profile_id: String,
+    },
+    /// Answers a confirmation the interface is waiting on, as a click would.
+    Answer {
+        confirmed: bool,
+    },
     Profiles,
 }
 
@@ -26,10 +42,13 @@ pub fn parse_command(line: &str) -> Result<DevCommand, String> {
     let argument = parts.next().map(|value| value.to_string());
     match (verb.as_str(), argument) {
         ("profiles", _) => Ok(DevCommand::Profiles),
+        ("confirm", _) => Ok(DevCommand::Answer { confirmed: true }),
+        ("dismiss", _) => Ok(DevCommand::Answer { confirmed: false }),
         ("health", Some(profile_id)) => Ok(DevCommand::Health { profile_id }),
         ("apply", Some(profile_id)) => Ok(DevCommand::Apply { profile_id }),
         ("launch", Some(profile_id)) => Ok(DevCommand::Launch { profile_id }),
-        ("health" | "apply" | "launch", None) => Err(format!("{verb} needs a profile id")),
+        ("stop", Some(profile_id)) => Ok(DevCommand::Stop { profile_id }),
+        ("health" | "apply" | "launch" | "stop", None) => Err(format!("{verb} needs a profile id")),
         _ => Err(format!("unknown command: {line}")),
     }
 }
@@ -47,6 +66,26 @@ fn find_profile(app: &AppHandle, profile_id: &str) -> Result<serde_json::Value, 
         .into_iter()
         .find(|profile| profile["id"].as_str() == Some(profile_id))
         .ok_or_else(|| format!("no profile with id {profile_id}"))
+}
+
+/// Hands the request to the interface rather than performing it here.
+///
+/// Deliberately not a call into the sync or launch command: those are only the
+/// second half of the work. Apply in particular is a sequence the interface
+/// drives — analyse, snapshot, install, finalise — and a second copy of it here
+/// would keep passing while the button was broken. The request goes to the same
+/// dispatcher the buttons, the keyboard shortcuts and the palette already share.
+fn press(app: &AppHandle, profile_id: &str, button: &str) -> Result<serde_json::Value, String> {
+    let profile = find_profile(app, profile_id)?;
+    let game = profile["gameIdentifier"].as_str().unwrap_or_default();
+    app.emit(
+        DISPATCH_EVENT,
+        serde_json::json!({ "profileId": profile_id, "game": game, "command": button }),
+    )
+    .map_err(|error| error.to_string())?;
+    // Pressed, not finished: the interface reports the outcome as it does for a
+    // person, and `health` is how the result is read back.
+    Ok(serde_json::json!({ "pressed": button, "profile": profile_id }))
 }
 
 async fn run(app: AppHandle, command: DevCommand) -> Result<serde_json::Value, String> {
@@ -81,46 +120,16 @@ async fn run(app: AppHandle, command: DevCommand) -> Result<serde_json::Value, S
             .await?;
             serde_json::to_value(health).map_err(|error| error.to_string())
         }
-        DevCommand::Apply { profile_id } => {
-            let profile = find_profile(&app, &profile_id)?;
-            let game = profile["gameIdentifier"]
-                .as_str()
-                .unwrap_or_default()
-                .to_string();
-            // The interface runs the analysis pass and then the finalising one.
-            let analysis = crate::commands::game_commands::sync_profile_to_game(
-                app.clone(),
-                profile_id.clone(),
-                game.clone(),
-                Some(false),
-                Some(false),
+        DevCommand::Apply { profile_id } => press(&app, &profile_id, "apply"),
+        DevCommand::Launch { profile_id } => press(&app, &profile_id, "launch"),
+        DevCommand::Stop { profile_id } => press(&app, &profile_id, "stop"),
+        DevCommand::Answer { confirmed } => {
+            app.emit(
+                DISPATCH_EVENT,
+                serde_json::json!({ "command": if confirmed { "confirm" } else { "dismiss" } }),
             )
-            .await?;
-            let finalized = crate::commands::game_commands::sync_profile_to_game(
-                app.clone(),
-                profile_id,
-                game,
-                Some(false),
-                Some(true),
-            )
-            .await?;
-            Ok(serde_json::json!({ "analysis": analysis, "finalized": finalized }))
-        }
-        DevCommand::Launch { profile_id } => {
-            let profile = find_profile(&app, &profile_id)?;
-            let game = profile["gameIdentifier"]
-                .as_str()
-                .unwrap_or_default()
-                .to_string();
-            let platform = profile["platform"].as_str().map(|value| value.to_string());
-            crate::commands::game_commands::launch_game_with_mods(
-                app.clone(),
-                game,
-                profile_id,
-                platform,
-            )
-            .await?;
-            Ok(serde_json::json!({ "launched": true }))
+            .map_err(|error| error.to_string())?;
+            Ok(serde_json::json!({ "answered": confirmed }))
         }
     }
 }
@@ -211,10 +220,23 @@ mod tests {
     }
 
     #[test]
+    fn a_confirmation_can_be_answered_either_way() {
+        assert_eq!(
+            parse_command("confirm"),
+            Ok(DevCommand::Answer { confirmed: true })
+        );
+        assert_eq!(
+            parse_command("dismiss"),
+            Ok(DevCommand::Answer { confirmed: false })
+        );
+    }
+
+    #[test]
     fn a_verb_without_a_profile_is_refused_rather_than_guessed() {
         assert!(parse_command("apply").is_err());
         assert!(parse_command("launch").is_err());
         assert!(parse_command("health").is_err());
+        assert!(parse_command("stop").is_err());
     }
 
     #[test]

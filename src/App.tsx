@@ -1265,6 +1265,33 @@ function App() {
     setPendingProfileCommand({ command });
   };
 
+  // Development only: the local bridge in `dev_bridge.rs` asks for a button by
+  // name, and it arrives here so it goes through exactly what a click goes
+  // through. Vite drops this branch from a production build, and the bridge
+  // that sends the event is not compiled into a released binary either.
+  const runProfileCommandRef = useRef(runProfileCommand);
+  runProfileCommandRef.current = runProfileCommand;
+  const resolveConfirmRef = useRef(resolveConfirm);
+  resolveConfirmRef.current = resolveConfirm;
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    let stop: (() => void) | undefined;
+    let cancelled = false;
+    void listen<{ profileId?: string; game?: string; command?: string }>('dev-bridge-command', event => {
+      const { profileId, game, command } = event.payload || {};
+      if (command === 'confirm' || command === 'dismiss') {
+        resolveConfirmRef.current(command === 'confirm');
+        return;
+      }
+      if (!profileId || !game || !command) return;
+      runProfileCommandRef.current(profileId, game, command as ProfileCommand);
+    }).then(unlisten => {
+      if (cancelled) unlisten();
+      else stop = unlisten;
+    });
+    return () => { cancelled = true; stop?.(); };
+  }, []);
+
   // Everything reachable regardless of where the user is standing: the games
   // list, every profile, and the panels that would otherwise take several
   // clicks. Registered from here because these are App's own to perform.
