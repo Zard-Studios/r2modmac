@@ -210,9 +210,16 @@ fn list_directory_entries(dir: &std::path::Path, limit: usize) -> Vec<String> {
     names
 }
 
-fn inspect_windows_bepinex(game_path: &std::path::Path, vanilla: bool) -> RuntimeHealth {
-    let disabled = vanilla && game_path.join("BepInEx_DISABLED").exists();
-    let bep_dir = game_path.join(if disabled {
+/// `tree_root` is where the BepInEx folder lives, which is the profile once it
+/// is isolated; the loader is still looked for beside the game, since that is
+/// what the game loads.
+fn inspect_windows_bepinex(
+    game_path: &std::path::Path,
+    tree_root: &std::path::Path,
+    vanilla: bool,
+) -> RuntimeHealth {
+    let disabled = vanilla && tree_root.join("BepInEx_DISABLED").exists();
+    let bep_dir = tree_root.join(if disabled {
         "BepInEx_DISABLED"
     } else {
         "BepInEx"
@@ -396,7 +403,8 @@ pub async fn check_profile_runtime_health(
         return Ok(health("bepinex", missing));
     }
 
-    Ok(inspect_windows_bepinex(game_path, vanilla))
+    let tree_root = bepinex_install_root(&app, &profile_id, game_path)?;
+    Ok(inspect_windows_bepinex(game_path, &tree_root, vanilla))
 }
 
 #[cfg(test)]
@@ -419,7 +427,7 @@ mod tests {
     fn windows_runtime_reports_missing_and_incomplete_components() {
         let root = test_dir("windows-incomplete");
         fs::create_dir_all(root.join("BepInEx/core")).unwrap();
-        let result = inspect_windows_bepinex(&root, false);
+        let result = inspect_windows_bepinex(&root, &root, false);
         assert_eq!(result.status, "incomplete");
         assert_eq!(result.missing_components, vec!["preloader", "doorstop"]);
         fs::remove_dir_all(root).unwrap();
@@ -433,9 +441,30 @@ mod tests {
         fs::write(root.join("BepInEx/core/BepInEx.Preloader.Core.dll"), b"").unwrap();
         fs::write(root.join("BepInEx/core/BepInEx.Unity.IL2CPP.dll"), b"").unwrap();
         fs::write(root.join("winhttp.dll"), b"").unwrap();
-        let result = inspect_windows_bepinex(&root, false);
+        let result = inspect_windows_bepinex(&root, &root, false);
         assert_eq!(result.status, "healthy");
         assert!(result.missing_components.is_empty());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_windows_tree_in_the_profile_is_healthy_with_only_the_loader_beside_the_game() {
+        let root = test_dir("windows-isolated");
+        let game = root.join("game");
+        let profile = root.join("profile");
+        fs::create_dir_all(profile.join("BepInEx/core")).unwrap();
+        fs::create_dir_all(&game).unwrap();
+        fs::write(profile.join("BepInEx/core/BepInEx.Preloader.dll"), b"").unwrap();
+        fs::write(game.join("winhttp.dll"), b"").unwrap();
+
+        let result = inspect_windows_bepinex(&game, &profile, false);
+        assert_eq!(result.status, "healthy");
+        // The same folders read as a shared install would answer missing, which
+        // is what sent an isolated profile into repairing what it already had.
+        assert_eq!(
+            inspect_windows_bepinex(&game, &game, false).status,
+            "missing"
+        );
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -449,8 +478,14 @@ mod tests {
         )
         .unwrap();
         fs::write(root.join("winhttp.dll_DISABLED"), b"").unwrap();
-        assert_eq!(inspect_windows_bepinex(&root, true).status, "healthy");
-        assert_eq!(inspect_windows_bepinex(&root, false).status, "missing");
+        assert_eq!(
+            inspect_windows_bepinex(&root, &root, true).status,
+            "healthy"
+        );
+        assert_eq!(
+            inspect_windows_bepinex(&root, &root, false).status,
+            "missing"
+        );
         fs::remove_dir_all(root).unwrap();
     }
 

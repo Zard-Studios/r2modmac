@@ -2200,31 +2200,35 @@ pub(crate) fn point_doorstop_ini_at_root(content: &str, bepinex_root: &str) -> S
     let root = bepinex_root
         .trim_end_matches(['/', '\\'])
         .replace('/', "\\");
-    let target = format!("targetAssembly={root}\\core\\BepInEx.Preloader.dll");
-    let search = format!("dllSearchPathOverride={root}\\core");
+    let preloader = format!("{root}\\core\\BepInEx.Preloader.dll");
+    let core = format!("{root}\\core");
 
+    // Doorstop 3 and Doorstop 4 name the same two settings differently, and a
+    // game folder holds whichever its loader reads. Rewriting only one spelling
+    // leaves the other pointing at a tree that has moved away, which the game
+    // reports by starting with no mods at all rather than by failing.
     let mut lines: Vec<String> = Vec::new();
     let mut wrote_target = false;
     let mut wrote_search = false;
     for line in content.replace("\r\n", "\n").lines() {
         let key = line.split('=').next().unwrap_or("").trim();
         match key {
-            "targetAssembly" => {
-                lines.push(target.clone());
+            "targetAssembly" | "target_assembly" => {
+                lines.push(format!("{key}={preloader}"));
                 wrote_target = true;
             }
-            "dllSearchPathOverride" => {
-                lines.push(search.clone());
+            "dllSearchPathOverride" | "dll_search_path_override" => {
+                lines.push(format!("{key}={core}"));
                 wrote_search = true;
             }
             _ => lines.push(line.to_string()),
         }
     }
     if !wrote_target {
-        lines.push(target);
+        lines.push(format!("targetAssembly={preloader}"));
     }
     if !wrote_search {
-        lines.push(search);
+        lines.push(format!("dllSearchPathOverride={core}"));
     }
 
     let mut out = lines.join("\n");
@@ -8063,6 +8067,29 @@ mod doorstop_ini_retarget_tests {
             .find(|line| line.starts_with(&format!("{key}=")))
             .map(|line| line[key.len() + 1..].to_string())
             .unwrap_or_default()
+    }
+
+    /// What a Doorstop 4 game folder holds instead, ULTRAKILL among them.
+    const SHIPPED_DOORSTOP_4: &str = "[General]\r\nenabled = true\r\ntarget_assembly=BepInEx\\core\\BepInEx.Preloader.dll\r\n\r\n[UnityMono]\r\ndll_search_path_override =\r\n";
+
+    #[test]
+    fn a_doorstop_4_config_is_retargeted_under_its_own_names() {
+        // Rewriting only the Doorstop 3 spelling left this file pointing at a
+        // tree beside the game that the move had just emptied, and the game
+        // started with none of its mods and no error.
+        let ini = point_doorstop_ini_at_root(SHIPPED_DOORSTOP_4, r"Z:\profiles\abc\BepInEx");
+        assert_eq!(
+            value(&ini, "target_assembly"),
+            r"Z:\profiles\abc\BepInEx\core\BepInEx.Preloader.dll"
+        );
+        assert_eq!(
+            value(&ini, "dll_search_path_override"),
+            r"Z:\profiles\abc\BepInEx\core"
+        );
+        // The keys it does not use are not invented alongside them.
+        assert!(!ini.contains("targetAssembly="));
+        assert!(ini.contains("[General]"));
+        assert!(ini.contains("[UnityMono]"));
     }
 
     #[test]

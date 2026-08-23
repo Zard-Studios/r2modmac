@@ -861,6 +861,15 @@ pub async fn install_to_game(
 
         if !is_vanilla {
             ensure_windows_bepinex_console_enabled(game_path)?;
+            // Apply is also where a config left over from an earlier layout gets
+            // corrected, so a game whose tree has moved into the profile is not
+            // left loading from a folder beside the executable that is empty.
+            let tree_root = bepinex_install_root(&app, &profile_id, game_path)?;
+            if tree_root != *game_path {
+                crate::commands::mod_commands::point_game_doorstop_ini_at_tree(
+                    game_path, &tree_root,
+                )?;
+            }
         }
     }
 
