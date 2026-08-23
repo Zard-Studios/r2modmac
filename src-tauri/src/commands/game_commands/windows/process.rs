@@ -200,3 +200,66 @@ pub(crate) fn is_windows_process_running_tasklist(image_name: &str) -> bool {
         })
         .unwrap_or(false)
 }
+
+#[cfg(all(test, unix))]
+mod profile_path_translation_tests {
+    use super::*;
+
+    /// A profile lives on the host; the game inside the bottle reads Windows
+    /// paths, so a profile-rooted BepInEx has to be handed over translated.
+    #[test]
+    fn a_host_profile_becomes_a_drive_letter_path() {
+        let root = std::env::temp_dir().join(format!(
+            "r2modmac-winpath-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let prefix = root.join("Bottles/Steam");
+        let home = root.join("home");
+        fs::create_dir_all(prefix.join("dosdevices")).unwrap();
+        fs::create_dir_all(prefix.join("drive_c")).unwrap();
+        fs::create_dir_all(home.join("profiles/abc/BepInEx/core")).unwrap();
+        std::os::unix::fs::symlink(prefix.join("drive_c"), prefix.join("dosdevices/c:")).unwrap();
+        std::os::unix::fs::symlink(&root, prefix.join("dosdevices/z:")).unwrap();
+
+        let translated =
+            map_native_path_to_wine_path(&prefix, &home.join("profiles/abc/BepInEx")).unwrap();
+
+        assert!(translated.starts_with("Z:\\"), "{translated}");
+        assert!(
+            translated.ends_with("profiles\\abc\\BepInEx"),
+            "{translated}"
+        );
+        assert!(!translated.contains('/'), "{translated}");
+
+        // Any mapped drive is a valid answer for a path inside the bottle, so
+        // this only asks for a drive-letter path, not for a particular letter.
+        let inside = map_native_path_to_wine_path(&prefix, &prefix.join("drive_c")).unwrap();
+        assert!(inside.len() > 2 && inside.as_bytes()[1] == b':', "{inside}");
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_path_outside_every_mapped_drive_translates_to_nothing() {
+        let root = std::env::temp_dir().join(format!(
+            "r2modmac-winpath-none-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let prefix = root.join("prefix");
+        fs::create_dir_all(prefix.join("dosdevices")).unwrap();
+        fs::create_dir_all(prefix.join("drive_c")).unwrap();
+        std::os::unix::fs::symlink(prefix.join("drive_c"), prefix.join("dosdevices/c:")).unwrap();
+
+        assert!(map_native_path_to_wine_path(&prefix, &root.join("elsewhere")).is_none());
+
+        fs::remove_dir_all(root).unwrap();
+    }
+}

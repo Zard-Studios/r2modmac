@@ -2190,6 +2190,48 @@ fn extract_ini_value(content: &str, keys: &[&str]) -> Option<String> {
     })
 }
 
+/// Point a `doorstop_config.ini` at a BepInEx tree that is not beside the game.
+///
+/// BepInEx roots itself two directories above the preloader it is handed, so a
+/// profile path here moves plugins, config and patchers with it (issue #40).
+/// `bepinex_root` is written as the game will read it: a Windows path, which
+/// under Wine means the `Z:` form of the profile directory.
+pub(crate) fn point_doorstop_ini_at_root(content: &str, bepinex_root: &str) -> String {
+    let root = bepinex_root
+        .trim_end_matches(['/', '\\'])
+        .replace('/', "\\");
+    let target = format!("targetAssembly={root}\\core\\BepInEx.Preloader.dll");
+    let search = format!("dllSearchPathOverride={root}\\core");
+
+    let mut lines: Vec<String> = Vec::new();
+    let mut wrote_target = false;
+    let mut wrote_search = false;
+    for line in content.replace("\r\n", "\n").lines() {
+        let key = line.split('=').next().unwrap_or("").trim();
+        match key {
+            "targetAssembly" => {
+                lines.push(target.clone());
+                wrote_target = true;
+            }
+            "dllSearchPathOverride" => {
+                lines.push(search.clone());
+                wrote_search = true;
+            }
+            _ => lines.push(line.to_string()),
+        }
+    }
+    if !wrote_target {
+        lines.push(target);
+    }
+    if !wrote_search {
+        lines.push(search);
+    }
+
+    let mut out = lines.join("\n");
+    out.push('\n');
+    out
+}
+
 pub(crate) fn normalize_macos_doorstop_config_file(path: &std::path::Path) -> Result<(), String> {
     if !path.exists() {
         return Ok(());
@@ -7903,5 +7945,204 @@ mod community_listing_tests {
             &serde_json::json!({ "version_number": "1.1.7" }),
             "meccha-chameleon"
         ));
+    }
+}
+
+#[cfg(test)]
+mod doorstop_ini_retarget_tests {
+    use super::point_doorstop_ini_at_root;
+
+    /// What the BepInEx pack ships.
+    const SHIPPED: &str = "[UnityDoorstop]\r\nenabled=true\r\ntargetAssembly=BepInEx\\core\\BepInEx.Preloader.dll\r\nredirectOutputLog=true\r\nignoreDisableSwitch=false\r\ndllSearchPathOverride=\r\n";
+
+    fn value(ini: &str, key: &str) -> String {
+        ini.lines()
+            .find(|line| line.starts_with(&format!("{key}=")))
+            .map(|line| line[key.len() + 1..].to_string())
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn a_native_windows_profile_gets_an_absolute_path() {
+        let ini = point_doorstop_ini_at_root(
+            SHIPPED,
+            r"C:\Users\peter\AppData\Roaming\r2modmac\profiles\abc\BepInEx",
+        );
+        assert_eq!(
+            value(&ini, "targetAssembly"),
+            r"C:\Users\peter\AppData\Roaming\r2modmac\profiles\abc\BepInEx\core\BepInEx.Preloader.dll"
+        );
+        assert_eq!(
+            value(&ini, "dllSearchPathOverride"),
+            r"C:\Users\peter\AppData\Roaming\r2modmac\profiles\abc\BepInEx\core"
+        );
+    }
+
+    #[test]
+    fn a_wine_bottle_gets_the_z_drive_form() {
+        // The profile lives on the mac side; the game reads Windows paths.
+        let ini = point_doorstop_ini_at_root(
+            SHIPPED,
+            r"Z:\Users\federicofeduzi\Library\Application Support\com.r2modmac\profiles\abc\BepInEx",
+        );
+        assert!(value(&ini, "targetAssembly")
+            .starts_with(r"Z:\Users\federicofeduzi\Library\Application Support\"));
+        assert!(value(&ini, "targetAssembly").ends_with(r"\BepInEx\core\BepInEx.Preloader.dll"));
+    }
+
+    #[test]
+    fn forward_slashes_become_windows_separators() {
+        let ini = point_doorstop_ini_at_root(SHIPPED, "Z:/Users/x/profiles/abc/BepInEx");
+        assert_eq!(
+            value(&ini, "targetAssembly"),
+            r"Z:\Users\x\profiles\abc\BepInEx\core\BepInEx.Preloader.dll"
+        );
+    }
+
+    #[test]
+    fn a_trailing_separator_does_not_double_up() {
+        for root in [r"C:\games\profile\BepInEx\", "C:/games/profile/BepInEx/"] {
+            let ini = point_doorstop_ini_at_root(SHIPPED, root);
+            assert_eq!(
+                value(&ini, "targetAssembly"),
+                r"C:\games\profile\BepInEx\core\BepInEx.Preloader.dll",
+                "{root}"
+            );
+        }
+    }
+
+    #[test]
+    fn spaces_and_parentheses_survive() {
+        let ini = point_doorstop_ini_at_root(
+            SHIPPED,
+            r"Z:\Volumes\Feduzi\Giochi\Crossover\Bottles\Steam\drive_c\Program Files (x86)\profiles\a b\BepInEx",
+        );
+        assert!(value(&ini, "targetAssembly").contains(r"Program Files (x86)"));
+        assert!(value(&ini, "targetAssembly").contains(r"\a b\"));
+    }
+
+    #[test]
+    fn every_other_setting_is_left_alone() {
+        let ini = point_doorstop_ini_at_root(SHIPPED, r"C:\p\BepInEx");
+        assert_eq!(value(&ini, "enabled"), "true");
+        assert_eq!(value(&ini, "redirectOutputLog"), "true");
+        assert_eq!(value(&ini, "ignoreDisableSwitch"), "false");
+        assert!(ini.starts_with("[UnityDoorstop]"));
+    }
+
+    #[test]
+    fn an_ini_missing_the_keys_gains_them() {
+        let ini = point_doorstop_ini_at_root("[UnityDoorstop]\nenabled=true\n", r"C:\p\BepInEx");
+        assert_eq!(
+            value(&ini, "targetAssembly"),
+            r"C:\p\BepInEx\core\BepInEx.Preloader.dll"
+        );
+        assert_eq!(value(&ini, "dllSearchPathOverride"), r"C:\p\BepInEx\core");
+    }
+
+    #[test]
+    fn pointing_twice_changes_nothing() {
+        let once = point_doorstop_ini_at_root(SHIPPED, r"C:\p\BepInEx");
+        let twice = point_doorstop_ini_at_root(&once, r"C:\p\BepInEx");
+        assert_eq!(once, twice);
+    }
+
+    #[test]
+    fn retargeting_an_already_pointed_ini_moves_it() {
+        // Switching profiles rewrites the same file.
+        let first = point_doorstop_ini_at_root(SHIPPED, r"C:\p\one\BepInEx");
+        let second = point_doorstop_ini_at_root(&first, r"C:\p\two\BepInEx");
+        assert_eq!(
+            value(&second, "targetAssembly"),
+            r"C:\p\two\BepInEx\core\BepInEx.Preloader.dll"
+        );
+        assert!(!second.contains(r"one\BepInEx"));
+    }
+
+    #[test]
+    fn the_written_file_uses_unix_line_endings_and_ends_with_one() {
+        let ini = point_doorstop_ini_at_root(SHIPPED, r"C:\p\BepInEx");
+        assert!(!ini.contains('\r'));
+        assert!(ini.ends_with('\n'));
+    }
+}
+
+#[cfg(test)]
+mod doorstop_ini_across_games_tests {
+    use super::point_doorstop_ini_at_root;
+
+    const SHIPPED: &str = "[UnityDoorstop]\r\nenabled=true\r\ntargetAssembly=BepInEx\\core\\BepInEx.Preloader.dll\r\ndllSearchPathOverride=\r\n";
+
+    /// Windows titles as they sit inside a CrossOver bottle, and on Windows.
+    const GAMES: [(&str, &str); 6] = [
+        (
+            "lethal-company",
+            r"Z:\Volumes\Feduzi\Giochi\Crossover\Bottles\Steam\drive_c\Program Files (x86)\Steam\steamapps\common\Lethal Company",
+        ),
+        (
+            "peak",
+            r"Z:\Volumes\Feduzi\Giochi\Crossover\Bottles\Steam\drive_c\Program Files (x86)\Steam\steamapps\common\PEAK",
+        ),
+        (
+            "ultrakill",
+            r"Z:\Volumes\Feduzi\Giochi\Crossover\Bottles\Steam\drive_c\Program Files (x86)\Steam\steamapps\common\ULTRAKILL",
+        ),
+        (
+            "human-fall-flat",
+            r"Z:\Volumes\Feduzi\Giochi\Crossover\Bottles\Steam\drive_c\Program Files (x86)\Steam\steamapps\common\Human Fall Flat",
+        ),
+        (
+            "repo",
+            r"C:\Program Files (x86)\Steam\steamapps\common\REPO",
+        ),
+        (
+            "valheim-windows",
+            r"D:\SteamLibrary\steamapps\common\Valheim",
+        ),
+    ];
+
+    #[test]
+    fn each_game_points_at_its_own_profile_tree() {
+        for (id, _game_path) in GAMES {
+            let profile = format!(
+                r"Z:\Users\x\Library\Application Support\com.r2modmac\profiles\{id}\BepInEx"
+            );
+            let ini = point_doorstop_ini_at_root(SHIPPED, &profile);
+
+            assert!(
+                ini.contains(&format!(
+                    "targetAssembly={profile}\\core\\BepInEx.Preloader.dll"
+                )),
+                "{id}: doorstop was not pointed at the profile"
+            );
+            assert!(
+                ini.contains(&format!("dllSearchPathOverride={profile}\\core")),
+                "{id}: the search path still points elsewhere"
+            );
+            assert!(
+                !ini.contains("targetAssembly=BepInEx\\core"),
+                "{id}: the shipped relative path survived"
+            );
+            assert!(ini.contains("enabled=true"), "{id}: doorstop got disabled");
+        }
+    }
+
+    #[test]
+    fn switching_between_two_profiles_leaves_no_trace_of_the_first() {
+        for (id, _) in GAMES {
+            let one = format!(r"C:\p\{id}-one\BepInEx");
+            let two = format!(r"C:\p\{id}-two\BepInEx");
+            let switched =
+                point_doorstop_ini_at_root(&point_doorstop_ini_at_root(SHIPPED, &one), &two);
+
+            assert!(
+                switched.contains(&format!("targetAssembly={two}\\core")),
+                "{id}"
+            );
+            assert!(
+                !switched.contains(&one),
+                "{id}: the previous profile is still referenced"
+            );
+        }
     }
 }

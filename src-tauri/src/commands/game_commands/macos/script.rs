@@ -510,3 +510,128 @@ mod configured_script_tests {
         std::fs::remove_dir_all(root).unwrap();
     }
 }
+
+#[cfg(test)]
+mod profile_root_across_games_tests {
+    use super::*;
+
+    /// Real installs, in the shapes they actually take: an internal drive, an
+    /// external volume, spaces and capitals in the folder name.
+    const GAMES: [(&str, &str, &str); 8] = [
+        (
+            "muck",
+            "/Users/x/Library/Application Support/Steam/steamapps/common/Muck",
+            "Muck.app",
+        ),
+        (
+            "rounds",
+            "/Users/x/Library/Application Support/Steam/steamapps/common/ROUNDS",
+            "ROUNDS.app",
+        ),
+        (
+            "inscryption",
+            "/Volumes/Games/SteamLibrary/steamapps/common/Inscryption",
+            "Inscryption.app",
+        ),
+        (
+            "dusk",
+            "/Volumes/Games/SteamLibrary/steamapps/common/Dusk",
+            "Dusk.app",
+        ),
+        (
+            "straftat",
+            "/Volumes/Games/SteamLibrary/steamapps/common/STRAFTAT",
+            "STRAFTAT.app",
+        ),
+        (
+            "cult-of-the-lamb",
+            "/Volumes/Games/SteamLibrary/steamapps/common/Cult of the Lamb",
+            "Cult Of The Lamb.app",
+        ),
+        (
+            "silksong",
+            "/Volumes/Games/SteamLibrary/steamapps/common/Hollow Knight Silksong",
+            "Hollow Knight Silksong.app",
+        ),
+        (
+            "valheim",
+            "/Users/x/Library/Application Support/Steam/steamapps/common/Valheim",
+            "valheim.app",
+        ),
+    ];
+
+    fn game_world(label: &str, bundle: &str) -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "r2modmac-matrix-{}-{}-{}",
+            label.replace(' ', "_"),
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let macos_dir = root.join(bundle).join("Contents/MacOS");
+        std::fs::create_dir_all(&macos_dir).unwrap();
+        std::fs::write(macos_dir.join(bundle.trim_end_matches(".app")), b"game").unwrap();
+        std::fs::create_dir_all(root.join("BepInEx/core")).unwrap();
+        std::fs::write(root.join("run_bepinex.sh"), b"#!/bin/sh\n").unwrap();
+        root
+    }
+
+    #[test]
+    fn every_game_shape_can_be_pointed_at_its_own_profile() {
+        for (id, install_path, bundle) in GAMES {
+            let root = game_world(id, bundle);
+            let profile = root.join(format!("profiles/{id}/BepInEx"));
+            std::fs::create_dir_all(profile.join("core")).unwrap();
+            let script = root.join("run_bepinex.sh");
+
+            configure_macos_bepinex_script(&script, &root, false, Some(&profile))
+                .unwrap_or_else(|error| panic!("{id} ({install_path}): {error}"));
+
+            let written = std::fs::read_to_string(&script).unwrap();
+            let profile_text = profile.to_string_lossy().to_string();
+            assert!(
+                written.contains(&format!(
+                    r#"DOORSTOP_INVOKE_DLL_PATH="{profile_text}/core/BepInEx.Preloader.dll""#
+                )),
+                "{id}: doorstop was not pointed at the profile"
+            );
+            assert!(
+                written.contains(&format!(
+                    r#"BEPINEX_LOG_PATH="{profile_text}/LogOutput.log""#
+                )),
+                "{id}: the log would still be written into the game"
+            );
+            assert!(
+                !written.contains(r#"DOORSTOP_INVOKE_DLL_PATH="$BASEDIR/BepInEx"#),
+                "{id}: the game-rooted path survived"
+            );
+            assert!(
+                written.contains("$BASEDIR/libdoorstop.dylib"),
+                "{id}: the loader must stay beside the game"
+            );
+
+            std::fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    #[test]
+    fn every_game_shape_still_defaults_to_the_game_folder() {
+        for (id, _, bundle) in GAMES {
+            let root = game_world(id, bundle);
+            let script = root.join("run_bepinex.sh");
+
+            configure_macos_bepinex_script(&script, &root, false, None).unwrap();
+
+            let written = std::fs::read_to_string(&script).unwrap();
+            assert!(
+                written.contains(
+                    r#"DOORSTOP_INVOKE_DLL_PATH="$BASEDIR/BepInEx/core/BepInEx.Preloader.dll""#
+                ),
+                "{id}: the default stopped being the game folder"
+            );
+            std::fs::remove_dir_all(root).unwrap();
+        }
+    }
+}
