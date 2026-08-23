@@ -161,11 +161,14 @@ pub(crate) async fn launch_game_with_mods_for_macos(
             remove_r2modmac_debug_logs(&runtime_game_path);
         }
         let run_script = canonicalize_macos_bepinex_script(&runtime_game_path)?;
+        let bepinex_root = bepinex_install_root(app, profile_id, &runtime_game_path)?;
+        let profile_root =
+            (bepinex_root != runtime_game_path).then(|| bepinex_root.join("BepInEx"));
         configure_macos_bepinex_script(
             &run_script,
             &runtime_game_path,
             settings.write_debug_logs_to_game,
-            None,
+            profile_root.as_deref(),
         )?;
         dequarantine_recursive(&runtime_game_path);
 

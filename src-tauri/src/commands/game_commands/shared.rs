@@ -606,3 +606,44 @@ mod bepinex_root_choice_tests {
         assert!(!one.starts_with(GAME) && !two.starts_with(GAME));
     }
 }
+
+#[cfg(test)]
+mod launch_root_pairing_tests {
+    use super::choose_bepinex_root;
+    use std::path::{Path, PathBuf};
+
+    /// The launch hands Doorstop the `BepInEx` directory inside the chosen
+    /// root, which is what the install writes into. If these two ever disagree
+    /// the game loads nothing.
+    fn doorstop_target(isolation: bool, profile: &str, game: &str) -> PathBuf {
+        let root = choose_bepinex_root(isolation, Path::new(profile), Path::new(game));
+        root.join("BepInEx")
+            .join("core")
+            .join("BepInEx.Preloader.dll")
+    }
+
+    #[test]
+    fn the_launch_points_where_the_install_writes() {
+        let game = "/games/Muck";
+        let profile = "/data/profiles/abc";
+
+        assert_eq!(
+            doorstop_target(false, profile, game),
+            Path::new("/games/Muck/BepInEx/core/BepInEx.Preloader.dll")
+        );
+        assert_eq!(
+            doorstop_target(true, profile, game),
+            Path::new("/data/profiles/abc/BepInEx/core/BepInEx.Preloader.dll")
+        );
+    }
+
+    #[test]
+    fn switching_profiles_changes_only_the_profile_segment() {
+        let game = "/games/Muck";
+        let one = doorstop_target(true, "/data/profiles/one", game);
+        let two = doorstop_target(true, "/data/profiles/two", game);
+        assert_ne!(one, two);
+        assert!(one.ends_with("BepInEx/core/BepInEx.Preloader.dll"));
+        assert!(two.ends_with("BepInEx/core/BepInEx.Preloader.dll"));
+    }
+}
