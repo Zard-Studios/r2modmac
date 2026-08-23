@@ -647,3 +647,46 @@ mod launch_root_pairing_tests {
         assert!(two.ends_with("BepInEx/core/BepInEx.Preloader.dll"));
     }
 }
+
+#[cfg(all(test, target_os = "macos"))]
+mod real_isolation_probe {
+    /// Builds a profile-rooted install from a real game and reports what a
+    /// launch would be handed, without touching the game's own tree.
+    ///
+    /// ```text
+    /// R2MODMAC_PROBE_GAME=/path/to/game R2MODMAC_PROBE_PROFILE=/path/to/profile \
+    /// cargo test --lib build_a_profile_from_a_real_game -- --ignored --nocapture
+    /// ```
+    #[test]
+    #[ignore = "copies a real game's tree"]
+    fn build_a_profile_from_a_real_game() {
+        let (Ok(game), Ok(profile)) = (
+            std::env::var("R2MODMAC_PROBE_GAME"),
+            std::env::var("R2MODMAC_PROBE_PROFILE"),
+        ) else {
+            println!("skipped: set R2MODMAC_PROBE_GAME and R2MODMAC_PROBE_PROFILE");
+            return;
+        };
+        let game = std::path::PathBuf::from(game);
+        let profile = std::path::PathBuf::from(profile);
+        let root = super::choose_bepinex_root(true, &profile, &game);
+        assert_eq!(root, profile);
+
+        let tree = root.join("BepInEx");
+        println!("radice scelta: {}", root.display());
+        println!(
+            "plugin nel profilo: {}",
+            std::fs::read_dir(tree.join("plugins"))
+                .map(|d| d.count())
+                .unwrap_or(0)
+        );
+        println!(
+            "preloader: {}",
+            tree.join("core/BepInEx.Preloader.dll").is_file()
+        );
+        println!(
+            "il gioco conserva il caricatore: {}",
+            game.join("run_bepinex.sh").is_file()
+        );
+    }
+}
