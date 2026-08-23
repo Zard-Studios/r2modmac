@@ -1,5 +1,5 @@
 
-BEPINEX_LOG_PATH="$BASEDIR/BepInEx/LogOutput.log"
+BEPINEX_LOG_PATH="__BEPINEX_ROOT__/LogOutput.log"
 BEPINEX_LOG_MTIME_BEFORE=0
 if [ -f "$BEPINEX_LOG_PATH" ]; then
     BEPINEX_LOG_MTIME_BEFORE=$(stat -f %m "$BEPINEX_LOG_PATH" 2>/dev/null || printf 0)

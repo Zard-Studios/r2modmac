@@ -1,3 +1,13 @@
+/// Does the script point Doorstop's search path at a `core` directory?
+///
+/// Checked by shape rather than by literal, so a script that roots BepInEx in a
+/// profile is not rewritten on every launch for not saying `$BASEDIR`.
+fn doorstop_search_path_points_at_core(script: &str) -> bool {
+    regex::Regex::new(r#"(?m)^export DOORSTOP_MONO_DLL_SEARCH_PATH_OVERRIDE=".+/core"$"#)
+        .map(|pattern| pattern.is_match(script))
+        .unwrap_or(false)
+}
+
 use super::*;
 
 pub(crate) fn configure_macos_bepinex_script(
@@ -70,7 +80,7 @@ pub(crate) fn configure_macos_bepinex_script(
         script.contains("wrapper_arch=") && script.contains("loader_env LD_LIBRARY_PATH=");
     let has_root_loader_mode_env = script.contains("root_loader_mode=false")
         && script.contains("DOORSTOP_IGNORE_DISABLED_ENV=0")
-        && script.contains("DOORSTOP_MONO_DLL_SEARCH_PATH_OVERRIDE=\"$BASEDIR/BepInEx/core\"")
+        && doorstop_search_path_points_at_core(&script)
         && script.contains("-e DOORSTOP_MONO_DLL_SEARCH_PATH_OVERRIDE=")
         && script.contains("root_loader_mode=$root_loader_mode")
         && script.contains("export DYLD_INSERT_LIBRARIES=\"libdoorstop.dylib");
@@ -127,7 +137,7 @@ pub(crate) fn configure_macos_bepinex_script(
         && script.contains("DOORSTOP_TARGET_ASSEMBLY=")
         && script.contains("DOORSTOP_BOOT_CONFIG_OVERRIDE=")
         && script.contains("DOORSTOP_IGNORE_DISABLED_ENV=0")
-        && script.contains("DOORSTOP_MONO_DLL_SEARCH_PATH_OVERRIDE=\"$BASEDIR/BepInEx/core\"")
+        && doorstop_search_path_points_at_core(&script)
         && script.contains("DOORSTOP_REDIRECT_OUTPUT_LOG=1")
         && script.contains("-e DOORSTOP_TARGET_ASSEMBLY=")
         && script.contains("-e DOORSTOP_MONO_DLL_SEARCH_PATH_OVERRIDE=");
@@ -299,6 +309,7 @@ pub(crate) fn configure_macos_bepinex_script(
             &relative_launch_entry,
             launch_entry_uses_wrapper,
             write_debug_logs_to_game,
+            super::script_template::BepInExRoot::Game,
         );
     } else {
         if let Ok(executable_re) = regex::Regex::new(r#"(?m)^executable_name=".*"$"#) {
@@ -395,4 +406,29 @@ pub(crate) fn configure_macos_bepinex_script(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod doorstop_search_path_tests {
+    use super::doorstop_search_path_points_at_core;
+
+    #[test]
+    fn both_roots_count_as_configured() {
+        assert!(doorstop_search_path_points_at_core(
+            "export DOORSTOP_MONO_DLL_SEARCH_PATH_OVERRIDE=\"$BASEDIR/BepInEx/core\"\n"
+        ));
+        assert!(doorstop_search_path_points_at_core(
+            "export DOORSTOP_MONO_DLL_SEARCH_PATH_OVERRIDE=\"/Users/x/profiles/abc/BepInEx/core\"\n"
+        ));
+    }
+
+    #[test]
+    fn a_script_without_the_override_is_stale() {
+        assert!(!doorstop_search_path_points_at_core(
+            "export DOORSTOP_ENABLED=1\n"
+        ));
+        assert!(!doorstop_search_path_points_at_core(
+            "export DOORSTOP_MONO_DLL_SEARCH_PATH_OVERRIDE=\"\"\n"
+        ));
+    }
 }
