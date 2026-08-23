@@ -3537,6 +3537,49 @@ pub(crate) async fn download_official_macos_bepinex_runtime(
     }
 }
 
+/// Move a freshly installed BepInEx tree from the game into the profile.
+///
+/// The pack ships the tree together with the loader that boots it. The loader
+/// has to stay where the game can load it; the tree is what Doorstop is pointed
+/// at, so it travels. Existing files in the profile are replaced, since the
+/// pack is the newer runtime.
+pub(crate) fn relocate_bepinex_tree(
+    game_root: &std::path::Path,
+    profile_root: &std::path::Path,
+) -> Result<(), String> {
+    for name in ["BepInEx", "BepInEx_DISABLED"] {
+        let source = game_root.join(name);
+        if !source.is_dir() {
+            continue;
+        }
+        let destination = profile_root.join(name);
+        fs::create_dir_all(&destination).map_err(|error| error.to_string())?;
+        merge_directory_into(&source, &destination)?;
+        fs::remove_dir_all(&source).map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+fn merge_directory_into(
+    source: &std::path::Path,
+    destination: &std::path::Path,
+) -> Result<(), String> {
+    for entry in fs::read_dir(source).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let target = destination.join(entry.file_name());
+        if entry.path().is_dir() {
+            fs::create_dir_all(&target).map_err(|error| error.to_string())?;
+            merge_directory_into(&entry.path(), &target)?;
+        } else {
+            if let Some(parent) = target.parent() {
+                fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+            }
+            fs::copy(entry.path(), &target).map_err(|error| error.to_string())?;
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn extract_bepinex_pack_to_root<R: std::io::Read + std::io::Seek>(
     archive: &mut zip::ZipArchive<R>,
     target_root: &std::path::Path,
@@ -4696,6 +4739,13 @@ async fn install_mod_bytes(
             if target_is_macos && !install_into_disabled_runtime {
                 migrate_root_plugins_into_bepinex(game_dir)?;
                 dequarantine_recursive(game_dir);
+            }
+            if isolated {
+                relocate_bepinex_tree(game_dir, &bepinex_root)?;
+                log::debug!(
+                    "[install_mod] Moved the BepInEx tree into {:?}; the loader stays with the game",
+                    bepinex_root
+                );
             }
         } else {
             extract_regular_mod_to_root(
@@ -8308,5 +8358,122 @@ mod profile_isolation_extraction_tests {
         assert!(!two.join("BepInEx/plugins/Author-First-1.0.0").exists());
 
         fs::remove_dir_all(world).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod bepinex_tree_relocation_tests {
+    use super::*;
+
+    fn world(label: &str) -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "r2modmac-relocate-{}-{}-{}",
+            label,
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    fn write(path: &std::path::Path, content: &[u8]) {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, content).unwrap();
+    }
+
+    #[test]
+    fn the_tree_travels_and_the_loader_stays() {
+        let root = world("split");
+        let game = root.join("game");
+        let profile = root.join("profiles/abc");
+        write(
+            &game.join("BepInEx/core/BepInEx.Preloader.dll"),
+            b"preloader",
+        );
+        write(&game.join("BepInEx/config/BepInEx.cfg"), b"config");
+        // What the game itself loads.
+        write(&game.join("libdoorstop.dylib"), b"loader");
+        write(&game.join("run_bepinex.sh"), b"#!/bin/sh\n");
+        write(&game.join("doorstop_libs/libdoorstop_x64.dylib"), b"lib");
+
+        relocate_bepinex_tree(&game, &profile).unwrap();
+
+        assert_eq!(
+            fs::read(profile.join("BepInEx/core/BepInEx.Preloader.dll")).unwrap(),
+            b"preloader"
+        );
+        assert_eq!(
+            fs::read(profile.join("BepInEx/config/BepInEx.cfg")).unwrap(),
+            b"config"
+        );
+        assert!(!game.join("BepInEx").exists(), "the tree was left behind");
+        assert!(game.join("libdoorstop.dylib").is_file());
+        assert!(game.join("run_bepinex.sh").is_file());
+        assert!(game.join("doorstop_libs/libdoorstop_x64.dylib").is_file());
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_newer_pack_replaces_the_files_it_ships_and_keeps_the_rest() {
+        let root = world("merge");
+        let game = root.join("game");
+        let profile = root.join("profiles/abc");
+        // Already installed: a config the user edited and a mod.
+        write(&profile.join("BepInEx/config/Mod.cfg"), b"user settings");
+        write(&profile.join("BepInEx/plugins/Author-Mod/Mod.dll"), b"mod");
+        write(&profile.join("BepInEx/core/BepInEx.Preloader.dll"), b"old");
+        // The pack that just landed in the game.
+        write(&game.join("BepInEx/core/BepInEx.Preloader.dll"), b"new");
+
+        relocate_bepinex_tree(&game, &profile).unwrap();
+
+        assert_eq!(
+            fs::read(profile.join("BepInEx/core/BepInEx.Preloader.dll")).unwrap(),
+            b"new"
+        );
+        assert_eq!(
+            fs::read(profile.join("BepInEx/config/Mod.cfg")).unwrap(),
+            b"user settings"
+        );
+        assert!(profile.join("BepInEx/plugins/Author-Mod/Mod.dll").is_file());
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_vanilla_tree_moves_under_its_own_name() {
+        let root = world("disabled");
+        let game = root.join("game");
+        let profile = root.join("profiles/abc");
+        write(
+            &game.join("BepInEx_DISABLED/core/BepInEx.Preloader.dll"),
+            b"preloader",
+        );
+
+        relocate_bepinex_tree(&game, &profile).unwrap();
+
+        assert!(profile
+            .join("BepInEx_DISABLED/core/BepInEx.Preloader.dll")
+            .is_file());
+        assert!(!game.join("BepInEx_DISABLED").exists());
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_game_without_a_tree_is_left_alone() {
+        let root = world("empty");
+        let game = root.join("game");
+        let profile = root.join("profiles/abc");
+        fs::create_dir_all(&game).unwrap();
+
+        relocate_bepinex_tree(&game, &profile).unwrap();
+
+        assert!(!profile.join("BepInEx").exists());
+        fs::remove_dir_all(root).unwrap();
     }
 }
