@@ -87,6 +87,23 @@ pub async fn sync_profile_to_game(
     } else {
         GAME_MANIFEST_SCOPE
     };
+    // A profile that was installed before isolation has its tree in the game.
+    // Move it once, rather than leaving the user with an empty profile and a
+    // game full of mods nobody claims.
+    if profile_isolated
+        && !bepinex_root.join("BepInEx").is_dir()
+        && !bepinex_root.join("BepInEx_DISABLED").is_dir()
+        && (runtime_game_path.join("BepInEx").is_dir()
+            || runtime_game_path.join("BepInEx_DISABLED").is_dir())
+    {
+        log::info!(
+            "[sync_profile_to_game] Moving the existing tree from {:?} into {:?}",
+            runtime_game_path,
+            bepinex_root
+        );
+        crate::commands::mod_commands::relocate_bepinex_tree(runtime_game_path, &bepinex_root)?;
+    }
+
     let game_plugins = if bepinex_root.join("BepInEx_DISABLED").is_dir() {
         bepinex_root.join("BepInEx_DISABLED").join("plugins")
     } else {
@@ -1173,6 +1190,121 @@ mod isolation_scan_target_tests {
             profile.join("BepInEx").join("plugins")
         };
         assert!(plugins.ends_with("BepInEx_DISABLED/plugins"));
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod isolation_migration_tests {
+    use crate::commands::mod_commands::relocate_bepinex_tree;
+
+    fn world(label: &str) -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "r2modmac-migrate-{}-{}-{}",
+            label,
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    fn write(path: &std::path::Path, content: &[u8]) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, content).unwrap();
+    }
+
+    /// Turning isolation on for a profile that was installed the old way must
+    /// carry its mods and configs across, not leave the user with nothing.
+    #[test]
+    fn an_existing_install_moves_into_the_profile_with_its_configs() {
+        let root = world("existing");
+        let game = root.join("game");
+        let profile = root.join("profiles/abc");
+        write(
+            &game.join("BepInEx/plugins/Author-Mod-1.0.0/Mod.dll"),
+            b"mod",
+        );
+        write(
+            &game.join("BepInEx/config/xyz.alcan.comfortcalc.cfg"),
+            b"user settings",
+        );
+        write(
+            &game.join("BepInEx/core/BepInEx.Preloader.dll"),
+            b"preloader",
+        );
+        write(&game.join("run_bepinex.sh"), b"#!/bin/sh\n");
+
+        relocate_bepinex_tree(&game, &profile).unwrap();
+
+        assert!(profile
+            .join("BepInEx/plugins/Author-Mod-1.0.0/Mod.dll")
+            .is_file());
+        assert_eq!(
+            std::fs::read(profile.join("BepInEx/config/xyz.alcan.comfortcalc.cfg")).unwrap(),
+            b"user settings"
+        );
+        assert!(profile.join("BepInEx/core/BepInEx.Preloader.dll").is_file());
+        assert!(!game.join("BepInEx").exists());
+        assert!(game.join("run_bepinex.sh").is_file());
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// Only the first profile to sync claims the tree the game already had.
+    #[test]
+    fn a_second_profile_does_not_steal_the_first_ones_tree() {
+        let root = world("second");
+        let game = root.join("game");
+        let first = root.join("profiles/first");
+        let second = root.join("profiles/second");
+        write(
+            &game.join("BepInEx/plugins/Author-Mod-1.0.0/Mod.dll"),
+            b"mod",
+        );
+
+        relocate_bepinex_tree(&game, &first).unwrap();
+        // The game has nothing left, so the second profile starts empty.
+        relocate_bepinex_tree(&game, &second).unwrap();
+
+        assert!(first
+            .join("BepInEx/plugins/Author-Mod-1.0.0/Mod.dll")
+            .is_file());
+        assert!(!second.join("BepInEx").exists());
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A profile that already has its own tree keeps it: the migration is a
+    /// one-off, and running it twice must not merge the game back in.
+    #[test]
+    fn a_profile_that_already_moved_is_not_touched_again() {
+        let root = world("idempotent");
+        let game = root.join("game");
+        let profile = root.join("profiles/abc");
+        write(
+            &profile.join("BepInEx/plugins/Author-Mine-1.0.0/Mine.dll"),
+            b"mine",
+        );
+        write(
+            &game.join("BepInEx/plugins/Author-Other-1.0.0/Other.dll"),
+            b"other",
+        );
+
+        // This is the guard the sync applies: the profile already has a tree.
+        let should_migrate = !profile.join("BepInEx").is_dir()
+            && !profile.join("BepInEx_DISABLED").is_dir()
+            && game.join("BepInEx").is_dir();
+        assert!(!should_migrate);
+
+        assert!(profile
+            .join("BepInEx/plugins/Author-Mine-1.0.0/Mine.dll")
+            .is_file());
+        assert!(!profile.join("BepInEx/plugins/Author-Other-1.0.0").exists());
 
         std::fs::remove_dir_all(root).unwrap();
     }
