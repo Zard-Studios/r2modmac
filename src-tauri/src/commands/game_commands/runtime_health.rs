@@ -352,17 +352,20 @@ pub async fn check_profile_runtime_health(
 
     if profile_platform == "mac" {
         let runtime_root = resolve_macos_runtime_root(game_path);
-        let disabled = vanilla && runtime_root.join("BepInEx_DISABLED").exists();
-        let bep_dir = runtime_root.join(if disabled {
+        // Under isolation the tree sits in the profile while the loader stays
+        // beside the game, so the two are looked for separately.
+        let tree_root = bepinex_install_root(&app, &profile_id, &runtime_root)?;
+        let disabled = vanilla && tree_root.join("BepInEx_DISABLED").exists();
+        let bep_dir = tree_root.join(if disabled {
             "BepInEx_DISABLED"
         } else {
             "BepInEx"
         });
         let complete = if vanilla {
             has_complete_disabled_macos_bepinex_runtime(game_path)
-                || has_complete_macos_bepinex_runtime(game_path)
+                || has_complete_macos_bepinex_runtime_rooted(game_path, Some(&tree_root))
         } else {
-            has_complete_macos_bepinex_runtime(game_path)
+            has_complete_macos_bepinex_runtime_rooted(game_path, Some(&tree_root))
         } && core_directory_has_payload(&bep_dir.join("core"));
         if complete {
             return Ok(health("bepinex", Vec::new()));

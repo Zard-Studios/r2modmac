@@ -123,8 +123,19 @@ pub(crate) fn canonicalize_macos_bepinex_script(
 }
 
 pub(crate) fn has_complete_macos_bepinex_runtime(game_path: &std::path::Path) -> bool {
+    has_complete_macos_bepinex_runtime_rooted(game_path, None)
+}
+
+/// The same check with the tree somewhere other than the game, which is where
+/// an isolated profile keeps it. The loader is still looked for beside the
+/// game, since that is what the game loads.
+pub(crate) fn has_complete_macos_bepinex_runtime_rooted(
+    game_path: &std::path::Path,
+    tree_root: Option<&std::path::Path>,
+) -> bool {
     let runtime_root = resolve_macos_runtime_root(game_path);
-    let has_core = runtime_root.join("BepInEx").join("core").is_dir();
+    let tree_root = tree_root.unwrap_or(&runtime_root);
+    let has_core = tree_root.join("BepInEx").join("core").is_dir();
     let has_doorstop_payload = runtime_root.join("doorstop_libs").is_dir()
         || runtime_root.join("libdoorstop.dylib").exists();
     let has_script = find_bepinex_script_in_dir(&runtime_root).is_some();
@@ -140,4 +151,77 @@ pub(crate) fn has_complete_disabled_macos_bepinex_runtime(game_path: &std::path:
     let has_script = find_bepinex_script_in_dir(&runtime_root).is_some();
 
     has_core && has_doorstop_payload && has_script
+}
+
+#[cfg(test)]
+mod rooted_runtime_check_tests {
+    use super::*;
+
+    fn world(label: &str) -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "r2modmac-rooted-{}-{}-{}",
+            label,
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    fn loader_files(game: &std::path::Path) {
+        std::fs::create_dir_all(game.join("doorstop_libs")).unwrap();
+        std::fs::write(game.join("run_bepinex.sh"), b"#!/bin/sh\n").unwrap();
+    }
+
+    #[test]
+    fn a_tree_in_the_profile_counts_as_installed() {
+        let root = world("profile-tree");
+        let game = root.join("game");
+        let profile = root.join("profiles/abc");
+        std::fs::create_dir_all(&game).unwrap();
+        loader_files(&game);
+        std::fs::create_dir_all(profile.join("BepInEx/core")).unwrap();
+
+        assert!(has_complete_macos_bepinex_runtime_rooted(
+            &game,
+            Some(&profile)
+        ));
+        // Without the profile the same game looks empty, which is what the
+        // health check reported before it knew about isolation.
+        assert!(!has_complete_macos_bepinex_runtime(&game));
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_profile_tree_without_the_loader_is_still_incomplete() {
+        let root = world("no-loader");
+        let game = root.join("game");
+        let profile = root.join("profiles/abc");
+        std::fs::create_dir_all(&game).unwrap();
+        std::fs::create_dir_all(profile.join("BepInEx/core")).unwrap();
+
+        assert!(!has_complete_macos_bepinex_runtime_rooted(
+            &game,
+            Some(&profile)
+        ));
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn the_game_tree_still_counts_when_no_profile_is_given() {
+        let root = world("game-tree");
+        let game = root.join("game");
+        std::fs::create_dir_all(game.join("BepInEx/core")).unwrap();
+        loader_files(&game);
+
+        assert!(has_complete_macos_bepinex_runtime_rooted(&game, None));
+        assert!(has_complete_macos_bepinex_runtime(&game));
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }
