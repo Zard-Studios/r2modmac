@@ -3537,6 +3537,39 @@ pub(crate) async fn download_official_macos_bepinex_runtime(
     }
 }
 
+/// Rewrite the game's `doorstop_config.ini` so it finds a tree that moved.
+///
+/// Only the Windows loader reads this file; on macOS the generated script
+/// carries the same paths. Under Wine the game sees a drive-letter path, so the
+/// profile is translated through the prefix before it is written.
+pub(crate) fn point_game_doorstop_ini_at_tree(
+    game_dir: &std::path::Path,
+    tree_root: &std::path::Path,
+) -> Result<(), String> {
+    let ini = game_dir.join("doorstop_config.ini");
+    if !ini.is_file() {
+        return Ok(());
+    }
+
+    let bepinex = tree_root.join("BepInEx");
+    let written_path = crate::models::shared::find_wine_prefix_root(game_dir)
+        .and_then(|prefix| {
+            crate::commands::game_commands::map_native_path_to_wine_path(&prefix, &bepinex)
+        })
+        .unwrap_or_else(|| bepinex.to_string_lossy().to_string());
+
+    let content = fs::read_to_string(&ini).map_err(|error| error.to_string())?;
+    let updated = point_doorstop_ini_at_root(&content, &written_path);
+    if updated != content {
+        fs::write(&ini, updated).map_err(|error| error.to_string())?;
+        log::debug!(
+            "[install_mod] Doorstop config now points at {}",
+            written_path
+        );
+    }
+    Ok(())
+}
+
 /// Move a freshly installed BepInEx tree from the game into the profile.
 ///
 /// The pack ships the tree together with the loader that boots it. The loader
@@ -4742,6 +4775,7 @@ async fn install_mod_bytes(
             }
             if isolated {
                 relocate_bepinex_tree(game_dir, &bepinex_root)?;
+                point_game_doorstop_ini_at_tree(game_dir, &bepinex_root)?;
                 log::debug!(
                     "[install_mod] Moved the BepInEx tree into {:?}; the loader stays with the game",
                     bepinex_root
@@ -8474,6 +8508,80 @@ mod bepinex_tree_relocation_tests {
         relocate_bepinex_tree(&game, &profile).unwrap();
 
         assert!(!profile.join("BepInEx").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod game_ini_follows_tree_tests {
+    use super::*;
+
+    fn world(label: &str) -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "r2modmac-gameini-{}-{}-{}",
+            label,
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    const SHIPPED: &str = "[UnityDoorstop]\nenabled=true\ntargetAssembly=BepInEx\\core\\BepInEx.Preloader.dll\ndllSearchPathOverride=\n";
+
+    #[test]
+    fn the_ini_in_the_game_learns_where_the_tree_went() {
+        let root = world("moved");
+        let game = root.join("game");
+        let profile = root.join("profiles/abc");
+        fs::create_dir_all(&game).unwrap();
+        fs::create_dir_all(profile.join("BepInEx/core")).unwrap();
+        fs::write(game.join("doorstop_config.ini"), SHIPPED).unwrap();
+
+        point_game_doorstop_ini_at_tree(&game, &profile).unwrap();
+
+        let written = fs::read_to_string(game.join("doorstop_config.ini")).unwrap();
+        let expected = profile.join("BepInEx").to_string_lossy().replace('/', "\\");
+        assert!(
+            written.contains(&format!(
+                "targetAssembly={expected}\\core\\BepInEx.Preloader.dll"
+            )),
+            "{written}"
+        );
+        assert!(written.contains("enabled=true"));
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_game_without_an_ini_is_left_alone() {
+        let root = world("no-ini");
+        let game = root.join("game");
+        fs::create_dir_all(&game).unwrap();
+
+        point_game_doorstop_ini_at_tree(&game, &root.join("profiles/abc")).unwrap();
+
+        assert!(!game.join("doorstop_config.ini").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn pointing_at_the_same_tree_twice_rewrites_nothing() {
+        let root = world("stable");
+        let game = root.join("game");
+        let profile = root.join("profiles/abc");
+        fs::create_dir_all(&game).unwrap();
+        fs::write(game.join("doorstop_config.ini"), SHIPPED).unwrap();
+
+        point_game_doorstop_ini_at_tree(&game, &profile).unwrap();
+        let first = fs::read_to_string(game.join("doorstop_config.ini")).unwrap();
+        point_game_doorstop_ini_at_tree(&game, &profile).unwrap();
+        let second = fs::read_to_string(game.join("doorstop_config.ini")).unwrap();
+
+        assert_eq!(first, second);
         fs::remove_dir_all(root).unwrap();
     }
 }

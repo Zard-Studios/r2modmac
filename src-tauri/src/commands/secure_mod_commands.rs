@@ -20,7 +20,7 @@ pub use super::legacy_mod_commands::{
 pub(crate) use super::legacy_mod_commands::{
     detect_unity_runtime_kind, download_official_macos_bepinex_runtime,
     extract_bepinex_pack_to_root, extract_version_number_from_full_name,
-    normalize_macos_doorstop_config_file, relocate_bepinex_tree,
+    normalize_macos_doorstop_config_file, point_game_doorstop_ini_at_tree, relocate_bepinex_tree,
 };
 
 const APP_USER_AGENT: &str = concat!("r2modmac/", env!("CARGO_PKG_VERSION"));

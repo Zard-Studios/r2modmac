@@ -102,6 +102,10 @@ pub async fn sync_profile_to_game(
             bepinex_root
         );
         crate::commands::mod_commands::relocate_bepinex_tree(runtime_game_path, &bepinex_root)?;
+        crate::commands::mod_commands::point_game_doorstop_ini_at_tree(
+            runtime_game_path,
+            &bepinex_root,
+        )?;
     }
 
     let game_plugins = if bepinex_root.join("BepInEx_DISABLED").is_dir() {

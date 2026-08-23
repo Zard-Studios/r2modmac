@@ -57,6 +57,7 @@ pub(super) use self::process::*;
 pub(super) use self::shared::*;
 #[allow(unused_imports)]
 pub(super) use self::steam::*;
+pub(crate) use self::windows::process::map_native_path_to_wine_path;
 #[allow(unused_imports)]
 pub(super) use self::windows::*;
 #[allow(unused_imports)]
