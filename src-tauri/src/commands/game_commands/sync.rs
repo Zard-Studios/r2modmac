@@ -78,10 +78,19 @@ pub async fn sync_profile_to_game(
         game_path.to_path_buf()
     };
     let runtime_game_path = runtime_game_path_buf.as_path();
-    let game_plugins = if runtime_game_path.join("BepInEx_DISABLED").is_dir() {
-        runtime_game_path.join("BepInEx_DISABLED").join("plugins")
+    // Under isolation the tree the game loads lives in the profile, so that is
+    // the tree to reconcile against.
+    let bepinex_root = bepinex_install_root(&app, &profile_id, runtime_game_path)?;
+    let profile_isolated = bepinex_root != runtime_game_path;
+    let bepinex_scope = if profile_isolated {
+        PROFILE_MANIFEST_SCOPE
     } else {
-        runtime_game_path.join("BepInEx").join("plugins")
+        GAME_MANIFEST_SCOPE
+    };
+    let game_plugins = if bepinex_root.join("BepInEx_DISABLED").is_dir() {
+        bepinex_root.join("BepInEx_DISABLED").join("plugins")
+    } else {
+        bepinex_root.join("BepInEx").join("plugins")
     };
 
     // Profile cache path
@@ -741,10 +750,10 @@ pub async fn sync_profile_to_game(
         }));
     }
 
-    let all_manifests = load_owned_mod_manifests(&app, &profile_id, GAME_MANIFEST_SCOPE)?;
+    let all_manifests = load_owned_mod_manifests(&app, &profile_id, bepinex_scope)?;
     let (stored_manifests, foreign_manifests): (Vec<_>, Vec<_>) = all_manifests
         .into_iter()
-        .partition(|entry| manifest_matches_target_root(&entry.manifest, runtime_game_path));
+        .partition(|entry| manifest_matches_target_root(&entry.manifest, &bepinex_root));
     // A mod removed and reinstalled on every Apply has lost its manifest to one
     // of these two comparisons, and neither said so before.
     for entry in &foreign_manifests {
@@ -904,7 +913,7 @@ pub async fn sync_profile_to_game(
 
             let has_exact_version = manifests_to_keep.iter().any(|entry| {
                 entry.manifest.mod_key == **pm_key
-                    && manifest_files_exist(runtime_game_path, &entry.manifest.files)
+                    && manifest_files_exist(&bepinex_root, &entry.manifest.files)
             }) || game_mod_folders.iter().any(|(folder_name, gm_key)| {
                 if gm_key != *pm_key {
                     return false;
@@ -952,13 +961,10 @@ pub async fn sync_profile_to_game(
     ensure_finalize_ready(finalize, to_install.len())?;
     let mut removed = 0;
     if finalize {
-        let removed_by_manifest = cleanup_owned_mod_manifests(
-            runtime_game_path,
-            &manifests_to_remove,
-            &manifests_to_keep,
-        )?;
+        let removed_by_manifest =
+            cleanup_owned_mod_manifests(&bepinex_root, &manifests_to_remove, &manifests_to_keep)?;
         let stale_generated_removed =
-            cleanup_stale_generated_mod_artifacts(runtime_game_path, &profile_mod_full_names)?;
+            cleanup_stale_generated_mod_artifacts(&bepinex_root, &profile_mod_full_names)?;
         removed += removed_by_manifest + stale_generated_removed;
         if removed_by_manifest > 0 || stale_generated_removed > 0 {
             log::debug!(
@@ -1107,4 +1113,67 @@ fn convert_to_owml_unix_path(path: &std::path::Path) -> String {
         return path.to_string_lossy().to_string();
     }
     path.to_string_lossy().replace('\\', "/")
+}
+
+#[cfg(test)]
+mod isolation_scan_target_tests {
+
+    fn world(label: &str) -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "r2modmac-scan-{}-{}-{}",
+            label,
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    /// Sync reconciles against whichever tree the game will load. Pointed at
+    /// the game it must not see the profile's mods, and the other way round,
+    /// or every Apply would remove and reinstall everything.
+    #[test]
+    fn each_root_sees_only_its_own_mods() {
+        let root = world("roots");
+        let game = root.join("game");
+        let profile = root.join("profiles/abc");
+        std::fs::create_dir_all(game.join("BepInEx/plugins/Author-InGame-1.0.0")).unwrap();
+        std::fs::create_dir_all(profile.join("BepInEx/plugins/Author-InProfile-1.0.0")).unwrap();
+
+        let names = |base: &std::path::Path| {
+            let mut found = std::fs::read_dir(base.join("BepInEx/plugins"))
+                .unwrap()
+                .filter_map(|entry| entry.ok())
+                .map(|entry| entry.file_name().to_string_lossy().to_string())
+                .collect::<Vec<_>>();
+            found.sort();
+            found
+        };
+
+        assert_eq!(names(&game), vec!["Author-InGame-1.0.0".to_string()]);
+        assert_eq!(names(&profile), vec!["Author-InProfile-1.0.0".to_string()]);
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A vanilla profile renames its own tree, so the disabled folder has to be
+    /// looked for under the same root the mods were installed into.
+    #[test]
+    fn the_disabled_tree_is_looked_for_in_the_same_root() {
+        let root = world("disabled");
+        let profile = root.join("profiles/abc");
+        std::fs::create_dir_all(profile.join("BepInEx_DISABLED/plugins")).unwrap();
+
+        let plugins = if profile.join("BepInEx_DISABLED").is_dir() {
+            profile.join("BepInEx_DISABLED").join("plugins")
+        } else {
+            profile.join("BepInEx").join("plugins")
+        };
+        assert!(plugins.ends_with("BepInEx_DISABLED/plugins"));
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }
