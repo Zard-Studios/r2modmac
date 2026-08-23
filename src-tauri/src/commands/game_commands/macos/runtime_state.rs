@@ -26,11 +26,88 @@ pub(crate) fn rename_path_if_present(
     })
 }
 
+/// Rename the given directories and files to their `_DISABLED` twin, or back.
+fn rename_runtime_items(
+    root: &std::path::Path,
+    disable: bool,
+    dir_items: &[&str],
+    file_items: &[&str],
+) -> Result<(), String> {
+    for item in dir_items {
+        let active = root.join(item);
+        let disabled = root.join(format!("{}_DISABLED", item));
+        if disable {
+            if active.is_dir() && disabled.is_dir() {
+                let _ = fs::remove_dir_all(&active);
+                continue;
+            }
+            rename_path_if_present(&active, &disabled)?;
+        } else if disabled.exists() {
+            if !active.exists() {
+                rename_path_if_present(&disabled, &active)?;
+            } else if disabled.is_dir() && !disabled.is_symlink() {
+                let _ = fs::remove_dir_all(&disabled);
+            } else {
+                let _ = fs::remove_file(&disabled);
+            }
+        }
+    }
+    for item in file_items {
+        let active = root.join(item);
+        let disabled = root.join(format!("{}_DISABLED", item));
+        if disable {
+            if (active.exists() || active.is_symlink())
+                && (disabled.exists() || disabled.is_symlink())
+            {
+                let _ = fs::remove_file(&active);
+                continue;
+            }
+            rename_path_if_present(&active, &disabled)?;
+        } else if disabled.exists() {
+            if !active.exists() {
+                rename_path_if_present(&disabled, &active)?;
+            } else {
+                let _ = fs::remove_file(&disabled);
+            }
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn sync_macos_runtime_disabled_state(
     game_path: &std::path::Path,
     disable: bool,
 ) -> Result<(), String> {
+    sync_macos_runtime_disabled_state_rooted(game_path, disable, None)
+}
+
+/// The same toggle with the BepInEx tree somewhere other than the game.
+///
+/// An isolated profile keeps the tree, while the loader that boots it stays
+/// beside the game, so a vanilla run has to rename one of each in its own
+/// place. Renaming only the loader would leave the tree under a name the
+/// install and the scan do not expect.
+pub(crate) fn sync_macos_runtime_disabled_state_rooted(
+    game_path: &std::path::Path,
+    disable: bool,
+    tree_root: Option<&std::path::Path>,
+) -> Result<(), String> {
     let runtime_root = resolve_macos_runtime_root(game_path);
+    if let Some(tree_root) = tree_root {
+        if tree_root != runtime_root {
+            rename_runtime_items(tree_root, disable, &["BepInEx"], &[])?;
+            return rename_runtime_items(
+                &runtime_root,
+                disable,
+                &["doorstop_libs"],
+                &[
+                    "doorstop_config.ini",
+                    "libdoorstop.dylib",
+                    ".doorstop_version",
+                ],
+            );
+        }
+    }
     let dir_items = ["BepInEx", "doorstop_libs"];
     let file_items = [
         "doorstop_config.ini",
@@ -142,4 +219,96 @@ pub(crate) fn sync_macos_runtime_disabled_state(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod isolated_vanilla_toggle_tests {
+    use super::*;
+
+    fn world(label: &str) -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "r2modmac-vanilla-{}-{}-{}",
+            label,
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    fn isolated_world(label: &str) -> (std::path::PathBuf, std::path::PathBuf, std::path::PathBuf) {
+        let root = world(label);
+        let game = root.join("game");
+        let profile = root.join("profiles/abc");
+        std::fs::create_dir_all(game.join("doorstop_libs")).unwrap();
+        std::fs::write(game.join("libdoorstop.dylib"), b"loader").unwrap();
+        std::fs::create_dir_all(profile.join("BepInEx/plugins/Author-Mod")).unwrap();
+        (root, game, profile)
+    }
+
+    #[test]
+    fn going_vanilla_disables_the_tree_in_the_profile_and_the_loader_in_the_game() {
+        let (root, game, profile) = isolated_world("disable");
+
+        sync_macos_runtime_disabled_state_rooted(&game, true, Some(&profile)).unwrap();
+
+        assert!(profile.join("BepInEx_DISABLED/plugins/Author-Mod").is_dir());
+        assert!(!profile.join("BepInEx").exists());
+        assert!(game.join("doorstop_libs_DISABLED").is_dir());
+        assert!(game.join("libdoorstop.dylib_DISABLED").exists());
+        // The mods are still on disk, only renamed.
+        assert!(profile.join("BepInEx_DISABLED/plugins/Author-Mod").exists());
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn coming_back_from_vanilla_restores_both_sides() {
+        let (root, game, profile) = isolated_world("enable");
+
+        sync_macos_runtime_disabled_state_rooted(&game, true, Some(&profile)).unwrap();
+        sync_macos_runtime_disabled_state_rooted(&game, false, Some(&profile)).unwrap();
+
+        assert!(profile.join("BepInEx/plugins/Author-Mod").is_dir());
+        assert!(!profile.join("BepInEx_DISABLED").exists());
+        assert!(game.join("doorstop_libs").is_dir());
+        assert!(game.join("libdoorstop.dylib").exists());
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn the_game_tree_is_never_touched_under_isolation() {
+        let (root, game, profile) = isolated_world("untouched");
+        // A leftover tree in the game, from before isolation.
+        std::fs::create_dir_all(game.join("BepInEx/plugins/Old-Mod")).unwrap();
+
+        sync_macos_runtime_disabled_state_rooted(&game, true, Some(&profile)).unwrap();
+
+        assert!(game.join("BepInEx/plugins/Old-Mod").is_dir());
+        assert!(!game.join("BepInEx_DISABLED").exists());
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn without_isolation_the_toggle_behaves_as_it_always_did() {
+        let root = world("classic");
+        let game = root.join("game");
+        std::fs::create_dir_all(game.join("BepInEx/plugins")).unwrap();
+        std::fs::create_dir_all(game.join("doorstop_libs")).unwrap();
+
+        sync_macos_runtime_disabled_state_rooted(&game, true, None).unwrap();
+        assert!(game.join("BepInEx_DISABLED").is_dir());
+        assert!(game.join("doorstop_libs_DISABLED").is_dir());
+
+        sync_macos_runtime_disabled_state_rooted(&game, false, None).unwrap();
+        assert!(game.join("BepInEx").is_dir());
+        assert!(game.join("doorstop_libs").is_dir());
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }

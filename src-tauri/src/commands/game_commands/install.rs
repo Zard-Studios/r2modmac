@@ -464,7 +464,8 @@ pub async fn install_to_game(
         // Keep the runtime disabled on Apply, but defer any Steam launch-option
         // changes until Play. Updating localconfig.vdf can force a Steam restart,
         // which would be a surprising side effect during a profile sync.
-        sync_macos_runtime_disabled_state(runtime_game_path, true)?;
+        let tree_root = bepinex_install_root(&app, &profile_id, runtime_game_path)?;
+        sync_macos_runtime_disabled_state_rooted(runtime_game_path, true, Some(&tree_root))?;
         log::info!(
             "[install_to_game] macOS vanilla mode complete - runtime disabled now, Steam launch state will be reconciled on Play."
         );
@@ -707,7 +708,8 @@ pub async fn install_to_game(
     // 4. Sync platform-specific root payloads
     if is_mac_profile {
         if !is_vanilla && !is_balatro_profile {
-            sync_macos_runtime_disabled_state(runtime_game_path, false)?;
+            let tree_root = bepinex_install_root(&app, &profile_id, runtime_game_path)?;
+            sync_macos_runtime_disabled_state_rooted(runtime_game_path, false, Some(&tree_root))?;
             ensure_macos_bepinex_runtime_present(&app, &profile_id, runtime_game_path).await?;
         }
         let profile_script_is_macos = find_bepinex_script_in_dir(&profile_dir)
@@ -809,7 +811,8 @@ pub async fn install_to_game(
             load_settings_impl(&app).write_debug_logs_to_game,
             None,
         )?;
-        sync_macos_runtime_disabled_state(runtime_game_path, false)?;
+        let tree_root = bepinex_install_root(&app, &profile_id, runtime_game_path)?;
+        sync_macos_runtime_disabled_state_rooted(runtime_game_path, false, Some(&tree_root))?;
         dequarantine_recursive(runtime_game_path);
         if manage_steam_launch {
             log::info!(

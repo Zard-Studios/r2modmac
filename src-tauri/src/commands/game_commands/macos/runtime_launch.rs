@@ -144,8 +144,17 @@ pub(crate) fn has_complete_macos_bepinex_runtime_rooted(
 }
 
 pub(crate) fn has_complete_disabled_macos_bepinex_runtime(game_path: &std::path::Path) -> bool {
+    has_complete_disabled_macos_bepinex_runtime_rooted(game_path, None)
+}
+
+/// The vanilla twin of [`has_complete_macos_bepinex_runtime_rooted`].
+pub(crate) fn has_complete_disabled_macos_bepinex_runtime_rooted(
+    game_path: &std::path::Path,
+    tree_root: Option<&std::path::Path>,
+) -> bool {
     let runtime_root = resolve_macos_runtime_root(game_path);
-    let has_core = runtime_root.join("BepInEx_DISABLED").join("core").is_dir();
+    let tree_root = tree_root.unwrap_or(&runtime_root);
+    let has_core = tree_root.join("BepInEx_DISABLED").join("core").is_dir();
     let has_doorstop_payload = runtime_root.join("doorstop_libs_DISABLED").is_dir()
         || runtime_root.join("libdoorstop.dylib_DISABLED").exists();
     let has_script = find_bepinex_script_in_dir(&runtime_root).is_some();
@@ -208,6 +217,26 @@ mod rooted_runtime_check_tests {
             &game,
             Some(&profile)
         ));
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_vanilla_profile_tree_counts_as_installed_too() {
+        let root = world("vanilla-profile");
+        let game = root.join("game");
+        let profile = root.join("profiles/abc");
+        std::fs::create_dir_all(&game).unwrap();
+        std::fs::create_dir_all(game.join("doorstop_libs_DISABLED")).unwrap();
+        std::fs::write(game.join("run_bepinex.sh"), b"#!/bin/sh\n").unwrap();
+        std::fs::create_dir_all(profile.join("BepInEx_DISABLED/core")).unwrap();
+
+        assert!(has_complete_disabled_macos_bepinex_runtime_rooted(
+            &game,
+            Some(&profile)
+        ));
+        // Before the health check knew about isolation this read as missing.
+        assert!(!has_complete_disabled_macos_bepinex_runtime(&game));
 
         std::fs::remove_dir_all(root).unwrap();
     }

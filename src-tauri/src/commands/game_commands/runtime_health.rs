@@ -362,7 +362,7 @@ pub async fn check_profile_runtime_health(
             "BepInEx"
         });
         let complete = if vanilla {
-            has_complete_disabled_macos_bepinex_runtime(game_path)
+            has_complete_disabled_macos_bepinex_runtime_rooted(game_path, Some(&tree_root))
                 || has_complete_macos_bepinex_runtime_rooted(game_path, Some(&tree_root))
         } else {
             has_complete_macos_bepinex_runtime_rooted(game_path, Some(&tree_root))

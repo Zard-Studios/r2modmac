@@ -147,13 +147,16 @@ pub(crate) async fn launch_game_with_mods_for_macos(
     }
 
     validate_macos_bepinex_support(&runtime_game_path)?;
-    sync_macos_runtime_disabled_state(&runtime_game_path, false).map_err(|error| {
-        format!(
-            "Failed to enable macOS runtime before modded launch ({}): {}",
-            runtime_game_path.display(),
-            error
-        )
-    })?;
+    let tree_root = bepinex_install_root(app, profile_id, &runtime_game_path)?;
+    sync_macos_runtime_disabled_state_rooted(&runtime_game_path, false, Some(&tree_root)).map_err(
+        |error| {
+            format!(
+                "Failed to enable macOS runtime before modded launch ({}): {}",
+                runtime_game_path.display(),
+                error
+            )
+        },
+    )?;
 
     let dist = infer_distribution_from_game_path(app, game_path, false);
     if dist == "steam" && !use_direct_launch {
@@ -339,7 +342,10 @@ pub(crate) async fn launch_game_vanilla_for_macos(
         if !settings.write_debug_logs_to_game {
             remove_r2modmac_debug_logs(&runtime_game_path);
         }
-        if let Err(error) = sync_macos_runtime_disabled_state(&runtime_game_path, true) {
+        let tree_root = bepinex_install_root(app, profile_id, &runtime_game_path)?;
+        if let Err(error) =
+            sync_macos_runtime_disabled_state_rooted(&runtime_game_path, true, Some(&tree_root))
+        {
             log::warn!(
                 "[launch_game_vanilla] Failed to enforce runtime_disabled state before vanilla Steam launch: {}",
                 error
@@ -375,7 +381,8 @@ pub(crate) async fn launch_game_vanilla_for_macos(
             }
         }
 
-        sync_macos_runtime_disabled_state(&runtime_game_path, true)?;
+        let tree_root = bepinex_install_root(app, profile_id, &runtime_game_path)?;
+        sync_macos_runtime_disabled_state_rooted(&runtime_game_path, true, Some(&tree_root))?;
         if launch_macos_bepinex_wrapper(
             app,
             &runtime_game_path,
