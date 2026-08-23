@@ -201,6 +201,13 @@ pub struct Settings {
     /// rather than dropped on the next save.
     #[serde(default)]
     pub keybinds: BTreeMap<String, String>,
+    /// Keep each profile's BepInEx tree in the profile instead of the game.
+    ///
+    /// Doorstop is pointed at the profile's preloader, and BepInEx roots itself
+    /// two directories above it, so plugins and configs follow. Switching
+    /// profiles then moves no files at all (issue #40).
+    #[serde(default)]
+    pub profile_isolation: bool,
 }
 
 impl Settings {
@@ -232,6 +239,7 @@ impl Settings {
             default_profile: None,
             active_theme: None,
             keybinds: BTreeMap::new(),
+            profile_isolation: false,
         }
     }
 }
@@ -815,6 +823,15 @@ mod settings_stable_order_tests {
             "expected a one-line diff, got {} lines",
             changed
         );
+    }
+
+    #[test]
+    fn profile_isolation_is_off_until_asked_for() {
+        assert!(!Settings::default().profile_isolation);
+        // Settings written before the field existed must not turn it on.
+        let older: Settings =
+            serde_json::from_str(r#"{"steam_path":null,"game_paths":{}}"#).unwrap();
+        assert!(!older.profile_isolation);
     }
 
     #[test]

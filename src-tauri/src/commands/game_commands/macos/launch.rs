@@ -165,6 +165,7 @@ pub(crate) async fn launch_game_with_mods_for_macos(
             &run_script,
             &runtime_game_path,
             settings.write_debug_logs_to_game,
+            None,
         )?;
         dequarantine_recursive(&runtime_game_path);
 

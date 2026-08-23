@@ -44,7 +44,7 @@ pub(crate) fn launch_macos_bepinex_wrapper(
         remove_r2modmac_debug_logs(&runtime_root);
     }
 
-    configure_macos_bepinex_script(&run_script, &runtime_root, write_debug_logs_to_game)?;
+    configure_macos_bepinex_script(&run_script, &runtime_root, write_debug_logs_to_game, None)?;
     dequarantine_recursive(&runtime_root);
 
     log::info!(

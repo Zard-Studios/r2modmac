@@ -14,7 +14,9 @@ pub(crate) fn configure_macos_bepinex_script(
     script_path: &std::path::Path,
     game_path: &std::path::Path,
     write_debug_logs_to_game: bool,
+    bepinex_root: Option<&std::path::Path>,
 ) -> Result<(), String> {
+    let profile_root = bepinex_root.map(|path| path.to_string_lossy().to_string());
     if !script_path.exists() {
         return Ok(());
     }
@@ -309,7 +311,10 @@ pub(crate) fn configure_macos_bepinex_script(
             &relative_launch_entry,
             launch_entry_uses_wrapper,
             write_debug_logs_to_game,
-            super::script_template::BepInExRoot::Game,
+            match &profile_root {
+                Some(path) => super::script_template::BepInExRoot::Profile(path),
+                None => super::script_template::BepInExRoot::Game,
+            },
         );
     } else {
         if let Ok(executable_re) = regex::Regex::new(r#"(?m)^executable_name=".*"$"#) {
@@ -430,5 +435,78 @@ mod doorstop_search_path_tests {
         assert!(!doorstop_search_path_points_at_core(
             "export DOORSTOP_MONO_DLL_SEARCH_PATH_OVERRIDE=\"\"\n"
         ));
+    }
+}
+
+#[cfg(test)]
+mod configured_script_tests {
+    use super::*;
+
+    fn world(label: &str) -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "r2modmac-script-{}-{}-{}",
+            label,
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("Example.app/Contents/MacOS")).unwrap();
+        std::fs::write(root.join("Example.app/Contents/MacOS/Example"), b"game").unwrap();
+        std::fs::create_dir_all(root.join("BepInEx/core")).unwrap();
+        // The writer refreshes an existing script rather than creating one.
+        std::fs::write(root.join("run_bepinex.sh"), b"#!/bin/sh\n").unwrap();
+        root
+    }
+
+    #[test]
+    fn a_written_script_keeps_pointing_at_the_game_by_default() {
+        let root = world("game-root");
+        let script = root.join("run_bepinex.sh");
+        configure_macos_bepinex_script(&script, &root, false, None).unwrap();
+
+        let written = std::fs::read_to_string(&script).unwrap();
+        assert!(written
+            .contains(r#"DOORSTOP_INVOKE_DLL_PATH="$BASEDIR/BepInEx/core/BepInEx.Preloader.dll""#));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_written_script_can_point_at_a_profile_instead() {
+        let root = world("profile-root");
+        let profile = root.join("profiles/abc/BepInEx");
+        std::fs::create_dir_all(profile.join("core")).unwrap();
+        let script = root.join("run_bepinex.sh");
+
+        configure_macos_bepinex_script(&script, &root, false, Some(&profile)).unwrap();
+
+        let written = std::fs::read_to_string(&script).unwrap();
+        let profile_text = profile.to_string_lossy().to_string();
+        assert!(written.contains(&format!(
+            r#"DOORSTOP_INVOKE_DLL_PATH="{profile_text}/core/BepInEx.Preloader.dll""#
+        )));
+        assert!(written.contains(&format!(
+            r#"DOORSTOP_MONO_DLL_SEARCH_PATH_OVERRIDE="{profile_text}/core""#
+        )));
+        // The doorstop library is loaded by the game, so it stays put.
+        assert!(written.contains("$BASEDIR/libdoorstop.dylib"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_profile_script_is_not_rewritten_on_every_launch() {
+        let root = world("stable");
+        let profile = root.join("profiles/abc/BepInEx");
+        std::fs::create_dir_all(profile.join("core")).unwrap();
+        let script = root.join("run_bepinex.sh");
+
+        configure_macos_bepinex_script(&script, &root, false, Some(&profile)).unwrap();
+        let first = std::fs::read_to_string(&script).unwrap();
+        configure_macos_bepinex_script(&script, &root, false, Some(&profile)).unwrap();
+        let second = std::fs::read_to_string(&script).unwrap();
+
+        assert_eq!(first, second);
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

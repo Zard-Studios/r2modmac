@@ -457,6 +457,7 @@ pub async fn install_to_game(
                 &run_script,
                 runtime_game_path,
                 load_settings_impl(&app).write_debug_logs_to_game,
+                None,
             )?;
             dequarantine_recursive(runtime_game_path);
         }
@@ -806,6 +807,7 @@ pub async fn install_to_game(
             &run_script,
             runtime_game_path,
             load_settings_impl(&app).write_debug_logs_to_game,
+            None,
         )?;
         sync_macos_runtime_disabled_state(runtime_game_path, false)?;
         dequarantine_recursive(runtime_game_path);
