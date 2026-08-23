@@ -4637,15 +4637,26 @@ async fn install_mod_bytes(
                 .map(|file| remap_disabled_macos_runtime_path(&file, install_into_disabled_runtime))
                 .collect::<Vec<_>>()
         };
+        // With isolation on the tree lives in the profile, so a mod is written
+        // there and Doorstop is pointed at it on launch. The loader files stay
+        // in the game, which is what the game loads.
+        let bepinex_root =
+            crate::commands::game_commands::bepinex_install_root(&app, &profile_id, game_dir)?;
+        let isolated = bepinex_root != game_dir;
+        let manifest_scope = if isolated {
+            PROFILE_MANIFEST_SCOPE
+        } else {
+            GAME_MANIFEST_SCOPE
+        };
         let backed_up_files = if managed_files.is_empty() {
             Vec::new()
         } else {
             backup_existing_mod_files(
                 &app,
                 &profile_id,
-                GAME_MANIFEST_SCOPE,
+                manifest_scope,
                 &mod_name,
-                game_dir,
+                &bepinex_root,
                 &managed_files,
             )?
         };
@@ -4689,12 +4700,12 @@ async fn install_mod_bytes(
         } else {
             extract_regular_mod_to_root(
                 &mut archive,
-                game_dir,
+                &bepinex_root,
                 &mod_name,
                 install_into_disabled_runtime,
             )?;
             if target_is_macos && !install_into_disabled_runtime {
-                migrate_root_plugins_into_bepinex(game_dir)?;
+                migrate_root_plugins_into_bepinex(&bepinex_root)?;
             }
         }
 
@@ -4710,9 +4721,9 @@ async fn install_mod_bytes(
             save_owned_mod_manifest(
                 &app,
                 &profile_id,
-                GAME_MANIFEST_SCOPE,
+                manifest_scope,
                 &mod_name,
-                game_dir,
+                &bepinex_root,
                 &managed_files,
                 &backed_up_files,
             )?;
@@ -8144,5 +8155,123 @@ mod doorstop_ini_across_games_tests {
                 "{id}: the previous profile is still referenced"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod profile_isolation_extraction_tests {
+    use super::*;
+    use std::io::{Cursor, Write};
+
+    fn fixture(entries: &[(&str, &[u8])]) -> Vec<u8> {
+        let mut bytes = Cursor::new(Vec::new());
+        {
+            let mut writer = zip::ZipWriter::new(&mut bytes);
+            let options = zip::write::FileOptions::default();
+            for (name, content) in entries {
+                writer.start_file(*name, options).unwrap();
+                writer.write_all(content).unwrap();
+            }
+            writer.finish().unwrap();
+        }
+        bytes.into_inner()
+    }
+
+    fn temp_root(label: &str) -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "r2modmac-isolation-{}-{}-{}",
+            label,
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    /// The same package, extracted against a game root and against a profile
+    /// root, has to produce the same tree in both places.
+    #[test]
+    fn a_mod_lands_in_whichever_root_it_is_given() {
+        let bytes = fixture(&[
+            ("manifest.json", b"{}"),
+            ("plugins/Mod.dll", b"payload"),
+            ("README.md", b"readme"),
+        ]);
+        let world = temp_root("both-roots");
+        let game = world.join("game");
+        let profile = world.join("profiles/abc");
+        fs::create_dir_all(&game).unwrap();
+        fs::create_dir_all(&profile).unwrap();
+
+        for root in [&game, &profile] {
+            let mut archive = zip::ZipArchive::new(Cursor::new(bytes.clone())).unwrap();
+            extract_regular_mod_to_root(&mut archive, root, "Author-Mod-1.0.0", false).unwrap();
+            assert!(
+                root.join("BepInEx/plugins/Author-Mod-1.0.0/Mod.dll")
+                    .is_file(),
+                "{:?} did not receive the payload",
+                root
+            );
+        }
+
+        // Isolation is only worth anything if the game stays clean when the
+        // profile is the target.
+        let clean = temp_root("profile-only");
+        let clean_game = clean.join("game");
+        let clean_profile = clean.join("profiles/abc");
+        fs::create_dir_all(&clean_game).unwrap();
+        fs::create_dir_all(&clean_profile).unwrap();
+        let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
+        extract_regular_mod_to_root(&mut archive, &clean_profile, "Author-Mod-1.0.0", false)
+            .unwrap();
+        assert!(
+            !clean_game.join("BepInEx").exists(),
+            "the game was written to"
+        );
+
+        fs::remove_dir_all(world).unwrap();
+        fs::remove_dir_all(clean).unwrap();
+    }
+
+    /// Two profiles of one game keep their own copies, which is the point of
+    /// the request: switching moves nothing.
+    #[test]
+    fn two_profiles_hold_different_mods_at_once() {
+        let world = temp_root("two-profiles");
+        let one = world.join("profiles/one");
+        let two = world.join("profiles/two");
+        fs::create_dir_all(&one).unwrap();
+        fs::create_dir_all(&two).unwrap();
+
+        let first = fixture(&[("manifest.json", b"{}"), ("plugins/First.dll", b"a")]);
+        let second = fixture(&[("manifest.json", b"{}"), ("plugins/Second.dll", b"b")]);
+        extract_regular_mod_to_root(
+            &mut zip::ZipArchive::new(Cursor::new(first)).unwrap(),
+            &one,
+            "Author-First-1.0.0",
+            false,
+        )
+        .unwrap();
+        extract_regular_mod_to_root(
+            &mut zip::ZipArchive::new(Cursor::new(second)).unwrap(),
+            &two,
+            "Author-Second-1.0.0",
+            false,
+        )
+        .unwrap();
+
+        assert!(one
+            .join("BepInEx/plugins/Author-First-1.0.0/First.dll")
+            .is_file());
+        assert!(two
+            .join("BepInEx/plugins/Author-Second-1.0.0/Second.dll")
+            .is_file());
+        assert!(!one.join("BepInEx/plugins/Author-Second-1.0.0").exists());
+        assert!(!two.join("BepInEx/plugins/Author-First-1.0.0").exists());
+
+        fs::remove_dir_all(world).unwrap();
     }
 }

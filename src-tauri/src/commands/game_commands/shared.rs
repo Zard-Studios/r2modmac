@@ -536,3 +536,73 @@ pub fn restore_mscorlib_vanilla(
     }
     Ok(())
 }
+
+/// Where a profile's BepInEx tree lives while it is installed.
+///
+/// With isolation off this is the game folder, as it has always been. With it
+/// on the tree sits in the profile, and Doorstop is pointed there at launch, so
+/// switching profiles moves no files (issue #40).
+pub(crate) fn choose_bepinex_root(
+    profile_isolation: bool,
+    profile_dir: &std::path::Path,
+    runtime_game_path: &std::path::Path,
+) -> std::path::PathBuf {
+    if profile_isolation {
+        profile_dir.to_path_buf()
+    } else {
+        runtime_game_path.to_path_buf()
+    }
+}
+
+/// The same choice, reading the setting for the caller.
+pub(crate) fn bepinex_install_root(
+    app: &tauri::AppHandle,
+    profile_id: &str,
+    runtime_game_path: &std::path::Path,
+) -> Result<std::path::PathBuf, String> {
+    let settings = crate::models::shared::load_settings_impl(app);
+    let profile_dir = crate::utils::paths::app_data_dir(app)
+        .map_err(|error| error.to_string())?
+        .join("profiles")
+        .join(profile_id);
+    Ok(choose_bepinex_root(
+        settings.profile_isolation,
+        &profile_dir,
+        runtime_game_path,
+    ))
+}
+
+#[cfg(test)]
+mod bepinex_root_choice_tests {
+    use super::choose_bepinex_root;
+    use std::path::Path;
+
+    const GAME: &str = "/Users/x/Library/Application Support/Steam/steamapps/common/Muck";
+    const PROFILE: &str = "/Users/x/Library/Application Support/com.r2modmac/profiles/abc";
+
+    #[test]
+    fn the_game_folder_stays_the_default() {
+        assert_eq!(
+            choose_bepinex_root(false, Path::new(PROFILE), Path::new(GAME)),
+            Path::new(GAME)
+        );
+    }
+
+    #[test]
+    fn isolation_puts_the_tree_in_the_profile() {
+        assert_eq!(
+            choose_bepinex_root(true, Path::new(PROFILE), Path::new(GAME)),
+            Path::new(PROFILE)
+        );
+    }
+
+    /// Two profiles for one game must not share a root, or isolation buys
+    /// nothing.
+    #[test]
+    fn two_profiles_of_the_same_game_land_apart() {
+        let one = choose_bepinex_root(true, Path::new("/p/one"), Path::new(GAME));
+        let two = choose_bepinex_root(true, Path::new("/p/two"), Path::new(GAME));
+        assert_ne!(one, two);
+        assert!(!one.starts_with(GAME) && !two.starts_with(GAME));
+    }
+}
