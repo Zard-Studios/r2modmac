@@ -741,15 +741,35 @@ pub async fn sync_profile_to_game(
         }));
     }
 
-    let stored_manifests = load_owned_mod_manifests(&app, &profile_id, GAME_MANIFEST_SCOPE)?
+    let all_manifests = load_owned_mod_manifests(&app, &profile_id, GAME_MANIFEST_SCOPE)?;
+    let (stored_manifests, foreign_manifests): (Vec<_>, Vec<_>) = all_manifests
         .into_iter()
-        .filter(|entry| manifest_matches_target_root(&entry.manifest, runtime_game_path))
-        .collect::<Vec<_>>();
+        .partition(|entry| manifest_matches_target_root(&entry.manifest, runtime_game_path));
+    // A mod removed and reinstalled on every Apply has lost its manifest to one
+    // of these two comparisons, and neither said so before.
+    for entry in &foreign_manifests {
+        log::info!(
+            "[sync_profile_to_game] Ignoring the manifest for {}: it was installed under {:?}, this run targets {:?}",
+            entry.manifest.mod_full_name,
+            entry.manifest.target_root_hint,
+            runtime_game_path
+        );
+    }
     let (manifests_to_remove, manifests_to_keep): (Vec<_>, Vec<_>) =
         stored_manifests.into_iter().partition(|entry| {
             let desired_full = desired_full_by_key.get(&entry.manifest.mod_key);
             match desired_full {
-                Some(full) => full != &entry.manifest.mod_full_name.to_lowercase(),
+                Some(full) => {
+                    let dropped = full != &entry.manifest.mod_full_name.to_lowercase();
+                    if dropped {
+                        log::info!(
+                            "[sync_profile_to_game] Dropping the manifest for {}: the profile asks for {}",
+                            entry.manifest.mod_full_name,
+                            full
+                        );
+                    }
+                    dropped
+                }
                 None => true,
             }
         });
