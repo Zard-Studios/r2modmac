@@ -18,11 +18,11 @@ pub struct ConfigRoot {
     pub file_names: Option<&'static [&'static str]>,
 }
 
-pub fn config_roots(
-    game_path: &Path,
-    runtime_game_path: &Path,
-    game_identifier: &str,
-) -> Vec<ConfigRoot> {
+/// `tree_root` is where the BepInEx folder lives: the game for a shared
+/// install, the profile for an isolated one. Reading it from the game folder
+/// instead restored a profile's configs beside an empty tree, where nothing
+/// would ever load them.
+pub fn config_roots(game_path: &Path, tree_root: &Path, game_identifier: &str) -> Vec<ConfigRoot> {
     if is_outerwilds_identifier(game_identifier) || is_outerwilds_game_path(game_path) {
         let owml_dir = get_owml_dir(game_path).unwrap_or_else(|| game_path.join("OWML"));
         return vec![ConfigRoot {
@@ -36,13 +36,12 @@ pub fn config_roots(
         return Vec::new();
     }
 
-    let bepinex_dir = if runtime_game_path.join("BepInEx").is_dir()
-        || !runtime_game_path.join("BepInEx_DISABLED").is_dir()
-    {
-        runtime_game_path.join("BepInEx")
-    } else {
-        runtime_game_path.join("BepInEx_DISABLED")
-    };
+    let bepinex_dir =
+        if tree_root.join("BepInEx").is_dir() || !tree_root.join("BepInEx_DISABLED").is_dir() {
+            tree_root.join("BepInEx")
+        } else {
+            tree_root.join("BepInEx_DISABLED")
+        };
 
     vec![ConfigRoot {
         key: "bepinex".to_string(),
@@ -63,7 +62,7 @@ pub fn apply_profile_configs(
     app_data_dir: &Path,
     profile_id: &str,
     game_path: &Path,
-    runtime_game_path: &Path,
+    tree_root: &Path,
     game_identifier: &str,
 ) {
     scoped_track_event!(
@@ -74,7 +73,7 @@ pub fn apply_profile_configs(
             ctx.add_debug_arg("game", TrackEventDebugArg::String(game_identifier));
         }
     );
-    let roots = config_roots(game_path, runtime_game_path, game_identifier);
+    let roots = config_roots(game_path, tree_root, game_identifier);
     if roots.is_empty() {
         return;
     }
@@ -135,7 +134,7 @@ pub fn capture_profile_configs(
     app_data_dir: &Path,
     profile_id: &str,
     game_path: &Path,
-    runtime_game_path: &Path,
+    tree_root: &Path,
     game_identifier: &str,
 ) -> usize {
     scoped_track_event!(
@@ -146,7 +145,7 @@ pub fn capture_profile_configs(
             ctx.add_debug_arg("game", TrackEventDebugArg::String(game_identifier));
         }
     );
-    let roots = config_roots(game_path, runtime_game_path, game_identifier);
+    let roots = config_roots(game_path, tree_root, game_identifier);
     if roots.is_empty() {
         return 0;
     }
@@ -406,6 +405,22 @@ mod tests {
         let roots = config_roots(&game, &game, "lethal-company");
         assert_eq!(roots[0].live_dir, game.join("BepInEx").join("config"));
 
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn an_isolated_profile_keeps_its_configs_with_its_tree() {
+        // Restoring them beside the game left the configs where no mod would
+        // ever read them, and put a stray BepInEx folder back in the game.
+        let root = temp_dir("isolated-configs");
+        let game = root.join("game");
+        let profile = root.join("profile");
+        fs::create_dir_all(&game).unwrap();
+        fs::create_dir_all(profile.join("BepInEx")).unwrap();
+
+        let roots = config_roots(&game, &profile, "ultrakill");
+
+        assert_eq!(roots[0].live_dir, profile.join("BepInEx").join("config"));
         fs::remove_dir_all(root).unwrap();
     }
 

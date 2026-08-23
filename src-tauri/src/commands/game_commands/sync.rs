@@ -126,7 +126,7 @@ pub async fn sync_profile_to_game(
         &app_data_dir,
         &profile_id,
         game_path,
-        runtime_game_path,
+        &bepinex_root,
         &game_identifier,
     );
 
@@ -620,7 +620,7 @@ pub async fn sync_profile_to_game(
                 &app_data_dir,
                 &profile_id,
                 game_path,
-                runtime_game_path,
+                &bepinex_root,
                 &game_identifier,
             );
         }
@@ -1054,7 +1054,7 @@ pub async fn sync_profile_to_game(
             &app_data_dir,
             &profile_id,
             game_path,
-            runtime_game_path,
+            &bepinex_root,
             &game_identifier,
         );
     }

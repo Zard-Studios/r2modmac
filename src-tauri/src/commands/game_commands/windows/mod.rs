@@ -551,7 +551,7 @@ pub(super) fn launch_windows_steam_game(
                                 return Err(if steam_was_running {
                                     "Steam accepted the launch but the game did not start. Open Steam to check for a prompt or an error waiting for you there.".to_string()
                                 } else {
-                                    "Steam was not running, so r2modmac started it first — but the game did not start in time. Check the Steam window and try again.".to_string()
+                                    "The game did not start in time. Check the Steam window and try again.".to_string()
                                 });
                             }
                         }
@@ -677,7 +677,7 @@ pub(super) fn launch_windows_steam_game(
             Err(if steam_was_running {
                 "Steam accepted the launch but the game did not start. Open Steam to check for a prompt or an error waiting for you there.".to_string()
             } else {
-                "Steam was not running, so r2modmac started it first — but the game did not start in time. Steam may still be signing in; check the Steam window, then press Play again.".to_string()
+                "The game did not start in time. Steam may still be signing in; check the Steam window, then press Play again.".to_string()
             })
         }
     }
