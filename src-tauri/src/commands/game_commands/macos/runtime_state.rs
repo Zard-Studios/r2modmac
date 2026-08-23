@@ -74,13 +74,6 @@ fn rename_runtime_items(
     Ok(())
 }
 
-pub(crate) fn sync_macos_runtime_disabled_state(
-    game_path: &std::path::Path,
-    disable: bool,
-) -> Result<(), String> {
-    sync_macos_runtime_disabled_state_rooted(game_path, disable, None)
-}
-
 /// The same toggle with the BepInEx tree somewhere other than the game.
 ///
 /// An isolated profile keeps the tree, while the loader that boots it stays
