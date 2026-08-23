@@ -4729,8 +4729,16 @@ async fn install_mod_bytes(
             )?;
         }
 
-        // LEGACY MODE: Also save to profile cache folder
-        if use_profile_cache.unwrap_or(false) {
+        // LEGACY MODE: Also save to profile cache folder.
+        // Skipped under isolation: the profile is already where the mod was
+        // installed, so the cache copy would write the same files twice.
+        if use_profile_cache.unwrap_or(false) && isolated {
+            log::debug!(
+                "[install_mod] Profile cache skipped for {}: the profile is the install target",
+                mod_name
+            );
+        }
+        if use_profile_cache.unwrap_or(false) && !isolated {
             let profile_dir = crate::utils::paths::app_data_dir(&app)
                 .map_err(|e| e.to_string())?
                 .join("profiles")
@@ -8234,6 +8242,33 @@ mod profile_isolation_extraction_tests {
 
         fs::remove_dir_all(world).unwrap();
         fs::remove_dir_all(clean).unwrap();
+    }
+
+    /// The legacy cache is skipped under isolation, but if the two ever ran
+    /// together the second write must not corrupt the first.
+    #[test]
+    fn extracting_the_same_mod_twice_into_one_root_is_harmless() {
+        let bytes = fixture(&[("manifest.json", b"{}"), ("plugins/Mod.dll", b"payload")]);
+        let root = temp_root("twice");
+        let profile = root.join("profiles/abc");
+        fs::create_dir_all(&profile).unwrap();
+
+        for _ in 0..2 {
+            let mut archive = zip::ZipArchive::new(Cursor::new(bytes.clone())).unwrap();
+            extract_regular_mod_to_root(&mut archive, &profile, "Author-Mod-1.0.0", false).unwrap();
+        }
+
+        let installed = profile.join("BepInEx/plugins/Author-Mod-1.0.0/Mod.dll");
+        assert_eq!(fs::read(&installed).unwrap(), b"payload");
+        assert_eq!(
+            fs::read_dir(profile.join("BepInEx/plugins"))
+                .unwrap()
+                .count(),
+            1,
+            "a second install must not leave a duplicate folder"
+        );
+
+        fs::remove_dir_all(root).unwrap();
     }
 
     /// Two profiles of one game keep their own copies, which is the point of
