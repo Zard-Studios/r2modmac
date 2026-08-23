@@ -4873,7 +4873,7 @@ async fn install_mod_bytes(
             // Verify the loader landed where the health check will look for it, so a
             // "successful" install that leaves an unusable runtime is visible here
             // rather than only as a downstream repair loop.
-            let core_dir = game_dir
+            let core_dir = bepinex_root
                 .join(if install_into_disabled_runtime {
                     "BepInEx_DISABLED"
                 } else {

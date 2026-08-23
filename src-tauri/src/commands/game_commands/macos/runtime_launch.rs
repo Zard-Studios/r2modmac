@@ -143,10 +143,6 @@ pub(crate) fn has_complete_macos_bepinex_runtime_rooted(
     has_core && has_doorstop_payload && has_script
 }
 
-pub(crate) fn has_complete_disabled_macos_bepinex_runtime(game_path: &std::path::Path) -> bool {
-    has_complete_disabled_macos_bepinex_runtime_rooted(game_path, None)
-}
-
 /// The vanilla twin of [`has_complete_macos_bepinex_runtime_rooted`].
 pub(crate) fn has_complete_disabled_macos_bepinex_runtime_rooted(
     game_path: &std::path::Path,
@@ -236,7 +232,9 @@ mod rooted_runtime_check_tests {
             Some(&profile)
         ));
         // Before the health check knew about isolation this read as missing.
-        assert!(!has_complete_disabled_macos_bepinex_runtime(&game));
+        assert!(!has_complete_disabled_macos_bepinex_runtime_rooted(
+            &game, None
+        ));
 
         std::fs::remove_dir_all(root).unwrap();
     }

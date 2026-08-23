@@ -131,10 +131,11 @@ pub async fn sync_profile_to_game(
     );
 
     log::info!(
-        "[sync_profile_to_game] Syncing profile {} to game {:?} (runtime root {:?}, legacy_cache: {}, finalize: {})",
+        "[sync_profile_to_game] Syncing profile {} to game {:?} (runtime root {:?}, BepInEx root {:?}, legacy_cache: {}, finalize: {})",
         profile_id,
         game_path,
         runtime_game_path,
+        bepinex_root,
         use_cache,
         finalize
     );
@@ -903,15 +904,20 @@ pub async fn sync_profile_to_game(
 
     // to_install: any profile key not present at the desired version in game
     // Special case: BepInExPack installs to game root, not plugins - check if BepInEx folder exists
+    // Looked for under `bepinex_root`, which is the profile when it is isolated:
+    // asking the game folder there answers no on every Apply, and the pack gets
+    // reinstalled over a runtime that was already in place.
     let bepinex_installed = if profile["platform"].as_str() == Some("mac") {
         if profile_is_vanilla {
-            has_complete_disabled_macos_bepinex_runtime(runtime_game_path)
-                || has_complete_macos_bepinex_runtime(runtime_game_path)
+            has_complete_disabled_macos_bepinex_runtime_rooted(
+                runtime_game_path,
+                Some(&bepinex_root),
+            ) || has_complete_macos_bepinex_runtime_rooted(runtime_game_path, Some(&bepinex_root))
         } else {
-            has_complete_macos_bepinex_runtime(runtime_game_path)
+            has_complete_macos_bepinex_runtime_rooted(runtime_game_path, Some(&bepinex_root))
         }
     } else {
-        windows_bepinex_runtime_is_installed(game_path)
+        windows_bepinex_runtime_is_installed(&bepinex_root)
     };
     log::debug!(
         "[sync_profile_to_game] bepinex_installed={} (BepInExPack is skipped from to_install when true)",
@@ -1101,6 +1107,31 @@ mod tests {
 
         std::fs::write(core.join("BepInEx.Preloader.Core.dll"), b"").unwrap();
         assert!(windows_bepinex_runtime_is_installed(&root));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn an_isolated_runtime_counts_as_installed_although_the_game_folder_is_bare() {
+        // The regression this guards: asking the game folder about a profile
+        // that keeps its tree elsewhere answers no, so every Apply queued
+        // BepInExPack again over a runtime that was already there.
+        let root = std::env::temp_dir().join(format!(
+            "r2modmac-sync-isolated-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let game = root.join("game");
+        let profile = root.join("profile");
+        let core = profile.join("BepInEx/core");
+        std::fs::create_dir_all(&core).unwrap();
+        std::fs::create_dir_all(&game).unwrap();
+        std::fs::write(core.join("BepInEx.Preloader.dll"), b"").unwrap();
+
+        assert!(windows_bepinex_runtime_is_installed(&profile));
+        assert!(!windows_bepinex_runtime_is_installed(&game));
         std::fs::remove_dir_all(root).unwrap();
     }
 
