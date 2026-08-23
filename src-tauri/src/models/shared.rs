@@ -203,10 +203,11 @@ pub struct Settings {
     pub keybinds: BTreeMap<String, String>,
     /// Keep each profile's BepInEx tree in the profile instead of the game.
     ///
-    /// Doorstop is pointed at the profile's preloader, and BepInEx roots itself
-    /// two directories above it, so plugins and configs follow. Switching
-    /// profiles then moves no files at all (issue #40).
-    #[serde(default)]
+    /// On, and deliberately absent from Preferences: every other manager works
+    /// this way, so it is how the app behaves rather than a choice to explain.
+    /// The file still honours `false`, which is the escape hatch for a game
+    /// that turns out to need its tree beside the executable.
+    #[serde(default = "default_true")]
     pub profile_isolation: bool,
 }
 
@@ -239,7 +240,7 @@ impl Settings {
             default_profile: None,
             active_theme: None,
             keybinds: BTreeMap::new(),
-            profile_isolation: false,
+            profile_isolation: true,
         }
     }
 }
@@ -826,12 +827,16 @@ mod settings_stable_order_tests {
     }
 
     #[test]
-    fn profile_isolation_is_off_until_asked_for() {
-        assert!(!Settings::default().profile_isolation);
-        // Settings written before the field existed must not turn it on.
+    fn profile_isolation_is_on_and_stays_settable_by_hand() {
+        assert!(Settings::default().profile_isolation);
+        // A settings file written before the field existed still gets it.
         let older: Settings =
             serde_json::from_str(r#"{"steam_path":null,"game_paths":{}}"#).unwrap();
-        assert!(!older.profile_isolation);
+        assert!(older.profile_isolation);
+        // The escape hatch: a game that needs its tree beside the executable.
+        let opted_out: Settings =
+            serde_json::from_str(r#"{"steam_path":null,"profile_isolation":false}"#).unwrap();
+        assert!(!opted_out.profile_isolation);
     }
 
     #[test]

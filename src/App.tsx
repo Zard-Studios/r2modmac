@@ -356,7 +356,6 @@ function App() {
   // Which panel Preferences should land on, when a command names one.
   const [preferencesPanel, setPreferencesPanel] = useState<PreferencesTarget | null>(null)
   const [legacyInstallMode, setLegacyInstallMode] = useState(false)
-  const [profileIsolation, setProfileIsolation] = useState(false)
   const [askVersionBeforeInstall, setAskVersionBeforeInstall] = useState(false)
   const [installInParallel, setInstallInParallel] = useState(true)
   const [confirmBeforeApplyToGame, setConfirmBeforeApplyToGame] = useState(false)
@@ -845,7 +844,6 @@ function App() {
     // Load app preferences
     window.ipcRenderer.getSettings().then((s: AppSettings) => {
       setLegacyInstallMode(!!s.legacy_install_mode);
-      setProfileIsolation(!!s.profile_isolation);
       setAskVersionBeforeInstall(s.ask_version_before_install ?? false);
       setInstallInParallel(s.install_in_parallel ?? true);
       setConfirmBeforeApplyToGame(!!s.confirm_before_apply_to_game);
@@ -2614,7 +2612,6 @@ function App() {
 
   const handleSavePreferences = async (newSettings: PreferencesSettings) => {
     setLegacyInstallMode(newSettings.legacy_install_mode);
-    setProfileIsolation(newSettings.profile_isolation);
     setAskVersionBeforeInstall(newSettings.ask_version_before_install);
     setInstallInParallel(newSettings.install_in_parallel);
     setConfirmBeforeApplyToGame(newSettings.confirm_before_apply_to_game);
@@ -2637,7 +2634,6 @@ function App() {
     await window.ipcRenderer.saveSettings({
       ...currentSettings,
       legacy_install_mode: newSettings.legacy_install_mode,
-      profile_isolation: newSettings.profile_isolation,
       ask_version_before_install: newSettings.ask_version_before_install,
       install_in_parallel: newSettings.install_in_parallel,
       confirm_before_apply_to_game: newSettings.confirm_before_apply_to_game,
@@ -3568,7 +3564,6 @@ function App() {
         setShowPreferences={setShowPreferences}
         preferences={{
           legacy_install_mode: legacyInstallMode,
-          profile_isolation: profileIsolation,
           ask_version_before_install: askVersionBeforeInstall,
           install_in_parallel: installInParallel,
           confirm_before_apply_to_game: confirmBeforeApplyToGame,
