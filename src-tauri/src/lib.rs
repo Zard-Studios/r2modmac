@@ -1,4 +1,15 @@
 pub mod commands;
+
+/// Whether `<profile>/BepInEx` is scratch space the app may delete at startup.
+///
+/// It was, back when the tree always lived beside the executable and the copy
+/// under the profile was only staging. With an isolated profile that same path
+/// is where the mods actually run from, so deleting it would wipe the profile
+/// on every launch.
+pub fn should_clean_profile_staging(legacy_install_mode: bool, profile_isolation: bool) -> bool {
+    !legacy_install_mode && !profile_isolation
+}
+
 #[cfg(debug_assertions)]
 mod dev_bridge;
 pub mod models;
@@ -302,7 +313,10 @@ pub fn run() {
                     let _ = models::shared::save_settings_impl(&app.handle(), &settings);
                 }
 
-                if !settings.legacy_install_mode {
+                if should_clean_profile_staging(
+                    settings.legacy_install_mode,
+                    settings.profile_isolation,
+                ) {
                     // Off the startup path. This walks every profile and deletes
                     // its BepInEx tree, which on a large install is hundreds of
                     // MB of recursive removal — and it ran inside `setup()`, so
@@ -335,7 +349,7 @@ pub fn run() {
                         }
                     });
                 } else {
-                    log::debug!("[startup] Legacy mode ON - keeping profile cache");
+                    log::debug!("[startup] Keeping the profile tree");
                 }
             }
 
@@ -565,5 +579,27 @@ mod app_log_storage_tests {
         assert!(directory.join("app.log.1").exists());
 
         std::fs::remove_dir_all(directory).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod profile_staging_tests {
+    use super::should_clean_profile_staging;
+
+    #[test]
+    fn an_isolated_profile_is_never_cleaned() {
+        // The tree under the profile is the installation, not a copy of one.
+        assert!(!should_clean_profile_staging(false, true));
+        assert!(!should_clean_profile_staging(true, true));
+    }
+
+    #[test]
+    fn staging_beside_the_game_is_still_cleaned() {
+        assert!(should_clean_profile_staging(false, false));
+    }
+
+    #[test]
+    fn legacy_mode_keeps_its_cache_as_before() {
+        assert!(!should_clean_profile_staging(true, false));
     }
 }
