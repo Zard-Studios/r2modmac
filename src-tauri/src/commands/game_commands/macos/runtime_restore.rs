@@ -83,9 +83,12 @@ pub(crate) fn copy_macos_bepinex_runtime_root(
     Ok(())
 }
 
+/// `tree_root` is wherever the BepInEx folder lives — the game for a shared
+/// install, the profile for an isolated one — which is not always where the
+/// loader and this config sit.
 pub(crate) fn configure_macos_doorstop_target_assembly(
     config_path: &std::path::Path,
-    game_path: &std::path::Path,
+    tree_root: &std::path::Path,
 ) -> Result<(), String> {
     if !config_path.exists() {
         return Ok(());
@@ -97,7 +100,7 @@ pub(crate) fn configure_macos_doorstop_target_assembly(
     // not on disk makes the game start unmodded with no visible error, so pick
     // the entry point that actually shipped and only fall back to the BepInEx 5
     // name when nothing is installed yet.
-    let core_dir = game_path.join("BepInEx").join("core");
+    let core_dir = tree_root.join("BepInEx").join("core");
     let preloader_name = [
         "BepInEx.Unity.IL2CPP.dll",
         "BepInEx.Unity.Mono.Preloader.dll",
@@ -115,7 +118,7 @@ pub(crate) fn configure_macos_doorstop_target_assembly(
         .join(preloader_name)
         .to_string_lossy()
         .replace('\\', "/");
-    let core_path = game_path
+    let core_path = tree_root
         .join("BepInEx")
         .join("core")
         .to_string_lossy()
@@ -175,6 +178,22 @@ pub(crate) async fn ensure_macos_bepinex_runtime_present(
     let has_explicit_bepinex_pack = bepinex_full_name.is_some();
 
     let runtime_root = resolve_macos_runtime_root(game_path);
+
+    // An isolated profile already keeps a complete tree of its own, and copying
+    // it beside the game would put back the shared installation this is meant
+    // to avoid. Only the loader config next to the game needs adjusting, so it
+    // points at the tree rather than at a folder that is no longer there.
+    let tree_root =
+        crate::commands::game_commands::bepinex_install_root(app, profile_id, &runtime_root)?;
+    if tree_root != runtime_root && has_complete_macos_bepinex_runtime(&tree_root) {
+        normalize_macos_doorstop_config_file(&runtime_root.join("doorstop_config.ini"))?;
+        configure_macos_doorstop_target_assembly(
+            &runtime_root.join("doorstop_config.ini"),
+            &tree_root,
+        )?;
+        return Ok(());
+    }
+
     let runtime_has_complete = has_complete_macos_bepinex_runtime(&runtime_root);
     let runtime_requires_fix = runtime_has_complete
         && !has_explicit_bepinex_pack

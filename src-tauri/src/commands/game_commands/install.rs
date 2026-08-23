@@ -799,19 +799,24 @@ pub async fn install_to_game(
         }
 
         migrate_root_plugins_into_bepinex(runtime_game_path)?;
+        let tree_root = bepinex_install_root(&app, &profile_id, runtime_game_path)?;
         normalize_macos_doorstop_config_file(&runtime_game_path.join("doorstop_config.ini"))?;
         configure_macos_doorstop_target_assembly(
             &runtime_game_path.join("doorstop_config.ini"),
-            runtime_game_path,
+            &tree_root,
         )?;
         let run_script = canonicalize_macos_bepinex_script(runtime_game_path)?;
+        // Apply leaves the script pointing at the tree it just wrote, so that
+        // starting the game from Steam rather than from here still loads the
+        // profile's mods instead of quietly running unmodded.
+        let script_bepinex_dir =
+            (tree_root != *runtime_game_path).then(|| tree_root.join("BepInEx"));
         configure_macos_bepinex_script(
             &run_script,
             runtime_game_path,
             load_settings_impl(&app).write_debug_logs_to_game,
-            None,
+            script_bepinex_dir.as_deref(),
         )?;
-        let tree_root = bepinex_install_root(&app, &profile_id, runtime_game_path)?;
         sync_macos_runtime_disabled_state_rooted(runtime_game_path, false, Some(&tree_root))?;
         dequarantine_recursive(runtime_game_path);
         if manage_steam_launch {
