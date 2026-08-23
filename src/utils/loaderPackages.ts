@@ -44,7 +44,13 @@ export const isLoaderPackage = (
     if (!runtime) return false;
     const key = packageKey(fullName);
     if (loaderPackageIds(runtime).some(id => id.toLowerCase() === key)) return true;
-    if (runtime === 'bepinex') return key.includes('bepinexpack');
+    // The package part only, and matched whole: mods built around the runtime
+    // carry its name — RoR2BepInExPack and BepInEx_GUI among them — and reading
+    // them as the loader made Apply skip installing them entirely.
+    if (runtime === 'bepinex') {
+        const pkg = key.slice(key.indexOf('-') + 1);
+        return pkg === 'bepinexpack' || pkg.startsWith('bepinexpack_');
+    }
     if (runtime === 'owml') return key === 'owml' || key.endsWith('-owml');
     if (runtime === 'lovely') return key === 'lovely' || key.endsWith('-lovely');
     return false;

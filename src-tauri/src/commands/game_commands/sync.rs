@@ -928,7 +928,7 @@ pub async fn sync_profile_to_game(
         .iter()
         .filter(|pm_key| {
             // Skip BepInExPack if BepInEx is already installed
-            if pm_key.contains("bepinex") && bepinex_installed {
+            if key_is_bepinex_runtime_pack(pm_key) && bepinex_installed {
                 return false;
             }
 
@@ -1078,6 +1078,16 @@ pub async fn sync_profile_to_game(
 /// a bare directory check would report the runtime as installed and make
 /// `to_install` skip BepInExPack forever - the runtime could then never be
 /// reinstalled from the app.
+/// Whether a profile key names the BepInEx runtime itself.
+///
+/// Asking whether the key merely contains "bepinex" also caught the mods built
+/// around it — BepInEx_GUI and RoR2BepInExPack among them — so Apply left them
+/// out and then reported that the profile was fully applied.
+fn key_is_bepinex_runtime_pack(key: &str) -> bool {
+    let package = key.split_once('-').map(|(_, name)| name).unwrap_or(key);
+    package == "bepinexpack" || package.starts_with("bepinexpack_")
+}
+
 fn windows_bepinex_runtime_is_installed(game_path: &std::path::Path) -> bool {
     [
         game_path.join("BepInEx").join("core"),
@@ -1089,7 +1099,25 @@ fn windows_bepinex_runtime_is_installed(game_path: &std::path::Path) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{ensure_finalize_ready, windows_bepinex_runtime_is_installed};
+    use super::{
+        ensure_finalize_ready, key_is_bepinex_runtime_pack, windows_bepinex_runtime_is_installed,
+    };
+
+    #[test]
+    fn only_the_runtime_pack_is_skipped_once_bepinex_is_installed() {
+        assert!(key_is_bepinex_runtime_pack("bepinex-bepinexpack"));
+        assert!(key_is_bepinex_runtime_pack("bbepis-bepinexpack"));
+        assert!(key_is_bepinex_runtime_pack("bepinex-bepinexpack_muck"));
+        assert!(key_is_bepinex_runtime_pack("bepinex-bepinexpack_gtfo"));
+
+        // Mods that merely carry the name: they were silently never installed,
+        // while Apply still reported the profile as fully applied.
+        assert!(!key_is_bepinex_runtime_pack("riskofthunder-bepinex_gui"));
+        assert!(!key_is_bepinex_runtime_pack(
+            "riskofthunder-ror2bepinexpack"
+        ));
+        assert!(!key_is_bepinex_runtime_pack("someone-bepinexconfigmanager"));
+    }
 
     #[test]
     fn empty_core_folder_does_not_count_as_an_installed_runtime() {

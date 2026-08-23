@@ -35,6 +35,14 @@ test('a community BepInEx fork still counts as the BepInEx runtime', () => {
     assert.ok(!isLoaderPackage('bepinex', 'Someone-SomeMod-1.0.0'));
 });
 
+test('a mod named after BepInEx is not the runtime', () => {
+    // These were read as the loader, so Apply skipped installing them and then
+    // reported the profile as fully applied with the mods missing.
+    assert.ok(!isLoaderPackage('bepinex', 'RiskofThunder-RoR2BepInExPack-1.9.0'));
+    assert.ok(!isLoaderPackage('bepinex', 'RiskofThunder-BepInEx_GUI-3.0.1'));
+    assert.ok(isLoaderPackage('bepinex', 'bbepis-BepInExPack-5.4.2121'));
+});
+
 test('a staged Hell2Modding install counts as the pending runtime', () => {
     const staged = profileWith({
         uuid4: 'loader',
