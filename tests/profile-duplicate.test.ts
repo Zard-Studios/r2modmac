@@ -15,17 +15,21 @@ import type { Profile } from '../src/types/profile.ts';
 interface FakeBackend {
     copies: { source: string; destination: string }[];
     saved: Profile[][];
+    deletes: { profileId: string; gameIdentifier?: string; platform?: string; preserveSharedRuntime?: boolean }[];
 }
 
 function installFakeEnvironment(): FakeBackend {
-    const backend: FakeBackend = { copies: [], saved: [] };
+    const backend: FakeBackend = { copies: [], saved: [], deletes: [] };
     (globalThis as Record<string, unknown>).window = {
         ipcRenderer: {
             duplicateProfileFolder: async (source: string, destination: string) => {
                 backend.copies.push({ source, destination });
                 return true;
             },
-            deleteProfileFolder: async () => true,
+            deleteProfileFolder: async (profileId: string, gameIdentifier?: string, platform?: string, preserveSharedRuntime?: boolean) => {
+                backend.deletes.push({ profileId, gameIdentifier, platform, preserveSharedRuntime });
+                return true;
+            },
             saveProfiles: async (profiles: Profile[]) => {
                 backend.saved.push(profiles);
                 return true;
@@ -152,7 +156,7 @@ test('deleting a profile tells the others for that game they are no longer appli
     // Deleting strips BepInEx out of the *game* folder, whichever profile put it
     // there. Left unmarked, the survivors claim to be in sync while the game
     // sits empty — nothing looks wrong until an Apply reinstalls everything.
-    installFakeEnvironment();
+    const backend = installFakeEnvironment();
     const store = await freshStore();
     store.getState().setProfiles([
         profile({ id: 'keep', name: 'Original', needs_sync: false }),
@@ -163,6 +167,24 @@ test('deleting a profile tells the others for that game they are no longer appli
 
     const survivor = store.getState().profiles.find((p: Profile) => p.id === 'keep')!;
     assert.equal(survivor.needs_sync, true);
+    assert.equal(
+        backend.deletes[0]?.preserveSharedRuntime,
+        true,
+        'a sibling profile must keep the shared loader and configs installed'
+    );
+});
+
+test('a profile on another platform does not preserve this game runtime', async () => {
+    const backend = installFakeEnvironment();
+    const store = await freshStore();
+    store.getState().setProfiles([
+        profile({ id: 'windows', platform: 'windows' }),
+        profile({ id: 'mac', platform: 'mac' }),
+    ]);
+
+    await store.getState().deleteProfile('windows', 'lethal-company');
+
+    assert.equal(backend.deletes[0]?.preserveSharedRuntime, false);
 });
 
 test('a profile for a different game is left alone', async () => {

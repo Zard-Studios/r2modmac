@@ -198,11 +198,24 @@ export const useProfileStore = create<ProfileState>((set) => ({
     selectProfile: (profileId) => set({ activeProfileId: profileId }),
 
     deleteProfile: async (profileId, gameIdentifier?) => {
-        const existingProfile = useProfileStore.getState().profiles.find((p) => p.id === profileId);
+        const profiles = useProfileStore.getState().profiles;
+        const existingProfile = profiles.find((p) => p.id === profileId);
+        const affectedGame = gameIdentifier ?? existingProfile?.gameIdentifier;
+        const effectivePlatform = existingProfile?.platform === 'mac' ? 'mac' : 'windows';
+        const preserveSharedRuntime = Boolean(affectedGame && profiles.some((profile) => (
+            profile.id !== profileId
+            && profile.gameIdentifier === affectedGame
+            && (profile.platform === 'mac' ? 'mac' : 'windows') === effectivePlatform
+        )));
         // First delete from disk, THEN update state
         // This ensures if there's an error, we don't lose state
         try {
-            await window.ipcRenderer.deleteProfileFolder(profileId, gameIdentifier, existingProfile?.platform);
+            await window.ipcRenderer.deleteProfileFolder(
+                profileId,
+                affectedGame,
+                existingProfile?.platform,
+                preserveSharedRuntime
+            );
         } catch (e) {
             console.error("Failed to delete profile folder:", e);
             // Continue anyway to clean up state
@@ -217,8 +230,6 @@ export const useProfileStore = create<ProfileState>((set) => ({
         // Marking them is deliberately generous: re-applying only installs what
         // is genuinely missing, so an unnecessary prompt costs a moment, while a
         // missing one costs a silent mismatch of the kind this is fixing.
-        const affectedGame = gameIdentifier ?? existingProfile?.gameIdentifier;
-
         set((state) => {
             const updatedProfiles = state.profiles
                 .filter(p => p.id !== profileId)

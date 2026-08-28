@@ -18,6 +18,56 @@ fn is_bepinex_shell_script(name: &str) -> bool {
     lower.ends_with(".sh") && lower.contains("bepinex")
 }
 
+/// Deleting one profile must not uninstall the game while another profile for
+/// that game still exists. Besides breaking the survivor, the old behaviour
+/// removed the shared BepInEx config directory even when the deleted profile
+/// was empty (issue #41).
+fn has_surviving_profile_for_game(
+    profiles: &[serde_json::Value],
+    deleted_profile_id: &str,
+    game_identifier: &str,
+    platform: Option<&str>,
+) -> bool {
+    let wanted = crate::models::shared::normalize_for_matching(game_identifier);
+    profiles.iter().any(|profile| {
+        let same_platform = platform.map_or(true, |wanted_platform| {
+            let wanted_platform = if wanted_platform == "mac" {
+                "mac"
+            } else {
+                "windows"
+            };
+            let profile_platform = profile
+                .get("platform")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("windows");
+            profile_platform == wanted_platform
+        });
+        profile.get("id").and_then(serde_json::Value::as_str) != Some(deleted_profile_id)
+            && same_platform
+            && profile
+                .get("gameIdentifier")
+                .and_then(serde_json::Value::as_str)
+                .map(crate::models::shared::normalize_for_matching)
+                .as_deref()
+                == Some(wanted.as_str())
+    })
+}
+
+fn should_cleanup_game_for_deleted_profile(
+    app_data_dir: &Path,
+    deleted_profile_id: &str,
+    game_identifier: &str,
+    platform: Option<&str>,
+) -> bool {
+    let Ok(raw) = fs::read_to_string(app_data_dir.join("profiles.json")) else {
+        return false;
+    };
+    let Ok(profiles) = serde_json::from_str::<Vec<serde_json::Value>>(&raw) else {
+        return false;
+    };
+    !has_surviving_profile_for_game(&profiles, deleted_profile_id, game_identifier, platform)
+}
+
 #[command]
 pub fn get_profiles(app: AppHandle) -> Result<Vec<serde_json::Value>, String> {
     let profile_path = crate::utils::paths::app_data_dir(&app)
@@ -189,13 +239,33 @@ pub async fn delete_profile_folder(
     profile_id: String,
     game_identifier: Option<String>,
     platform: Option<String>,
+    preserve_shared_runtime: Option<bool>,
 ) -> Result<bool, String> {
-    let profile_dir = crate::utils::paths::app_data_dir(&app)
-        .unwrap()
+    let app_data_dir = crate::utils::paths::app_data_dir(&app)
+        .map_err(|error| format!("Failed to resolve the app data directory: {error}"))?;
+    let profile_dir = app_data_dir
         .join("profiles")
-        .join(&profile_id);
+        .join(safe_profile_dir_name(&profile_id)?);
 
-    // If game_identifier is provided, clean up ALL BepInEx-related files from the game folder
+    // Game-side runtime files are shared routing/bootstrap state. Remove them
+    // only with the last profile for this game; otherwise deleting an empty or
+    // inactive profile would uninstall the survivor and erase legacy configs.
+    let game_identifier = game_identifier.filter(|game_id| {
+        let cleanup_game = !preserve_shared_runtime.unwrap_or(false)
+            && should_cleanup_game_for_deleted_profile(
+                &app_data_dir,
+                &profile_id,
+                game_id,
+                platform.as_deref(),
+            );
+        if !cleanup_game {
+            log::debug!(
+                "[delete_profile] Keeping game runtime because another profile exists for {}",
+                game_id
+            );
+        }
+        cleanup_game
+    });
     if let Some(game_id) = game_identifier {
         let is_mac_profile = platform.as_deref() == Some("mac");
         let is_balatro_game = is_balatro_identifier(&game_id);
@@ -388,9 +458,7 @@ pub async fn delete_profile_folder(
         }
     }
 
-    if let Ok(app_data_dir) = crate::utils::paths::app_data_dir(&app) {
-        crate::utils::config_backup::forget_profile_configs(&app_data_dir, &profile_id);
-    }
+    crate::utils::config_backup::forget_profile_configs(&app_data_dir, &profile_id);
 
     // Delete the profile folder
     if profile_dir.exists() {
@@ -398,6 +466,90 @@ pub async fn delete_profile_folder(
         Ok(true)
     } else {
         Ok(false)
+    }
+}
+
+#[cfg(test)]
+mod profile_delete_safety_tests {
+    use super::{has_surviving_profile_for_game, should_cleanup_game_for_deleted_profile};
+    use serde_json::json;
+    use std::fs;
+
+    fn temp_dir(label: &str) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "r2modmac-profile-delete-{label}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    #[test]
+    fn deleting_an_empty_profile_keeps_a_configured_sibling_installed() {
+        let profiles = vec![
+            json!({"id": "configured", "gameIdentifier": "lethal-company", "mods": [{"name": "A"}]}),
+            json!({"id": "empty", "gameIdentifier": "lethal-company", "mods": []}),
+        ];
+        assert!(has_surviving_profile_for_game(
+            &profiles,
+            "empty",
+            "Lethal Company",
+            Some("windows")
+        ));
+    }
+
+    #[test]
+    fn the_game_is_cleaned_only_when_its_last_profile_is_deleted() {
+        let root = temp_dir("last-profile");
+        fs::write(
+            root.join("profiles.json"),
+            serde_json::to_vec(&vec![
+                json!({"id": "one", "gameIdentifier": "peak"}),
+                json!({"id": "other-game", "gameIdentifier": "repo"}),
+            ])
+            .unwrap(),
+        )
+        .unwrap();
+
+        assert!(should_cleanup_game_for_deleted_profile(
+            &root,
+            "one",
+            "peak",
+            Some("windows")
+        ));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn unreadable_profile_data_preserves_shared_runtime() {
+        let root = temp_dir("unreadable");
+        fs::write(root.join("profiles.json"), b"not json").unwrap();
+
+        assert!(!should_cleanup_game_for_deleted_profile(
+            &root,
+            "one",
+            "peak",
+            Some("windows")
+        ));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_profile_on_another_platform_does_not_block_cleanup() {
+        let profiles = vec![
+            json!({"id": "mac", "gameIdentifier": "peak", "platform": "mac"}),
+            json!({"id": "windows", "gameIdentifier": "peak", "platform": "windows"}),
+        ];
+        assert!(!has_surviving_profile_for_game(
+            &profiles,
+            "windows",
+            "peak",
+            Some("windows")
+        ));
     }
 }
 

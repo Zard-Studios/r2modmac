@@ -1,4 +1,4 @@
-use crate::commands::game_commands::get_game_path;
+use crate::commands::game_commands::{bepinex_install_root, get_game_path};
 use crate::models::shared::*;
 use crate::tracing::{perfetto_te_ns, scoped_track_event, EventContext, TrackEventDebugArg};
 use crate::utils::file_ops::*;
@@ -4972,7 +4972,7 @@ pub async fn remove_mod(
 #[command]
 pub async fn open_mod_folder(
     app: AppHandle,
-    _profile_id: String,
+    profile_id: String,
     mod_name: String,
     game_identifier: String,
     platform: Option<String>,
@@ -4987,7 +4987,7 @@ pub async fn open_mod_folder(
         let profile_dir = crate::utils::paths::app_data_dir(&app)
             .map_err(|error| error.to_string())?
             .join("profiles")
-            .join(&_profile_id);
+            .join(&profile_id);
         if is_shimloader_loader(&mod_name) {
             if !profile_dir.join("dwmapi.dll").is_file() {
                 return Err("MODS_NOT_APPLIED".to_string());
@@ -5146,10 +5146,11 @@ pub async fn open_mod_folder(
 
     // BepInExPack is installed to game root (BepInEx/, doorstop files), not under plugins/.
     if mod_key.contains("bepinexpack") {
-        let use_disabled_runtime = profile_is_vanilla(&app, &_profile_id)
+        let install_root = bepinex_install_root(&app, &profile_id, game_root)?;
+        let use_disabled_runtime = profile_is_vanilla(&app, &profile_id)
             && is_macos_game_dir(game_root)
             && !is_balatro_game_path(game_root);
-        let bepinex_root = game_root.join(runtime_bepinex_dir_name(use_disabled_runtime));
+        let bepinex_root = install_root.join(runtime_bepinex_dir_name(use_disabled_runtime));
         if bepinex_root.exists() {
             open::that(&bepinex_root)
                 .map_err(|e| format!("Failed to open BepInEx folder: {}", e))?;
@@ -5185,10 +5186,11 @@ pub async fn open_mod_folder(
         return Err("MODS_NOT_APPLIED".to_string());
     }
 
-    let use_disabled_runtime = profile_is_vanilla(&app, &_profile_id)
+    let install_root = bepinex_install_root(&app, &profile_id, game_root)?;
+    let use_disabled_runtime = profile_is_vanilla(&app, &profile_id)
         && is_macos_game_dir(game_root)
         && !is_balatro_game_path(game_root);
-    let bepinex_root = game_root.join(runtime_bepinex_dir_name(use_disabled_runtime));
+    let bepinex_root = install_root.join(runtime_bepinex_dir_name(use_disabled_runtime));
     if !bepinex_root.exists() {
         return Err("MODS_NOT_APPLIED".to_string());
     }

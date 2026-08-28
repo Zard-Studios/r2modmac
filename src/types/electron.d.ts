@@ -159,7 +159,7 @@ export interface IElectronAPI {
     shareProfile: (profileId: string) => Promise<string>;
     openModFolder: (profileId: string, modName: string, gameIdentifier: string, platform?: 'windows' | 'mac') => Promise<void>;
     exportProfile: (profileId: string) => Promise<any>;
-    deleteProfileFolder: (profileId: string, gameIdentifier?: string, platform?: 'windows' | 'mac') => Promise<boolean>;
+    deleteProfileFolder: (profileId: string, gameIdentifier?: string, platform?: 'windows' | 'mac', preserveSharedRuntime?: boolean) => Promise<boolean>;
     /** Resolves false when the source profile has no folder on disk yet. */
     duplicateProfileFolder: (sourceProfileId: string, newProfileId: string) => Promise<boolean>;
     getSettings: () => Promise<AppSettings>;
