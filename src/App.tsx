@@ -405,6 +405,11 @@ function App() {
   const profilePackageIndexRequestRef = useRef(0)
   const syncInspectionRequestRef = useRef<string | null>(null)
   const installToGameRequestRef = useRef<((isVanillaOverride?: boolean) => Promise<void>) | null>(null)
+  // The profile picker is a different screen from the launch controls. A run
+  // request therefore selects the target first, then invokes the exact same
+  // guarded launcher after React has made that profile active.
+  const pendingProfileLaunchRef = useRef<string | null>(null)
+  const launchActiveProfileRef = useRef<(() => Promise<void>) | null>(null)
   const [pendingProfileCommand, setPendingProfileCommand] = useState<PendingProfileCommand | null>(null)
 
   const {
@@ -1229,6 +1234,22 @@ function App() {
     setIsBrowsingMode(false);
     selectProfile(profileId);
   };
+
+  const handleLaunchProfileFromList = (profileId: string) => {
+    if (profileActionLockRef.current || applyInFlightRef.current) return;
+    const profile = useProfileStore.getState().profiles.find((candidate) => candidate.id === profileId);
+    if (!profile) return;
+    pendingProfileLaunchRef.current = profileId;
+    handleSelectProfile(profileId);
+  };
+
+  useEffect(() => {
+    if (!activeProfileId || pendingProfileLaunchRef.current !== activeProfileId) return;
+    const launch = launchActiveProfileRef.current;
+    if (!launch) return;
+    pendingProfileLaunchRef.current = null;
+    void launch();
+  }, [activeProfileId]);
 
   // One source of truth for every way Spotlight is opened from the profile
   // selection page. The toolbar button and the keyboard shortcut must carry
@@ -2947,6 +2968,7 @@ function App() {
           onDeleteProfile={deleteProfile}
           onUpdateProfile={updateProfile}
           onToggleVanilla={handleToggleProfileVanilla}
+          onLaunchProfile={handleLaunchProfileFromList}
         />
       </div>
     );
@@ -3058,6 +3080,7 @@ function App() {
       }
       await handleLaunchModdedDirect();
     };
+    launchActiveProfileRef.current = handleLaunchProfileDirect;
 
     const handleCancelLaunch = async () => {
       if (!isLaunchingProfile) return;

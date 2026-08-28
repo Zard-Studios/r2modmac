@@ -30,6 +30,8 @@ interface ProfileListProps {
     onDeleteProfile: (profileId: string, gameIdentifier?: string) => void;
     onUpdateProfile: (profileId: string, updates: Partial<Profile>) => void;
     onToggleVanilla: (profileId: string, newVanillaState: boolean) => void;
+    /** Selects and starts this profile through the app's normal launch guard. */
+    onLaunchProfile: (profileId: string) => void;
 }
 
 export function ProfileList({
@@ -47,6 +49,7 @@ export function ProfileList({
     onDeleteProfile,
     onUpdateProfile,
     onToggleVanilla,
+    onLaunchProfile,
 }: ProfileListProps) {
     const [isCreating, setIsCreating] = useState(false);
     const [isImporting, setIsImporting] = useState(false);
@@ -386,7 +389,22 @@ export function ProfileList({
                             className="bg-gray-800 border border-gray-700 rounded-xl p-6 hover:border-blue-500 transition-all cursor-pointer flex flex-col min-h-[200px] group relative overflow-hidden"
                         >
                             <div aria-hidden="true" className="pointer-events-none absolute right-0 top-0 z-10 h-24 w-48 bg-gradient-to-l from-gray-800/90 via-gray-800/50 to-transparent opacity-0 transition-opacity duration-200 group-hover:opacity-100" />
-                            <div className="absolute right-0 top-0 z-20 flex gap-2 p-6 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
+                            <div className="absolute right-0 top-0 z-20 flex gap-2 p-6 opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus-within:opacity-100">
+                                <button
+                                    type="button"
+                                    onClick={(event) => {
+                                        event.stopPropagation();
+                                        if (!isBusy) onLaunchProfile(profile.id);
+                                    }}
+                                    disabled={isBusy}
+                                    className="flex h-8 w-8 items-center justify-center rounded-full bg-green-500/20 text-fg-success transition-colors hover:bg-green-500 hover:text-on-success disabled:cursor-not-allowed disabled:opacity-50"
+                                    title={profile.is_vanilla ? 'Run Profile (Vanilla)' : 'Run Profile'}
+                                    aria-label={profile.is_vanilla ? `Run ${profile.name} without mods` : `Run ${profile.name}`}
+                                >
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                        <path d="M8 5.14v13.72a1 1 0 001.51.86l10.58-6.86a1 1 0 000-1.72L9.51 4.28A1 1 0 008 5.14z" />
+                                    </svg>
+                                </button>
                                     <button
                                         onClick={(e) => {
                                             e.stopPropagation();
