@@ -3,6 +3,7 @@ import { Button } from '../ui';
 import { Toggle } from '../ui/Toggle';
 import { Slider } from '../ui/Slider';
 import { AppIcon, type IconName } from '../ui/icons';
+import { PREFERENCE_ICON_COLORS, type PreferencesIconName } from '../../utils/preferencesIconColors';
 import { DefaultGamePickerModal } from './DefaultGamePickerModal';
 import { ThemeEditorModal } from './ThemeEditorModal';
 import { KeybindsModal } from './KeybindsModal';
@@ -99,36 +100,10 @@ function IconBox({ children, colorClass }: { children: React.ReactNode; colorCla
     );
 }
 
-type PreferencesIconName = Extract<
-    IconName,
-    'install' | 'version' | 'parallel' | 'apply' | 'logs' | 'layout' | 'warning' |
-    'cache' | 'stream' | 'update' | 'support' | 'folder' | 'game' | 'profile' |
-    'theme' | 'keyboard'
->;
-
-const ROW_ICON_COLORS: Record<PreferencesIconName, string> = {
-    install: 'text-fg-accent',
-    version: 'text-cyan-400',
-    parallel: 'text-violet-400',
-    apply: 'text-fg-success',
-    logs: 'text-sky-400',
-    layout: 'text-indigo-400',
-    warning: 'text-fg-warning',
-    cache: 'text-red-400',
-    stream: 'text-fuchsia-400',
-    update: 'text-fg-success',
-    support: 'text-rose-400',
-    folder: 'text-orange-400',
-    game: 'text-teal-400',
-    profile: 'text-purple-400',
-    theme: 'text-fg-accent',
-    keyboard: 'text-amber-400',
-};
-
 function RowIcon({ kind }: { kind: PreferencesIconName }) {
     return (
-        <IconBox colorClass={ROW_ICON_COLORS[kind]}>
-            <AppIcon name={kind} className="h-5 w-5" strokeWidth={1.75} />
+        <IconBox colorClass={PREFERENCE_ICON_COLORS[kind]}>
+            <AppIcon name={kind as Extract<IconName, PreferencesIconName>} className="h-5 w-5" strokeWidth={1.75} />
         </IconBox>
     );
 }

@@ -436,13 +436,31 @@ test('applying a theme writes every token the palette depends on', () => {
     // Every palette family at 11 shades — the ones a theme drives plus the
     // fixed-hue icon families — then the text token, the five per-fill label
     // tokens, the two hover tokens, the four readable-on-surface status ones
-    // and the two cover-chrome tokens.
+    // and the two cover-chrome tokens. The fifth readable token is the
+    // accent-driven decorative icon colour.
     const families = THEMED_FAMILIES.length + DECORATIVE_FAMILIES.length;
     // Every colour token has a matching alpha token.
-    assert.equal(root.props.size, (families * 11 + 1 + 5 + 2 + 4 + 2) * 2);
+    assert.equal(root.props.size, (families * 11 + 1 + 5 + 2 + 5 + 2) * 2);
     assert.equal(root.props.get('--r2-gray-900'), '17 24 39');
     assert.equal(root.props.get('--r2-blue-500'), '59 130 246');
     assert.equal(root.props.get('--r2-white'), '255 255 255');
+    assert.equal(root.props.get('--r2-fg-icon'), root.props.get('--r2-fg-accent'));
+});
+
+test('preference icons follow the accent until a manual icon colour takes over', () => {
+    const automatic = resolveTheme(normalizeTheme({
+        ...DEFAULT_THEME,
+        colors: { ...DEFAULT_THEME.colors, accent: '#ef4444' },
+    }));
+    assert.equal(automatic.fg.icon, automatic.fg.accent);
+
+    const manual = resolveTheme(normalizeTheme({
+        ...DEFAULT_THEME,
+        colors: { ...DEFAULT_THEME.colors, accent: '#ef4444', icon: '#8b5cf6' },
+        options: { ...DEFAULT_THEME.options, autoContrast: false },
+    }));
+    assert.notEqual(manual.fg.icon, manual.fg.accent);
+    assert.equal(manual.alpha.fg.icon, manual.alpha.decorative);
 });
 
 test('clearing the theme removes every token so the stylesheet defaults take over', () => {

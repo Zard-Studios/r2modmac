@@ -689,6 +689,8 @@ export interface ResolvedPalette {
      */
     fg: {
         accent: string;
+        /** Decorative settings icons: accent-driven unless manually overridden. */
+        icon: string;
         danger: string;
         warning: string;
         success: string;
@@ -708,7 +710,7 @@ export interface ResolvedPalette {
         media: { scrim: number; ink: number };
         accentHover: number;
         surfaceHover: number;
-        fg: Record<'accent' | 'danger' | 'warning' | 'success', number>;
+        fg: Record<'accent' | 'icon' | 'danger' | 'warning' | 'success', number>;
         decorative: number;
     };
 }
@@ -929,6 +931,9 @@ function computePalette(theme: Theme): ResolvedPalette {
         surfaceHover,
         fg: {
             accent: readableOnSurface(blue, c.surface),
+            icon: !auto && c.icon && isValidHex(c.icon)
+                ? readableOnSurface(expandAccentRamp(DEFAULT_BLUE, c.icon), c.surface)
+                : readableOnSurface(blue, c.surface),
             danger: readableOnSurface(red, c.surface),
             warning: readableOnSurface(amber, c.surface),
             success: readableOnSurface(green, c.surface),
@@ -961,6 +966,7 @@ function computePalette(theme: Theme): ResolvedPalette {
             surfaceHover: opacity(c.surface_hover ? 'surface_hover' : 'surface'),
             fg: {
                 accent: opacity('accent'),
+                icon: !auto && c.icon ? opacity('icon') : opacity('accent'),
                 danger: opacity('danger'),
                 warning: opacity('warning'),
                 success: opacity('success'),
