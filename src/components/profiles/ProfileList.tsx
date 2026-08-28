@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Menu, MenuItem } from '@tauri-apps/api/menu';
 import type { Profile } from '../../types/profile';
 import type { CommunityPlatformInfo } from '../../types/thunderstore';
@@ -58,6 +58,8 @@ export function ProfileList({
     const [editName, setEditName] = useState('');
     const [importCode, setImportCode] = useState('');
     const [selectedPlatform, setSelectedPlatform] = useState<'windows' | 'mac'>('windows');
+    const [openProfileMenuId, setOpenProfileMenuId] = useState<string | null>(null);
+    const profileMenuRef = useRef<HTMLDivElement>(null);
     // null = no pending import; string = code; { file: string } = file
     const [pendingImport, setPendingImport] = useState<string | { file: string } | null>(null);
 
@@ -90,6 +92,13 @@ export function ProfileList({
                 return;
             }
 
+            if (openProfileMenuId) {
+                event.preventDefault();
+                event.stopPropagation();
+                setOpenProfileMenuId(null);
+                return;
+            }
+
             if (editingProfile) {
                 event.preventDefault();
                 event.stopPropagation();
@@ -118,7 +127,17 @@ export function ProfileList({
 
         window.addEventListener('keydown', onKeyDown, true);
         return () => window.removeEventListener('keydown', onKeyDown, true);
-    }, [editingProfile, isCreating, isImporting, pendingImport]);
+    }, [editingProfile, isCreating, isImporting, openProfileMenuId, pendingImport]);
+
+    useEffect(() => {
+        if (!openProfileMenuId) return;
+        const closeOutside = (event: MouseEvent) => {
+            if (profileMenuRef.current?.contains(event.target as Node)) return;
+            setOpenProfileMenuId(null);
+        };
+        document.addEventListener('mousedown', closeOutside);
+        return () => document.removeEventListener('mousedown', closeOutside);
+    }, [openProfileMenuId]);
 
     // Kept local because it is active only while this screen is mounted.
     const shortcuts = (
@@ -389,73 +408,52 @@ export function ProfileList({
                             className="bg-gray-800 border border-gray-700 rounded-xl p-6 hover:border-blue-500 transition-all cursor-pointer flex flex-col min-h-[200px] group relative overflow-hidden"
                         >
                             <div aria-hidden="true" className="pointer-events-none absolute right-0 top-0 z-10 h-24 w-48 bg-gradient-to-l from-gray-800/90 via-gray-800/50 to-transparent opacity-0 transition-opacity duration-200 group-hover:opacity-100" />
-                            <div className="absolute right-0 top-0 z-20 flex gap-2 p-6 opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus-within:opacity-100">
+                            <div
+                                ref={openProfileMenuId === profile.id ? profileMenuRef : undefined}
+                                className="absolute right-0 top-0 z-20 p-5"
+                            >
                                 <button
                                     type="button"
                                     onClick={(event) => {
                                         event.stopPropagation();
-                                        if (!isBusy) onLaunchProfile(profile.id);
+                                        setOpenProfileMenuId((open) => open === profile.id ? null : profile.id);
                                     }}
-                                    disabled={isBusy}
-                                    className="flex h-8 w-8 items-center justify-center rounded-full bg-green-500/20 text-fg-success transition-colors hover:bg-green-500 hover:text-on-success disabled:cursor-not-allowed disabled:opacity-50"
-                                    title={profile.is_vanilla ? 'Run Profile (Vanilla)' : 'Run Profile'}
-                                    aria-label={profile.is_vanilla ? `Run ${profile.name} without mods` : `Run ${profile.name}`}
+                                    className="flex h-9 w-9 items-center justify-center rounded-full border border-transparent bg-gray-800/75 text-gray-300 opacity-0 shadow-sm backdrop-blur-sm transition-all hover:border-gray-600 hover:bg-gray-700 hover:text-white group-hover:opacity-100 group-focus-within:opacity-100 focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-fg-accent/70"
+                                    aria-label={`Actions for ${profile.name}`}
+                                    aria-haspopup="menu"
+                                    aria-expanded={openProfileMenuId === profile.id}
                                 >
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                                        <path d="M8 5.14v13.72a1 1 0 001.51.86l10.58-6.86a1 1 0 000-1.72L9.51 4.28A1 1 0 008 5.14z" />
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                        <path d="M5.5 10.5A1.5 1.5 0 107 12a1.5 1.5 0 00-1.5-1.5zm6.5 0a1.5 1.5 0 101.5 1.5 1.5 1.5 0 00-1.5-1.5zm6.5 0A1.5 1.5 0 1020.5 12 1.5 1.5 0 0018.5 10.5z" />
                                     </svg>
                                 </button>
-                                    <button
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            setEditingProfile(profile);
-                                            setEditName(profile.name);
-                                        }}
-                                        className="w-8 h-8 bg-gray-700 hover:bg-gray-600 text-gray-300 hover:text-white rounded-full flex items-center justify-center transition-colors"
-                                        title="Edit Profile"
+
+                                {openProfileMenuId === profile.id && (
+                                    <div
+                                        role="menu"
+                                        aria-label={`Actions for ${profile.name}`}
+                                        className="absolute right-5 top-[3.8rem] z-30 w-52 overflow-hidden rounded-2xl border border-gray-600/80 bg-gray-800/95 p-1.5 shadow-2xl shadow-black/40 backdrop-blur-xl"
+                                        onClick={(event) => event.stopPropagation()}
                                     >
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                                    </svg>
-                                </button>
-                                <button
-                                    onClick={async (e) => {
-                                        e.stopPropagation();
-                                        if (isBusy) return;
-                                        if (profile.mods.length === 0 && !profile.is_vanilla) {
-                                            alert("No mods to disable!");
-                                            return;
-                                        }
-                                        const newVanillaState = !profile.is_vanilla;
-                                        onToggleVanilla(profile.id, newVanillaState);
-                                    }}
-                                    disabled={isBusy}
-                                    className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${profile.is_vanilla
-                                        ? 'bg-yellow-500/20 text-yellow-500 border border-yellow-500/50'
-                                        : 'bg-gray-700 hover:bg-yellow-500/10 text-gray-300 hover:text-yellow-500'
-                                        }`}
-                                    style={isBusy ? { opacity: 0.5, cursor: 'not-allowed' } : undefined}
-                                    title={profile.is_vanilla ? "Enable Mods" : "Disable All Mods (Vanilla)"}
-                                >
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
-                                    </svg>
-                                </button>
-                                <button
-                                    onClick={async (e) => {
-                                        e.stopPropagation();
-                                        const confirmed = await window.ipcRenderer.confirm('Delete Profile', 'Are you sure you want to delete this profile?\nALL THE INSTALLED MODS WILL BE DELETED TOO!');
-                                        if (confirmed) {
-                                            await onDeleteProfile(profile.id, selectedGameIdentifier);
-                                        }
-                                    }}
-                                    className="w-8 h-8 bg-red-500/20 hover:bg-red-500 text-red-500 hover:text-on-danger rounded-full flex items-center justify-center transition-colors"
-                                    title="Delete Profile"
-                                >
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                    </svg>
-                                </button>
+                                        <button type="button" role="menuitem" disabled={isBusy} onClick={() => { setOpenProfileMenuId(null); onLaunchProfile(profile.id); }} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium text-fg-success transition-colors hover:bg-green-500/15 disabled:cursor-not-allowed disabled:opacity-50">
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.14v13.72a1 1 0 001.51.86l10.58-6.86a1 1 0 000-1.72L9.51 4.28A1 1 0 008 5.14z" /></svg>
+                                            {profile.is_vanilla ? 'Run vanilla profile' : 'Run profile'}
+                                        </button>
+                                        <button type="button" role="menuitem" onClick={() => { setOpenProfileMenuId(null); setEditingProfile(profile); setEditName(profile.name); }} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium text-gray-100 transition-colors hover:bg-gray-700">
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                                            Edit profile
+                                        </button>
+                                        <button type="button" role="menuitem" disabled={isBusy} onClick={() => { setOpenProfileMenuId(null); if (profile.mods.length === 0 && !profile.is_vanilla) { alert('No mods to disable!'); return; } onToggleVanilla(profile.id, !profile.is_vanilla); }} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium text-fg-warning transition-colors hover:bg-amber-500/15 disabled:cursor-not-allowed disabled:opacity-50">
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" /></svg>
+                                            {profile.is_vanilla ? 'Enable mods' : 'Disable mods'}
+                                        </button>
+                                        <div className="my-1 border-t border-gray-700" />
+                                        <button type="button" role="menuitem" onClick={async () => { setOpenProfileMenuId(null); const confirmed = await window.ipcRenderer.confirm('Delete Profile', 'Are you sure you want to delete this profile?\nALL THE INSTALLED MODS WILL BE DELETED TOO!'); if (confirmed) await onDeleteProfile(profile.id, selectedGameIdentifier); }} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium text-fg-danger transition-colors hover:bg-red-500/15">
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                            Delete profile
+                                        </button>
+                                    </div>
+                                )}
                             </div>
 
                             <div className={`flex-1 flex flex-col transition-all duration-300 ${profile.is_vanilla ? 'grayscale opacity-60' : ''}`}>
