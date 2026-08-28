@@ -14,7 +14,7 @@ const UPDATE_RUNNING =
 const CORRUPT_FILES =
     "Steam reports corrupted game files. Verify the game's files in Steam, then try again.";
 const COLD_STEAM =
-    'Steam was not running, so r2modmac started it first — but the game did not start in time. Steam may still be signing in; check the Steam window, then press Play again.';
+    'The game did not start in time. Steam may still be signing in; check the Steam window, then press Play again.';
 
 test('a Steam Cloud conflict is titled as such and points at Steam', () => {
     const issue = describeLaunchIssue(CLOUD_CONFLICT);
