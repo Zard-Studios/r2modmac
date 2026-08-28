@@ -10,12 +10,17 @@ export function summaryToTheme(summary: ThemeSummary): Theme {
         name: summary.name,
         author: summary.author ?? undefined,
         colors: summary.colors,
+        icons: summary.icons ?? undefined,
         opacity: summary.opacity ?? undefined,
         options: summary.options
             ? {
                 autoContrast:
                     typeof summary.options.auto_contrast === 'boolean'
                         ? summary.options.auto_contrast
+                        : true,
+                adaptSvg:
+                    typeof summary.options.adapt_svg === 'boolean'
+                        ? summary.options.adapt_svg
                         : true,
                 interfaceBlur: summary.options.interface_blur ?? 0,
             }

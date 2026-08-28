@@ -17,6 +17,7 @@ import {
     type StyleTarget,
     type Theme,
 } from '../src/utils/theme.ts';
+import { PREFERENCE_ICON_NAMES } from '../src/utils/preferencesIconColors.ts';
 
 // Tailwind's stock ramps, duplicated here on purpose: if the engine ever stops
 // reproducing them, this file should fail rather than quietly agree with a
@@ -346,17 +347,20 @@ test('an override left unset falls back to the plain text colour', () => {
     }
 });
 
-test('a manual icon colour replaces the adaptive hues', () => {
-    const colors = { ...LIGHT.colors, icon: '#8b5cf6' };
-    const manual = resolveTheme({ name: 'Manual', colors, options: { autoContrast: false } });
-    // Every family lands on the chosen colour, so icons stop being multi-hued.
-    const shades = Object.values(manual.decorative).map((ramp) => ramp[500]);
-    assert.ok(shades.every((s) => s === shades[0]), 'families should agree');
+test('SVG icons remain multicolour automatically and accept individual overrides', () => {
+    const automatic = resolveTheme(normalizeTheme({ name: 'Auto', colors: LIGHT.colors }));
+    assert.equal(automatic.preferenceIcons.install, automatic.fg.accent);
+    assert.notEqual(automatic.preferenceIcons.version, automatic.preferenceIcons.parallel);
 
-    // With automatic on, they stay distinct.
-    const auto = resolveTheme({ name: 'Auto', colors, options: { autoContrast: true } });
-    const autoShades = new Set(Object.values(auto.decorative).map((r) => r[400]));
-    assert.ok(autoShades.size > 1, 'automatic icons must keep their own hues');
+    const manual = resolveTheme(normalizeTheme({
+        name: 'Manual',
+        colors: LIGHT.colors,
+        icons: { version: '#8b5cf6', game: '#22c55e' },
+        options: { autoContrast: true, adaptSvg: false },
+    }));
+    assert.equal(manual.preferenceIcons.version, '#8b5cf6');
+    assert.equal(manual.preferenceIcons.game, '#22c55e');
+    assert.equal(manual.preferenceIcons.parallel, automatic.preferenceIcons.parallel);
 });
 
 test('overrides survive the file format and only appear when set', () => {
@@ -389,6 +393,16 @@ test('the option survives a round trip through the file format', () => {
         normalizeTheme({ name: 'X', colors: {}, options: { autoContrast: false } }).options?.autoContrast,
         false
     );
+    const themedIcons = themeToToml(normalizeTheme({
+        name: 'Icons',
+        colors: {},
+        icons: { version: '#8b5cf6', future_svg: '#22c55e' },
+        options: { autoContrast: true, adaptSvg: false },
+    }));
+    assert.match(themedIcons, /^adapt_svg = false$/m);
+    assert.match(themedIcons, /^\[icons\]$/m);
+    assert.match(themedIcons, /^future_svg = "#22c55e"$/m);
+    assert.equal(normalizeTheme({ name: 'X', colors: {} }).options?.adaptSvg, true);
 });
 
 test('interface blur is bounded, serialised, and free when disabled', () => {
@@ -436,31 +450,32 @@ test('applying a theme writes every token the palette depends on', () => {
     // Every palette family at 11 shades — the ones a theme drives plus the
     // fixed-hue icon families — then the text token, the five per-fill label
     // tokens, the two hover tokens, the four readable-on-surface status ones
-    // and the two cover-chrome tokens. The fifth readable token is the
-    // accent-driven decorative icon colour.
+    // and the two cover-chrome tokens, followed by one colour for every
+    // Preferences SVG in the shared catalogue.
     const families = THEMED_FAMILIES.length + DECORATIVE_FAMILIES.length;
     // Every colour token has a matching alpha token.
-    assert.equal(root.props.size, (families * 11 + 1 + 5 + 2 + 5 + 2) * 2);
+    assert.equal(root.props.size, (families * 11 + 1 + 5 + 2 + 4 + 2) * 2 + PREFERENCE_ICON_NAMES.length);
     assert.equal(root.props.get('--r2-gray-900'), '17 24 39');
     assert.equal(root.props.get('--r2-blue-500'), '59 130 246');
     assert.equal(root.props.get('--r2-white'), '255 255 255');
-    assert.equal(root.props.get('--r2-fg-icon'), root.props.get('--r2-fg-accent'));
+    assert.ok(root.props.get('--r2-pref-icon-version'));
 });
 
-test('preference icons follow the accent until a manual icon colour takes over', () => {
+test('preference SVG overrides are ignored while adaptation is on', () => {
     const automatic = resolveTheme(normalizeTheme({
         ...DEFAULT_THEME,
         colors: { ...DEFAULT_THEME.colors, accent: '#ef4444' },
+        icons: { version: '#8b5cf6' },
     }));
-    assert.equal(automatic.fg.icon, automatic.fg.accent);
+    assert.notEqual(automatic.preferenceIcons.version, '#8b5cf6');
 
     const manual = resolveTheme(normalizeTheme({
         ...DEFAULT_THEME,
-        colors: { ...DEFAULT_THEME.colors, accent: '#ef4444', icon: '#8b5cf6' },
-        options: { ...DEFAULT_THEME.options, autoContrast: false },
+        colors: { ...DEFAULT_THEME.colors, accent: '#ef4444' },
+        icons: { version: '#8b5cf6' },
+        options: { ...DEFAULT_THEME.options, adaptSvg: false },
     }));
-    assert.notEqual(manual.fg.icon, manual.fg.accent);
-    assert.equal(manual.alpha.fg.icon, manual.alpha.decorative);
+    assert.equal(manual.preferenceIcons.version, '#8b5cf6');
 });
 
 test('clearing the theme removes every token so the stylesheet defaults take over', () => {

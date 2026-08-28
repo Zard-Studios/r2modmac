@@ -32,12 +32,18 @@ import {
     normalizeHex,
     normalizeTheme,
     parseHex,
+    resolveTheme,
     backgroundLayerStyle,
     themeStyleVariables,
     themeToToml,
     type Theme,
     type ThemeColors,
 } from '../../utils/theme';
+import {
+    PREFERENCE_ICON_CATALOG,
+    PREFERENCE_ICON_NAMES,
+    type PreferencesIconName,
+} from '../../utils/preferencesIconColors';
 import { patchThemeToml, themeEdits } from '../../utils/themeFile';
 import { allBuiltinThemes, isBuiltinId, type ThemePreset } from '../../utils/themePresets';
 import { formatAccelerator, isTextFieldTarget } from '../../utils/keybinds';
@@ -160,6 +166,84 @@ const ColorRow = memo(function ColorRow({
                     aria-label={`${meta.label} hex value`}
                     className={`w-[92px] rounded-lg border bg-gray-900 px-2.5 py-1.5 text-right font-mono text-[13px] text-white transition-colors focus:outline-none focus:ring-1 disabled:cursor-not-allowed ${
                         isValidHex(draft)
+                            ? 'border-gray-600 focus:border-blue-500 focus:ring-blue-500'
+                            : 'border-red-500/60 focus:border-red-500 focus:ring-red-500'
+                    }`}
+                />
+            </div>
+        </div>
+    );
+});
+
+/** One entry from the automatically discovered Preferences SVG catalogue. */
+const IconColorRow = memo(function IconColorRow({
+    iconName,
+    value,
+    presets,
+    onChange,
+    onInteractionStart,
+    onInteractionEnd,
+    portalTarget,
+    disabled,
+}: {
+    iconName: PreferencesIconName;
+    value: string;
+    presets: string[];
+    onChange: (name: PreferencesIconName, next: string) => void;
+    onInteractionStart: () => void;
+    onInteractionEnd: () => void;
+    portalTarget?: Element | null;
+    disabled: boolean;
+}) {
+    const meta = PREFERENCE_ICON_CATALOG[iconName];
+    const [hex, setHex] = useState(value);
+    const [lastValue, setLastValue] = useState(value);
+
+    if (value !== lastValue) {
+        setLastValue(value);
+        setHex(value);
+    }
+
+    const commit = (next: string) => {
+        setHex(next);
+        if (isValidHex(next)) onChange(iconName, normalizeHex(next));
+    };
+
+    return (
+        <div className={`flex items-center justify-between gap-4 p-4 transition-colors hover:bg-surface-hover ${disabled ? 'opacity-60' : ''}`}>
+            <div className="flex min-w-0 items-center gap-3.5">
+                <span
+                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-600 bg-gray-700/60"
+                    style={{ color: value }}
+                >
+                    <AppIcon name={iconName} className="h-5 w-5" />
+                </span>
+                <div className="min-w-0">
+                    <p className="truncate text-[15px] font-medium text-white">{meta.label}</p>
+                    <p className="mt-0.5 text-[13px] text-gray-400">SVG: {iconName}</p>
+                </div>
+            </div>
+            <div className="flex shrink-0 items-center gap-3">
+                <ColorField
+                    label={`${meta.label} SVG`}
+                    value={value}
+                    presets={presets}
+                    opacity={1}
+                    onChange={(next) => onChange(iconName, next)}
+                    onOpacityChange={() => undefined}
+                    onInteractionStart={onInteractionStart}
+                    onInteractionEnd={onInteractionEnd}
+                    portalTarget={portalTarget}
+                />
+                <input
+                    value={hex}
+                    onChange={(event) => commit(event.target.value)}
+                    onBlur={() => setHex(value)}
+                    disabled={disabled}
+                    spellCheck={false}
+                    aria-label={`${meta.label} SVG hex value`}
+                    className={`w-[92px] rounded-lg border bg-gray-900 px-2.5 py-1.5 text-right font-mono text-[13px] text-white transition-colors focus:outline-none focus:ring-1 disabled:cursor-not-allowed ${
+                        isValidHex(hex)
                             ? 'border-gray-600 focus:border-blue-500 focus:ring-blue-500'
                             : 'border-red-500/60 focus:border-red-500 focus:ring-red-500'
                     }`}
@@ -565,6 +649,40 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
         }));
     }, [applyVisualEdit]);
 
+    const updateIconColor = useCallback((name: PreferencesIconName, value: string) => {
+        applyVisualEdit((theme) => ({
+            ...theme,
+            icons: { ...theme.icons, [name]: value },
+        }));
+    }, [applyVisualEdit]);
+
+    const updateSvgAdaptation = useCallback((adaptSvg: boolean) => {
+        applyVisualEdit((theme) => {
+            const automatic = resolveTheme({
+                ...theme,
+                options: {
+                    ...theme.options,
+                    autoContrast: theme.options?.autoContrast ?? DEFAULT_THEME_OPTIONS.autoContrast,
+                    adaptSvg: true,
+                },
+            }).preferenceIcons;
+            return {
+                ...theme,
+                icons: adaptSvg
+                    ? theme.icons
+                    : Object.fromEntries(PREFERENCE_ICON_NAMES.map((name) => [
+                        name,
+                        theme.icons?.[name] ?? automatic[name],
+                    ])),
+                options: {
+                    ...theme.options,
+                    autoContrast: theme.options?.autoContrast ?? DEFAULT_THEME_OPTIONS.autoContrast,
+                    adaptSvg,
+                },
+            };
+        });
+    }, [applyVisualEdit]);
+
     const surpriseMe = useCallback(() => {
         if (!draft) return;
         const next = (() => {
@@ -794,6 +912,11 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
 
     const warnings = useMemo(() => (draft ? findContrastWarnings(draft.colors) : []), [draft]);
     const autoContrast = draft?.options?.autoContrast ?? DEFAULT_THEME_OPTIONS.autoContrast;
+    const adaptSvg = draft?.options?.adaptSvg ?? DEFAULT_THEME_OPTIONS.adaptSvg ?? true;
+    const resolvedPreferenceIcons = useMemo(
+        () => draft ? resolveTheme(draft).preferenceIcons : null,
+        [draft]
+    );
     const interfaceBlur = draft?.options?.interfaceBlur ?? DEFAULT_THEME_OPTIONS.interfaceBlur ?? 0;
 
     // Active sample game for cover preview
@@ -1396,6 +1519,43 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
                                                 disabled={!editable}
                                                 onChange={updateColor}
                                                 onOpacityChange={updateOpacity}
+                                                onInteractionStart={beginVisualGesture}
+                                                onInteractionEnd={endVisualGesture}
+                                                portalTarget={previewRoot}
+                                            />
+                                        ))}
+                                    </div>
+                                </div>
+
+                                {/* ── SVG Icons Section ── */}
+                                <div className="space-y-3">
+                                    <h3 className="px-1 text-xs font-semibold uppercase tracking-widest text-gray-400">
+                                        SVG Icons
+                                    </h3>
+                                    <div className="overflow-hidden rounded-2xl border border-gray-700 bg-gray-800 divide-y divide-gray-700">
+                                        <div className={`flex items-center justify-between gap-4 p-4 transition-colors hover:bg-surface-hover ${!editable ? 'opacity-60' : ''}`}>
+                                            <div>
+                                                <p className="text-[15px] font-medium text-white">Adapt SVG icons</p>
+                                                <p className="mt-0.5 text-[13px] leading-snug text-gray-400">
+                                                    Keeps r2modmac&apos;s multicolour icon design and adjusts it for the theme&apos;s surfaces.
+                                                </p>
+                                            </div>
+                                            <Toggle
+                                                value={adaptSvg}
+                                                disabled={!editable}
+                                                label="Adapt SVG icons"
+                                                onChange={updateSvgAdaptation}
+                                            />
+                                        </div>
+
+                                        {!adaptSvg && resolvedPreferenceIcons && PREFERENCE_ICON_NAMES.map((name) => (
+                                            <IconColorRow
+                                                key={name}
+                                                iconName={name}
+                                                value={draft.icons?.[name] ?? resolvedPreferenceIcons[name]}
+                                                presets={swatchPresets}
+                                                disabled={!editable}
+                                                onChange={updateIconColor}
                                                 onInteractionStart={beginVisualGesture}
                                                 onInteractionEnd={endVisualGesture}
                                                 portalTarget={previewRoot}

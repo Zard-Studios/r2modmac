@@ -258,7 +258,6 @@
      (blue-400, red-400, amber-400, green-400), so nothing moves until a theme
      is applied. */
   --r2-fg-accent: 96 165 250;
-  --r2-fg-icon: 96 165 250;
   --r2-fg-danger: 248 113 113;
   --r2-fg-warning: 251 191 36;
   --r2-fg-success: 74 222 128;

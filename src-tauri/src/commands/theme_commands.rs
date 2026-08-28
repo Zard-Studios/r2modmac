@@ -10,7 +10,7 @@
 //! applied theme cannot drift apart.
 
 use std::{
-    collections::HashSet,
+    collections::{BTreeMap, HashSet},
     path::{Component, Path, PathBuf},
     sync::mpsc,
     thread,
@@ -125,6 +125,9 @@ pub struct ThemeOptions {
     /// on, so themes written before the option existed keep working.
     #[serde(default)]
     pub auto_contrast: Option<bool>,
+    /// Keep the stock multicolour SVG palette. Absent means enabled.
+    #[serde(default)]
+    pub adapt_svg: Option<bool>,
     /// Blur behind the app's translucent interface. Zero keeps the compositor
     /// filter entirely disabled.
     #[serde(default)]
@@ -164,6 +167,8 @@ struct ThemeDocument {
     #[serde(default)]
     colors: ThemeColors,
     #[serde(default)]
+    icons: BTreeMap<String, String>,
+    #[serde(default)]
     opacity: Option<ThemeOpacity>,
     #[serde(default)]
     background_image: Option<ThemeBackgroundImage>,
@@ -178,6 +183,8 @@ pub struct ThemeSummary {
     pub name: String,
     pub author: Option<String>,
     pub colors: ThemeColors,
+    #[serde(default)]
+    pub icons: BTreeMap<String, String>,
     #[serde(default)]
     pub opacity: Option<ThemeOpacity>,
     #[serde(default)]
@@ -421,6 +428,7 @@ fn parse_theme(file_name: String, source: &str) -> ThemeSummary {
                     .map(|a| a.trim().to_string())
                     .filter(|a| !a.is_empty()),
                 colors: doc.colors,
+                icons: doc.icons,
                 opacity: doc.opacity,
                 background_image: doc.background_image,
                 options: doc.options,
@@ -432,6 +440,7 @@ fn parse_theme(file_name: String, source: &str) -> ThemeSummary {
             file_name,
             author: None,
             colors: ThemeColors::default(),
+            icons: BTreeMap::new(),
             opacity: None,
             background_image: None,
             options: None,
@@ -473,6 +482,7 @@ pub async fn list_themes(app: AppHandle) -> Result<Vec<ThemeSummary>, String> {
                 file_name,
                 author: None,
                 colors: ThemeColors::default(),
+                icons: BTreeMap::new(),
                 opacity: None,
                 background_image: None,
                 options: None,
@@ -753,6 +763,25 @@ interface_blur = 24
         let options = summary.options.expect("expected theme options");
         assert_eq!(options.auto_contrast, Some(true));
         assert_eq!(options.interface_blur, Some(24.0));
+    }
+
+    #[test]
+    fn svg_icon_overrides_are_parsed_without_enumerating_them() {
+        let summary = parse_theme(
+            "icons.toml".to_string(),
+            r##"
+[options]
+adapt_svg = false
+
+[icons]
+version = "#8b5cf6"
+future_svg = "#22c55e"
+"##,
+        );
+        let options = summary.options.expect("expected theme options");
+        assert_eq!(options.adapt_svg, Some(false));
+        assert_eq!(summary.icons.get("version").map(String::as_str), Some("#8b5cf6"));
+        assert_eq!(summary.icons.get("future_svg").map(String::as_str), Some("#22c55e"));
     }
 
     #[test]

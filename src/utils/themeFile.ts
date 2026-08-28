@@ -30,7 +30,7 @@ import {
  */
 
 /** Where a key lives. The empty string is the file's own top level. */
-type Section = '' | 'colors' | 'opacity' | 'options' | 'background_image';
+type Section = '' | 'colors' | 'opacity' | 'options' | 'icons' | 'background_image';
 
 export type ThemeEdit =
     | { kind: 'set'; section: Section; key: string; value: string | number | boolean }
@@ -109,6 +109,14 @@ export function themeEdits(base: Theme, next: Theme): ThemeEdit[] {
             value: next.options?.autoContrast ?? true,
         });
     }
+    if (next.options?.adaptSvg !== base.options?.adaptSvg) {
+        edits.push({
+            kind: 'set',
+            section: 'options',
+            key: 'adapt_svg',
+            value: next.options?.adaptSvg ?? true,
+        });
+    }
     if (next.options?.interfaceBlur !== base.options?.interfaceBlur) {
         edits.push({
             kind: 'set',
@@ -116,6 +124,21 @@ export function themeEdits(base: Theme, next: Theme): ThemeEdit[] {
             key: 'interface_blur',
             value: Math.round(next.options?.interfaceBlur ?? 0),
         });
+    }
+
+    const iconNames = new Set([
+        ...Object.keys(base.icons ?? {}),
+        ...Object.keys(next.icons ?? {}),
+    ]);
+    for (const name of [...iconNames].sort()) {
+        const from = base.icons?.[name];
+        const to = next.icons?.[name];
+        if (from === to) continue;
+        edits.push(
+            to
+                ? { kind: 'set', section: 'icons', key: name, value: to }
+                : { kind: 'unset', section: 'icons', key: name }
+        );
     }
 
     if (!next.backgroundImage) {

@@ -92,9 +92,20 @@ interface PreferencesModalProps {
     onCheckForUpdates: () => Promise<void>;
 }
 
-function IconBox({ children, colorClass }: { children: React.ReactNode; colorClass: string }) {
+function IconBox({
+    children,
+    colorClass,
+    style,
+}: {
+    children: React.ReactNode;
+    colorClass: string;
+    style?: React.CSSProperties;
+}) {
     return (
-        <div className={`w-9 h-9 rounded-xl flex items-center justify-center bg-gray-700/60 border border-gray-700 flex-shrink-0 ${colorClass}`}>
+        <div
+            className={`w-9 h-9 rounded-xl flex items-center justify-center bg-gray-700/60 border border-gray-700 flex-shrink-0 ${colorClass}`}
+            style={style}
+        >
             {children}
         </div>
     );
@@ -102,7 +113,10 @@ function IconBox({ children, colorClass }: { children: React.ReactNode; colorCla
 
 function RowIcon({ kind }: { kind: PreferencesIconName }) {
     return (
-        <IconBox colorClass={PREFERENCE_ICON_COLORS[kind]}>
+        <IconBox
+            colorClass={PREFERENCE_ICON_COLORS[kind]}
+            style={{ color: `rgb(var(--r2-pref-icon-${kind}))` }}
+        >
             <AppIcon name={kind as Extract<IconName, PreferencesIconName>} className="h-5 w-5" strokeWidth={1.75} />
         </IconBox>
     );

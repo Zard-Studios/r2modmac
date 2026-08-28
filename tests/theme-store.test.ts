@@ -68,8 +68,15 @@ function installFakeEnvironment() {
             if (m) opacity[m[1]] = Number(m[2]);
         }
         const imageSection = toml.split('[background_image]')[1];
+        const iconSection = toml.split('[icons]')[1]?.split(/^\[/m)[0] ?? '';
+        const icons: Record<string, string> = {};
+        for (const line of iconSection.split('\n')) {
+            const m = /^\s*([A-Za-z0-9_-]+)\s*=\s*"([^"]+)"/.exec(line);
+            if (m) icons[m[1]] = m[2];
+        }
         const optionsSection = toml.split('[options]')[1]?.split(/^\[/m)[0] ?? '';
         const autoContrastMatch = /^auto_contrast\s*=\s*(true|false)/m.exec(optionsSection);
+        const adaptSvgMatch = /^adapt_svg\s*=\s*(true|false)/m.exec(optionsSection);
         const interfaceBlurMatch = /^interface_blur\s*=\s*([0-9.]+)/m.exec(optionsSection);
         const pathMatch = imageSection ? /^path\s*=\s*"([^"]+)"/m.exec(imageSection) : null;
         const str = (k: string) =>
@@ -83,9 +90,11 @@ function installFakeEnvironment() {
             name: nameMatch?.[1] ?? name.replace('.toml', ''),
             author: authorMatch ? authorMatch[1] : null,
             colors,
+            icons: Object.keys(icons).length > 0 ? icons : null,
             opacity: Object.keys(opacity).length > 0 ? opacity : null,
             options: {
                 auto_contrast: autoContrastMatch ? autoContrastMatch[1] === 'true' : null,
+                adapt_svg: adaptSvgMatch ? adaptSvgMatch[1] === 'true' : null,
                 interface_blur: interfaceBlurMatch ? Number(interfaceBlurMatch[1]) : null,
             },
             background_image: pathMatch

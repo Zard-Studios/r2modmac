@@ -101,6 +101,21 @@ test('a section the file has never had is opened at the end', () => {
     assert.ok(saved.indexOf('[colors]') < saved.indexOf('[options]'));
 });
 
+test('an individual SVG colour is patched without disturbing an unknown icon', () => {
+    const source = `name = "Midnight"
+
+[icons]
+version = "#22d3ee" # cool blue
+future_svg = "#ffffff"
+`;
+    const base = loaded({ name: 'Midnight', colors: {}, icons: { version: '#22d3ee', future_svg: '#ffffff' } });
+    const next: Theme = { ...base, icons: { ...base.icons, version: '#8b5cf6' } };
+    const saved = patchThemeToml(source, themeEdits(base, next));
+
+    assert.match(saved, /^version = "#8b5cf6" # cool blue$/m);
+    assert.match(saved, /^future_svg = "#ffffff"$/m);
+});
+
 test('removing the background picture takes its whole section with it', () => {
     const source = `name = "Wall"
 

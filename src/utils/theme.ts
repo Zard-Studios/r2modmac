@@ -10,6 +10,12 @@
  * applied theme can never drift apart.
  */
 
+import {
+    PREFERENCE_ICON_CATALOG,
+    PREFERENCE_ICON_NAMES,
+    type PreferencesIconName,
+} from './preferencesIconColors.ts';
+
 export interface ThemeColors {
     /** App background — the largest surface. */
     background: string;
@@ -79,8 +85,10 @@ export const MANUAL_COLOR_KEYS = [
     'on_danger',
     'on_warning',
     'on_success',
-    'icon',
 ] as const;
+
+/** Deprecated single-colour icon override, retained when old themes are read. */
+const LEGACY_COLOR_KEYS = ['icon'] as const;
 
 /** A picture behind the app, with the controls needed to keep text readable. */
 export interface ThemeBackgroundImage {
@@ -111,17 +119,25 @@ export interface ThemeOptions {
      * control back to whoever wants to place every colour by hand.
      */
     autoContrast: boolean;
+    /** Keep the stock multicolour SVG palette and adapt it for readability. */
+    adaptSvg?: boolean;
     /** Blur behind the app's translucent interface, in pixels (0–40). */
     interfaceBlur?: number;
 }
 
-export const DEFAULT_THEME_OPTIONS: ThemeOptions = { autoContrast: true, interfaceBlur: 0 };
+export const DEFAULT_THEME_OPTIONS: ThemeOptions = {
+    autoContrast: true,
+    adaptSvg: true,
+    interfaceBlur: 0,
+};
 
 export interface Theme {
     name: string;
     author?: string;
     colors: ThemeColors;
     opacity?: ThemeOpacity;
+    /** Exact per-icon colours, used only when automatic SVG adaptation is off. */
+    icons?: Record<string, string>;
     backgroundImage?: ThemeBackgroundImage | null;
     options?: ThemeOptions;
 }
@@ -672,6 +688,8 @@ export interface ResolvedPalette {
     };
     /** Fixed-hue icon families, lightness-matched to the surface. */
     decorative: Record<string, Ramp>;
+    /** Preferences SVG colours, keyed by the shared icon catalogue. */
+    preferenceIcons: Record<PreferencesIconName, string>;
     /** Chrome over artwork: scrim fill and the ink on it. */
     media: { scrim: string; ink: string };
     /** Explicit button/interactive hover accent. */
@@ -689,8 +707,6 @@ export interface ResolvedPalette {
      */
     fg: {
         accent: string;
-        /** Decorative settings icons: accent-driven unless manually overridden. */
-        icon: string;
         danger: string;
         warning: string;
         success: string;
@@ -710,7 +726,7 @@ export interface ResolvedPalette {
         media: { scrim: number; ink: number };
         accentHover: number;
         surfaceHover: number;
-        fg: Record<'accent' | 'icon' | 'danger' | 'warning' | 'success', number>;
+        fg: Record<'accent' | 'danger' | 'warning' | 'success', number>;
         decorative: number;
     };
 }
@@ -795,21 +811,6 @@ function pickLabel(
     return manual && isValidHex(manual) ? normalizeHex(manual) : colors.text;
 }
 
-/**
- * Paint every decorative family in one colour.
- *
- * Manual mode trades the per-icon hues for a single choice — which is the whole
- * point of turning the automatic behaviour off. The ramp is still generated
- * around it so shade modifiers keep working.
- */
-function tintDecorative(icon: string): Record<string, Ramp> {
-    const out: Record<string, Ramp> = {};
-    for (const family of Object.keys(DECORATIVE_RAMPS)) {
-        out[family] = expandAccentRamp(DECORATIVE_RAMPS[family], icon);
-    }
-    return out;
-}
-
 /** Back-compat shorthand for the accent, the most common fill. */
 export function resolveOnAccent(colors: ThemeColors, autoContrast = true): string {
     return resolveOnFill(colors, colors.accent, autoContrast);
@@ -826,14 +827,18 @@ const PALETTE_CACHE_LIMIT = 8;
 
 /** Expand a theme's colours into every shade the app paints with. */
 export function resolveTheme(theme: Theme): ResolvedPalette {
+    const iconEntries = Object.entries(theme.icons ?? {}).sort(([a], [b]) => a.localeCompare(b));
     const key = [
         ...THEME_COLOR_KEYS.map((k) => theme.colors[k] || ''),
         ...MANUAL_COLOR_KEYS.map((k) => theme.colors[k] || ''),
+        ...LEGACY_COLOR_KEYS.map((k) => theme.colors[k] || ''),
         ...COVER_COLOR_KEYS.map((k) => theme.colors[k] || ''),
-        ...[...THEME_COLOR_KEYS, ...MANUAL_COLOR_KEYS, ...COVER_COLOR_KEYS].map(
+        ...[...THEME_COLOR_KEYS, ...MANUAL_COLOR_KEYS, ...LEGACY_COLOR_KEYS, ...COVER_COLOR_KEYS].map(
             (k) => theme.opacity?.[k] ?? 1
         ),
         theme.options?.autoContrast ?? DEFAULT_THEME_OPTIONS.autoContrast,
+        theme.options?.adaptSvg ?? DEFAULT_THEME_OPTIONS.adaptSvg,
+        ...iconEntries.flatMap(([name, value]) => [name, value]),
     ].join('|');
     const cached = paletteCache.get(key);
     if (cached) return cached;
@@ -886,6 +891,7 @@ function computePalette(theme: Theme): ResolvedPalette {
     const red = expandAccentRamp(DEFAULT_RED, c.danger);
     const amber = expandAccentRamp(DEFAULT_AMBER, c.warning);
     const green = expandAccentRamp(DEFAULT_GREEN, c.success);
+    const decorative = resolveDecorative(gray[700]);
 
     const accentHover = c.accent_hover && isValidHex(c.accent_hover)
         ? normalizeHex(c.accent_hover)
@@ -894,6 +900,27 @@ function computePalette(theme: Theme): ResolvedPalette {
     const surfaceHover = c.surface_hover && isValidHex(c.surface_hover)
         ? normalizeHex(c.surface_hover)
         : deriveHoverColor(c.surface, false);
+
+    const fg = {
+        accent: readableOnSurface(blue, c.surface),
+        danger: readableOnSurface(red, c.surface),
+        warning: readableOnSurface(amber, c.surface),
+        success: readableOnSurface(green, c.surface),
+    };
+    const adaptSvg = theme.options?.adaptSvg ?? DEFAULT_THEME_OPTIONS.adaptSvg ?? true;
+    const preferenceIcons = {} as Record<PreferencesIconName, string>;
+    for (const name of PREFERENCE_ICON_NAMES) {
+        const tone = PREFERENCE_ICON_CATALOG[name].tone;
+        const automatic = tone === 'accent' || tone === 'danger' || tone === 'warning' || tone === 'success'
+            ? fg[tone]
+            : decorative[tone][ICON_SHADE];
+        const manual = theme.icons?.[name];
+        preferenceIcons[name] = !adaptSvg && manual && isValidHex(manual)
+            ? normalizeHex(manual)
+            : !adaptSvg && c.icon && isValidHex(c.icon)
+                ? normalizeHex(c.icon)
+                : automatic;
+    }
 
     return {
         gray,
@@ -923,21 +950,11 @@ function computePalette(theme: Theme): ResolvedPalette {
             warning: pickLabel(c, 'on_warning', amber[600], auto),
             success: pickLabel(c, 'on_success', green[600], auto),
         },
-        decorative:
-            !auto && c.icon && isValidHex(c.icon)
-                ? tintDecorative(c.icon)
-                : resolveDecorative(gray[700]),
+        decorative,
+        preferenceIcons,
         accentHover,
         surfaceHover,
-        fg: {
-            accent: readableOnSurface(blue, c.surface),
-            icon: !auto && c.icon && isValidHex(c.icon)
-                ? readableOnSurface(expandAccentRamp(DEFAULT_BLUE, c.icon), c.surface)
-                : readableOnSurface(blue, c.surface),
-            danger: readableOnSurface(red, c.surface),
-            warning: readableOnSurface(amber, c.surface),
-            success: readableOnSurface(green, c.surface),
-        },
+        fg,
         alpha: {
             gray: grayAlpha,
             slate: expandAlphaRamp(DEFAULT_SLATE, {
@@ -966,12 +983,11 @@ function computePalette(theme: Theme): ResolvedPalette {
             surfaceHover: opacity(c.surface_hover ? 'surface_hover' : 'surface'),
             fg: {
                 accent: opacity('accent'),
-                icon: !auto && c.icon ? opacity('icon') : opacity('accent'),
                 danger: opacity('danger'),
                 warning: opacity('warning'),
                 success: opacity('success'),
             },
-            decorative: !auto && c.icon ? opacity('icon') : 1,
+            decorative: 1,
         },
     };
 }
@@ -1080,6 +1096,9 @@ export function paletteVars(p: ResolvedPalette): Record<string, string> {
             vars[`${VAR_PREFIX}${family}-${shade}`] = channels(ramp[shade]);
             vars[`${VAR_PREFIX}${family}-${shade}-alpha`] = String(p.alpha.decorative);
         }
+    }
+    for (const [name, value] of Object.entries(p.preferenceIcons)) {
+        vars[`${VAR_PREFIX}pref-icon-${name}`] = channels(value);
     }
     return vars;
 }
@@ -1307,7 +1326,8 @@ export function themeToToml(theme: Theme): string {
         }
     }
 
-    const manual = [...MANUAL_COLOR_KEYS, ...COVER_COLOR_KEYS].filter((key) => theme.colors[key]);
+    const manual = [...MANUAL_COLOR_KEYS, ...LEGACY_COLOR_KEYS, ...COVER_COLOR_KEYS]
+        .filter((key) => theme.colors[key]);
     if (manual.length > 0) {
         lines.push('', '# Used only while auto_contrast is off.');
         for (const key of manual) {
@@ -1316,7 +1336,7 @@ export function themeToToml(theme: Theme): string {
         }
     }
 
-    const transparent = [...THEME_COLOR_KEYS, ...MANUAL_COLOR_KEYS, ...COVER_COLOR_KEYS]
+    const transparent = [...THEME_COLOR_KEYS, ...MANUAL_COLOR_KEYS, ...LEGACY_COLOR_KEYS, ...COVER_COLOR_KEYS]
         .filter((key) => typeof theme.opacity?.[key] === 'number');
     if (transparent.length > 0) {
         lines.push('', '[opacity]', '# Per-colour opacity: 0 = transparent, 1 = opaque.');
@@ -1334,9 +1354,20 @@ export function themeToToml(theme: Theme): string {
         '# Turn off to use the single text colour everywhere and place each',
         '# colour by hand.',
         `auto_contrast = ${options.autoContrast}`,
+        '# Keep the app\'s multicolour SVG palette and adapt it to the theme.',
+        '# Turn off to use the individual colours in [icons].',
+        `adapt_svg = ${options.adaptSvg ?? DEFAULT_THEME_OPTIONS.adaptSvg}`,
         '# Glass blur behind translucent interface surfaces; 0 disables it.',
         `interface_blur = ${Math.round(clamp(options.interfaceBlur ?? 0, 0, 40))}`
     );
+
+    const icons = Object.entries(theme.icons ?? {})
+        .filter(([, value]) => isValidHex(value))
+        .sort(([a], [b]) => a.localeCompare(b));
+    if (icons.length > 0) {
+        lines.push('', '[icons]', '# Used while adapt_svg is false; unknown keys are preserved.');
+        for (const [name, value] of icons) lines.push(`${name} = "${normalizeHex(value)}"`);
+    }
 
     if (theme.backgroundImage) {
         const { path, opacity, blur, fit, offset_x, offset_y, tile_scale } = theme.backgroundImage;
@@ -1367,6 +1398,7 @@ export function normalizeTheme(
     input: Omit<Partial<Theme>, 'colors' | 'opacity' | 'backgroundImage' | 'options'> & {
         colors?: Partial<ThemeColors>;
         opacity?: Partial<Record<keyof ThemeColors, number | null>> | null;
+        icons?: Record<string, string | null | undefined> | null;
         // Nullable per field: this is what arrives over IPC, where an unset
         // value is `null` rather than absent. Accepting it here means callers
         // no longer hand-convert — which is what kept losing fields.
@@ -1380,14 +1412,14 @@ export function normalizeTheme(
         colors[key] = value && isValidHex(value) ? normalizeHex(value) : (DEFAULT_THEME.colors[key] || '#1f2937');
     }
 
-    for (const key of [...MANUAL_COLOR_KEYS, ...COVER_COLOR_KEYS]) {
+    for (const key of [...MANUAL_COLOR_KEYS, ...LEGACY_COLOR_KEYS, ...COVER_COLOR_KEYS]) {
         const value = input.colors?.[key];
         if (value && isValidHex(value)) colors[key] = normalizeHex(value);
     }
 
 
     const opacity: ThemeOpacity = {};
-    for (const key of [...THEME_COLOR_KEYS, ...MANUAL_COLOR_KEYS, ...COVER_COLOR_KEYS]) {
+    for (const key of [...THEME_COLOR_KEYS, ...MANUAL_COLOR_KEYS, ...LEGACY_COLOR_KEYS, ...COVER_COLOR_KEYS]) {
         const value = input.opacity?.[key];
         if (typeof value === 'number' && Number.isFinite(value)) {
             opacity[key] = clamp(value, 0, 1);
@@ -1395,6 +1427,14 @@ export function normalizeTheme(
     }
 
     const rawOptions = input.options;
+    const icons = Object.fromEntries(
+        Object.entries(input.icons ?? {})
+            .filter((entry): entry is [string, string] => Boolean(entry[0]) && typeof entry[1] === 'string' && isValidHex(entry[1]))
+            .map(([name, value]) => [name, normalizeHex(value)])
+    );
+    const legacyManualIcons = typeof rawOptions?.adaptSvg !== 'boolean'
+        && rawOptions?.autoContrast === false
+        && Boolean(colors.icon);
     const rawImage = input.backgroundImage;
     const path = rawImage?.path?.trim();
     const rawFit = rawImage?.fit;
@@ -1405,11 +1445,18 @@ export function normalizeTheme(
         author: input.author?.trim() || undefined,
         colors,
         opacity: Object.keys(opacity).length > 0 ? opacity : undefined,
+        icons: Object.keys(icons).length > 0 ? icons : undefined,
         options: {
             autoContrast:
                 typeof rawOptions?.autoContrast === 'boolean'
                     ? rawOptions.autoContrast
                     : DEFAULT_THEME_OPTIONS.autoContrast,
+            adaptSvg:
+                typeof rawOptions?.adaptSvg === 'boolean'
+                    ? rawOptions.adaptSvg
+                    : legacyManualIcons
+                        ? false
+                        : DEFAULT_THEME_OPTIONS.adaptSvg,
             interfaceBlur: clamp(
                 numberOr(rawOptions?.interfaceBlur, DEFAULT_THEME_OPTIONS.interfaceBlur ?? 0),
                 0,

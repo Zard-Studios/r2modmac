@@ -61,7 +61,6 @@ export default {
                 // ~1.6:1 once the theme inverts. These are resolved per theme
                 // against its surface, so they read either way.
                 'fg-accent': themedColor('fg-accent'),
-                'fg-icon': themedColor('fg-icon'),
                 'fg-danger': themedColor('fg-danger'),
                 'fg-warning': themedColor('fg-warning'),
                 'fg-success': themedColor('fg-success'),

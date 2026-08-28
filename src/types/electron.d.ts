@@ -56,6 +56,8 @@ export interface ThemeSummary {
         | 'media_scrim' | 'media_ink',
         string
     >>;
+    /** Per-SVG overrides; keys unknown to this version remain round-trippable. */
+    icons?: Record<string, string> | null;
     opacity?: Partial<Record<
         'background' | 'surface' | 'surface_hover' | 'border' | 'text' | 'text_muted' | 'accent' | 'accent_hover'
         | 'danger' | 'warning' | 'success'
@@ -74,6 +76,7 @@ export interface ThemeSummary {
     } | null;
     options?: {
         auto_contrast?: boolean | null;
+        adapt_svg?: boolean | null;
         interface_blur?: number | null;
     } | null;
     /** Set when the file could not be parsed, so the UI can say why. */
