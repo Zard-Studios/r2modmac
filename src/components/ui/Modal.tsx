@@ -1,4 +1,5 @@
 import React from 'react';
+import { DialogLayer } from './DialogLayer';
 
 interface ModalProps {
     isOpen: boolean;
@@ -27,7 +28,10 @@ export function Modal({ isOpen, onClose, title, children, size = 'md' }: ModalPr
             />
 
             {/* Content */}
-            <div className={`relative ${sizeStyles[size]} w-full mx-4 bg-gray-800 rounded-xl shadow-2xl border border-gray-700`}>
+            <DialogLayer
+                onDismiss={onClose}
+                className={`relative ${sizeStyles[size]} w-full mx-4 bg-gray-800 rounded-xl shadow-2xl border border-gray-700`}
+            >
                 {title && (
                     <div className="flex items-center justify-between px-6 py-4 border-b border-gray-700">
                         {typeof title === 'string' ? (
@@ -49,7 +53,7 @@ export function Modal({ isOpen, onClose, title, children, size = 'md' }: ModalPr
                 <div className="p-6">
                     {children}
                 </div>
-            </div>
+            </DialogLayer>
         </div>
     );
 }

@@ -1,6 +1,6 @@
-import { useEffect } from 'react';
 import type { ProfileModUpdate } from '../../hooks/useModActions';
 import type { Package } from '../../types/thunderstore';
+import { DialogLayer } from '../ui';
 
 interface UpdateAllModalProps {
     isOpen: boolean;
@@ -12,19 +12,6 @@ interface UpdateAllModalProps {
 }
 
 export function UpdateAllModal({ isOpen, updates, isUpdating, onClose, onConfirm, onViewMod }: UpdateAllModalProps) {
-    useEffect(() => {
-        if (!isOpen || isUpdating) return;
-
-        const handleKeyDown = (event: KeyboardEvent) => {
-            if (event.key !== 'Escape') return;
-            event.preventDefault();
-            onClose();
-        };
-
-        window.addEventListener('keydown', handleKeyDown);
-        return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [isOpen, isUpdating, onClose]);
-
     if (!isOpen) return null;
 
     return (
@@ -34,13 +21,20 @@ export function UpdateAllModal({ isOpen, updates, isUpdating, onClose, onConfirm
                 if (event.target === event.currentTarget && !isUpdating) onClose();
             }}
         >
-            <div
-                role="dialog"
-                aria-modal="true"
+            <DialogLayer
+                onDismiss={onClose}
+                dismissible={!isUpdating}
                 aria-labelledby="update-all-title"
                 onMouseDown={(event) => event.stopPropagation()}
                 className="flex max-h-[78vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-gray-700 bg-gray-800 shadow-2xl"
             >
+                <form
+                    className="contents"
+                    onSubmit={(event) => {
+                        event.preventDefault();
+                        if (!isUpdating && updates.length > 0) onConfirm();
+                    }}
+                >
                 <div className="border-b border-gray-700 px-6 py-5">
                     <h2 id="update-all-title" className="text-xl font-bold text-white">Update {updates.length} mod{updates.length === 1 ? '' : 's'}?</h2>
                     <p className="mt-1 text-sm text-gray-400">
@@ -87,15 +81,16 @@ export function UpdateAllModal({ isOpen, updates, isUpdating, onClose, onConfirm
                         Cancel
                     </button>
                     <button
-                        type="button"
-                        onClick={onConfirm}
+                        type="submit"
+                        data-dialog-primary
                         disabled={isUpdating || updates.length === 0}
                         className="rounded-xl border border-blue-500 bg-blue-600 px-4 py-2.5 text-sm font-bold text-on-accent disabled:cursor-not-allowed disabled:opacity-50"
                     >
                         {isUpdating ? 'Preparing…' : `Update all (${updates.length})`}
                     </button>
                 </div>
-            </div>
+                </form>
+            </DialogLayer>
         </div>
     );
 }

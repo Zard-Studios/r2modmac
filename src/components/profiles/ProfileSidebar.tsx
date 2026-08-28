@@ -4,7 +4,7 @@ import type { Community, Package } from '../../types/thunderstore';
 import type { Profile, InstalledMod } from '../../types/profile';
 import type { RuntimeHealth } from '../../types/electron';
 import type { ProfileModUpdate } from '../../hooks/useModActions';
-import { Button, HoverMarquee } from '../ui';
+import { Button, DialogLayer, HoverMarquee } from '../ui';
 import { KeyboardShortcuts } from '../KeyboardShortcuts';
 import { compareVersions, hasNewerVersion, latestVersionNumber, parsePackageReference } from '../../utils/modVersioning';
 import { hasPendingRuntimeInstall, restoreInstalledMod } from '../../utils/profileSync';
@@ -391,14 +391,6 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
         previousPendingCountRef.current = pendingSyncCount;
     }, [pendingSyncCount]);
     useEffect(() => {
-        if (!syncConfirmation) return;
-        const onKeyDown = (event: KeyboardEvent) => {
-            if (event.key === 'Escape') setSyncConfirmation(null);
-        };
-        window.addEventListener('keydown', onKeyDown);
-        return () => window.removeEventListener('keydown', onKeyDown);
-    }, [syncConfirmation]);
-    useEffect(() => {
         const onKeyDown = (event: KeyboardEvent) => {
             if (event.key !== 'Escape' || event.defaultPrevented || syncConfirmation) return;
             setSelectedModIds([]);
@@ -699,7 +691,16 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
             {syncConfirmation ? (
                 <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/65 p-6 backdrop-blur-sm"
                     onMouseDown={event => { if (event.target === event.currentTarget) setSyncConfirmation(null); }}>
-                    <div role="dialog" aria-modal="true" aria-labelledby="sync-confirmation-title" className="flex max-h-[78vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-gray-700 bg-gray-800 shadow-2xl">
+                    <DialogLayer onDismiss={() => setSyncConfirmation(null)} aria-labelledby="sync-confirmation-title" className="flex max-h-[78vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-gray-700 bg-gray-800 shadow-2xl">
+                        <form className="contents" onSubmit={async (event) => {
+                            event.preventDefault();
+                            const confirmation = syncConfirmation;
+                            setSyncConfirmation(null);
+                            if (confirmation.kind === 'sync') await onSyncPending(confirmedSyncEntries.map(entry => entry.id));
+                            else await onRevertPending(confirmation.ids);
+                            setSyncSelectedIds([]);
+                            setSyncSelectionAnchorId(null);
+                        }}>
                         <div className="border-b border-gray-700 px-5 py-4">
                             <h2 id="sync-confirmation-title" className="text-lg font-bold text-white">{syncConfirmation.kind === 'sync' ? 'Sync' : 'Revert'} {confirmedSyncEntries.length} changes?</h2>
                             <p className="mt-1 text-xs text-gray-400">{syncConfirmation.kind === 'sync' ? 'Required dependencies are included automatically.' : 'Game files stay untouched until the next Sync.'}</p>
@@ -714,16 +715,10 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                         </div>
                         <div className="grid grid-cols-2 gap-3 border-t border-gray-700 p-4">
                             <button type="button" onClick={() => setSyncConfirmation(null)} className="rounded-xl border border-gray-600 bg-gray-700 px-4 py-2.5 text-sm font-semibold text-gray-100">Cancel</button>
-                            <button type="button" onClick={async () => {
-                                const confirmation = syncConfirmation;
-                                setSyncConfirmation(null);
-                                if (confirmation.kind === 'sync') await onSyncPending(confirmedSyncEntries.map(entry => entry.id));
-                                else await onRevertPending(confirmation.ids);
-                                setSyncSelectedIds([]);
-                                setSyncSelectionAnchorId(null);
-                            }} className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-on-accent">{syncConfirmation.kind === 'sync' ? 'Sync' : 'Revert'}</button>
+                            <button type="submit" data-dialog-primary className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-on-accent">{syncConfirmation.kind === 'sync' ? 'Sync' : 'Revert'}</button>
                         </div>
-                    </div>
+                        </form>
+                    </DialogLayer>
                 </div>
             ) : null}
             {/* Header */}

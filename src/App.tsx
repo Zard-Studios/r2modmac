@@ -44,6 +44,7 @@ import { compareVersions, findPinnedVersion, parsePackageReference } from './uti
 import { getProfileModKey, hasPendingRuntimeInstall, migratePendingSyncBaselines, restoreInstalledMod } from './utils/profileSync';
 import { isLoaderPackage, loaderDisplayName, loaderPackageIds } from './utils/loaderPackages';
 import { isTextEntryTarget, shouldReleaseSearchFocus } from './utils/searchField';
+import { dialogStack } from './utils/dialogStack';
 
 const QUICK_MAC_HINTS = new Set([
   'btd6',
@@ -2746,6 +2747,7 @@ function App() {
 
   useEffect(() => {
     const onKeyDownCapture = (event: KeyboardEvent) => {
+      if (dialogStack.size() > 0) return;
       if (!shouldReleaseSearchFocus(event)) return;
       if (useCommandStore.getState().isOpen) return;
 
@@ -2770,6 +2772,13 @@ function App() {
       // The palette closes itself; without this the same Escape would also step
       // back out of the profile behind it.
       if (useCommandStore.getState().isOpen) {
+        return;
+      }
+
+      // DialogLayer owns Escape for the topmost dialog. The app listener may
+      // have been registered first, so it must not navigate the screen behind
+      // an open prompt before that dialog consumes the event (issue #42).
+      if (dialogStack.size() > 0) {
         return;
       }
 
