@@ -378,6 +378,23 @@
   transition-duration: 0s !important;
 }
 
+/* A list highlight is feedback about where the pointer or keyboard focus is
+   now, not a decorative transition. When moving quickly, easing it makes the
+   highlight visibly trail behind the active row. Keep list selection instant
+   across menus, the command palette, and the mod/profile lists. */
+:where(
+  [role='menuitem'],
+  [role='option'],
+  [data-highlighted],
+  [aria-selected],
+  .mod-card,
+  .mod-list-item,
+  .profile-mod-row
+) {
+  transition-duration: 0s !important;
+  transition-delay: 0s !important;
+}
+
 @media (prefers-reduced-motion: reduce) {
   :root.r2-theme-crossfade-a::after,
   :root.r2-theme-crossfade-b::after {
