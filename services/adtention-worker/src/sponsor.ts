@@ -26,6 +26,10 @@ export type SponsorPayload = {
   billable: boolean;
 };
 
+export function isAdtentionConnectionEnabled(value: unknown): boolean {
+  return typeof value === 'string' && value.trim().toLowerCase() === 'true';
+}
+
 export function text(value: unknown, maximum: number): string | undefined {
   return typeof value === 'string' && value.trim().length > 0 && value.length <= maximum
     ? value.trim()

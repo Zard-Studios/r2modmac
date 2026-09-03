@@ -9,6 +9,12 @@ The two deployments are isolated:
 - `r2modmac-sponsor-staging` uses the ADtention test Publisher ID.
 - `r2modmac-sponsor-production` uses the ADtention live Publisher ID.
 
+The ADtention upstream is controlled by `ADTENTION_CONNECTION_ENABLED`. It is enabled in staging
+and disabled in production. When disabled, the Worker returns an empty `204` before parsing the
+request or initializing the SDK, so no request reaches ADtention. To reconnect production, set the
+production value to `"true"` in `wrangler.jsonc` and redeploy only the Worker; the desktop app does
+not need to be rebuilt. The Publisher ID secret remains untouched while the connection is disabled.
+
 Publisher IDs are configured per environment with Wrangler secrets and are never stored in this
 directory. The Worker has no database, analytics, custom request logging, or dynamic upstream URL.
 

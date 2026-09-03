@@ -1,12 +1,23 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { normalizeSponsor, validateSponsorRequest } from '../src/sponsor.ts';
+import {
+  isAdtentionConnectionEnabled,
+  normalizeSponsor,
+  validateSponsorRequest,
+} from '../src/sponsor.ts';
 
 const validRequest = {
   category: 'general' as const,
   placement: 'home-support',
   subject: '6f7c41f4-a42d-4cb5-bd44-123456789abc',
 };
+
+test('enables the ADtention connection only through an explicit true switch', () => {
+  assert.equal(isAdtentionConnectionEnabled('true'), true);
+  assert.equal(isAdtentionConnectionEnabled(' TRUE '), true);
+  assert.equal(isAdtentionConnectionEnabled('false'), false);
+  assert.equal(isAdtentionConnectionEnabled(undefined), false);
+});
 
 test('accepts only the minimal expected request', () => {
   assert.deepEqual(validateSponsorRequest(validRequest), validRequest);

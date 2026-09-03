@@ -13,7 +13,8 @@
     "staging": {
       "name": "r2modmac-sponsor-staging",
       "vars": {
-        "DEPLOYMENT_ENV": "staging"
+        "DEPLOYMENT_ENV": "staging",
+        "ADTENTION_CONNECTION_ENABLED": "true"
       },
       "secrets": {
         "required": ["ADTENTION_PUBLISHER_ID"]
@@ -22,7 +23,8 @@
     "production": {
       "name": "r2modmac-sponsor-production",
       "vars": {
-        "DEPLOYMENT_ENV": "production"
+        "DEPLOYMENT_ENV": "production",
+        "ADTENTION_CONNECTION_ENABLED": "false"
       },
       "secrets": {
         "required": ["ADTENTION_PUBLISHER_ID"]

@@ -1,5 +1,10 @@
 import { SponsorSlot, type AdtentionError, type Category } from '@adtention/sdk';
-import { normalizeSponsor, text, validateSponsorRequest } from './sponsor';
+import {
+  isAdtentionConnectionEnabled,
+  normalizeSponsor,
+  text,
+  validateSponsorRequest,
+} from './sponsor';
 
 const SPONSOR_PATH = '/api/sponsor';
 const MAX_REQUEST_BYTES = 2_048;
@@ -65,6 +70,13 @@ export default {
       || !request.headers.get('content-type')?.toLowerCase().startsWith('application/json')
     ) {
       return noContent('route_rejected', staging);
+    }
+
+    // Keep this gate ahead of request parsing and SDK setup so disabling the connection
+    // guarantees that no request reaches ADtention. It can be restored at the Worker
+    // configuration layer without rebuilding or redistributing the desktop app.
+    if (!isAdtentionConnectionEnabled(env.ADTENTION_CONNECTION_ENABLED)) {
+      return noContent('connection_disabled', staging);
     }
 
     const publisherId = text(env.ADTENTION_PUBLISHER_ID, 128);
