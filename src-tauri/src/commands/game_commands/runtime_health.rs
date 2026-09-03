@@ -11,6 +11,24 @@ pub struct RuntimeHealth {
     repairable: bool,
 }
 
+impl RuntimeHealth {
+    pub(crate) fn blocks_modded_launch(&self) -> bool {
+        matches!(self.status.as_str(), "missing" | "incomplete")
+    }
+
+    pub(crate) fn modded_launch_error(&self) -> String {
+        let details = if self.missing_components.is_empty() {
+            String::new()
+        } else {
+            format!(" Missing: {}.", self.missing_components.join(", "))
+        };
+        format!(
+            "The {} runtime is {} and must be repaired before launching modded.{}",
+            self.runtime, self.status, details
+        )
+    }
+}
+
 fn profile_is_vanilla(app: &AppHandle, profile_id: &str) -> bool {
     let Ok(data_dir) = crate::utils::paths::app_data_dir(app) else {
         return false;
@@ -242,6 +260,17 @@ fn inspect_windows_bepinex(
     if !game_path.join(winhttp).is_file() {
         missing.push("doorstop".to_string());
     }
+    let config = if disabled {
+        "doorstop_config.ini_DISABLED"
+    } else {
+        "doorstop_config.ini"
+    };
+    if !crate::commands::legacy_mod_commands::doorstop_config_has_loadable_target(
+        &game_path.join(config),
+        &bep_dir.join("core"),
+    ) {
+        missing.push("doorstop-config".to_string());
+    }
     health("bepinex", missing)
 }
 
@@ -373,7 +402,7 @@ pub async fn check_profile_runtime_health(
                 || has_complete_macos_bepinex_runtime_rooted(game_path, Some(&tree_root))
         } else {
             has_complete_macos_bepinex_runtime_rooted(game_path, Some(&tree_root))
-        } && core_directory_has_payload(&bep_dir.join("core"));
+        } && macos_bepinex_core_is_bootstrappable(&bep_dir.join("core"));
         if complete {
             return Ok(health("bepinex", Vec::new()));
         }
@@ -383,6 +412,8 @@ pub async fn check_profile_runtime_health(
         let mut missing = Vec::new();
         if !core_directory_has_payload(&bep_dir.join("core")) {
             missing.push("core".to_string());
+        } else if !macos_bepinex_core_is_bootstrappable(&bep_dir.join("core")) {
+            missing.push("preloader".to_string());
         }
         let doorstop = runtime_root.join(if disabled {
             "doorstop_libs_DISABLED"
@@ -429,7 +460,10 @@ mod tests {
         fs::create_dir_all(root.join("BepInEx/core")).unwrap();
         let result = inspect_windows_bepinex(&root, &root, false);
         assert_eq!(result.status, "incomplete");
-        assert_eq!(result.missing_components, vec!["preloader", "doorstop"]);
+        assert_eq!(
+            result.missing_components,
+            vec!["preloader", "doorstop", "doorstop-config"]
+        );
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -441,6 +475,11 @@ mod tests {
         fs::write(root.join("BepInEx/core/BepInEx.Preloader.Core.dll"), b"").unwrap();
         fs::write(root.join("BepInEx/core/BepInEx.Unity.IL2CPP.dll"), b"").unwrap();
         fs::write(root.join("winhttp.dll"), b"").unwrap();
+        fs::write(
+            root.join("doorstop_config.ini"),
+            b"enabled=true\ntarget_assembly=BepInEx\\core\\BepInEx.Unity.IL2CPP.dll\n",
+        )
+        .unwrap();
         let result = inspect_windows_bepinex(&root, &root, false);
         assert_eq!(result.status, "healthy");
         assert!(result.missing_components.is_empty());
@@ -456,6 +495,11 @@ mod tests {
         fs::create_dir_all(&game).unwrap();
         fs::write(profile.join("BepInEx/core/BepInEx.Preloader.dll"), b"").unwrap();
         fs::write(game.join("winhttp.dll"), b"").unwrap();
+        fs::write(
+            game.join("doorstop_config.ini"),
+            b"enabled=true\ntargetAssembly=BepInEx\\core\\BepInEx.Preloader.dll\n",
+        )
+        .unwrap();
 
         let result = inspect_windows_bepinex(&game, &profile, false);
         assert_eq!(result.status, "healthy");
@@ -478,6 +522,11 @@ mod tests {
         )
         .unwrap();
         fs::write(root.join("winhttp.dll_DISABLED"), b"").unwrap();
+        fs::write(
+            root.join("doorstop_config.ini_DISABLED"),
+            b"enabled=true\ntargetAssembly=BepInEx\\core\\BepInEx.Preloader.dll\n",
+        )
+        .unwrap();
         assert_eq!(
             inspect_windows_bepinex(&root, &root, true).status,
             "healthy"
@@ -522,6 +571,32 @@ mod tests {
         let result = inspect_owml(&root, false);
         assert_eq!(result.status, "incomplete");
         assert_eq!(result.missing_components, vec!["core"]);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn windows_runtime_without_doorstop_config_is_incomplete() {
+        let root = test_dir("windows-no-config");
+        fs::create_dir_all(root.join("BepInEx/core")).unwrap();
+        fs::write(root.join("BepInEx/core/BepInEx.Preloader.dll"), b"").unwrap();
+        fs::write(root.join("winhttp.dll"), b"").unwrap();
+
+        let result = inspect_windows_bepinex(&root, &root, false);
+        assert_eq!(result.status, "incomplete");
+        assert_eq!(result.missing_components, vec!["doorstop-config"]);
+        assert!(result.blocks_modded_launch());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn macos_core_with_unrelated_dlls_has_no_bootstrap_entry_point() {
+        let root = test_dir("macos-no-preloader");
+        let core = root.join("BepInEx/core");
+        fs::create_dir_all(&core).unwrap();
+        fs::write(core.join("BepInEx.dll"), b"").unwrap();
+
+        assert!(core_directory_has_payload(&core));
+        assert!(!macos_bepinex_core_is_bootstrappable(&core));
         fs::remove_dir_all(root).unwrap();
     }
 }

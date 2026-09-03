@@ -1796,7 +1796,10 @@ function App() {
     const community = profile.gameIdentifier || selectedCommunity;
     if (!community) return false;
 
-    const health = runtimeHealth || await refreshRuntimeHealth();
+    // Repair decisions must come from the filesystem now. Reusing the sidebar
+    // snapshot can incorrectly return success after BepInEx is damaged while
+    // the app is open.
+    const health = await refreshRuntimeHealth();
     if (health?.status === 'healthy' || hasPendingRuntimeInstall(profile, health?.runtime)) return true;
     if (!health || !health.repairable) {
       if (health?.status === 'unconfigured') setShowSettings(true);
@@ -1921,7 +1924,7 @@ function App() {
     } finally {
       setIsRepairingRuntime(false);
     }
-  }, [activeProfileId, installModWithDependencies, isRepairingRuntime, refreshRuntimeHealth, runtimeHealth, selectedCommunity, setProgressState, updateProfile]);
+  }, [activeProfileId, installModWithDependencies, isRepairingRuntime, refreshRuntimeHealth, selectedCommunity, setProgressState, updateProfile]);
 
   const handleProfileModUpdate = useCallback(async (
     pkg: Package,
@@ -3004,6 +3007,16 @@ function App() {
             : 'This profile has unapplied changes. Click “Apply to Game” before launching.'
         );
         return;
+      }
+
+      const health = await refreshRuntimeHealth();
+      if (health && (health.status === 'missing' || health.status === 'incomplete')) {
+        const confirmedRepair = await requestConfirm({
+          title: 'Repair Runtime Before Launch?',
+          message: `${loaderDisplayName(health.runtime)} is ${health.status}. Repair it before launching modded?`,
+          confirmLabel: 'Repair',
+        });
+        if (!confirmedRepair || !await repairProfileRuntime()) return;
       }
 
       try {

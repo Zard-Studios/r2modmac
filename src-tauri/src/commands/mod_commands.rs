@@ -2200,7 +2200,19 @@ pub(crate) fn point_doorstop_ini_at_root(content: &str, bepinex_root: &str) -> S
     let root = bepinex_root
         .trim_end_matches(['/', '\\'])
         .replace('/', "\\");
-    let preloader = format!("{root}\\core\\BepInEx.Preloader.dll");
+    // Keep the entry point the pack selected. BepInEx 5 uses
+    // BepInEx.Preloader.dll, while BepInEx 6 uses a runtime-specific assembly.
+    // Hard-coding the v5 name here made every isolated v6 repair immediately
+    // point Doorstop at a file that was not installed.
+    let entry_point = extract_ini_value(content, &["targetAssembly", "target_assembly"])
+        .and_then(|target| {
+            target
+                .rsplit(['/', '\\'])
+                .find(|component| !component.trim().is_empty())
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| "BepInEx.Preloader.dll".to_string());
+    let preloader = format!("{root}\\core\\{entry_point}");
     let core = format!("{root}\\core");
 
     // Doorstop 3 and Doorstop 4 name the same two settings differently, and a
@@ -2234,6 +2246,29 @@ pub(crate) fn point_doorstop_ini_at_root(content: &str, bepinex_root: &str) -> S
     let mut out = lines.join("\n");
     out.push('\n');
     out
+}
+
+/// Confirm that Doorstop is enabled and its configured entry point exists in
+/// the BepInEx tree. This catches a valid-looking install that would otherwise
+/// let the game start without loading any mods.
+pub(crate) fn doorstop_config_has_loadable_target(
+    config_path: &std::path::Path,
+    core_dir: &std::path::Path,
+) -> bool {
+    let Ok(content) = fs::read_to_string(config_path) else {
+        return false;
+    };
+    let enabled = extract_ini_value(&content, &["enabled"])
+        .is_some_and(|value| normalize_ini_bool(Some(value), false) == "true");
+    let target_exists = extract_ini_value(&content, &["targetAssembly", "target_assembly"])
+        .and_then(|target| {
+            target
+                .rsplit(['/', '\\'])
+                .find(|component| !component.trim().is_empty())
+                .map(str::to_string)
+        })
+        .is_some_and(|name| core_dir.join(name).is_file());
+    enabled && target_exists
 }
 
 pub(crate) fn normalize_macos_doorstop_config_file(path: &std::path::Path) -> Result<(), String> {
@@ -8059,7 +8094,7 @@ mod community_listing_tests {
 
 #[cfg(test)]
 mod doorstop_ini_retarget_tests {
-    use super::point_doorstop_ini_at_root;
+    use super::{doorstop_config_has_loadable_target, point_doorstop_ini_at_root};
 
     /// What the BepInEx pack ships.
     const SHIPPED: &str = "[UnityDoorstop]\r\nenabled=true\r\ntargetAssembly=BepInEx\\core\\BepInEx.Preloader.dll\r\nredirectOutputLog=true\r\nignoreDisableSwitch=false\r\ndllSearchPathOverride=\r\n";
@@ -8073,6 +8108,47 @@ mod doorstop_ini_retarget_tests {
 
     /// What a Doorstop 4 game folder holds instead, ULTRAKILL among them.
     const SHIPPED_DOORSTOP_4: &str = "[General]\r\nenabled = true\r\ntarget_assembly=BepInEx\\core\\BepInEx.Preloader.dll\r\n\r\n[UnityMono]\r\ndll_search_path_override =\r\n";
+
+    #[test]
+    fn a_bepinex6_entry_point_survives_profile_retargeting() {
+        let shipped = "[General]\nenabled=true\ntarget_assembly=BepInEx\\core\\BepInEx.Unity.IL2CPP.dll\ndll_search_path_override=\n";
+        let ini = point_doorstop_ini_at_root(shipped, r"Z:\profiles\abc\BepInEx");
+        assert_eq!(
+            value(&ini, "target_assembly"),
+            r"Z:\profiles\abc\BepInEx\core\BepInEx.Unity.IL2CPP.dll"
+        );
+        assert!(!ini.contains("BepInEx.Preloader.dll"));
+    }
+
+    #[test]
+    fn config_health_requires_an_enabled_existing_entry_point() {
+        let root = std::env::temp_dir().join(format!(
+            "r2modmac-doorstop-health-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let core = root.join("BepInEx/core");
+        std::fs::create_dir_all(&core).unwrap();
+        std::fs::write(core.join("BepInEx.Unity.IL2CPP.dll"), b"loader").unwrap();
+        let config = root.join("doorstop_config.ini");
+        std::fs::write(
+            &config,
+            "enabled=true\ntarget_assembly=BepInEx\\core\\BepInEx.Unity.IL2CPP.dll\n",
+        )
+        .unwrap();
+        assert!(doorstop_config_has_loadable_target(&config, &core));
+
+        std::fs::write(
+            &config,
+            "enabled=true\ntarget_assembly=BepInEx\\core\\BepInEx.Preloader.dll\n",
+        )
+        .unwrap();
+        assert!(!doorstop_config_has_loadable_target(&config, &core));
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn a_doorstop_4_config_is_retargeted_under_its_own_names() {

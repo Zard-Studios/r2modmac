@@ -126,6 +126,20 @@ pub(crate) fn has_complete_macos_bepinex_runtime(game_path: &std::path::Path) ->
     has_complete_macos_bepinex_runtime_rooted(game_path, None)
 }
 
+/// Whether `core` contains an assembly Doorstop can actually invoke on macOS.
+///
+/// A non-empty core directory is not enough: deleting only the entry point
+/// leaves plenty of BepInEx DLLs behind, but the game then starts vanilla.
+pub(crate) fn macos_bepinex_core_is_bootstrappable(core_dir: &std::path::Path) -> bool {
+    [
+        "BepInEx.Preloader.dll",
+        "BepInEx.Unity.IL2CPP.dll",
+        "BepInEx.Unity.Mono.Preloader.dll",
+    ]
+    .iter()
+    .any(|name| core_dir.join(name).is_file())
+}
+
 /// The same check with the tree somewhere other than the game, which is where
 /// an isolated profile keeps it. The loader is still looked for beside the
 /// game, since that is what the game loads.
@@ -135,7 +149,7 @@ pub(crate) fn has_complete_macos_bepinex_runtime_rooted(
 ) -> bool {
     let runtime_root = resolve_macos_runtime_root(game_path);
     let tree_root = tree_root.unwrap_or(&runtime_root);
-    let has_core = tree_root.join("BepInEx").join("core").is_dir();
+    let has_core = macos_bepinex_core_is_bootstrappable(&tree_root.join("BepInEx").join("core"));
     let has_doorstop_payload = runtime_root.join("doorstop_libs").is_dir()
         || runtime_root.join("libdoorstop.dylib").exists();
     let has_script = find_bepinex_script_in_dir(&runtime_root).is_some();
@@ -150,7 +164,8 @@ pub(crate) fn has_complete_disabled_macos_bepinex_runtime_rooted(
 ) -> bool {
     let runtime_root = resolve_macos_runtime_root(game_path);
     let tree_root = tree_root.unwrap_or(&runtime_root);
-    let has_core = tree_root.join("BepInEx_DISABLED").join("core").is_dir();
+    let has_core =
+        macos_bepinex_core_is_bootstrappable(&tree_root.join("BepInEx_DISABLED").join("core"));
     let has_doorstop_payload = runtime_root.join("doorstop_libs_DISABLED").is_dir()
         || runtime_root.join("libdoorstop.dylib_DISABLED").exists();
     let has_script = find_bepinex_script_in_dir(&runtime_root).is_some();
@@ -189,6 +204,11 @@ mod rooted_runtime_check_tests {
         std::fs::create_dir_all(&game).unwrap();
         loader_files(&game);
         std::fs::create_dir_all(profile.join("BepInEx/core")).unwrap();
+        std::fs::write(
+            profile.join("BepInEx/core/BepInEx.Preloader.dll"),
+            b"loader",
+        )
+        .unwrap();
 
         assert!(has_complete_macos_bepinex_runtime_rooted(
             &game,
@@ -226,6 +246,11 @@ mod rooted_runtime_check_tests {
         std::fs::create_dir_all(game.join("doorstop_libs_DISABLED")).unwrap();
         std::fs::write(game.join("run_bepinex.sh"), b"#!/bin/sh\n").unwrap();
         std::fs::create_dir_all(profile.join("BepInEx_DISABLED/core")).unwrap();
+        std::fs::write(
+            profile.join("BepInEx_DISABLED/core/BepInEx.Preloader.dll"),
+            b"loader",
+        )
+        .unwrap();
 
         assert!(has_complete_disabled_macos_bepinex_runtime_rooted(
             &game,
@@ -244,10 +269,24 @@ mod rooted_runtime_check_tests {
         let root = world("game-tree");
         let game = root.join("game");
         std::fs::create_dir_all(game.join("BepInEx/core")).unwrap();
+        std::fs::write(game.join("BepInEx/core/BepInEx.Preloader.dll"), b"loader").unwrap();
         loader_files(&game);
 
         assert!(has_complete_macos_bepinex_runtime_rooted(&game, None));
         assert!(has_complete_macos_bepinex_runtime(&game));
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn unrelated_core_dlls_do_not_make_the_runtime_complete() {
+        let root = world("missing-entry-point");
+        let game = root.join("game");
+        std::fs::create_dir_all(game.join("BepInEx/core")).unwrap();
+        std::fs::write(game.join("BepInEx/core/BepInEx.dll"), b"loader").unwrap();
+        loader_files(&game);
+
+        assert!(!has_complete_macos_bepinex_runtime(&game));
 
         std::fs::remove_dir_all(root).unwrap();
     }

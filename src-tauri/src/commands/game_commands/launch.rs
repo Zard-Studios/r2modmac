@@ -36,6 +36,16 @@ pub async fn launch_game_with_mods(
     // Clears any cancellation left by a previous attempt, so pressing Play
     // after stopping one launch does not abort the next one instantly.
     launch_cancel::begin_launch();
+    let health = super::runtime_health::check_profile_runtime_health(
+        app.clone(),
+        profile_id.clone(),
+        game_identifier.clone(),
+        platform.clone(),
+    )
+    .await?;
+    if health.blocks_modded_launch() {
+        return Err(health.modded_launch_error());
+    }
     let is_windows_profile = normalized_platform(platform.as_deref()) == Some("windows");
     let game_path_str = get_game_path(app.clone(), game_identifier.clone(), platform)
         .await?
