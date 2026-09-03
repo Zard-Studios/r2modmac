@@ -231,7 +231,7 @@ fn list_directory_entries(dir: &std::path::Path, limit: usize) -> Vec<String> {
 /// `tree_root` is where the BepInEx folder lives, which is the profile once it
 /// is isolated; the loader is still looked for beside the game, since that is
 /// what the game loads.
-fn inspect_windows_bepinex(
+pub(crate) fn inspect_windows_bepinex(
     game_path: &std::path::Path,
     tree_root: &std::path::Path,
     vanilla: bool,

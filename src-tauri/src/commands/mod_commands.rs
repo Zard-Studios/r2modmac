@@ -8690,3 +8690,116 @@ mod game_ini_follows_tree_tests {
         fs::remove_dir_all(root).unwrap();
     }
 }
+
+#[cfg(test)]
+mod fresh_lethal_company_bottle_tests {
+    use super::*;
+    use crate::commands::game_commands::runtime_health::inspect_windows_bepinex;
+    use std::io::{Cursor, Write};
+
+    // Matches the relevant files and Doorstop 4 syntax in the current
+    // BepInEx-BepInExPack package for Lethal Company (5.4.2305).
+    const DOORSTOP_CONFIG: &[u8] = b"# General options for Unity Doorstop\n\
+[General]\n\
+enabled = true\n\
+target_assembly=BepInEx\\core\\BepInEx.Preloader.dll\n\
+redirect_output_log = false\n\
+boot_config_override =\n\
+ignore_disable_switch = false\n\
+[UnityMono]\n\
+dll_search_path_override =\n";
+
+    fn bepinex_pack_fixture() -> Vec<u8> {
+        let mut bytes = Cursor::new(Vec::new());
+        {
+            let mut writer = zip::ZipWriter::new(&mut bytes);
+            let options = zip::write::FileOptions::default();
+            for (name, content) in [
+                ("BepInExPack/.doorstop_version", b"4.3.0".as_slice()),
+                (
+                    "BepInExPack/BepInEx/core/BepInEx.Preloader.dll",
+                    b"preloader".as_slice(),
+                ),
+                ("BepInExPack/BepInEx/core/BepInEx.dll", b"core".as_slice()),
+                (
+                    "BepInExPack/BepInEx/config/BepInEx.cfg",
+                    b"[Logging.Console]\nEnabled = true\n".as_slice(),
+                ),
+                ("BepInExPack/doorstop_config.ini", DOORSTOP_CONFIG),
+                ("BepInExPack/winhttp.dll", b"doorstop".as_slice()),
+            ] {
+                writer.start_file(name, options).unwrap();
+                writer.write_all(content).unwrap();
+            }
+            writer.finish().unwrap();
+        }
+        bytes.into_inner()
+    }
+
+    fn install_or_repair(bytes: &[u8], game: &std::path::Path, profile: &std::path::Path) {
+        let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
+        extract_bepinex_pack_to_root(&mut archive, game, false, false).unwrap();
+        relocate_bepinex_tree(game, profile).unwrap();
+        point_game_doorstop_ini_at_tree(game, profile).unwrap();
+    }
+
+    #[test]
+    fn fresh_crossover_bottle_detects_damage_repairs_and_blocks_invalid_launches() {
+        let root = std::env::temp_dir().join(format!(
+            "r2modmac-lethal-fresh-bottle-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let bottle = root.join("Bottles/Steam");
+        let game = bottle.join("drive_c/Program Files (x86)/Steam/steamapps/common/Lethal Company");
+        let profile = root.join("Application Support/com.r2modmac/profiles/lethal-company");
+        fs::create_dir_all(&game).unwrap();
+        fs::create_dir_all(&profile).unwrap();
+
+        #[cfg(unix)]
+        {
+            let dosdevices = bottle.join("dosdevices");
+            fs::create_dir_all(&dosdevices).unwrap();
+            std::os::unix::fs::symlink("/", dosdevices.join("z:")).unwrap();
+        }
+
+        let pack = bepinex_pack_fixture();
+        install_or_repair(&pack, &game, &profile);
+
+        assert!(!game.join("BepInEx").exists());
+        assert!(game.join("winhttp.dll").is_file());
+        let installed_config = fs::read_to_string(game.join("doorstop_config.ini")).unwrap();
+        assert!(installed_config.contains("target_assembly="));
+        assert!(!installed_config.contains("target_assembly=BepInEx\\core"));
+        assert!(!inspect_windows_bepinex(&game, &profile, false).blocks_modded_launch());
+
+        fs::remove_file(profile.join("BepInEx/core/BepInEx.Preloader.dll")).unwrap();
+        fs::write(
+            game.join("doorstop_config.ini"),
+            b"[General]\nenabled=false\ntarget_assembly=BepInEx\\core\\Missing.dll\n",
+        )
+        .unwrap();
+        let damaged = inspect_windows_bepinex(&game, &profile, false);
+        assert!(damaged.blocks_modded_launch());
+        let error = damaged.modded_launch_error();
+        assert!(error.contains("preloader"), "{error}");
+        assert!(error.contains("doorstop-config"), "{error}");
+
+        install_or_repair(&pack, &game, &profile);
+
+        assert!(!inspect_windows_bepinex(&game, &profile, false).blocks_modded_launch());
+        assert_eq!(
+            fs::read(profile.join("BepInEx/core/BepInEx.Preloader.dll")).unwrap(),
+            b"preloader"
+        );
+        assert!(doorstop_config_has_loadable_target(
+            &game.join("doorstop_config.ini"),
+            &profile.join("BepInEx/core"),
+        ));
+
+        fs::remove_dir_all(root).unwrap();
+    }
+}
