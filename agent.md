@@ -111,6 +111,5 @@ Then apply/sync a game mod profile and press the launch button. Check `LastRunWi
   - `check_update` resolves OS and architecture combinations (e.g., Windows x86_64 -> `"x64"`, Windows i686/x86 -> `"x86"`, Windows aarch64 -> `"arm64"`) and targets `.exe` file extensions on Windows while targeting `.dmg`/`.tar.gz`/`.zip` on macOS.
   - `install_update` uses a `#[cfg(target_os = "windows")]` block to spawn the downloaded `.exe` installer as a detached child process, then immediately exits the application so that the installer can overwrite `r2modmac.exe` without encountering file lock conflicts.
 - **Native Context Menus:**
-  - Intercepts default context menu events and overrides them in [App.tsx](file:///Users/federicofeduzi/Github/r2modmac/src/App.tsx) using English options ("Reload", "Inspect Element") for cross-platform visual consistency.
-
+  - Intercepts default context menu events and overrides them in `src/App.tsx` using English options ("Reload", "Inspect Element") for cross-platform visual consistency.
 

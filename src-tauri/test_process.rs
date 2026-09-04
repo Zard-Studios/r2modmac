@@ -1,6 +1,6 @@
 fn main() {
     let patterns = vec![
-        "/Users/federicofeduzi/Applications/Steambuild 32 64bit DXVK.app/Contents/SharedSupport/prefix/drive_c/Program Files (x86)/Steam/steamapps/common/PEAK/PEAK.exe".to_string(),
+        "/Users/test-user/Applications/Steam Bottle.app/Contents/SharedSupport/prefix/drive_c/Program Files (x86)/Steam/steamapps/common/PEAK/PEAK.exe".to_string(),
         "C:\\Program Files (x86)\\Steam\\steamapps\\common\\PEAK\\PEAK.exe".to_string(),
         "PEAK.exe".to_string(),
         "peak.exe".to_string(),

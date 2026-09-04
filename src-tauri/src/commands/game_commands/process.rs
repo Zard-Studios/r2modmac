@@ -579,7 +579,7 @@ mod pgrep_self_match_tests {
         for executable in [
             "/Steam/steamapps/common/PEAK/PEAK.exe",
             "PEAK.exe",
-            "/Volumes/Feduzi/Giochi/Crossover/Bottles/Steam/drive_c/PEAK/PEAK.exe",
+            "/Volumes/ExternalSSD/Games/CrossOver/Bottles/Steam/drive_c/PEAK/PEAK.exe",
         ] {
             let pattern = regex::escape(executable);
             let needle = pgrep_pattern_for(&pattern);

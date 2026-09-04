@@ -222,9 +222,9 @@ mod manual_game_path_tests {
     #[test]
     fn the_library_that_holds_every_game_is_not_a_game_folder() {
         for root in [
-            "/Volumes/Feduzi/SteamLibrary/steamapps/common",
+            "/Volumes/ExternalSSD/SteamLibrary/steamapps/common",
             "/Users/x/Library/Application Support/Steam/steamapps/common",
-            "/Volumes/Feduzi/SteamLibrary/steamapps/Common",
+            "/Volumes/ExternalSSD/SteamLibrary/steamapps/Common",
         ] {
             assert!(is_steam_library_root(Path::new(root)), "{root}");
         }
@@ -233,7 +233,7 @@ mod manual_game_path_tests {
     #[test]
     fn a_game_inside_the_library_is_accepted() {
         for game in [
-            "/Volumes/Feduzi/SteamLibrary/steamapps/common/Inscryption",
+            "/Volumes/ExternalSSD/SteamLibrary/steamapps/common/Inscryption",
             "/Users/x/Library/Application Support/Steam/steamapps/common/Muck",
             "/Users/x/Games/common",
         ] {

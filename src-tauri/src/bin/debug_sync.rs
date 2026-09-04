@@ -1,6 +1,6 @@
 use serde_json::Value;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 #[derive(serde::Deserialize, Debug, Clone)]
 struct SimpleManifest {
@@ -185,7 +185,9 @@ fn read_manifest_version(dir: &Path) -> Option<String> {
 
 fn main() {
     println!("--- DEBUG ALL SYNC START ---");
-    let app_data = PathBuf::from("/Users/federicofeduzi/Library/Application Support/com.r2modmac");
+    let app_data = dirs::home_dir()
+        .expect("home directory is required")
+        .join("Library/Application Support/com.r2modmac");
     let settings_data = fs::read_to_string(app_data.join("settings.json")).unwrap();
     let settings: Value = serde_json::from_str(&settings_data).unwrap();
     let game_paths = settings["game_paths"].as_object().unwrap();

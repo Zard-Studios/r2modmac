@@ -8191,10 +8191,10 @@ mod doorstop_ini_retarget_tests {
         // The profile lives on the mac side; the game reads Windows paths.
         let ini = point_doorstop_ini_at_root(
             SHIPPED,
-            r"Z:\Users\federicofeduzi\Library\Application Support\com.r2modmac\profiles\abc\BepInEx",
+            r"Z:\Users\test-user\Library\Application Support\com.r2modmac\profiles\abc\BepInEx",
         );
         assert!(value(&ini, "targetAssembly")
-            .starts_with(r"Z:\Users\federicofeduzi\Library\Application Support\"));
+            .starts_with(r"Z:\Users\test-user\Library\Application Support\"));
         assert!(value(&ini, "targetAssembly").ends_with(r"\BepInEx\core\BepInEx.Preloader.dll"));
     }
 
@@ -8223,7 +8223,7 @@ mod doorstop_ini_retarget_tests {
     fn spaces_and_parentheses_survive() {
         let ini = point_doorstop_ini_at_root(
             SHIPPED,
-            r"Z:\Volumes\Feduzi\Giochi\Crossover\Bottles\Steam\drive_c\Program Files (x86)\profiles\a b\BepInEx",
+            r"Z:\Volumes\ExternalSSD\Games\CrossOver\Bottles\Steam\drive_c\Program Files (x86)\profiles\a b\BepInEx",
         );
         assert!(value(&ini, "targetAssembly").contains(r"Program Files (x86)"));
         assert!(value(&ini, "targetAssembly").contains(r"\a b\"));
@@ -8285,19 +8285,19 @@ mod doorstop_ini_across_games_tests {
     const GAMES: [(&str, &str); 6] = [
         (
             "lethal-company",
-            r"Z:\Volumes\Feduzi\Giochi\Crossover\Bottles\Steam\drive_c\Program Files (x86)\Steam\steamapps\common\Lethal Company",
+            r"Z:\Volumes\ExternalSSD\Games\CrossOver\Bottles\Steam\drive_c\Program Files (x86)\Steam\steamapps\common\Lethal Company",
         ),
         (
             "peak",
-            r"Z:\Volumes\Feduzi\Giochi\Crossover\Bottles\Steam\drive_c\Program Files (x86)\Steam\steamapps\common\PEAK",
+            r"Z:\Volumes\ExternalSSD\Games\CrossOver\Bottles\Steam\drive_c\Program Files (x86)\Steam\steamapps\common\PEAK",
         ),
         (
             "ultrakill",
-            r"Z:\Volumes\Feduzi\Giochi\Crossover\Bottles\Steam\drive_c\Program Files (x86)\Steam\steamapps\common\ULTRAKILL",
+            r"Z:\Volumes\ExternalSSD\Games\CrossOver\Bottles\Steam\drive_c\Program Files (x86)\Steam\steamapps\common\ULTRAKILL",
         ),
         (
             "human-fall-flat",
-            r"Z:\Volumes\Feduzi\Giochi\Crossover\Bottles\Steam\drive_c\Program Files (x86)\Steam\steamapps\common\Human Fall Flat",
+            r"Z:\Volumes\ExternalSSD\Games\CrossOver\Bottles\Steam\drive_c\Program Files (x86)\Steam\steamapps\common\Human Fall Flat",
         ),
         (
             "repo",
