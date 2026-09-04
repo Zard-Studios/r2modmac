@@ -2006,12 +2006,9 @@ function App() {
 
     const health = await refreshRuntimeHealth();
     if (health && (health.status === 'missing' || health.status === 'incomplete') && !hasPendingRuntimeInstall(original, health.runtime)) {
-      const confirmedRepair = await requestConfirm({
-        title: 'Repair Runtime Before Sync?',
-        message: `${loaderDisplayName(health.runtime)} is ${health.status}. Repair it before synchronizing this selection?`,
-        confirmLabel: 'Repair',
-      });
-      if (!confirmedRepair || !await repairProfileRuntime()) return;
+      // Choosing Sync already authorizes the file changes. A second question
+      // here only interrupts the operation; repair is a required first step.
+      if (!await repairProfileRuntime()) return;
     }
 
     const selected = new Set(ids);
@@ -2579,13 +2576,9 @@ function App() {
       if (isVanillaOverride === undefined) {
         const health = await refreshRuntimeHealth();
         if (health && (health.status === 'missing' || health.status === 'incomplete') && !hasPendingRuntimeInstall(activeProfile, health.runtime)) {
-          const confirmedRepair = await requestConfirm({
-            title: 'Repair Runtime Before Apply?',
-            message: `${loaderDisplayName(health.runtime)} is ${health.status}. ` +
-              'The working files will be repaired before the profile is synchronized.',
-            confirmLabel: 'Repair',
-          });
-          if (!confirmedRepair || !await repairProfileRuntime()) return;
+          // Apply is already the user's consent to synchronize this profile.
+          // Repairing its required runtime is part of that one operation.
+          if (!await repairProfileRuntime()) return;
         }
       }
       // Confirming an apply is the pending-changes modal's job in the sidebar,

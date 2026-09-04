@@ -244,6 +244,26 @@ pub(crate) enum LaunchWaitOutcome {
 
 const POLL_INTERVAL_MS: u64 = 250;
 
+/// Steam briefly writes `waiting for user response` for normal launch steps
+/// such as ShowInterstitials, then answers them itself a moment later. Only a
+/// reason that survives two log reads is a blocker worth showing to the user.
+fn confirm_persistent_blocker(
+    previous: &mut Option<String>,
+    current: Option<String>,
+) -> Option<String> {
+    match current {
+        Some(reason) if previous.as_deref() == Some(reason.as_str()) => Some(reason),
+        Some(reason) => {
+            *previous = Some(reason);
+            None
+        }
+        None => {
+            *previous = None;
+            None
+        }
+    }
+}
+
 /// Wait for the game to appear, watching Steam for a reason it will not start.
 ///
 /// Polling Steam's own state while waiting means a blocked launch is reported
@@ -266,6 +286,7 @@ pub(crate) fn wait_for_launch_or_blocker(
 
     let attempts = std::cmp::max(1, timeout_ms / POLL_INTERVAL_MS);
     let mut confirmation = crate::commands::game_commands::process::StartConfirmation::new();
+    let mut pending_blocker = None;
 
     for attempt in 0..attempts {
         if should_cancel() {
@@ -290,7 +311,8 @@ pub(crate) fn wait_for_launch_or_blocker(
         }
 
         if attempt > 0 && attempt % STEAM_CHECK_EVERY == 0 {
-            if let Some(reason) = explain_stalled_launch(client_root, library_root, app_id) {
+            let observed = explain_stalled_launch(client_root, library_root, app_id);
+            if let Some(reason) = confirm_persistent_blocker(&mut pending_blocker, observed) {
                 // Re-check the process first: the game may have started in the
                 // same tick, which beats a stale log line.
                 if confirmation.observe(is_started()) {
@@ -584,9 +606,67 @@ mod tests {
     }
 
     #[test]
+    fn a_transient_steam_handshake_is_not_reported_as_a_prompt() {
+        let waiting = "[2026-09-04 14:39:54] GameAction [AppID 1966720, ActionID 1] : LaunchApp waiting for user response to ShowInterstitials \"\"\n";
+        let answered = concat!(
+            "[2026-09-04 14:39:54] GameAction [AppID 1966720, ActionID 1] : LaunchApp waiting for user response to ShowInterstitials \"\"\n",
+            "[2026-09-04 14:39:55] GameAction [AppID 1966720, ActionID 1] : LaunchApp continues with user response \"ShowInterstitials\"\n",
+        );
+        let mut previous = None;
+
+        assert_eq!(
+            confirm_persistent_blocker(
+                &mut previous,
+                pending_user_prompt_for_app(waiting, "1966720")
+            ),
+            None,
+            "the first sighting may be Steam's normal auto-answered handshake"
+        );
+        assert_eq!(
+            confirm_persistent_blocker(
+                &mut previous,
+                pending_user_prompt_for_app(answered, "1966720")
+            ),
+            None,
+            "Steam answered the prompt itself, so no warning is due"
+        );
+        assert_eq!(previous, None);
+    }
+
+    #[test]
+    fn a_prompt_that_survives_two_reads_is_reported() {
+        let log = "[20:07:37] GameAction [AppID 3527290, ActionID 1] : LaunchApp waiting for user response to SynchronizingCloud \"pendingcloudsessions\"\n";
+        let mut previous = None;
+        let first = pending_user_prompt_for_app(log, "3527290");
+        let second = pending_user_prompt_for_app(log, "3527290");
+
+        assert_eq!(confirm_persistent_blocker(&mut previous, first), None);
+        assert!(confirm_persistent_blocker(&mut previous, second)
+            .expect("a persistent prompt must still be reported")
+            .contains("Steam Cloud"));
+    }
+
+    #[test]
     fn ignores_prompts_belonging_to_a_different_app() {
         let log = "[2026-08-06 20:07:37] GameAction [AppID 3527290, ActionID 1] : LaunchApp waiting for user response to SynchronizingCloud \"pendingcloudsessions\"\n";
         assert_eq!(pending_user_prompt_for_app(log, "1229490"), None);
+    }
+
+    #[test]
+    fn another_game_updating_does_not_block_the_requested_game() {
+        let root = fake_steam_root("1966720", 4, "");
+        std::fs::write(
+            appmanifest_path(&root, "3527290"),
+            "\"AppState\"\n{\n\t\"StateFlags\"\t\t\"1030\"\n}",
+        )
+        .unwrap();
+
+        assert_eq!(
+            explain_stalled_launch(&root, &root, "1966720"),
+            None,
+            "only the requested app's manifest may affect its launch"
+        );
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
