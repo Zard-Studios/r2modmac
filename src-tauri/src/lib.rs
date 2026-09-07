@@ -28,11 +28,12 @@ static GLOBAL: MiMalloc = MiMalloc;
 use tauri::Emitter;
 use tauri::Manager;
 
-fn copy_text_with_program(program: &str, text: &str) -> Result<(), String> {
+fn copy_text_with_program(program: &str, args: &[&str], text: &str) -> Result<(), String> {
     use std::io::Write;
     use std::process::{Command, Stdio};
 
     let mut child = Command::new(program)
+        .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
@@ -63,12 +64,32 @@ fn copy_text_with_program(program: &str, text: &str) -> Result<(), String> {
 #[tauri::command]
 fn copy_text_to_clipboard(text: String) -> Result<(), String> {
     #[cfg(target_os = "macos")]
-    return copy_text_with_program("/usr/bin/pbcopy", &text);
+    return copy_text_with_program("/usr/bin/pbcopy", &[], &text);
 
     #[cfg(target_os = "windows")]
-    return copy_text_with_program("clip.exe", &text);
+    return copy_text_with_program("clip.exe", &[], &text);
 
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    #[cfg(target_os = "linux")]
+    {
+        let helpers: [(&str, &[&str]); 3] = [
+            ("wl-copy", &[]),
+            ("xclip", &["-selection", "clipboard"]),
+            ("xsel", &["--clipboard", "--input"]),
+        ];
+        let mut errors = Vec::new();
+        for (program, args) in helpers {
+            match copy_text_with_program(program, args, &text) {
+                Ok(()) => return Ok(()),
+                Err(error) => errors.push(format!("{program}: {error}")),
+            }
+        }
+        Err(format!(
+            "No Linux clipboard helper succeeded. Install wl-clipboard, xclip, or xsel. {}",
+            errors.join("; ")
+        ))
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
     {
         let _ = text;
         Err("Native clipboard copying is not supported on this platform".to_string())
@@ -609,14 +630,15 @@ mod app_log_storage_tests {
     #[cfg(unix)]
     #[test]
     fn sends_the_complete_text_to_a_native_helper() {
-        copy_text_with_program("/usr/bin/tee", "01a07517-88d6-3b53-4797-e0b774855941")
+        copy_text_with_program("/usr/bin/tee", &[], "01a07517-88d6-3b53-4797-e0b774855941")
             .expect("the helper should receive stdin and exit successfully");
     }
 
     #[test]
     fn reports_when_the_native_helper_cannot_start() {
-        let error = copy_text_with_program("r2modmac-command-that-does-not-exist", "share-code")
-            .expect_err("a missing helper must not be reported as a successful copy");
+        let error =
+            copy_text_with_program("r2modmac-command-that-does-not-exist", &[], "share-code")
+                .expect_err("a missing helper must not be reported as a successful copy");
         assert!(error.contains("Could not start the system clipboard helper"));
     }
 
