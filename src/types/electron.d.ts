@@ -208,6 +208,7 @@ export interface IElectronAPI {
     openAppLogsFolder: () => Promise<void>;
     getAppLogsSize: () => Promise<number>;
     clearAppLogs: () => Promise<number>;
+    copyTextToClipboard: (text: string) => Promise<void>;
     setVerboseLogging: (enabled: boolean) => Promise<void>;
     listThemes: () => Promise<ThemeSummary[]>;
     readThemeSource: (fileName: string) => Promise<string>;

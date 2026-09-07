@@ -193,17 +193,25 @@ export function useProfileActions({
             const code = await window.ipcRenderer.shareProfile(activeProfileId);
             setProgressState(prev => ({ ...prev, progress: 100, currentTask: 'Done!' }));
 
-            // Attempted here rather than inside the timeout below. Writing to the
-            // clipboard needs recent user activation, and half a second of
-            // waiting is enough to lose it — so the write was being refused
-            // while the message still promised it had worked. Awaited too: it
-            // returns a promise, and ignoring it meant the failure was silent.
+            // The browser clipboard API is permission-gated by the WebView and
+            // can reject the write after the upload has consumed the original
+            // click. Use the native clipboard first; keep the browser API as a
+            // fallback for the standalone web/dev build.
             let copied = false;
             try {
-                await navigator.clipboard.writeText(code);
+                await window.ipcRenderer.copyTextToClipboard(code);
                 copied = true;
-            } catch (clipboardError) {
-                console.warn('[share-profile] clipboard refused the code', clipboardError);
+            } catch (nativeClipboardError) {
+                try {
+                    await navigator.clipboard.writeText(code);
+                    copied = true;
+                } catch (webClipboardError) {
+                    console.warn(
+                        '[share-profile] clipboard refused the code',
+                        nativeClipboardError,
+                        webClipboardError,
+                    );
+                }
             }
 
             setTimeout(() => {

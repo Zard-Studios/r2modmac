@@ -248,6 +248,7 @@ export const tauriAPI: IElectronAPI = {
     openAppLogsFolder: async () => invoke('open_app_logs_folder'),
     getAppLogsSize: async () => invoke<number>('get_app_logs_size'),
     clearAppLogs: async () => invoke<number>('clear_app_logs'),
+    copyTextToClipboard: async (text: string) => invoke('copy_text_to_clipboard', { text }),
     setVerboseLogging: async (enabled: boolean) => invoke('set_verbose_logging', { enabled }),
 
     listThemes: async () => invoke<ThemeSummary[]>('list_themes'),
