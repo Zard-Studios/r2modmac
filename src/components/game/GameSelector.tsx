@@ -13,7 +13,6 @@ interface GameSelectorProps {
     favoriteGames: string[];
     onToggleFavorite: (identifier: string, e: React.MouseEvent) => void;
     searchQuery: string;
-    gridClassName?: string;
     containerClassName?: string;
 }
 
@@ -214,7 +213,6 @@ export function GameSelector({
     favoriteGames,
     onToggleFavorite,
     searchQuery,
-    gridClassName = "grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8 3xl:grid-cols-10 gap-3.5 sm:gap-4",
     containerClassName = "p-4 pt-0 space-y-8",
 }: GameSelectorProps) {
     const containerRef = useRef<HTMLDivElement>(null);
@@ -327,7 +325,10 @@ export function GameSelector({
                                         <div className="absolute inset-x-0 top-1/2 border-t border-gray-800" />
                                     </div>
                                 ) : (
-                                    <div className={`${gridClassName} pb-4`}>
+                                    <div
+                                        className="grid gap-4 pb-4"
+                                        style={{ gridTemplateColumns: `repeat(${columnCount}, minmax(0, 1fr))` }}
+                                    >
                                         {row.communities.map(community => (
                                             <GameCard
                                                 key={community.identifier}
