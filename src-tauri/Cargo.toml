@@ -53,10 +53,10 @@ sha2 = "0.10"
 # Themes are user-authored TOML. Parsing only — theme files are written from the
 # frontend, which emits the commented, self-documenting layout users read.
 toml = { version = "0.9", default-features = false, features = ["parse", "serde"] }
-perfetto-sdk = "1.0.3"
 
 [target.'cfg(not(target_os = "windows"))'.dependencies]
 mimalloc = { version = "0.1", default-features = false }
+perfetto-sdk = "1.0.3"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # clonefile(2) for copy-on-write Apply snapshots.

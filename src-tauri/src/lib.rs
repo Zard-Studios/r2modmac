@@ -13,6 +13,10 @@ pub fn should_clean_profile_staging(legacy_install_mode: bool, profile_isolation
 #[cfg(debug_assertions)]
 mod dev_bridge;
 pub mod models;
+#[cfg(not(target_os = "windows"))]
+pub mod tracing;
+#[cfg(target_os = "windows")]
+#[path = "tracing_noop.rs"]
 pub mod tracing;
 pub mod utils;
 
