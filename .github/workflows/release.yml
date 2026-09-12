@@ -208,16 +208,16 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           body: |
-            ## Fixes
-
-            * Fixed launcher problems.
-            * Fixed BepInEx runtime repair and detection.
-            * Fixed profile code copying to the clipboard.
-            * Improved the profile actions menu.
-            * Renamed Stream Mode to pls privacy and extended it to hide usernames in the app and its logs.
-            * Kept custom theme SVG icon controls in sync with Preferences.
-            * UI fixes.
-            * General fixes.
+            - Interface changes and fixes
+            - Improved UI
+            - Fixed the sidebar display after enabling or disabling a mod
+            - Fixed an issue that could cause updates to fail silently
+            - Small changes to theme presets and icons
+            - Added version information in settings
+            - Fixed the missing cover for some communities
+            - Removed size limits for downloading and extracting mods
+            - Fixed Steam detection through Sikarugir and Hades II mod synchronization
+            - Fixed the installation of Hell2Modding and ReturnOfModding in the `Hades II/Ship` folder
           files: |
             release_files/*.dmg
             release_files/*.zip
