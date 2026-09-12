@@ -52,7 +52,6 @@ export interface AppModalsProps {
     communityImages: Record<string, string>;
     communityPlatforms: Record<string, CommunityPlatformInfo>;
     onSavePreferences: (settings: PreferencesSettings) => Promise<void>;
-    onSponsorPreferencesChange: (enabled: boolean) => Promise<void>;
     hasHiddenGuideWarnings: boolean;
     onRestoreGuideWarnings: () => Promise<void>;
     onSetGuideHidden: (guide: 'crossover' | 'macos', hidden: boolean) => Promise<void>;
@@ -77,7 +76,7 @@ export function AppModals({
     showExportModal, setShowExportModal, handleExportCode, handleExportFile,
     showUpdateModal, setShowUpdateModal, updateInfo,
     showCrossOverGuide, setShowCrossOverGuide, hideCrossOverGuide, setHideCrossOverGuide,
-    showPreferences, preferencesInitialPanel, setShowPreferences, preferences, communities, communityImages, communityPlatforms, onSavePreferences, onSponsorPreferencesChange,
+    showPreferences, preferencesInitialPanel, setShowPreferences, preferences, communities, communityImages, communityPlatforms, onSavePreferences,
     hasHiddenGuideWarnings, onRestoreGuideWarnings, onSetGuideHidden,
     legacyInstallMode,
     onCheckForUpdates,
@@ -244,7 +243,6 @@ export function AppModals({
                 communityImages={communityImages}
                 communityPlatforms={communityPlatforms}
                 onSave={onSavePreferences}
-                onSponsorPreferencesChange={onSponsorPreferencesChange}
                 hasHiddenGuideWarnings={hasHiddenGuideWarnings}
                 onRestoreGuideWarnings={onRestoreGuideWarnings}
                 onCheckForUpdates={onCheckForUpdates}

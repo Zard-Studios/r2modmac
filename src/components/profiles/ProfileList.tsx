@@ -7,7 +7,6 @@ import { Toggle } from '../ui/Toggle';
 import { PlatformPicker } from './PlatformPicker';
 import { revealInFileManagerLabel } from '../../utils/platformUtils';
 import { getProfileAvatarGradient, getProfileInitial } from '../../utils/profileAvatar';
-import { SponsorSurface } from '../sponsors/SponsorSurface';
 import { KeyboardShortcuts } from '../KeyboardShortcuts';
 
 interface ProfileListProps {
@@ -846,7 +845,6 @@ export function ProfileList({
                 )
             }
             </div>
-            <SponsorSurface placement="profile-selector-support" visible />
         </div>
     );
 }

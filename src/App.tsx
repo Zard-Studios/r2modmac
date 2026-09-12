@@ -380,9 +380,6 @@ function App() {
   const [settingsHydrated, setSettingsHydrated] = useState(false)
   const [defaultModViewMode, setDefaultModViewMode] = useState<'grid' | 'list'>('grid')
   const [showDeprecatedWarnings, setShowDeprecatedWarnings] = useState(true)
-  const [sponsoredMessagesEnabled, setSponsoredMessagesEnabled] = useState(true)
-  const [sponsoredMessagesScale, setSponsoredMessagesScale] = useState(80)
-  const [sponsoredMessagesOpacity, setSponsoredMessagesOpacity] = useState(80)
   const [isBrowsingMode, setIsBrowsingMode] = useState(false)
   const [defaultGame, setDefaultGame] = useState<string | null>(null)
   const [defaultProfile, setDefaultProfile] = useState<string | null>(null)
@@ -861,9 +858,6 @@ function App() {
       setDefaultModViewMode(storedViewMode);
       setViewMode(storedViewMode);
       setShowDeprecatedWarnings(s.show_deprecated_warnings ?? true);
-      setSponsoredMessagesEnabled(s.sponsored_messages_enabled ?? true);
-      setSponsoredMessagesScale(s.sponsored_messages_scale ?? 80);
-      setSponsoredMessagesOpacity(s.sponsored_messages_background_opacity ?? 80);
       setHideCrossOverGuide(!!s.hide_crossover_guide);
       setHideVerboseLogsWarning(!!s.hide_verbose_logs_warning);
       setStreamMode(!!s.stream_mode);
@@ -1647,14 +1641,6 @@ function App() {
         group: 'Settings',
         icon: 'stream',
         run: () => openPreferencesAt('stream-mode'),
-      },
-      {
-        id: 'settings:sponsored-messages',
-        title: 'Sponsored messages',
-        subtitle: 'Support r2modmac',
-        group: 'Settings',
-        icon: 'support',
-        run: () => openPreferencesAt('sponsored-messages'),
       },
       {
         id: 'settings:deprecated-warnings',
@@ -2667,9 +2653,6 @@ function App() {
     setDefaultModViewMode(newSettings.default_mod_view_mode);
     setViewMode(newSettings.default_mod_view_mode);
     setShowDeprecatedWarnings(newSettings.show_deprecated_warnings);
-    setSponsoredMessagesEnabled(newSettings.sponsored_messages_enabled);
-    setSponsoredMessagesScale(newSettings.sponsored_messages_scale);
-    setSponsoredMessagesOpacity(newSettings.sponsored_messages_background_opacity);
     setStreamMode(newSettings.stream_mode);
     setDefaultGame(newSettings.default_game);
     setDefaultProfile(newSettings.default_profile ?? null);
@@ -2686,19 +2669,11 @@ function App() {
       verbose_logging: newSettings.verbose_logging,
       default_mod_view_mode: newSettings.default_mod_view_mode,
       show_deprecated_warnings: newSettings.show_deprecated_warnings,
-      sponsored_messages_enabled: newSettings.sponsored_messages_enabled,
-      sponsored_messages_scale: newSettings.sponsored_messages_scale,
-      sponsored_messages_background_opacity: newSettings.sponsored_messages_background_opacity,
       default_game: newSettings.default_game,
       default_profile: newSettings.default_profile ?? null,
       stream_mode: newSettings.stream_mode,
       keybinds: newSettings.keybinds ?? {},
     });
-  };
-
-  const handleSponsorPreferencesChange = async (enabled: boolean) => {
-    setSponsoredMessagesEnabled(enabled);
-    await window.ipcRenderer.updateSponsorPreferences(enabled);
   };
 
   const handleSetGuideHidden = async (guide: 'crossover' | 'macos', hidden: boolean) => {
@@ -3636,9 +3611,6 @@ function App() {
           verbose_logging: verboseLogging,
           default_mod_view_mode: defaultModViewMode,
           show_deprecated_warnings: showDeprecatedWarnings,
-          sponsored_messages_enabled: sponsoredMessagesEnabled,
-          sponsored_messages_scale: sponsoredMessagesScale,
-          sponsored_messages_background_opacity: sponsoredMessagesOpacity,
           stream_mode: streamMode,
           default_game: defaultGame,
           default_profile: defaultProfile,
@@ -3648,7 +3620,6 @@ function App() {
         communityImages={communityImages}
         communityPlatforms={communityPlatforms}
         onSavePreferences={handleSavePreferences}
-        onSponsorPreferencesChange={handleSponsorPreferencesChange}
         hasHiddenGuideWarnings={hideCrossOverGuide || hideVerboseLogsWarning}
         onRestoreGuideWarnings={handleRestoreGuideWarnings}
         onSetGuideHidden={handleSetGuideHidden}

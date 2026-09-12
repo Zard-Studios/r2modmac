@@ -3,7 +3,6 @@ import { useRef, useState, useEffect, useLayoutEffect, useMemo, useCallback } fr
 import { flushSync } from 'react-dom';
 import { ModCard } from './ModCard';
 import { ModListItem } from './ModListItem';
-import { SponsorSurface } from './sponsors/SponsorSurface';
 import type { Package } from '../types/thunderstore';
 import type { InstalledMod } from '../types/profile';
 import { packageIdentityKey } from '../utils/modVersioning';
@@ -43,7 +42,6 @@ function chunkIntoRows<T>(items: T[], cols: number): T[][] {
 export function VirtualizedModGrid({ packages, installedMods, onInstall, onUninstall, onModClick, viewMode = 'grid', isBrowsing, searchQuery, legacyInstallMode = false, onLoadMore, hasMore, isLoadingMore }: VirtualizedModGridProps) {
     const parentRef = useRef<HTMLDivElement>(null);
     const [columnCount, setColumnCount] = useState(3);
-    const [isAtCatalogEnd, setIsAtCatalogEnd] = useState(false);
     const columnCountRef = useRef(3);
 
     // Scroll to top when search query changes
@@ -243,24 +241,11 @@ export function VirtualizedModGrid({ packages, installedMods, onInstall, onUnins
         }
     }, [virtualItems, hasMore, isLoadingMore, onLoadMore, viewMode, gridRows.length, packages.length]);
 
-    const updateCatalogBoundary = useCallback((element: HTMLDivElement) => {
-        const distanceToBottom = element.scrollHeight - element.scrollTop - element.clientHeight;
-        const atEnd = !hasMore && distanceToBottom <= 6;
-        setIsAtCatalogEnd(current => current === atEnd ? current : atEnd);
-    }, [hasMore]);
-
-    useEffect(() => {
-        if (hasMore) setIsAtCatalogEnd(false);
-    }, [hasMore]);
-
-    const sponsorVisible = packages.length > 0 && !isAtCatalogEnd;
-
     if (viewMode === 'grid') {
         return (
             <div className="relative flex-1 min-h-0">
                 <div
                     ref={parentRef}
-                    onScroll={(event) => updateCatalogBoundary(event.currentTarget)}
                     className="h-full overflow-y-auto px-[clamp(1rem,3vw,3.125rem)] pt-[clamp(1rem,3vw,3.125rem)] pb-32"
                 >
                     {/* Virtual grid: only visible rows are in the DOM */}
@@ -317,7 +302,6 @@ export function VirtualizedModGrid({ packages, installedMods, onInstall, onUnins
                     })}
                     </div>
                 </div>
-                <SponsorSurface placement="catalog-support" visible={sponsorVisible} />
             </div>
         );
     }
@@ -326,7 +310,6 @@ export function VirtualizedModGrid({ packages, installedMods, onInstall, onUnins
         <div className="relative flex-1 min-h-0">
             <div
                 ref={parentRef}
-                onScroll={(event) => updateCatalogBoundary(event.currentTarget)}
                 className="h-full overflow-y-auto px-[clamp(1rem,3vw,3.125rem)] pt-[clamp(1rem,3vw,3.125rem)] pb-32"
             >
                 <div
@@ -390,7 +373,6 @@ export function VirtualizedModGrid({ packages, installedMods, onInstall, onUnins
                 })}
                 </div>
             </div>
-            <SponsorSurface placement="catalog-support" visible={sponsorVisible} />
         </div>
     );
 }

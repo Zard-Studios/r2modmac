@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import { GameSelector } from '../game/GameSelector';
-import { SponsorSurface } from '../sponsors/SponsorSurface';
 import type { CommunityPlatformInfo } from '../../types/thunderstore';
 
 export interface GameSelectionScreenProps {
@@ -211,7 +210,6 @@ export function GameSelectionScreen({
                 </footer>
                 </div>
             </div>
-            <SponsorSurface placement="home-support" visible />
         </div>
     );
 }

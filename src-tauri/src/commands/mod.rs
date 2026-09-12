@@ -8,7 +8,6 @@ pub mod legacy_system_commands;
 pub mod mod_commands;
 pub mod profile_commands;
 pub mod settings_commands;
-pub mod sponsor_commands;
 #[path = "secure_system_commands.rs"]
 pub mod system_commands;
 pub mod theme_commands;

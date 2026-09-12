@@ -167,12 +167,6 @@ pub struct Settings {
     pub thunderstore_chunk_cache_migrated: bool,
     #[serde(default)]
     pub stream_mode: bool,
-    #[serde(default = "default_true")]
-    pub sponsored_messages_enabled: bool,
-    #[serde(default = "default_sponsor_scale")]
-    pub sponsored_messages_scale: u8,
-    #[serde(default = "default_sponsor_opacity")]
-    pub sponsored_messages_background_opacity: u8,
     /// Emit the per-file/per-mod tracing that is otherwise suppressed.
     ///
     /// Off by default so the rotating log stays short enough to be useful in a
@@ -232,9 +226,6 @@ impl Settings {
             hide_verbose_logs_warning: false,
             thunderstore_chunk_cache_migrated: false,
             stream_mode: false,
-            sponsored_messages_enabled: true,
-            sponsored_messages_scale: default_sponsor_scale(),
-            sponsored_messages_background_opacity: default_sponsor_opacity(),
             verbose_logging: false,
             default_game: None,
             default_profile: None,
@@ -255,14 +246,6 @@ fn default_true() -> bool {
 
 fn default_false() -> bool {
     false
-}
-
-fn default_sponsor_scale() -> u8 {
-    80
-}
-
-fn default_sponsor_opacity() -> u8 {
-    80
 }
 
 pub fn get_settings_path(app: &tauri::AppHandle) -> std::path::PathBuf {

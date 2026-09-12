@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { Button } from '../ui';
 import { Toggle } from '../ui/Toggle';
-import { Slider } from '../ui/Slider';
 import { AppIcon, type IconName } from '../ui/icons';
 import { PREFERENCE_ICON_COLORS, type PreferencesIconName } from '../../utils/preferencesIconColors';
 import { DefaultGamePickerModal } from './DefaultGamePickerModal';
@@ -45,9 +44,6 @@ export interface PreferencesSettings {
     default_mod_view_mode: 'grid' | 'list';
     show_deprecated_warnings: boolean;
     stream_mode: boolean;
-    sponsored_messages_enabled: boolean;
-    sponsored_messages_scale: number;
-    sponsored_messages_background_opacity: number;
     default_game: string | null;
     default_profile?: string | null;
     /** Only the shortcuts the user changed; see `src/utils/keybinds.ts`. */
@@ -68,7 +64,6 @@ export type PreferencesTarget =
     | 'open-logs'
     | 'default-view'
     | 'stream-mode'
-    | 'sponsored-messages'
     | 'deprecated-warnings'
     | 'restore-warnings'
     | 'clear-cache';
@@ -86,7 +81,6 @@ interface PreferencesModalProps {
     communityImages: Record<string, string>;
     communityPlatforms: Record<string, CommunityPlatformInfo>;
     onSave: (settings: PreferencesSettings) => void;
-    onSponsorPreferencesChange: (enabled: boolean) => Promise<void>;
     hasHiddenGuideWarnings: boolean;
     onRestoreGuideWarnings: () => Promise<void>;
     onCheckForUpdates: () => Promise<void>;
@@ -131,7 +125,6 @@ export default function PreferencesModal({
     communityImages,
     communityPlatforms,
     onSave,
-    onSponsorPreferencesChange,
     hasHiddenGuideWarnings,
     onRestoreGuideWarnings,
     onCheckForUpdates,
@@ -148,16 +141,13 @@ export default function PreferencesModal({
     const [defaultModViewMode, setDefaultModViewMode] = useState<'grid' | 'list'>(settings.default_mod_view_mode);
     const [showDeprecatedWarnings, setShowDeprecatedWarnings] = useState(settings.show_deprecated_warnings);
     const [streamMode, setStreamMode] = useState(settings.stream_mode);
-    const [sponsoredMessagesEnabled, setSponsoredMessagesEnabled] = useState(settings.sponsored_messages_enabled);
-    const [sponsoredMessagesScale, setSponsoredMessagesScale] = useState(settings.sponsored_messages_scale ?? 80);
-    const [sponsoredMessagesOpacity, setSponsoredMessagesOpacity] = useState(settings.sponsored_messages_background_opacity ?? 80);
     const [defaultGame, setDefaultGame] = useState<string | null>(settings.default_game ?? null);
     const [defaultProfile, setDefaultProfile] = useState<string | null>(settings.default_profile ?? null);
     const [showGamePicker, setShowGamePicker] = useState(false);
     const [showThemeEditor, setShowThemeEditor] = useState(false);
     const [showKeybinds, setShowKeybinds] = useState(false);
     const [showUiPreviewLab, setShowUiPreviewLab] = useState(false);
-    const supportHeartClicks = useRef<number[]>([]);
+    const deprecatedWarningClicks = useRef<number[]>([]);
     const [keybinds, setKeybinds] = useState<KeybindMap>(() => resolveKeybinds(settings.keybinds));
     const themes = useThemeStore((s) => s.themes);
     const activeThemeFileName = useThemeStore((s) => s.activeFileName);
@@ -194,9 +184,6 @@ export default function PreferencesModal({
             setShowDeprecatedWarnings(settings.show_deprecated_warnings);
             setStreamMode(settings.stream_mode ?? false);
             setDefaultModViewMode(settings.default_mod_view_mode ?? 'grid');
-            setSponsoredMessagesEnabled(settings.sponsored_messages_enabled);
-            setSponsoredMessagesScale(settings.sponsored_messages_scale ?? 80);
-            setSponsoredMessagesOpacity(settings.sponsored_messages_background_opacity ?? 80);
             setDefaultGame(settings.default_game ?? null);
             setDefaultProfile(settings.default_profile ?? null);
             setKeybinds(resolveKeybinds(settings.keybinds));
@@ -225,28 +212,6 @@ export default function PreferencesModal({
         return () => cancelAnimationFrame(frame);
     }, [initialPanel, isOpen]);
 
-    useEffect(() => {
-        if (!isOpen) return;
-        let cancelled = false;
-        let timeoutId: number | undefined;
-
-        const requestNextSponsor = async () => {
-            try {
-                await window.ipcRenderer.requestSponsor('preferences-support');
-            } catch {
-                void 0;
-            } finally {
-                if (!cancelled) timeoutId = window.setTimeout(requestNextSponsor, 15_000);
-            }
-        };
-
-        void requestNextSponsor();
-        return () => {
-            cancelled = true;
-            if (timeoutId !== undefined) window.clearTimeout(timeoutId);
-        };
-    }, [isOpen]);
-
     if (!isOpen) return null;
 
     const currentSettings = (currentKeybinds: KeybindMap = keybinds): PreferencesSettings => ({
@@ -259,9 +224,6 @@ export default function PreferencesModal({
             default_mod_view_mode: defaultModViewMode,
             show_deprecated_warnings: showDeprecatedWarnings,
             stream_mode: streamMode,
-            sponsored_messages_enabled: sponsoredMessagesEnabled,
-            sponsored_messages_scale: sponsoredMessagesScale,
-            sponsored_messages_background_opacity: sponsoredMessagesOpacity,
             default_game: defaultGame,
             default_profile: defaultProfile,
             keybinds: overridesFromKeybinds(currentKeybinds),
@@ -278,21 +240,15 @@ export default function PreferencesModal({
         if (initialPanel === 'keybinds') onClose();
     };
 
-    const persistSponsorPreferences = (enabled: boolean) => {
-        setSponsoredMessagesEnabled(enabled);
-        window.dispatchEvent(new CustomEvent('r2modmac:sponsor-preferences', { detail: { enabled, scale: sponsoredMessagesScale, opacity: sponsoredMessagesOpacity } }));
-        void onSponsorPreferencesChange(enabled).catch(() => undefined);
-    };
-
-    const handleSupportHeartClick = () => {
+    const handleDeprecatedWarningClick = () => {
         const now = Date.now();
-        const recentClicks = [...supportHeartClicks.current.filter((time) => now - time < 1_800), now];
+        const recentClicks = [...deprecatedWarningClicks.current.filter((time) => now - time < 1_800), now];
         if (recentClicks.length >= 5) {
-            supportHeartClicks.current = [];
+            deprecatedWarningClicks.current = [];
             setShowUiPreviewLab(true);
             return;
         }
-        supportHeartClicks.current = recentClicks;
+        deprecatedWarningClicks.current = recentClicks;
     };
 
     const logsActive = writeDebugLogsToGame || verboseLogging;
@@ -682,67 +638,6 @@ export default function PreferencesModal({
                         </div>
                     </div>
 
-                    {/* Support Section */}
-                    <div className="space-y-3">
-                        <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-widest px-1">Support r2modmac</h3>
-
-                        <div className="divide-y divide-gray-700/50 overflow-hidden rounded-2xl border border-gray-700 bg-gray-800">
-                            <div id="preference-sponsored-messages" className="flex items-center justify-between gap-4 p-4 transition-colors hover:bg-surface-hover">
-                                <div className="flex items-center gap-4">
-                                    <span onClick={handleSupportHeartClick} className="shrink-0 select-none">
-                                        <RowIcon kind="support" />
-                                    </span>
-                                    <div>
-                                        <p className="text-[15px] font-medium text-white">Support r2modmac with sponsored messages</p>
-                                        <p className="mt-0.5 text-[13px] leading-snug text-gray-400">Occasional short text messages help fund development. Enabled by default, they can be disabled at any time and never affect the application&apos;s functionality.</p>
-                                    </div>
-                                </div>
-                                <Toggle value={sponsoredMessagesEnabled} onChange={persistSponsorPreferences} label="Enable sponsored messages" />
-                            </div>
-                            <div className={`grid transition-[grid-template-rows,opacity] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] ${sponsoredMessagesEnabled ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'}`} aria-hidden={!sponsoredMessagesEnabled}>
-                                <div className="min-h-0 overflow-hidden">
-                                    <div className="space-y-4 border-t border-gray-700/50 p-4">
-                                        <label className="block text-[13px] text-gray-400">
-                                            <span className="mb-1 flex items-center justify-between"><span>Ad size</span><span className="tabular-nums text-gray-300">{sponsoredMessagesScale}%</span></span>
-                                            <Slider
-                                                ariaLabel="Sponsored message size"
-                                                value={sponsoredMessagesScale}
-                                                min={70} max={100} step={1}
-                                                onChange={(value) => {
-                                                    setSponsoredMessagesScale(value);
-                                                    window.dispatchEvent(new CustomEvent('r2modmac:sponsor-preferences', { detail: { enabled: sponsoredMessagesEnabled, scale: value, opacity: sponsoredMessagesOpacity } }));
-                                                }}
-                                            />
-                                        </label>
-                                        <label className="block text-[13px] text-gray-400">
-                                            <span className="mb-1 flex items-center justify-between"><span>Background opacity</span><span className="tabular-nums text-gray-300">{sponsoredMessagesOpacity}%</span></span>
-                                            <Slider
-                                                ariaLabel="Sponsored message background opacity"
-                                                value={sponsoredMessagesOpacity}
-                                                min={0} max={100} step={1}
-                                                onChange={(value) => {
-                                                    setSponsoredMessagesOpacity(value);
-                                                    window.dispatchEvent(new CustomEvent('r2modmac:sponsor-preferences', { detail: { enabled: sponsoredMessagesEnabled, scale: sponsoredMessagesScale, opacity: value } }));
-                                                }}
-                                            />
-                                        </label>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <p className="px-1 text-[13px] leading-snug text-gray-500">Text-only messages: no images or banners. They never interrupt installs, updates, Sync, Apply, warnings, dialogs, or your workflow.</p>
-                        <button
-                            type="button"
-                            onClick={() => {
-                                void import('@tauri-apps/plugin-shell').then(({ open }) => open('https://github.com/Zard-Studios/r2modmac/blob/main/docs/sponsored-messages.md'));
-                            }}
-                            className="px-1 text-[13px] font-medium text-fg-accent transition-colors hover:text-fg-accent"
-                        >
-                            Learn more about sponsored messages ↗
-                        </button>
-                    </div>
-
                     {/* Guides & Warnings Section */}
                     <div className="space-y-3">
                         <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-widest px-1">Guides & Alerts</h3>
@@ -750,7 +645,9 @@ export default function PreferencesModal({
                         <div className="divide-y divide-gray-700/50 overflow-hidden rounded-2xl border border-gray-700 bg-gray-800">
                             <div id="preference-deprecated-warnings" className="flex items-center justify-between gap-4 p-4 transition-colors hover:bg-surface-hover">
                                 <div className="flex items-center gap-4">
-                                    <RowIcon kind="warning" />
+                                    <button type="button" onClick={handleDeprecatedWarningClick} className="shrink-0 select-none" aria-label="Deprecated mod warnings">
+                                        <RowIcon kind="warning" />
+                                    </button>
                                     <div>
                                         <p className="text-[15px] font-medium text-white">Deprecated mod warnings</p>
                                         <p className="mt-0.5 text-[13px] leading-snug text-gray-400">Show a red warning on deprecated mod icons.</p>

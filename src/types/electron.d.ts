@@ -26,21 +26,9 @@ export interface AppSettings {
     hide_macos_guide?: boolean;
     hide_verbose_logs_warning?: boolean;
     stream_mode?: boolean;
-    sponsored_messages_enabled?: boolean;
-    sponsored_messages_scale?: number;
-    sponsored_messages_background_opacity?: number;
     /** Only the shortcuts the user changed; see `src/utils/keybinds.ts`. */
     keybinds?: Record<string, string>;
 }
-
-export interface SponsorMessage {
-    id: string;
-    sponsorName?: string | null;
-    message: string;
-    url?: string | null;
-}
-
-export type SponsorPlacement = 'preferences-support' | 'home-support' | 'profile-selector-support' | 'catalog-support';
 
 /** A theme file on disk, as parsed by the backend. */
 export interface ThemeSummary {
@@ -167,10 +155,6 @@ export interface IElectronAPI {
     duplicateProfileFolder: (sourceProfileId: string, newProfileId: string) => Promise<boolean>;
     getSettings: () => Promise<AppSettings>;
     saveSettings: (settings: AppSettings) => Promise<void>;
-    requestSponsor: (placement?: SponsorPlacement) => Promise<SponsorMessage | null>;
-    acknowledgeSponsorDisplay: (sponsorId: string) => Promise<void>;
-    dismissSponsor: (sponsorId: string) => Promise<void>;
-    updateSponsorPreferences: (enabled: boolean) => Promise<void>;
     getGamePath: (gameIdentifier: string, platform?: 'windows' | 'mac') => Promise<string | null>;
     getGameSource: (gameIdentifier: string, platform?: 'windows' | 'mac') => Promise<'steam' | 'manual' | 'unknown'>;
     setGamePath: (gameIdentifier: string, path: string, platform?: 'windows' | 'mac') => Promise<void>;

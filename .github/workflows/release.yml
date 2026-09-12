@@ -11,11 +11,6 @@ jobs:
     permissions:
       contents: write
     runs-on: ${{ matrix.settings.platform }}
-    env:
-      # Overrides the hardcoded production Cloudflare Worker URL in sponsor_commands.rs.
-      # An unset or empty value is not "disabled" — resolve_proxy_endpoint() falls back
-      # to that hardcoded URL, so the distributed app keeps working either way.
-      R2MODMAC_SPONSOR_PROXY_URL: ${{ secrets.R2MODMAC_SPONSOR_PROXY_URL }}
     strategy:
       fail-fast: false
       matrix:

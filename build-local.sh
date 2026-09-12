@@ -22,7 +22,6 @@ SKIP_BEFORE_MACOS='{"build":{"beforeBuildCommand":""}}'
 
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 DIST_DIR="$ROOT_DIR/dist-local"
-SPONSOR_PROXY_URL="https://r2modmac-sponsor-production.notfy-stream.workers.dev/api/sponsor"
 MODE="all"
 MODE_SET=""
 REQUESTED_VERSION=""
@@ -170,15 +169,6 @@ console.log(`Version ${packageVersion} is consistent across npm, Tauri, and Carg
 NODE
 }
 
-verify_sponsor_endpoint() {
-  require curl
-  local status
-  status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
-    --connect-timeout 8 --max-time 15 "$SPONSOR_PROXY_URL")" \
-    || die "The production sponsor Worker could not be reached."
-  [[ "$status" == "204" ]] || die "Production sponsor Worker returned HTTP $status instead of 204."
-}
-
 install_frontend_dependencies() {
   require npm
   local stamp="node_modules/.r2modmac-lock-hash"
@@ -217,13 +207,6 @@ build_frontend() {
   npm run build
 }
 
-verify_compiled_sponsor_endpoint() {
-  local binary="$1"
-  require grep
-  LC_ALL=C grep -aFq -- "$SPONSOR_PROXY_URL" "$binary" \
-    || die "Production sponsor endpoint is missing from $(basename "$binary")."
-}
-
 sha256_file() {
   local file="$1"
   if command -v shasum >/dev/null 2>&1; then
@@ -257,13 +240,11 @@ build_macos_target() {
 
   log "Building macOS $asset_arch"
   rustup target add "$rust_target"
-  unset R2MODMAC_SPONSOR_PROXY_URL
   npm run tauri build -- --target "$rust_target" --bundles app \
     --config "$SKIP_BEFORE_MACOS" -- --locked
 
   local app_path="$ROOT_DIR/src-tauri/target/$rust_target/release/bundle/macos/r2modmac.app"
   [[ -d "$app_path" ]] || die "macOS app bundle was not produced at $app_path"
-  verify_compiled_sponsor_endpoint "$app_path/Contents/MacOS/r2modmac"
 
   local dmg_root
   dmg_root="$(mktemp -d "${TMPDIR:-/tmp}/r2modmac-dmg.XXXXXX")"
@@ -359,13 +340,12 @@ build_linux_target() {
     -v "$HOME/.cache/sccache:/root/.cache/sccache" \
     -w "$ROOT_DIR" \
     "$img" \
-    /bin/bash -s -- "$rust_target" "$ROOT_DIR" "$archive_name" "$SPONSOR_PROXY_URL" <<'INNER'
+    /bin/bash -s -- "$rust_target" "$ROOT_DIR" "$archive_name" <<'INNER'
 #!/bin/bash
 set -Eeuo pipefail
 RUST_TARGET="$1"
 ROOT_DIR="$2"
 ARCHIVE_NAME="$3"
-SPONSOR_PROXY_URL="$4"
 
 export PATH="/root/.cargo/bin:$PATH"
 # The builder image ships gcc/g++, not clang. Left to itself the `cc` crate
@@ -390,9 +370,6 @@ rm -f "src-tauri/target/$RUST_TARGET/release/r2modmac"
 
 binary="src-tauri/target/$RUST_TARGET/release/r2modmac"
 test -f "$binary" || { echo "Linux binary not found: $binary" >&2; exit 1; }
-LC_ALL=C grep -aFq -- "$SPONSOR_PROXY_URL" "$binary" \
-  || { echo "Production sponsor endpoint is missing from Linux binary" >&2; exit 1; }
-
 stage="$(mktemp -d)"
 trap 'rm -rf -- "$stage"' EXIT
 cp "$binary" "$stage/r2modmac"
@@ -429,8 +406,6 @@ write_checksums() {
 
 
 verify_versions
-verify_sponsor_endpoint
-
 if [[ "$CLEAN" == "1" ]]; then
   log "Cleaning local build outputs"
   # The containers build into src-tauri/target/<triple>, which is what has to

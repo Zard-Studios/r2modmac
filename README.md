@@ -175,7 +175,7 @@ If you like the project, leave a star! ⭐
 
 <div align="center">
 
-r2modmac is and will always remain open-source. It has no analytics or telemetry, and it does not share personal data or application content. Optional text-only sponsored messages help support development and can always be disabled in Settings. I dedicate all my free time to it as a student and independent developer. If this tool has saved you hours of configuration and headaches, please consider supporting its development with a micro donation!
+r2modmac is and will always remain open-source. It has no analytics or telemetry, and it does not share personal data or application content. I dedicate all my free time to it as a student and independent developer. If this tool has saved you hours of configuration and headaches, please consider supporting its development with a micro donation!
 
 **Made with ❤️ for the modding community**
 
