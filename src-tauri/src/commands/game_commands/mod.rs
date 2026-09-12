@@ -71,6 +71,7 @@ pub use self::install::install_to_game;
 pub use self::launch::{is_game_running, launch_game_vanilla, launch_game_with_mods, stop_game};
 pub use self::launch_cancel::cancel_game_launch;
 pub(crate) use self::macos::ensure_macos_steam_launch_options;
+pub(crate) use self::paths::resolve_game_runtime_path;
 pub use self::paths::{
     find_game_executable, get_game_path, get_game_source, open_game_folder, set_game_path,
 };

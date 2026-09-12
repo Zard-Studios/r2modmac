@@ -16,7 +16,7 @@ fn directory_contains_case_insensitive(directory: &std::path::Path, name: &str) 
 /// below the Steam install directory. All install, inspection and launch code
 /// consumes `get_game_path`, so resolving it here gives every phase the same
 /// target instead of installing ReturnOfModding beside the wrong directory.
-fn resolve_game_runtime_path(
+pub(crate) fn resolve_game_runtime_path(
     game_identifier: &str,
     install_path: &std::path::Path,
 ) -> std::path::PathBuf {

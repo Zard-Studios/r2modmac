@@ -851,8 +851,7 @@ mod tests {
                 .as_nanos()
         ));
         let prefix = root.join("Steam.app/Contents/SharedSupport/prefix");
-        let ship =
-            prefix.join("drive_c/Program Files (x86)/Steam/steamapps/common/Hades II/Ship");
+        let ship = prefix.join("drive_c/Program Files (x86)/Steam/steamapps/common/Hades II/Ship");
         std::fs::create_dir_all(&ship).unwrap();
 
         assert_eq!(

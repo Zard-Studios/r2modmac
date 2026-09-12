@@ -1575,7 +1575,7 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
                 </div>
                 <p className="text-gray-400 font-medium mb-1">No config files found</p>
                 <p className="text-gray-600 text-sm max-w-xs">
-                    Make sure the game directory is set in <strong className="text-gray-500">Settings → Game Directory</strong>, then apply your profile to the game to generate BepInEx config files.
+                    Make sure the game directory is set in <strong className="text-gray-500">Settings → Game Directory</strong>, then apply and launch your profile once so its loader can generate config files.
                 </p>
             </div>
         );

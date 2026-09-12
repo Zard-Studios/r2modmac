@@ -1,4 +1,6 @@
-use crate::commands::game_commands::{ensure_macos_steam_launch_options, get_game_path};
+use crate::commands::game_commands::{
+    ensure_macos_steam_launch_options, get_game_path, resolve_game_runtime_path,
+};
 use crate::commands::game_commands::{restore_mscorlib_vanilla, restore_outerwilds_vanilla};
 use crate::models::shared::{
     get_balatro_mods_dir, is_balatro_game_path, is_balatro_identifier, is_outerwilds_game_path,
@@ -857,6 +859,39 @@ fn collect_config_files_flat(
     }
 }
 
+/// Collect the editable files generated beside a game's runtime. Hades II is
+/// commonly configured at its install root while Hell2Modding lives one level
+/// deeper in `Ship`, so keep paths relative to the configured root but scan the
+/// resolved runtime directory.
+fn collect_game_config_files(
+    game_identifier: &str,
+    configured_root: &Path,
+    out: &mut Vec<ConfigFileInfo>,
+) {
+    let runtime_root = resolve_game_runtime_path(game_identifier, configured_root);
+
+    if is_outerwilds_identifier(game_identifier) || is_outerwilds_game_path(&runtime_root) {
+        if let Some(owml_dir) = crate::models::shared::get_owml_dir(&runtime_root) {
+            collect_config_files_flat(&owml_dir, configured_root, out);
+            let owml_mods = owml_dir.join("Mods");
+            if owml_mods.is_dir() {
+                collect_config_files(&owml_mods, configured_root, out);
+            }
+        }
+        return;
+    }
+
+    for directory in [
+        runtime_root.join("BepInEx").join("config"),
+        runtime_root.join("BepInEx").join("plugins"),
+        runtime_root.join("ReturnOfModding").join("config"),
+    ] {
+        if directory.is_dir() {
+            collect_config_files(&directory, configured_root, out);
+        }
+    }
+}
+
 fn profile_config_root(app: &AppHandle, profile_id: &str) -> Result<PathBuf, String> {
     Ok(crate::utils::paths::app_data_dir(app)
         .map_err(|e| e.to_string())?
@@ -1051,33 +1086,7 @@ pub fn list_profile_config_files(
                     }
 
                     if let Some(gp) = game_path_str {
-                        let game_path = std::path::Path::new(&gp);
-                        if game_id == "outerwilds" {
-                            // The OWML folder may be at OWML (modded mode) or OWML_DISABLED
-                            // (vanilla mode, where mods stay on disk but the runtime is hidden).
-                            // Resolve whichever actually exists so configs are always listed.
-                            if let Some(owml_dir) = crate::models::shared::get_owml_dir(game_path) {
-                                // 1. Flat scan OWML root for global configs
-                                collect_config_files_flat(&owml_dir, game_path, &mut files);
-                                // 2. Recursive scan OWML/Mods for mod configs
-                                let owml_mods = owml_dir.join("Mods");
-                                if owml_mods.is_dir() {
-                                    collect_config_files(&owml_mods, game_path, &mut files);
-                                }
-                            }
-                        } else {
-                            // BepInEx/config — recursive because some mods group
-                            // their generated config files in nested folders.
-                            let bep_config = game_path.join("BepInEx").join("config");
-                            if bep_config.is_dir() {
-                                collect_config_files(&bep_config, game_path, &mut files);
-                            }
-                            // BepInEx/plugins — recursive, but only config-extension files
-                            let bep_plugins = game_path.join("BepInEx").join("plugins");
-                            if bep_plugins.is_dir() {
-                                collect_config_files(&bep_plugins, game_path, &mut files);
-                            }
-                        }
+                        collect_game_config_files(&game_id, std::path::Path::new(&gp), &mut files);
                     }
                 }
             }
@@ -1244,6 +1253,28 @@ mod config_editor_tests {
         assert!(files.is_empty());
         let _ = fs::remove_dir_all(root);
         let _ = fs::remove_dir_all(outside);
+    }
+
+    #[test]
+    fn hades_ii_config_scanner_resolves_ship_and_return_of_modding() {
+        let root = temporary_directory("hades-rom-configs");
+        let ship = root.join("Ship");
+        let config = ship.join("ReturnOfModding/config/zerp-MainMenuRestoration");
+        fs::create_dir_all(&config).unwrap();
+        fs::write(ship.join("Hades2.exe"), b"exe").unwrap();
+        fs::write(config.join("menu.cfg"), "version = early-access").unwrap();
+        fs::write(config.join("code.lua"), "return {}").unwrap();
+
+        let mut files = Vec::new();
+        collect_game_config_files("hades-ii", &root, &mut files);
+
+        assert_eq!(files.len(), 1);
+        assert_eq!(
+            files[0].relative_path,
+            "Ship/ReturnOfModding/config/zerp-MainMenuRestoration/menu.cfg"
+        );
+        assert_eq!(files[0].root, root.to_string_lossy());
+        let _ = fs::remove_dir_all(root);
     }
 }
 
