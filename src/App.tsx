@@ -1636,7 +1636,7 @@ function App() {
       },
       {
         id: 'settings:stream-mode',
-        title: 'Stream Mode',
+        title: 'pls privacy',
         subtitle: 'Privacy',
         group: 'Settings',
         icon: 'stream',

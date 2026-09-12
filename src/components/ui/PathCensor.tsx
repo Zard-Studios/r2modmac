@@ -64,7 +64,7 @@ export function PathCensor({ path, className = '' }: PathCensorProps) {
                     const censorLength = effUsername ? effUsername.length : part.length;
                     const censorStr = '*'.repeat(censorLength);
                     return (
-                        <span key={index} className="stream-censor-blur mx-[2px]" title="Hidden by Stream Mode">
+                        <span key={index} className="stream-censor-blur mx-[2px]" title="Hidden by pls privacy">
                             <span className="select-none pointer-events-none font-bold tracking-wider">{censorStr}</span>
                         </span>
                     );

@@ -66,6 +66,7 @@ pub async fn get_settings(app: AppHandle) -> Result<Settings, String> {
 #[command]
 pub async fn save_settings(app: AppHandle, settings: Settings) -> Result<(), String> {
     save_settings_impl(&app, &settings)?;
+    crate::set_log_privacy(&app, settings.stream_mode);
     sync_preferences_menu_accelerator(&app, &settings)
 }
 

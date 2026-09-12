@@ -629,8 +629,8 @@ export default function PreferencesModal({
                                 <div className="flex items-center gap-4">
                                     <RowIcon kind="stream" />
                                     <div>
-                                        <p className="text-[15px] font-medium text-white">Stream Mode</p>
-                                        <p className="text-[13px] text-gray-400 mt-0.5 leading-snug">Automatically censors usernames in file paths to protect your privacy during streaming or screen sharing.</p>
+                                        <p className="text-[15px] font-medium text-white">pls privacy</p>
+                                        <p className="text-[13px] text-gray-400 mt-0.5 leading-snug">Censors usernames in the app and its logs, so they stay private when streaming or screen sharing.</p>
                                     </div>
                                 </div>
                                 <Toggle value={streamMode} onChange={setStreamMode} />

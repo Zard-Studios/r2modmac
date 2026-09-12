@@ -14,7 +14,7 @@ export const PREFERENCE_ICON_CATALOG = {
     layout: { label: 'Layout', tone: 'indigo', className: 'text-indigo-400' },
     warning: { label: 'Warnings', tone: 'warning', className: 'text-fg-warning' },
     cache: { label: 'Cache', tone: 'danger', className: 'text-fg-danger' },
-    stream: { label: 'Stream mode', tone: 'fuchsia', className: 'text-fuchsia-400' },
+    stream: { label: 'pls privacy', tone: 'fuchsia', className: 'text-fuchsia-400' },
     update: { label: 'Updates', tone: 'success', className: 'text-fg-success' },
     support: { label: 'Support', tone: 'rose', className: 'text-rose-400' },
     folder: { label: 'Folders', tone: 'orange', className: 'text-orange-400' },

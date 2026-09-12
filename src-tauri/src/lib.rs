@@ -162,6 +162,35 @@ fn clear_app_logs_at(log_dir: &std::path::Path) -> Result<u64, String> {
     Ok(bytes_freed)
 }
 
+fn redact_existing_app_logs(app: &tauri::AppHandle) {
+    let Ok(log_dir) = app.path().app_log_dir() else {
+        return;
+    };
+    let Ok(entries) = std::fs::read_dir(log_dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        if !entry.file_type().is_ok_and(|kind| kind.is_file()) {
+            continue;
+        }
+        let path = entry.path();
+        let Ok(contents) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let redacted = utils::log_privacy::redact(&contents);
+        if redacted != contents {
+            let _ = std::fs::write(path, redacted);
+        }
+    }
+}
+
+pub(crate) fn set_log_privacy(app: &tauri::AppHandle, enabled: bool) {
+    utils::log_privacy::set_enabled(enabled);
+    if enabled {
+        redact_existing_app_logs(app);
+    }
+}
+
 #[tauri::command]
 fn get_app_logs_size(app: tauri::AppHandle) -> Result<u64, String> {
     let log_dir = app
@@ -214,6 +243,16 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(
             tauri_plugin_log::Builder::default()
+                .format(|out, message, record| {
+                    let redacted = utils::log_privacy::redact(&message.to_string());
+                    out.finish(format_args!(
+                        "{}[{}][{}] {}",
+                        chrono::Local::now().format("[%Y-%m-%d][%H:%M:%S]"),
+                        record.target(),
+                        record.level(),
+                        redacted
+                    ));
+                })
                 // The plugin is built able to emit Debug so the Verbose logging
                 // preference can be toggled at runtime; the effective level is
                 // narrowed to Info below via `log::set_max_level` unless the
@@ -238,7 +277,9 @@ pub fn run() {
             use chrono::Datelike;
             use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
 
-            apply_log_level(models::shared::load_settings_impl(app.handle()).verbose_logging);
+            let settings = models::shared::load_settings_impl(app.handle());
+            set_log_privacy(app.handle(), settings.stream_mode);
+            apply_log_level(settings.verbose_logging);
 
             // Which loader a community uses comes from the Thunderstore
             // ecosystem schema. The embedded snapshot answers immediately; the
