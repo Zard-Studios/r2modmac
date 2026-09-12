@@ -78,12 +78,12 @@ const hslToHex = (hue: number, saturation: number, lightness: number) => {
     return `#${channel(r)}${channel(g)}${channel(b)}`;
 };
 
-/** 4-swatch pill preview showing the theme's core color identity. */
-function SwatchStrip({ colors, className = '' }: { colors: ThemeColors; className?: string }) {
+/** 2×2 palette preview showing the theme's core color identity. */
+function SwatchMosaic({ colors, className = '' }: { colors: ThemeColors; className?: string }) {
     return (
-        <div className={`flex overflow-hidden rounded-md border border-gray-700 ${className}`}>
+        <div className={`grid grid-cols-2 grid-rows-2 overflow-hidden rounded-md border border-gray-700 ${className}`}>
             {[colors.background, colors.surface, colors.accent, colors.text].map((color, i) => (
-                <span key={i} className="h-full flex-1" style={{ backgroundColor: color }} />
+                <span key={i} style={{ backgroundColor: color }} />
             ))}
         </div>
     );
@@ -1186,7 +1186,7 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
                                                             : 'border-gray-700 hover:border-gray-600 hover:bg-gray-800'
                                                     }`}
                                                 >
-                                                    <SwatchStrip colors={b.colors} className="h-8 w-8 shrink-0" />
+                                                    <SwatchMosaic colors={b.colors} className="h-8 w-8 shrink-0" />
                                                     <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-white">
                                                         {b.name}
                                                     </span>
@@ -1245,7 +1245,7 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
                                                                       : 'border-gray-700 hover:border-gray-600 hover:bg-gray-800'
                                                             }`}
                                                         >
-                                                            <SwatchStrip colors={colors} className="h-8 w-8 shrink-0" />
+                                                            <SwatchMosaic colors={colors} className="h-8 w-8 shrink-0" />
                                                             <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-white">
                                                                 {t.name}
                                                             </span>
