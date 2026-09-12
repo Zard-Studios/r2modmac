@@ -11,6 +11,7 @@ import { hasPendingRuntimeInstall, restoreInstalledMod } from '../../utils/profi
 import { loaderDisplayName } from '../../utils/loaderPackages';
 import { getProfileAvatarGradient } from '../../utils/profileAvatar';
 import { runWithConcurrency } from '../../utils/concurrency';
+import { resolveProfileModView, type ProfileModView } from '../../utils/profileModView';
 
 const MAX_PARALLEL_TOGGLES = 10;
 const formatCount = (count: number, singular: string, plural = `${singular}s`) => (
@@ -206,11 +207,10 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
     const [editName, setEditName] = useState('');
     const [selectedModIds, setSelectedModIds] = useState<string[]>([]);
     const [selectionAnchorId, setSelectionAnchorId] = useState<string | null>(null);
-    const [modView, setModView] = useState<'all' | 'updates' | 'sync'>('all');
+    const [modView, setModView] = useState<ProfileModView>('all');
     const [syncSelectedIds, setSyncSelectedIds] = useState<string[]>([]);
     const [syncSelectionAnchorId, setSyncSelectionAnchorId] = useState<string | null>(null);
     const [syncConfirmation, setSyncConfirmation] = useState<{ kind: 'sync' | 'revert'; ids: string[] } | null>(null);
-    const previousPendingCountRef = useRef<number | null>(null);
     const modListScrollRef = useRef<HTMLDivElement>(null);
     const [scrollFades, setScrollFades] = useState({ top: false, bottom: false });
     const renderedModView = useDeferredValue(modView);
@@ -376,20 +376,12 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
         ...(profileUpdates.length > 0 ? ['updates' as const] : []),
         ...(pendingSyncCount > 0 ? ['sync' as const] : []),
     ], [pendingSyncCount, profileUpdates.length]);
+    const fallbackModView = resolveProfileModView(modView, availableTabs);
     useEffect(() => {
-        if (availableTabs.includes(modView)) return;
-        const frame = window.requestAnimationFrame(() => setModView(pendingSyncCount > 0 ? 'sync' : 'all'));
+        if (fallbackModView === modView) return;
+        const frame = window.requestAnimationFrame(() => setModView(fallbackModView));
         return () => window.cancelAnimationFrame(frame);
-    }, [availableTabs, modView, pendingSyncCount]);
-    useEffect(() => {
-        const previous = previousPendingCountRef.current;
-        if (previous !== null && pendingSyncCount > previous) {
-            const frame = window.requestAnimationFrame(() => setModView('sync'));
-            previousPendingCountRef.current = pendingSyncCount;
-            return () => window.cancelAnimationFrame(frame);
-        }
-        previousPendingCountRef.current = pendingSyncCount;
-    }, [pendingSyncCount]);
+    }, [fallbackModView, modView]);
     useEffect(() => {
         const onKeyDown = (event: KeyboardEvent) => {
             if (event.key !== 'Escape' || event.defaultPrevented || syncConfirmation) return;
