@@ -1977,6 +1977,40 @@ mod return_of_modding_tests {
     }
 
     #[test]
+    fn hell2modding_pack_lands_only_inside_hades_ship() {
+        let bytes = fixture(&[
+            ("manifest.json", br#"{"version_number":"1.0.110"}"#),
+            ("ReturnOfModdingPack/d3d12.dll", b"hell2 loader"),
+            ("ReturnOfModdingPack/mods.yaml", b"mods: []"),
+            ("ReturnOfModdingPack/ReturnOfModding/core.lua", b"return {}"),
+        ]);
+        let install_root = test_dir("hades-ii");
+        let ship = install_root.join("Hades II/Ship");
+        fs::create_dir_all(&ship).unwrap();
+
+        let mut archive = zip::ZipArchive::new(Cursor::new(&bytes)).unwrap();
+        let files =
+            collect_return_of_modding_files(&mut archive, "Hell2Modding-Hell2Modding-1.0.110")
+                .unwrap();
+
+        let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
+        extract_return_of_modding_to_root(&mut archive, &ship, "Hell2Modding-Hell2Modding-1.0.110")
+            .unwrap();
+
+        assert!(files.contains(&std::path::PathBuf::from("d3d12.dll")));
+        assert_eq!(fs::read(ship.join("d3d12.dll")).unwrap(), b"hell2 loader");
+        assert_eq!(fs::read(ship.join("mods.yaml")).unwrap(), b"mods: []");
+        assert_eq!(
+            fs::read(ship.join("ReturnOfModding/core.lua")).unwrap(),
+            b"return {}"
+        );
+        assert!(!install_root.join("Hades II/d3d12.dll").exists());
+        assert!(!install_root.join("d3d12.dll").exists());
+
+        fs::remove_dir_all(install_root).unwrap();
+    }
+
+    #[test]
     fn plugin_routes_payload_data_and_config_like_r2modman() {
         let bytes = fixture(&[
             ("manifest.json", b"{}"),

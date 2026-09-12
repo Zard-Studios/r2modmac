@@ -855,17 +855,25 @@ mod issue_25_launch_routing_tests {
     }
 
     #[test]
-    fn discovery_finds_the_steam_client_inside_a_sikarugir_wrapper() {
+    fn sikarugir_hades_ii_ship_is_discovered_and_routed_through_steam() {
         let world = World::new("sikarugir-discovery");
         let prefix = world
             .home
             .join("Applications/Sikarugir/Steam.app/Contents/SharedSupport/prefix");
         std::fs::create_dir_all(prefix.join("drive_c")).unwrap();
         let client_root = world.steam_client(&prefix);
+        let install_root = world.install_game(&client_root, "1145350", "Hades II", 4);
+        let ship = install_root.join("Ship");
+        std::fs::create_dir_all(&ship).unwrap();
+        std::fs::write(ship.join("Hades2.exe"), b"stub").unwrap();
 
         let discovered = discover_windows_steam_roots_in_home(&world.home);
-
         assert_eq!(discovered.len(), 1, "{:?}", discovered);
         assert_eq!(canonical(&discovered[0]), canonical(&client_root));
+
+        let target = steam_target(plan_windows_launch(&discovered, &ship));
+        assert_eq!(target.app_id, "1145350");
+        assert_eq!(canonical(&target.client_root), canonical(&client_root));
+        assert_eq!(canonical(&target.library_root), canonical(&client_root));
     }
 }

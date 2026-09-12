@@ -1200,8 +1200,12 @@ mod tests {
         let isolated_profile = std::path::PathBuf::from("/profiles/test");
 
         assert_eq!(
-            managed_install_root(true, game, isolated_profile),
+            managed_install_root(true, game, isolated_profile.clone()),
             game.to_path_buf()
+        );
+        assert_eq!(
+            managed_install_root(false, game, isolated_profile.clone()),
+            isolated_profile
         );
     }
 }
