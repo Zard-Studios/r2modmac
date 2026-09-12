@@ -118,6 +118,60 @@ function getFirstLetter(name: string | undefined): string {
     }
 }
 
+const renderSyncKindIcon = (kind: string, className = 'h-3.5 w-3.5 shrink-0') => {
+    switch (kind) {
+        case 'update':
+            return (
+                <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v6h6M20 20v-6h-6M5.6 15a7 7 0 0011.9 2M18.4 9A7 7 0 006.5 7" />
+                </svg>
+            );
+        case 'add':
+            return (
+                <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+            );
+        case 'enable':
+            return (
+                <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M5 13l4 4L19 7" />
+                </svg>
+            );
+        case 'disable':
+            return (
+                <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                </svg>
+            );
+        case 'remove':
+            return (
+                <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 0 0-1 1v3M4 7h16" />
+                </svg>
+            );
+        default:
+            return null;
+    }
+};
+
+const getEntryKindInfo = (kind: string) => {
+    switch (kind) {
+        case 'update':
+            return { label: 'Update', color: 'text-fg-warning' };
+        case 'add':
+            return { label: 'Install', color: 'text-fg-accent' };
+        case 'enable':
+            return { label: 'Enable', color: 'text-fg-success' };
+        case 'disable':
+            return { label: 'Disable', color: 'text-fg-warning' };
+        case 'remove':
+            return { label: 'Remove', color: 'text-fg-danger' };
+        default:
+            return { label: kind, color: 'text-gray-300' };
+    }
+};
+
 interface ProfileSidebarProps {
     activeProfile: Profile | undefined;
     currentCommunity: Community | null;
@@ -632,50 +686,38 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
     }, [selectedMods]);
 
     const syncSummaryIndicators = (
-        <span className="flex min-w-0 items-center gap-2" title={pendingChangeSummary} aria-label={pendingChangeSummary}>
+        <div className="flex min-w-0 items-center gap-2.5 px-1" title={pendingChangeSummary} aria-label={pendingChangeSummary}>
             {pendingChangeCounts.update ? (
-                <span className="inline-flex items-center gap-1 text-fg-warning">
-                    <svg className="h-4 w-4" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-                        <path d="M8.75 2.75a.75.75 0 0 0-1.5 0v5.69L5.03 6.22a.75.75 0 0 0-1.06 1.06l3.5 3.5a.75.75 0 0 0 1.06 0l3.5-3.5a.75.75 0 0 0-1.06-1.06L8.75 8.44V2.75Z" />
-                        <path d="M3.5 9.75a.75.75 0 0 0-1.5 0v1.5A2.75 2.75 0 0 0 4.75 14h6.5A2.75 2.75 0 0 0 14 11.25v-1.5a.75.75 0 0 0-1.5 0v1.5c0 .69-.56 1.25-1.25 1.25h-6.5c-.69 0-1.25-.56-1.25-1.25v-1.5Z" />
-                    </svg>
+                <span className="inline-flex items-center gap-1 text-xs font-semibold text-fg-warning" title={`${pendingChangeCounts.update} ${pendingChangeCounts.update === 1 ? 'update' : 'updates'}`}>
+                    {renderSyncKindIcon('update', 'h-4 w-4 shrink-0')}
                     <span>{pendingChangeCounts.update}</span>
                 </span>
             ) : null}
             {pendingChangeCounts.add ? (
-                <span className="inline-flex items-center gap-1 text-sky-300">
-                    <svg className="h-4 w-4" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-                        <path d="M8.75 2.75a.75.75 0 0 0-1.5 0v5.69L5.03 6.22a.75.75 0 0 0-1.06 1.06l3.5 3.5a.75.75 0 0 0 1.06 0l3.5-3.5a.75.75 0 0 0-1.06-1.06L8.75 8.44V2.75Z" />
-                        <path d="M3.5 9.75a.75.75 0 0 0-1.5 0v1.5A2.75 2.75 0 0 0 4.75 14h6.5A2.75 2.75 0 0 0 14 11.25v-1.5a.75.75 0 0 0-1.5 0v1.5c0 .69-.56 1.25-1.25 1.25h-6.5c-.69 0-1.25-.56-1.25-1.25v-1.5Z" />
-                    </svg>
+                <span className="inline-flex items-center gap-1 text-xs font-semibold text-fg-accent" title={`${pendingChangeCounts.add} new`}>
+                    {renderSyncKindIcon('add', 'h-4 w-4 shrink-0')}
                     <span>{pendingChangeCounts.add}</span>
                 </span>
             ) : null}
             {pendingChangeCounts.enable ? (
-                <span className="inline-flex items-center gap-1 text-fg-success">
-                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                    </svg>
+                <span className="inline-flex items-center gap-1 text-xs font-semibold text-fg-success" title={`${pendingChangeCounts.enable} enable`}>
+                    {renderSyncKindIcon('enable', 'h-4 w-4 shrink-0')}
                     <span>{pendingChangeCounts.enable}</span>
                 </span>
             ) : null}
             {pendingChangeCounts.disable ? (
-                <span className="inline-flex items-center gap-1 text-fg-warning">
-                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
-                    </svg>
+                <span className="inline-flex items-center gap-1 text-xs font-semibold text-fg-warning" title={`${pendingChangeCounts.disable} disable`}>
+                    {renderSyncKindIcon('disable', 'h-4 w-4 shrink-0')}
                     <span>{pendingChangeCounts.disable}</span>
                 </span>
             ) : null}
             {pendingChangeCounts.remove ? (
-                <span className="inline-flex items-center gap-1 text-fg-danger">
-                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 0 0-1 1v3M4 7h16" />
-                    </svg>
+                <span className="inline-flex items-center gap-1 text-xs font-semibold text-fg-danger" title={`${pendingChangeCounts.remove} remove`}>
+                    {renderSyncKindIcon('remove', 'h-4 w-4 shrink-0')}
                     <span>{pendingChangeCounts.remove}</span>
                 </span>
             ) : null}
-        </span>
+        </div>
     );
 
     return (
@@ -701,7 +743,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                             {confirmedSyncEntries.map(entry => (
                                 <div key={entry.id} className="flex items-center gap-3 rounded-xl px-2 py-2">
                                     <div className="h-9 w-9 shrink-0 overflow-hidden rounded-lg bg-gray-900">{entry.mod.iconUrl ? <img src={entry.mod.iconUrl} alt="" className="h-full w-full object-cover" /> : null}</div>
-                                    <span className="min-w-0 flex-1"><span className="block truncate text-sm text-gray-100">{entry.mod.displayName || entry.mod.fullName}</span><span className="block text-xs capitalize text-sky-300">{entry.kind}{entry.automatic ? ' · required dependency' : ''}</span></span>
+                                    <span className="min-w-0 flex-1"><span className="block truncate text-sm text-gray-100">{entry.mod.displayName || entry.mod.fullName}</span><span className="block text-xs capitalize text-fg-accent">{entry.kind}{entry.automatic ? ' · required dependency' : ''}</span></span>
                                 </div>
                             ))}
                         </div>
@@ -901,13 +943,13 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                 looks, which is worse than not recording it: the sidebar sat
                 silent while the game was empty. It says so now. */}
             {activeProfile?.needs_sync && pendingSyncCount === 0 && (activeProfile?.mods.length ?? 0) > 0 && (
-                <div className="profile-sidebar-motion-item [--sidebar-motion-order:2] mx-4 mb-2 flex items-center gap-2 rounded-xl border border-sky-500/30 bg-sky-500/10 px-3 py-2.5">
-                    <svg className="h-4 w-4 flex-shrink-0 text-sky-400" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                <div className="profile-sidebar-motion-item [--sidebar-motion-order:2] mx-4 mb-2 flex items-center gap-2 rounded-xl border border-blue-500/30 bg-blue-500/10 px-3 py-2.5">
+                    <svg className="h-4 w-4 flex-shrink-0 text-fg-accent" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
                         <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9 9a1 1 0 012 0v4a1 1 0 11-2 0V9zm1-4a1 1 0 100 2 1 1 0 000-2z" clipRule="evenodd" />
                     </svg>
                     <div className="min-w-0 flex-1">
-                        <div className="truncate text-xs font-medium text-sky-300">Not applied to the game</div>
-                        <div className="truncate text-[10px] text-sky-300/70">
+                        <div className="truncate text-xs font-medium text-fg-accent">Not applied to the game</div>
+                        <div className="truncate text-[10px] text-fg-accent/70">
                             This profile&apos;s mods are not in the game folder right now.
                         </div>
                     </div>
@@ -921,7 +963,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                         <div
                             aria-hidden="true"
                             className={`profile-mod-segment-indicator absolute bottom-0.5 left-0.5 top-0.5 rounded-md transition-[transform,width,background-color,box-shadow] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] ${modView === 'updates'
-                                ? 'bg-amber-500/20' : modView === 'sync' ? 'bg-sky-500/20' : 'bg-gray-600 shadow-sm'}`}
+                                ? 'bg-amber-500/20' : modView === 'sync' ? 'bg-blue-500/20' : 'bg-gray-600 shadow-sm'}`}
                             style={{
                                 width: `calc(${100 / availableTabs.length}% - 2px)`,
                                 transform: `translateX(${availableTabs.indexOf(modView) * 100}%)`,
@@ -931,7 +973,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                             <button key={tab} type="button" role="tab" aria-controls="profile-mod-view-panel"
                                 onClick={() => changeModView(tab)} aria-selected={modView === tab}
                                 className={`relative z-10 min-w-0 flex-1 whitespace-nowrap rounded-md px-1 py-1.5 transition-colors duration-200 ${modView === tab
-                                    ? tab === 'updates' ? 'text-fg-warning' : tab === 'sync' ? 'text-sky-300' : 'text-white'
+                                    ? tab === 'updates' ? 'text-fg-warning' : tab === 'sync' ? 'text-fg-accent' : 'text-white'
                                     : 'text-gray-400 hover:text-gray-200'}`}>
                                 {tab === 'all' ? `All ${activeProfile?.mods.length ?? 0}` : tab === 'updates' ? `Updates ${profileUpdates.length}` : `Sync ${pendingSyncCount}`}
                             </button>
@@ -967,24 +1009,34 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                                 </span>
                             </button>
                         ) : null}
-                        <div className="flex items-center gap-2 rounded-xl border border-sky-500/20 bg-sky-500/8 p-2">
-                            <span className="min-w-0 flex-1 px-1 text-xs font-semibold text-sky-100">
-                                {isApplying
-                                    ? `${pendingEntries.filter(entry => entry.status === 'syncing').length} syncing · ${pendingSyncCount} pending`
-                                    : syncSelectedIds.length ? `${syncSelectedIds.length} selected` : syncSummaryIndicators}
-                            </span>
-                            <button type="button" disabled={isApplying || (syncSelectedIds.length
-                                ? pendingEntries.filter(entry => syncSelectedIds.includes(entry.id)).some(entry => !entry.revertable)
-                                : pendingEntries.some(entry => !entry.revertable))}
-                                onClick={() => {
+                        <div className="flex items-center justify-between gap-2 rounded-xl border border-gray-700/70 bg-gray-800/60 p-2 shadow-sm">
+                            <div className="min-w-0 flex-1 px-0.5">
+                                {isApplying ? (
+                                    <span className="flex items-center gap-1.5 text-xs font-semibold text-gray-200">
+                                        <span className="inline-block h-2 w-2 animate-ping rounded-full bg-blue-400" />
+                                        <span>{pendingEntries.filter(entry => entry.status === 'syncing').length} syncing · {pendingSyncCount} pending</span>
+                                    </span>
+                                ) : syncSelectedIds.length ? (
+                                    <span className="flex items-center gap-1.5 text-xs font-semibold text-gray-200">
+                                        <span className="rounded-md bg-blue-500/20 px-1.5 py-0.5 text-[11px] font-bold text-fg-accent">{syncSelectedIds.length}</span>
+                                        <span>selected</span>
+                                    </span>
+                                ) : syncSummaryIndicators}
+                            </div>
+                            <div className="flex shrink-0 items-center gap-1.5">
+                                <button type="button" disabled={isApplying || (syncSelectedIds.length
+                                    ? pendingEntries.filter(entry => syncSelectedIds.includes(entry.id)).some(entry => !entry.revertable)
+                                    : pendingEntries.some(entry => !entry.revertable))}
+                                    onClick={() => {
+                                        const ids = syncSelectedIds.length ? syncSelectedIds : pendingEntries.map(entry => entry.id);
+                                        setSyncConfirmation({ kind: 'revert', ids });
+                                    }}
+                                    className="rounded-lg border border-gray-600 px-2.5 py-1.5 text-[11px] font-semibold text-gray-200 transition-colors hover:border-gray-500 hover:bg-gray-700/50 disabled:opacity-40">Revert{syncSelectedIds.length || pendingSyncCount < 2 ? '' : ' all'}</button>
+                                <button type="button" disabled={isApplying || !!activeProfile?.apply_interrupted} onClick={() => {
                                     const ids = syncSelectedIds.length ? syncSelectedIds : pendingEntries.map(entry => entry.id);
-                                    setSyncConfirmation({ kind: 'revert', ids });
-                                }}
-                                className="rounded-lg border border-gray-600 px-2.5 py-1.5 text-[11px] font-semibold text-gray-200 disabled:opacity-40">Revert{syncSelectedIds.length || pendingSyncCount < 2 ? '' : ' all'}</button>
-                            <button type="button" disabled={isApplying || !!activeProfile?.apply_interrupted} onClick={() => {
-                                const ids = syncSelectedIds.length ? syncSelectedIds : pendingEntries.map(entry => entry.id);
-                                setSyncConfirmation({ kind: 'sync', ids });
-                            }} className="rounded-lg bg-blue-600 px-2.5 py-1.5 text-[11px] font-bold text-on-accent disabled:opacity-40">Sync{syncSelectedIds.length || pendingSyncCount < 2 ? '' : ' all'}</button>
+                                    setSyncConfirmation({ kind: 'sync', ids });
+                                }} className="rounded-lg bg-blue-600 px-2.5 py-1.5 text-[11px] font-bold text-on-accent transition-colors hover:bg-blue-500 shadow-sm disabled:opacity-40">Sync{syncSelectedIds.length || pendingSyncCount < 2 ? '' : ' all'}</button>
+                            </div>
                         </div>
                         {pendingEntries.map(entry => {
                             const baseline = entry.mod.sync_baseline;
@@ -992,22 +1044,32 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                             const pkg = packageIndex[packageName];
                             const selected = syncSelectedIds.includes(entry.id);
                             const syncStatus = entry.status;
-                            const statusLabel: string | null = syncStatus === 'syncing'
+                            const kindInfo = getEntryKindInfo(entry.kind);
+                            const statusLabel: string = syncStatus === 'syncing'
                                 ? 'Syncing…'
                                 : syncStatus === 'failed'
                                     ? `Failed${entry.error ? ` · ${entry.error}` : ''}`
                                     : syncStatus === 'ready'
                                         ? 'Ready · waiting for finalization'
-                                        : entry.kind === 'add'
-                                            ? null
-                                            : `${entry.kind[0].toUpperCase() + entry.kind.slice(1)}${entry.kind === 'update' && baseline ? ` ${baseline.versionNumber} → ${entry.mod.versionNumber}` : ''}`;
+                                        : entry.kind === 'update' && baseline
+                                            ? `Update ${baseline.versionNumber} → ${entry.mod.versionNumber}`
+                                            : entry.kind === 'add'
+                                                ? 'Install'
+                                                : kindInfo.label;
+                            const statusColor = syncStatus === 'failed'
+                                ? 'text-fg-danger'
+                                : syncStatus === 'ready'
+                                    ? 'text-fg-success'
+                                    : syncStatus === 'syncing'
+                                        ? 'text-fg-accent'
+                                        : kindInfo.color;
                             return (
                                 <div key={entry.id}
                                     onClick={event => handleSyncRowClick(event, entry.id, entry.mod, pkg)}
                                     onMouseDown={event => { if (event.shiftKey || event.metaKey || event.ctrlKey) event.preventDefault(); }}
                                     aria-selected={selected}
-                                    className={`group/sync-row relative flex cursor-pointer select-none items-center gap-3 overflow-hidden rounded-lg border p-2 transition-colors ${selected ? 'border-sky-500/40 bg-sky-500/10' : 'border-transparent hover:border-gray-700 hover:bg-gray-800'}`}>
-                                    {selected ? <span className="absolute inset-y-2 left-0 w-0.5 rounded-full bg-sky-400" aria-hidden="true" /> : null}
+                                    className={`group/sync-row relative flex cursor-pointer select-none items-center gap-3 overflow-hidden rounded-lg border p-2 transition-colors ${selected ? 'border-blue-500/40 bg-blue-500/10' : 'border-transparent hover:border-gray-700 hover:bg-gray-800'}`}>
+                                    {selected ? <span className="absolute inset-y-2 left-0 w-0.5 rounded-full bg-blue-500" aria-hidden="true" /> : null}
                                     <div className="flex min-w-0 flex-1 items-center gap-3 text-left">
                                         <div className="h-10 w-10 shrink-0 overflow-hidden rounded-lg border border-gray-700 bg-gray-800">
                                             {entry.mod.iconUrl ? <img src={entry.mod.iconUrl} alt="" className="h-full w-full object-cover" /> : null}
@@ -1018,13 +1080,20 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                                                 lazy
                                                 className="text-sm font-medium text-gray-100"
                                             />
-                                            {statusLabel ? (
+                                            <div className={`flex items-center gap-1 text-xs ${statusColor}`}>
+                                                {syncStatus === 'syncing' ? (
+                                                    <svg className="h-3 w-3 shrink-0 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v6h6M20 20v-6h-6M5.6 15a7 7 0 0011.9 2M18.4 9A7 7 0 006.5 7" />
+                                                    </svg>
+                                                ) : (
+                                                    renderSyncKindIcon(entry.kind, 'h-3 w-3 shrink-0')
+                                                )}
                                                 <HoverMarquee
                                                     text={statusLabel}
                                                     lazy
-                                                    className={`text-xs ${syncStatus === 'failed' ? 'text-fg-danger' : syncStatus === 'ready' ? 'text-fg-success' : 'text-sky-300'}`}
+                                                    className="min-w-0 flex-1 truncate font-medium"
                                                 />
-                                            ) : null}
+                                            </div>
                                             {!entry.revertable ? <span className="block truncate text-[10px] text-fg-warning">Previous state could not be verified</span> : null}
                                         </div>
                                     </div>
@@ -1056,25 +1125,26 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                         })}
                     </div>
                 ) : null}
-                {renderedModView === 'updates' && profileUpdates.length > 1 ? (
-                    <button
-                        type="button"
-                        onClick={() => onUpdateAll(profileUpdates)}
-                        className="profile-update-action-enter group/update-all mx-2 mb-1 flex w-[calc(100%-16px)] items-center gap-2.5 rounded-lg border border-amber-500/35 bg-amber-500/10 px-2.5 py-2 text-left text-fg-warning transition-[background-color,border-color,transform] duration-200 hover:border-amber-400/60 hover:bg-amber-500/15 active:scale-[0.985]"
-                    >
-                        <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md bg-amber-400/10 text-fg-warning">
-                            <svg className="h-4 w-4" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-                                <path d="M8.75 2.75a.75.75 0 0 0-1.5 0v5.69L5.03 6.22a.75.75 0 0 0-1.06 1.06l3.5 3.5a.75.75 0 0 0 1.06 0l3.5-3.5a.75.75 0 0 0-1.06-1.06L8.75 8.44V2.75Z" />
-                                <path d="M3.5 9.75a.75.75 0 0 0-1.5 0v1.5A2.75 2.75 0 0 0 4.75 14h6.5A2.75 2.75 0 0 0 14 11.25v-1.5a.75.75 0 0 0-1.5 0v1.5c0 .69-.56 1.25-1.25 1.25h-6.5c-.69 0-1.25-.56-1.25-1.25v-1.5Z" />
-                            </svg>
-                        </span>
-                        <span className="min-w-0 flex-1">
-                            <span className="block text-xs font-bold">Update all {profileUpdates.length} mods</span>
-                        </span>
-                        <svg className="h-4 w-4 flex-shrink-0 text-fg-warning/70 transition-transform duration-200 group-hover/update-all:translate-x-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="m9 18 6-6-6-6" />
-                        </svg>
-                    </button>
+                {renderedModView === 'updates' && profileUpdates.length > 0 ? (
+                    <div className="mx-2 mb-1 flex items-center justify-between gap-2 rounded-xl border border-gray-700/70 bg-gray-800/60 p-2 shadow-sm">
+                        <div className="min-w-0 flex-1 px-0.5">
+                            <div className="flex min-w-0 items-center gap-2.5 px-1" title={`${profileUpdates.length} ${profileUpdates.length === 1 ? 'update' : 'updates'} available`}>
+                                <span className="inline-flex items-center gap-1 text-xs font-semibold text-fg-warning" title={`${profileUpdates.length} ${profileUpdates.length === 1 ? 'update' : 'updates'}`}>
+                                    {renderSyncKindIcon('update', 'h-4 w-4 shrink-0')}
+                                    <span>{profileUpdates.length}</span>
+                                </span>
+                            </div>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-1.5">
+                            <button
+                                type="button"
+                                onClick={() => onUpdateAll(profileUpdates)}
+                                className="rounded-lg bg-blue-600 px-2.5 py-1.5 text-[11px] font-bold text-on-accent transition-colors hover:bg-blue-500 shadow-sm"
+                            >
+                                Update{profileUpdates.length < 2 ? '' : ' all'}
+                            </button>
+                        </div>
+                    </div>
                 ) : null}
 
                 {renderedModView !== 'sync' && (
@@ -1170,7 +1240,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                                     </span>
                                     {!legacyInstallMode && mod.pending_sync && (
                                         <span
-                                            className="inline-flex flex-shrink-0 items-center text-sky-300"
+                                            className="inline-flex flex-shrink-0 items-center text-fg-accent"
                                             title='Pending sync. Click "Apply to Game" to apply profile changes.'
                                         >
                                             <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
