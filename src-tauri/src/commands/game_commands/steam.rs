@@ -387,6 +387,21 @@ fn discover_windows_steam_roots_in_home(home: &std::path::Path) -> Vec<std::path
         }
     }
 
+    // Sikarugir keeps each Wineskin wrapper below ~/Applications/Sikarugir
+    // and embeds its Wine prefix inside the .app bundle. It is not one of the
+    // Library/Application Support bottle layouts above, so without this scan a
+    // perfectly standard Sikarugir Steam install can only be configured by
+    // hand (issue #38).
+    let sikarugir_apps = home.join("Applications/Sikarugir");
+    if let Ok(entries) = fs::read_dir(&sikarugir_apps) {
+        for entry in entries.filter_map(|entry| entry.ok()) {
+            let prefix_root = entry.path().join("Contents/SharedSupport/prefix");
+            if prefix_root.join("drive_c").is_dir() {
+                prefix_roots.push(prefix_root);
+            }
+        }
+    }
+
     let default_prefix = home.join(".wine");
     if default_prefix.join("drive_c").is_dir() {
         prefix_roots.push(default_prefix);
@@ -832,6 +847,21 @@ mod issue_25_launch_routing_tests {
         let client_root = world.steam_client(&bottle);
         // A second bottle with no Steam in it must not produce a false hit.
         world.crossover_bottle("Empty");
+
+        let discovered = discover_windows_steam_roots_in_home(&world.home);
+
+        assert_eq!(discovered.len(), 1, "{:?}", discovered);
+        assert_eq!(canonical(&discovered[0]), canonical(&client_root));
+    }
+
+    #[test]
+    fn discovery_finds_the_steam_client_inside_a_sikarugir_wrapper() {
+        let world = World::new("sikarugir-discovery");
+        let prefix = world
+            .home
+            .join("Applications/Sikarugir/Steam.app/Contents/SharedSupport/prefix");
+        std::fs::create_dir_all(prefix.join("drive_c")).unwrap();
+        let client_root = world.steam_client(&prefix);
 
         let discovered = discover_windows_steam_roots_in_home(&world.home);
 

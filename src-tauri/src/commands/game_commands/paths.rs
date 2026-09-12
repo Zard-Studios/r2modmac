@@ -1,6 +1,48 @@
 use super::*;
 use tauri::command;
 
+fn directory_contains_case_insensitive(directory: &std::path::Path, name: &str) -> bool {
+    fs::read_dir(directory).is_ok_and(|entries| {
+        entries.filter_map(|entry| entry.ok()).any(|entry| {
+            entry
+                .file_name()
+                .to_str()
+                .is_some_and(|candidate| candidate.eq_ignore_ascii_case(name))
+        })
+    })
+}
+
+/// Hades II keeps its executable and Hell2Modding runtime in `Ship`, one level
+/// below the Steam install directory. All install, inspection and launch code
+/// consumes `get_game_path`, so resolving it here gives every phase the same
+/// target instead of installing ReturnOfModding beside the wrong directory.
+fn resolve_game_runtime_path(
+    game_identifier: &str,
+    install_path: &std::path::Path,
+) -> std::path::PathBuf {
+    if normalize_for_matching(game_identifier) != "hadesii" {
+        return install_path.to_path_buf();
+    }
+
+    if directory_contains_case_insensitive(install_path, "Hades2.exe") {
+        return install_path.to_path_buf();
+    }
+
+    let ship = fs::read_dir(install_path).ok().and_then(|entries| {
+        entries.filter_map(|entry| entry.ok()).find_map(|entry| {
+            let path = entry.path();
+            let is_ship = entry
+                .file_name()
+                .to_str()
+                .is_some_and(|name| name.eq_ignore_ascii_case("Ship"));
+            (is_ship && path.is_dir()).then_some(path)
+        })
+    });
+
+    ship.filter(|path| directory_contains_case_insensitive(path, "Hades2.exe"))
+        .unwrap_or_else(|| install_path.to_path_buf())
+}
+
 #[command]
 pub async fn get_game_path(
     app: AppHandle,
@@ -34,7 +76,11 @@ pub async fn get_game_path(
                 continue;
             }
             log_manual_override_once(&key, path);
-            return Ok(Some(path.clone()));
+            return Ok(Some(
+                resolve_game_runtime_path(&game_identifier, path_obj)
+                    .to_string_lossy()
+                    .to_string(),
+            ));
         }
     }
 
@@ -79,7 +125,9 @@ pub async fn get_game_path(
                         || normalized_folder.contains(&normalized_id)
                         || normalized_id.contains(&normalized_folder)
                     {
-                        let game_path = entry.path().to_string_lossy().to_string();
+                        let game_path = resolve_game_runtime_path(&game_identifier, &entry.path())
+                            .to_string_lossy()
+                            .to_string();
                         log::debug!(
                             "[get_game_path] Found match: {} -> {}",
                             folder_name,
@@ -216,7 +264,8 @@ pub async fn find_game_executable(game_path: String) -> Result<Option<String>, S
 
 #[cfg(test)]
 mod manual_game_path_tests {
-    use super::is_steam_library_root;
+    use super::{is_steam_library_root, resolve_game_runtime_path};
+    use std::fs;
     use std::path::Path;
 
     #[test]
@@ -239,5 +288,25 @@ mod manual_game_path_tests {
         ] {
             assert!(!is_steam_library_root(Path::new(game)), "{game}");
         }
+    }
+
+    #[test]
+    fn hades_ii_uses_the_ship_runtime_directory() {
+        let root = std::env::temp_dir().join(format!(
+            "r2modmac-hades-ship-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let install = root.join("Hades II");
+        let ship = install.join("Ship");
+        fs::create_dir_all(&ship).unwrap();
+        fs::write(ship.join("Hades2.exe"), b"stub").unwrap();
+
+        assert_eq!(resolve_game_runtime_path("hades-ii", &install), ship);
+
+        fs::remove_dir_all(root).unwrap();
     }
 }

@@ -10,6 +10,22 @@ fn ensure_finalize_ready(finalize: bool, missing_payloads: usize) -> Result<(), 
     }
     Ok(())
 }
+
+fn managed_install_root(
+    is_return_of_modding: bool,
+    game_path: &std::path::Path,
+    bepinex_root: std::path::PathBuf,
+) -> std::path::PathBuf {
+    // Profile isolation moves only a BepInEx tree. ReturnOfModding packages
+    // are installed beside the game and their ownership manifests point there;
+    // reconciling them against the isolated profile makes every successful
+    // install appear missing during finalization (issue #38).
+    if is_return_of_modding {
+        game_path.to_path_buf()
+    } else {
+        bepinex_root
+    }
+}
 use tauri::command;
 
 #[command]
@@ -58,12 +74,14 @@ pub async fn sync_profile_to_game(
     .await?
     .ok_or("Game path not configured. Please set it in Settings.")?;
     let game_path = std::path::Path::new(&game_path_str);
+    let is_return_of_modding_profile =
+        crate::models::loaders::uses_return_of_modding(&game_identifier, game_path);
     let runtime_game_path_buf = if profile_platform == "mac"
         && !is_balatro_identifier(&game_identifier)
         && !is_balatro_game_path(game_path)
         && !is_outerwilds_identifier(&game_identifier)
         && !is_outerwilds_game_path(game_path)
-        && !crate::models::loaders::uses_return_of_modding(&game_identifier, game_path)
+        && !is_return_of_modding_profile
     {
         let resolved = resolve_macos_runtime_root(game_path);
         if resolved != game_path {
@@ -80,7 +98,11 @@ pub async fn sync_profile_to_game(
     let runtime_game_path = runtime_game_path_buf.as_path();
     // Under isolation the tree the game loads lives in the profile, so that is
     // the tree to reconcile against.
-    let bepinex_root = bepinex_install_root(&app, &profile_id, runtime_game_path)?;
+    let bepinex_root = managed_install_root(
+        is_return_of_modding_profile,
+        runtime_game_path,
+        bepinex_install_root(&app, &profile_id, runtime_game_path)?,
+    );
     let profile_isolated = bepinex_root != runtime_game_path;
     let bepinex_scope = if profile_isolated {
         PROFILE_MANIFEST_SCOPE
@@ -142,9 +164,6 @@ pub async fn sync_profile_to_game(
 
     let is_outerwilds_profile =
         is_outerwilds_identifier(&game_identifier) || is_outerwilds_game_path(game_path);
-    let is_return_of_modding_profile =
-        crate::models::loaders::uses_return_of_modding(&game_identifier, game_path);
-
     // Get list of mod names from profile (format: "Author-ModName-Version")
     // We keep the full name for matching
     // IMPORTANT: Only include ENABLED mods for BepInEx (disabled mods should not be installed).
@@ -1100,7 +1119,8 @@ fn windows_bepinex_runtime_is_installed(game_path: &std::path::Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        ensure_finalize_ready, key_is_bepinex_runtime_pack, windows_bepinex_runtime_is_installed,
+        ensure_finalize_ready, key_is_bepinex_runtime_pack, managed_install_root,
+        windows_bepinex_runtime_is_installed,
     };
 
     #[test]
@@ -1172,6 +1192,17 @@ mod tests {
     fn cleanup_phase_requires_every_payload() {
         assert!(ensure_finalize_ready(true, 0).is_ok());
         assert!(ensure_finalize_ready(true, 1).is_err());
+    }
+
+    #[test]
+    fn return_of_modding_reconciles_the_game_even_with_an_isolated_profile() {
+        let game = std::path::Path::new("/games/Hades II");
+        let isolated_profile = std::path::PathBuf::from("/profiles/test");
+
+        assert_eq!(
+            managed_install_root(true, game, isolated_profile),
+            game.to_path_buf()
+        );
     }
 }
 
