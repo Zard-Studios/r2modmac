@@ -24,7 +24,6 @@ pub(crate) use super::legacy_mod_commands::{
 };
 
 const APP_USER_AGENT: &str = concat!("r2modmac/", env!("CARGO_PKG_VERSION"));
-const MAX_ARCHIVE_BYTES: u64 = 1024 * 1024 * 1024;
 const MAX_UNCOMPRESSED_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 const MAX_SINGLE_FILE_BYTES: u64 = 768 * 1024 * 1024;
 const MAX_ARCHIVE_ENTRIES: usize = 4096;
@@ -132,13 +131,6 @@ fn validate_archive(path: &Path, mod_name: &str) -> Result<(), String> {
     if !metadata.is_file() {
         return Err("Downloaded mod payload is not a file".to_string());
     }
-    if metadata.len() > MAX_ARCHIVE_BYTES {
-        return Err(format!(
-            "Downloaded mod archive exceeds the {} MB safety limit",
-            MAX_ARCHIVE_BYTES / 1024 / 1024
-        ));
-    }
-
     let file = fs::File::open(path).map_err(|error| error.to_string())?;
     let mut archive = zip::ZipArchive::new(file)
         .map_err(|error| format!("Downloaded mod is not a valid zip archive: {}", error))?;
