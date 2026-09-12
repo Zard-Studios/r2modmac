@@ -994,7 +994,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                     className="space-y-1"
                 >
                 {renderedModView === 'sync' ? (
-                    <div className="space-y-2 px-2 pb-2">
+                    <div className="space-y-2 pb-2">
                         {activeProfile?.apply_interrupted && !isApplying ? (
                             <button type="button" onClick={() => onInstallToGame()}
                                 className="flex w-full items-start gap-2.5 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-left text-xs text-fg-warning">
@@ -1126,7 +1126,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                     </div>
                 ) : null}
                 {renderedModView === 'updates' && profileUpdates.length > 0 ? (
-                    <div className="mx-2 mb-1 flex items-center justify-between gap-2 rounded-xl border border-gray-700/70 bg-gray-800/60 p-2 shadow-sm">
+                    <div className="mb-1 flex items-center justify-between gap-2 rounded-xl border border-gray-700/70 bg-gray-800/60 p-2 shadow-sm">
                         <div className="min-w-0 flex-1 px-0.5">
                             <div className="flex min-w-0 items-center gap-2.5 px-1" title={`${profileUpdates.length} ${profileUpdates.length === 1 ? 'update' : 'updates'} available`}>
                                 <span className="inline-flex items-center gap-1 text-xs font-semibold text-fg-warning" title={`${profileUpdates.length} ${profileUpdates.length === 1 ? 'update' : 'updates'}`}>
