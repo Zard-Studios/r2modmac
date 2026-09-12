@@ -84,8 +84,8 @@ export const THEME_PRESETS: ThemePreset[] = [
     {
         id: `${BUILTIN_PREFIX}claudio-dark`,
         name: 'Claudio Dark',
-        author: 'Anthropic palette',
-        origin: "Anthropic's brand colours — coral on near-black",
+        author: 'sloppy droppy thing',
+        origin: 'Coral on near-black',
         colors: {
             background: '#191919',
             surface: '#262625',
@@ -103,8 +103,8 @@ export const THEME_PRESETS: ThemePreset[] = [
     {
         id: `${BUILTIN_PREFIX}claudio-light`,
         name: 'Claudio Light',
-        author: 'Anthropic palette',
-        origin: "Anthropic's brand colours — coral on cream",
+        author: 'sloppy droppy thing',
+        origin: 'Coral on cream',
         colors: {
             background: '#f4f3ee', // Pampas
             surface: '#ffffff',
