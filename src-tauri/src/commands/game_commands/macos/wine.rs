@@ -323,6 +323,69 @@ fn macos_wineskin_activation_command(bundle_path: &std::path::Path) -> std::proc
     command
 }
 
+/// Persist loader-related DLL choices for one Windows executable. This matters
+/// when Steam is already running: a second `steam.exe -applaunch` forwards the
+/// request to the existing client, whose children do not inherit the new
+/// launcher's WINEDLLOVERRIDES environment. Wine's per-application registry
+/// key is read by the game process itself and avoids changing other games in
+/// the same prefix.
+pub(crate) fn ensure_macos_wine_app_dll_overrides(
+    prefix_root: &std::path::Path,
+    executable_path: &std::path::Path,
+    dll_names: &[&str],
+) -> Result<(), String> {
+    let runner = find_macos_compat_runner_binary(Some(prefix_root), executable_path)
+        .ok_or_else(|| "Could not find Wine to configure the game DLL overrides".to_string())?;
+    let executable_name = executable_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| "Could not determine the Windows game executable name".to_string())?;
+
+    for dll_name in dll_names {
+        let status = macos_wine_registry_override_command(
+            &runner,
+            prefix_root,
+            executable_name,
+            dll_name,
+        )?
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map_err(|error| format!("Failed to configure Wine override for {dll_name}: {error}"))?;
+        if !status.success() {
+            return Err(format!(
+                "Wine could not configure the {dll_name} override (status {status})"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn macos_wine_registry_override_command(
+    runner: &std::path::Path,
+    prefix_root: &std::path::Path,
+    executable_name: &str,
+    dll_name: &str,
+) -> Result<std::process::Command, String> {
+    let mut command = std::process::Command::new(runner);
+    configure_macos_compat_runner_command(&mut command, runner, Some(prefix_root))?;
+    command.args([
+        "reg",
+        "add",
+        &format!(
+            "HKCU\\Software\\Wine\\AppDefaults\\{executable_name}\\DllOverrides"
+        ),
+        "/v",
+        dll_name,
+        "/t",
+        "REG_SZ",
+        "/d",
+        "native,builtin",
+        "/f",
+    ]);
+    Ok(command)
+}
+
 /// Serialize argv for Sikarugir's single `Program Flags` string using the
 /// quoting rules consumed by CommandLineToArgvW. Paths inside Steam prefixes
 /// commonly contain spaces, parentheses, and trailing backslashes.
@@ -577,6 +640,39 @@ mod tests {
         assert!(command
             .get_args()
             .all(|argument| argument != std::ffi::OsStr::new("-n")));
+    }
+
+    #[test]
+    fn wine_overrides_are_scoped_to_hades_in_its_prefix() {
+        let runner = std::path::Path::new("/mock/wine64");
+        let prefix = std::path::Path::new("/mock/Steam.app/Contents/SharedSupport/prefix");
+        let command = macos_wine_registry_override_command(
+            runner,
+            prefix,
+            "Hades2.exe",
+            "d3d12",
+        )
+        .unwrap();
+
+        assert_eq!(command.get_program(), runner);
+        assert!(command.get_envs().any(|(key, value)| {
+            key == std::ffi::OsStr::new("WINEPREFIX") && value == Some(prefix.as_os_str())
+        }));
+        assert_eq!(
+            command.get_args().collect::<Vec<_>>(),
+            vec![
+                "reg",
+                "add",
+                "HKCU\\Software\\Wine\\AppDefaults\\Hades2.exe\\DllOverrides",
+                "/v",
+                "d3d12",
+                "/t",
+                "REG_SZ",
+                "/d",
+                "native,builtin",
+                "/f",
+            ]
+        );
     }
 }
 

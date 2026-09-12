@@ -94,6 +94,14 @@ fn windows_modded_arguments(
     arguments
 }
 
+#[cfg(target_os = "macos")]
+fn is_hades_ii_windows_executable(executable_path: &std::path::Path) -> bool {
+    executable_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.eq_ignore_ascii_case("Hades2.exe"))
+}
+
 pub(crate) fn launch_windows_direct_game(
     game_path: &std::path::Path,
     shimloader: Option<&ShimloaderLaunch>,
@@ -133,6 +141,22 @@ pub(crate) fn launch_windows_direct_game_with_working_dir(
     {
         let prefix_root =
             find_wine_prefix_root(&executable_path).or_else(|| find_wine_prefix_root(game_path));
+
+        #[cfg(target_os = "macos")]
+        if enable_return_of_modding && is_hades_ii_windows_executable(&executable_path) {
+            if let Some(prefix_root_path) = prefix_root.as_deref() {
+                if let Err(error) = ensure_macos_wine_app_dll_overrides(
+                    prefix_root_path,
+                    &executable_path,
+                    &["d3d12", "winhttp", "libglesv2"],
+                ) {
+                    log::warn!(
+                        "[launch_windows_direct_game] Could not persist Hades II Wine overrides; the per-launch override will still be attempted: {}",
+                        error
+                    );
+                }
+            }
+        }
 
         #[cfg(target_os = "macos")]
         if let Some(prefix_root_path) = prefix_root.as_deref() {
@@ -534,6 +558,25 @@ pub(super) fn launch_windows_steam_game(
         let prefix_root = find_wine_prefix_root(&steam_executable)
             .or_else(|| find_wine_prefix_root(&executable_path))
             .or_else(|| find_wine_prefix_root(game_path));
+
+        #[cfg(target_os = "macos")]
+        if enable_return_of_modding && is_hades_ii_windows_executable(&executable_path) {
+            if let Some(prefix_root_path) = prefix_root.as_deref() {
+                // The official Hades II macOS setup requires these three
+                // native-first overrides. Scope them to Hades2.exe so other
+                // games in the Steam prefix retain their own Wine settings.
+                if let Err(error) = ensure_macos_wine_app_dll_overrides(
+                    prefix_root_path,
+                    &executable_path,
+                    &["d3d12", "winhttp", "libglesv2"],
+                ) {
+                    log::warn!(
+                        "[launch_windows_steam_game] Could not persist Hades II Wine overrides; the per-launch override will still be attempted: {}",
+                        error
+                    );
+                }
+            }
+        }
 
         #[cfg(target_os = "macos")]
         if let Some(prefix_root_path) = prefix_root.as_deref() {
