@@ -45,6 +45,7 @@ import { getProfileModKey, hasPendingRuntimeInstall, migratePendingSyncBaselines
 import { isLoaderPackage, loaderDisplayName, loaderPackageIds } from './utils/loaderPackages';
 import { isTextEntryTarget, shouldReleaseSearchFocus } from './utils/searchField';
 import { dialogStack } from './utils/dialogStack';
+import { censorText } from './utils/pathCensorUtils';
 
 const QUICK_MAC_HINTS = new Set([
   'btd6',
@@ -424,7 +425,16 @@ function App() {
     revertPendingMods,
   } = useProfileStore()
   // App State Store
-  const { communities, communityImages, communityPlatforms, streamMode, setCommunities, setCommunityImages, setCommunityPlatforms, setStreamMode, setUsername } = useAppStore();
+  const { communities, communityImages, communityPlatforms, streamMode, username, setCommunities, setCommunityImages, setCommunityPlatforms, setStreamMode, setUsername } = useAppStore();
+
+  useEffect(() => {
+    if (!streamMode) return;
+    const systemAlert = window.alert;
+    window.alert = (message?: unknown) => systemAlert(censorText(String(message ?? ''), username));
+    return () => {
+      window.alert = systemAlert;
+    };
+  }, [streamMode, username]);
   const hydrateTheme = useThemeStore((s) => s.hydrate);
   const loadThemes = useThemeStore((s) => s.loadThemes);
 
@@ -3542,7 +3552,9 @@ function App() {
                 <span className="truncate text-sm font-semibold text-white">Applying in background</span>
                 <span className="shrink-0 text-xs tabular-nums text-fg-accent">{Math.round(progressState.progress)}%</span>
               </div>
-              <div className="mt-0.5 truncate text-xs text-gray-400">{progressState.currentTask}</div>
+              <div className="mt-0.5 truncate text-xs text-gray-400">
+                {streamMode ? censorText(progressState.currentTask, username) : progressState.currentTask}
+              </div>
             </div>
           </div>
           <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-gray-700">

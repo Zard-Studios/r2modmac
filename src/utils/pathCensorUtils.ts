@@ -5,6 +5,37 @@ const EXCLUDED_NAMES = new Set([
     'pictures', 'music', 'videos', 'appdata', 'local', 'roaming', 'microsoft'
 ]);
 
+const USER_PATH_PATTERN = /((?:[a-z]:)?[\\/](?:users|home|documents and settings)[\\/])([^\\/:\r\n]+)/gi;
+
+function escapeRegExp(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Redact a username from arbitrary UI text, not just from editable path fields.
+ * Path usernames are collected first so the same name is also hidden elsewhere
+ * in the message while the asynchronously loaded OS username is unavailable.
+ */
+export function censorText(text: string | null | undefined, username: string | null): string {
+    if (!text) return '';
+
+    const usernames = new Set<string>();
+    const configuredUsername = username?.trim();
+    if (configuredUsername) usernames.add(configuredUsername);
+
+    for (const match of text.matchAll(USER_PATH_PATTERN)) {
+        const pathUsername = match[2]?.trim();
+        if (pathUsername) usernames.add(pathUsername);
+    }
+
+    let censored = text.replace(USER_PATH_PATTERN, '$1[user]');
+    const orderedUsernames = [...usernames].sort((left, right) => right.length - left.length);
+    for (const name of orderedUsernames) {
+        censored = censored.replace(new RegExp(escapeRegExp(name), 'gi'), '[user]');
+    }
+    return censored;
+}
+
 function getEffectiveUsername(path: string | null | undefined, storeUsername: string | null): string | null {
     if (storeUsername) return storeUsername;
     if (!path) return null;

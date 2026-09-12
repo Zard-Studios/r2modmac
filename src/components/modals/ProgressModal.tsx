@@ -1,5 +1,7 @@
 import { useEffect } from 'react';
 import type { ProgressState } from '../../types/progress';
+import { useAppStore } from '../../store/useAppStore';
+import { censorText } from '../../utils/pathCensorUtils';
 
 interface ProgressModalProps {
     isOpen: boolean;
@@ -45,6 +47,7 @@ export function ProgressModal({
     onMinimize,
     isCancelling = false,
 }: ProgressModalProps) {
+    const { streamMode, username } = useAppStore();
     useEffect(() => {
         if (!isOpen || !onMinimize) return;
         const handleKeyDown = (event: KeyboardEvent) => {
@@ -63,12 +66,14 @@ export function ProgressModal({
     const transferLabel = typeof totalBytes === 'number' && totalBytes > 0
         ? `${formatBytes(downloadedBytes)} / ${formatBytes(totalBytes)}`
         : `${formatBytes(downloadedBytes)} downloaded`;
+    const privacyTitle = streamMode ? censorText(title, username) : title;
+    const privacyTask = streamMode ? censorText(currentTask, username) : currentTask;
 
     return (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
             <div className="relative bg-gray-800 rounded-xl p-6 max-w-md w-full min-w-0 border border-gray-700 shadow-2xl overflow-hidden">
                 <div className="flex items-start gap-4 mb-4 min-w-0 pr-8">
-                    <h3 className="text-xl font-bold text-white min-w-0 break-words">{title}</h3>
+                    <h3 className="text-xl font-bold text-white min-w-0 break-words">{privacyTitle}</h3>
                     {onMinimize && (
                         <button
                             type="button"
@@ -85,8 +90,8 @@ export function ProgressModal({
                 </div>
 
                 <div className="mb-2 flex h-5 items-center justify-between gap-3 text-sm text-gray-400 min-w-0">
-                    <span className="min-w-0 truncate" title={isCancelling ? 'Stopping...' : currentTask}>
-                        {isCancelling ? 'Stopping...' : currentTask}
+                    <span className="min-w-0 truncate" title={isCancelling ? 'Stopping...' : privacyTask}>
+                        {isCancelling ? 'Stopping...' : privacyTask}
                     </span>
                     <span className="shrink-0 tabular-nums">{Math.round(progress)}%</span>
                 </div>

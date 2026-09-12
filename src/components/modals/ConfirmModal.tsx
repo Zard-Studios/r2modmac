@@ -1,5 +1,7 @@
 import { Button, DialogLayer } from '../ui';
 import { AppIcon } from '../ui/icons';
+import { useAppStore } from '../../store/useAppStore';
+import { censorText } from '../../utils/pathCensorUtils';
 
 export type ConfirmTone = 'default' | 'danger';
 
@@ -24,9 +26,11 @@ interface ConfirmModalProps {
  * goes through this modal instead.
  */
 export function ConfirmModal({ request, onResolve }: ConfirmModalProps) {
+    const { streamMode, username } = useAppStore();
     if (!request) return null;
 
     const isDanger = request.tone === 'danger';
+    const privacyText = (value: string) => streamMode ? censorText(value, username) : value;
 
     return (
         <div
@@ -44,13 +48,13 @@ export function ConfirmModal({ request, onResolve }: ConfirmModalProps) {
                             <AppIcon name={isDanger ? 'warning' : 'apply'} className="h-6 w-6" />
                         </span>
                         <div className="min-w-0">
-                            <h2 id="confirm-modal-title" className="text-lg font-bold text-white">{request.title}</h2>
-                            <p className="mt-1 whitespace-pre-line text-sm leading-relaxed text-gray-400">{request.message}</p>
+                            <h2 id="confirm-modal-title" className="text-lg font-bold text-white">{privacyText(request.title)}</h2>
+                            <p className="mt-1 whitespace-pre-line text-sm leading-relaxed text-gray-400">{privacyText(request.message)}</p>
                         </div>
                     </div>
                     <div className="grid grid-cols-2 gap-3 p-4">
                         <Button type="button" variant="secondary" className="rounded-xl py-2.5" onClick={() => onResolve(false)}>
-                            {request.cancelLabel || 'Cancel'}
+                            {privacyText(request.cancelLabel || 'Cancel')}
                         </Button>
                         <Button
                             type="submit"
@@ -58,7 +62,7 @@ export function ConfirmModal({ request, onResolve }: ConfirmModalProps) {
                             variant={isDanger ? 'danger' : 'primary'}
                             className="rounded-xl py-2.5"
                         >
-                            {request.confirmLabel || 'Continue'}
+                            {privacyText(request.confirmLabel || 'Continue')}
                         </Button>
                     </div>
                 </form>

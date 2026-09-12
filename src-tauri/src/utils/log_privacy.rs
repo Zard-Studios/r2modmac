@@ -16,11 +16,23 @@ fn path_username() -> &'static Regex {
 fn username_patterns() -> &'static [Regex] {
     USERNAME_PATTERNS
         .get_or_init(|| {
-            ["USER", "USERNAME"]
+            let mut names = ["USER", "USERNAME", "LOGNAME"]
                 .into_iter()
                 .filter_map(|name| std::env::var(name).ok())
                 .map(|name| name.trim().to_string())
                 .filter(|name| !name.is_empty())
+                .collect::<Vec<_>>();
+            if let Some(home_username) = dirs::home_dir()
+                .and_then(|home| home.file_name().map(|name| name.to_owned()))
+                .and_then(|name| name.to_str().map(str::to_owned))
+                .filter(|name| !name.trim().is_empty())
+            {
+                names.push(home_username);
+            }
+            names.sort_unstable();
+            names.dedup();
+            names
+                .into_iter()
                 .map(|name| Regex::new(&format!(r"(?i){}", regex::escape(&name))))
                 .filter_map(Result::ok)
                 .collect()
@@ -76,6 +88,15 @@ mod tests {
         assert_eq!(
             redact_for_usernames("Could not open alice's profile at /tmp", &["alice"]),
             "Could not open [user]'s profile at /tmp"
+        );
+    }
+
+    #[test]
+    fn masks_usernames_in_mixed_error_and_url_contexts() {
+        let raw = "alice failed: owner=ALICE; mail=alice@example.test; file:///Users/alice/Game";
+        assert_eq!(
+            redact_for_usernames(raw, &["alice"]),
+            "[user] failed: owner=[user]; mail=[user]@example.test; file:///Users/[user]/Game"
         );
     }
 }

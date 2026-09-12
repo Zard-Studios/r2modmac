@@ -1285,6 +1285,8 @@ pub async fn confirm_dialog(
         .get_webview_window("main")
         .ok_or("Main window not found")?;
 
+    let title = crate::utils::log_privacy::redact(&title);
+    let message = crate::utils::log_privacy::redact(&message);
     let ans = app
         .dialog()
         .message(message)
@@ -1305,6 +1307,8 @@ pub async fn alert_dialog(app: AppHandle, title: String, message: String) -> Res
         .get_webview_window("main")
         .ok_or("Main window not found")?;
 
+    let title = crate::utils::log_privacy::redact(&title);
+    let message = crate::utils::log_privacy::redact(&message);
     app.dialog()
         .message(message)
         .title(title)

@@ -1,24 +1,10 @@
 import { useRef, useEffect } from 'react';
 import { useAppStore } from '../../store/useAppStore';
-import { censorPath, uncensorPath } from '../../utils/pathCensorUtils';
+import { censorPath, censorText, uncensorPath } from '../../utils/pathCensorUtils';
 
 interface PathCensorProps {
     path: string | null | undefined;
     className?: string;
-}
-
-const EXCLUDED_NAMES = new Set([
-    'steam', 'steamapps', 'common', 'library', 'application support', 
-    'drive_c', 'program files', 'program files (x86)', 'users', 'home', 
-    'volumes', 'media', 'mnt', 'desktop', 'documents', 'downloads', 
-    'pictures', 'music', 'videos', 'appdata', 'local', 'roaming', 'microsoft'
-]);
-
-function getEffectiveUsername(path: string | null | undefined, storeUsername: string | null): string | null {
-    if (storeUsername) return storeUsername;
-    if (!path) return null;
-    const match = path.match(/(?:\\|\/)(?:Users|home)(?:\\|\/)([^\\/]+)/i);
-    return match ? match[1] : null;
 }
 
 export function PathCensor({ path, className = '' }: PathCensorProps) {
@@ -30,50 +16,7 @@ export function PathCensor({ path, className = '' }: PathCensorProps) {
         return <span className={className}>{path}</span>;
     }
 
-    const effUsername = getEffectiveUsername(path, username);
-    if (!effUsername) {
-        return <span className={className}>{path}</span>;
-    }
-
-    const lowerUsername = effUsername.toLowerCase();
-    const parts = path.split(/([\\/])/);
-
-    return (
-        <span className={className}>
-            {parts.map((part, index) => {
-                if (part === '/' || part === '\\') {
-                    return <span key={index}>{part}</span>;
-                }
-                
-                const lowerPart = part.toLowerCase();
-                if (!lowerPart || EXCLUDED_NAMES.has(lowerPart)) {
-                    return <span key={index}>{part}</span>;
-                }
-                
-                // Match conditions:
-                // 1. Exact case-insensitive match
-                // 2. Substring match if the segment is at least 3 characters long
-                const isMatch = lowerPart === lowerUsername || (
-                    lowerPart.length >= 3 && (
-                        lowerUsername.includes(lowerPart) || 
-                        lowerPart.includes(lowerUsername)
-                    )
-                );
-                
-                if (isMatch) {
-                    const censorLength = effUsername ? effUsername.length : part.length;
-                    const censorStr = '*'.repeat(censorLength);
-                    return (
-                        <span key={index} className="stream-censor-blur mx-[2px]" title="Hidden by pls privacy">
-                            <span className="select-none pointer-events-none font-bold tracking-wider">{censorStr}</span>
-                        </span>
-                    );
-                }
-                
-                return <span key={index}>{part}</span>;
-            })}
-        </span>
-    );
+    return <span className={className}>{censorText(path, username)}</span>;
 }
 
 function getOverlayClasses(className: string): string {
