@@ -24,8 +24,6 @@ pub(crate) use super::legacy_mod_commands::{
 };
 
 const APP_USER_AGENT: &str = concat!("r2modmac/", env!("CARGO_PKG_VERSION"));
-const MAX_UNCOMPRESSED_BYTES: u64 = 2 * 1024 * 1024 * 1024;
-const MAX_SINGLE_FILE_BYTES: u64 = 768 * 1024 * 1024;
 const MAX_ARCHIVE_ENTRIES: usize = 4096;
 const MAX_ARCHIVE_PATH_CHARS: usize = 240;
 const MAX_MANIFEST_BYTES: u64 = 256 * 1024;
@@ -171,21 +169,9 @@ fn validate_archive(path: &Path, mod_name: &str) -> Result<(), String> {
             continue;
         }
 
-        if entry.size() > MAX_SINGLE_FILE_BYTES {
-            return Err(format!(
-                "Blocked oversized file in mod archive: {}",
-                normalized
-            ));
-        }
         total_uncompressed = total_uncompressed
             .checked_add(entry.size())
             .ok_or_else(|| "Archive size accounting overflowed".to_string())?;
-        if total_uncompressed > MAX_UNCOMPRESSED_BYTES {
-            return Err(format!(
-                "Downloaded mod expands beyond the {} MB safety limit",
-                MAX_UNCOMPRESSED_BYTES / 1024 / 1024
-            ));
-        }
 
         let compressed = entry.compressed_size();
         if compressed == 0 && entry.size() > 0 {
