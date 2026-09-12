@@ -188,7 +188,7 @@ pub(crate) fn launch_macos_wineskin_program(
                 executable_path, prefix_root
             )
         })?;
-    let win_flags = args.join(" ");
+    let win_flags = serialize_windows_arguments(args);
 
     log::info!(
         "[{}] Launching via Sikarugir bundle {:?}: program={:?} flags={:?}",
@@ -296,6 +296,47 @@ pub(crate) fn launch_macos_wineskin_program(
     });
 
     Ok(())
+}
+
+/// Serialize argv for Sikarugir's single `Program Flags` string using the
+/// quoting rules consumed by CommandLineToArgvW. Paths inside Steam prefixes
+/// commonly contain spaces, parentheses, and trailing backslashes.
+fn serialize_windows_arguments(arguments: &[String]) -> String {
+    arguments
+        .iter()
+        .map(|argument| quote_windows_argument(argument))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn quote_windows_argument(argument: &str) -> String {
+    if !argument.is_empty()
+        && !argument
+            .chars()
+            .any(|character| character.is_whitespace() || character == '"')
+    {
+        return argument.to_string();
+    }
+
+    let mut quoted = String::from("\"");
+    let mut backslashes = 0usize;
+    for character in argument.chars() {
+        if character == '\\' {
+            backslashes += 1;
+            continue;
+        }
+        if character == '"' {
+            quoted.push_str(&"\\".repeat(backslashes * 2 + 1));
+            quoted.push('"');
+        } else {
+            quoted.push_str(&"\\".repeat(backslashes));
+            quoted.push(character);
+        }
+        backslashes = 0;
+    }
+    quoted.push_str(&"\\".repeat(backslashes * 2));
+    quoted.push('"');
+    quoted
 }
 
 pub(crate) fn find_macos_compat_runner_binary(
@@ -469,6 +510,31 @@ mod tests {
         );
 
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn quotes_sikarugir_program_flags_without_splitting_hades_paths() {
+        let arguments = vec![
+            "-applaunch".to_string(),
+            "1145350".to_string(),
+            "--rom_modding_root_folder".to_string(),
+            "C:\\Program Files (x86)\\Steam\\steamapps\\common\\Hades II\\Ship".to_string(),
+        ];
+        assert_eq!(
+            serialize_windows_arguments(&arguments),
+            "-applaunch 1145350 --rom_modding_root_folder \"C:\\Program Files (x86)\\Steam\\steamapps\\common\\Hades II\\Ship\""
+        );
+    }
+
+    #[test]
+    fn quotes_empty_embedded_quote_and_trailing_backslash_arguments() {
+        assert_eq!(quote_windows_argument(""), "\"\"");
+        assert_eq!(quote_windows_argument("plain"), "plain");
+        assert_eq!(quote_windows_argument("a\\\"b"), "\"a\\\\\\\"b\"");
+        assert_eq!(
+            quote_windows_argument("C:\\space here\\"),
+            "\"C:\\space here\\\\\""
+        );
     }
 }
 

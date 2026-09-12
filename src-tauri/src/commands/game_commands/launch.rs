@@ -92,12 +92,19 @@ pub async fn launch_game_with_mods(
 
         // 5. Launch OuterWilds.exe — mods are injected via the patched Assembly-CSharp.dll.
         log::info!("[launch_game_with_mods] Launching OuterWilds.exe directly");
-        return launch_windows_game(&app, &game_path, None);
+        return launch_windows_game(&app, &game_path, None, false);
     }
 
     if is_windows_profile {
         let shimloader = shimloader_launch_for(&app, &game_identifier, &profile_id, &game_path);
-        return launch_windows_game(&app, &game_path, shimloader.as_ref());
+        let enable_return_of_modding =
+            crate::models::loaders::uses_return_of_modding(&game_identifier, &game_path);
+        return launch_windows_game(
+            &app,
+            &game_path,
+            shimloader.as_ref(),
+            enable_return_of_modding,
+        );
     }
 
     launch_game_with_mods_for_macos(&app, &game_identifier, &profile_id, &game_path).await
@@ -139,13 +146,13 @@ pub async fn launch_game_vanilla(
 
         // Launch OuterWilds.exe directly — vanilla, no mods
         log::info!("[launch_game_vanilla] Launching OuterWilds.exe directly (vanilla)");
-        return launch_windows_game(&app, &game_path, None);
+        return launch_windows_game(&app, &game_path, None, false);
     }
 
     if is_windows_profile {
         // No loader arguments: without them the shim has nowhere to read mods
         // from, which is exactly what a vanilla launch wants.
-        return launch_windows_game(&app, &game_path, None);
+        return launch_windows_game(&app, &game_path, None, false);
     }
 
     launch_game_vanilla_for_macos(&app, &game_identifier, &profile_id, &game_path_str).await
