@@ -6,8 +6,10 @@ umask 022
 # Always use rustup's cargo/rustc, NOT Homebrew's. Homebrew rust lacks cross-compile targets.
 export PATH="$HOME/.cargo/bin:$PATH"
 
-# Use sccache if available to speed up incremental rebuilds
-if command -v sccache &>/dev/null; then
+# Use sccache if available to speed up incremental rebuilds. Some macOS
+# environments ship a wrapper that cannot execute the active rustc toolchain;
+# allow a caller to opt out without changing PATH or uninstalling sccache.
+if [[ "${R2MODMAC_DISABLE_SCCACHE:-0}" != "1" ]] && command -v sccache &>/dev/null; then
   export RUSTC_WRAPPER
   RUSTC_WRAPPER="$(command -v sccache)"
   unset CARGO_INCREMENTAL
