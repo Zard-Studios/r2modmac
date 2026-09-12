@@ -137,6 +137,10 @@ jobs:
       - name: Build Tauri app (Windows)
         if: matrix.settings.platform == 'windows-latest'
         run: npm run tauri build -- --target ${{ matrix.settings.rust-target }} --no-bundle
+        env:
+          # Windows headers otherwise define min/max macros, which break
+          # Perfetto's std::min/std::max calls while cc-rs builds its C++ SDK.
+          CXXFLAGS: -DNOMINMAX
 
       - name: Build Tauri app (Linux)
         if: startsWith(matrix.settings.platform, 'ubuntu-')
