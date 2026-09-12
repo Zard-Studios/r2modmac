@@ -94,12 +94,42 @@ fn windows_modded_arguments(
     arguments
 }
 
+fn windows_steam_arguments(
+    app_id: &str,
+    game_path: &std::path::Path,
+    shimloader: Option<&ShimloaderLaunch>,
+    enable_return_of_modding: bool,
+    prefix_root: Option<&std::path::Path>,
+) -> Vec<String> {
+    let mut arguments = vec!["-applaunch".to_string(), app_id.to_string()];
+    // Steam hands everything following the app id to the game executable.
+    arguments.extend(windows_modded_arguments(
+        game_path,
+        shimloader,
+        enable_return_of_modding,
+        prefix_root,
+    ));
+    arguments
+}
+
 #[cfg(target_os = "macos")]
 fn is_hades_ii_windows_executable(executable_path: &std::path::Path) -> bool {
     executable_path
         .file_name()
         .and_then(|name| name.to_str())
         .is_some_and(|name| name.eq_ignore_ascii_case("Hades2.exe"))
+}
+
+#[cfg(target_os = "macos")]
+fn hades_ii_wine_dll_overrides(
+    executable_path: &std::path::Path,
+    enable_return_of_modding: bool,
+) -> &'static [&'static str] {
+    if enable_return_of_modding && is_hades_ii_windows_executable(executable_path) {
+        &["d3d12", "winhttp", "libglesv2"]
+    } else {
+        &[]
+    }
 }
 
 pub(crate) fn launch_windows_direct_game(
@@ -143,17 +173,21 @@ pub(crate) fn launch_windows_direct_game_with_working_dir(
             find_wine_prefix_root(&executable_path).or_else(|| find_wine_prefix_root(game_path));
 
         #[cfg(target_os = "macos")]
-        if enable_return_of_modding && is_hades_ii_windows_executable(&executable_path) {
-            if let Some(prefix_root_path) = prefix_root.as_deref() {
-                if let Err(error) = ensure_macos_wine_app_dll_overrides(
-                    prefix_root_path,
-                    &executable_path,
-                    &["d3d12", "winhttp", "libglesv2"],
-                ) {
-                    log::warn!(
-                        "[launch_windows_direct_game] Could not persist Hades II Wine overrides; the per-launch override will still be attempted: {}",
-                        error
-                    );
+        {
+            let hades_overrides =
+                hades_ii_wine_dll_overrides(&executable_path, enable_return_of_modding);
+            if !hades_overrides.is_empty() {
+                if let Some(prefix_root_path) = prefix_root.as_deref() {
+                    if let Err(error) = ensure_macos_wine_app_dll_overrides(
+                        prefix_root_path,
+                        &executable_path,
+                        hades_overrides,
+                    ) {
+                        log::warn!(
+                            "[launch_windows_direct_game] Could not persist Hades II Wine overrides; the per-launch override will still be attempted: {}",
+                            error
+                        );
+                    }
                 }
             }
         }
@@ -560,20 +594,24 @@ pub(super) fn launch_windows_steam_game(
             .or_else(|| find_wine_prefix_root(game_path));
 
         #[cfg(target_os = "macos")]
-        if enable_return_of_modding && is_hades_ii_windows_executable(&executable_path) {
-            if let Some(prefix_root_path) = prefix_root.as_deref() {
-                // The official Hades II macOS setup requires these three
-                // native-first overrides. Scope them to Hades2.exe so other
-                // games in the Steam prefix retain their own Wine settings.
-                if let Err(error) = ensure_macos_wine_app_dll_overrides(
-                    prefix_root_path,
-                    &executable_path,
-                    &["d3d12", "winhttp", "libglesv2"],
-                ) {
-                    log::warn!(
-                        "[launch_windows_steam_game] Could not persist Hades II Wine overrides; the per-launch override will still be attempted: {}",
-                        error
-                    );
+        {
+            let hades_overrides =
+                hades_ii_wine_dll_overrides(&executable_path, enable_return_of_modding);
+            if !hades_overrides.is_empty() {
+                if let Some(prefix_root_path) = prefix_root.as_deref() {
+                    // The official Hades II macOS setup requires these three
+                    // native-first overrides. Scope them to Hades2.exe so other
+                    // games in the Steam prefix retain their own Wine settings.
+                    if let Err(error) = ensure_macos_wine_app_dll_overrides(
+                        prefix_root_path,
+                        &executable_path,
+                        hades_overrides,
+                    ) {
+                        log::warn!(
+                            "[launch_windows_steam_game] Could not persist Hades II Wine overrides; the per-launch override will still be attempted: {}",
+                            error
+                        );
+                    }
                 }
             }
         }
@@ -583,14 +621,13 @@ pub(super) fn launch_windows_steam_game(
             if let Some(bundle_path) =
                 find_macos_wineskin_launcher_binary(Some(prefix_root_path), &steam_executable)
             {
-                let mut args = vec!["-applaunch".to_string(), app_id.clone()];
-                // Steam hands anything after the app id to the game itself.
-                args.extend(windows_modded_arguments(
+                let args = windows_steam_arguments(
+                    &app_id,
                     game_path,
                     shimloader,
                     enable_return_of_modding,
                     Some(prefix_root_path),
-                ));
+                );
                 match launch_macos_wineskin_program(
                     &bundle_path,
                     prefix_root_path,
@@ -685,9 +722,8 @@ pub(super) fn launch_windows_steam_game(
 		);
         command
             .arg(&steam_executable)
-            .arg("-applaunch")
-            .arg(&app_id)
-            .args(windows_modded_arguments(
+            .args(windows_steam_arguments(
+                &app_id,
                 game_path,
                 shimloader,
                 enable_return_of_modding,
@@ -712,9 +748,8 @@ pub(super) fn launch_windows_steam_game(
             steam_executable
         );
         std::process::Command::new(&steam_executable)
-            .arg("-applaunch")
-            .arg(&app_id)
-            .args(windows_modded_arguments(
+            .args(windows_steam_arguments(
+                &app_id,
                 game_path,
                 shimloader,
                 enable_return_of_modding,
@@ -790,7 +825,7 @@ pub(super) fn launch_windows_steam_game(
 mod tests {
     use super::{
         configure_native_loader_dll_override, configure_shimloader_dll_override,
-        windows_modded_arguments, ShimloaderLaunch,
+        windows_modded_arguments, windows_steam_arguments, ShimloaderLaunch,
     };
     use std::ffi::OsStr;
 
@@ -919,7 +954,39 @@ mod tests {
         );
         assert!(windows_modded_arguments(&ship, None, false, Some(&prefix)).is_empty());
 
+        assert_eq!(
+            windows_steam_arguments("1145350", &ship, None, true, Some(&prefix)),
+            vec![
+                "-applaunch",
+                "1145350",
+                "--rom_modding_root_folder",
+                "C:\\Program Files (x86)\\Steam\\steamapps\\common\\Hades II\\Ship",
+            ]
+        );
+
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn official_wine_overrides_apply_only_to_modded_hades_ii() {
+        assert_eq!(
+            super::hades_ii_wine_dll_overrides(
+                std::path::Path::new("C:/Games/Hades II/Ship/Hades2.exe"),
+                true,
+            ),
+            ["d3d12", "winhttp", "libglesv2"]
+        );
+        assert!(super::hades_ii_wine_dll_overrides(
+            std::path::Path::new("C:/Games/Hades II/Ship/Hades2.exe"),
+            false,
+        )
+        .is_empty());
+        assert!(super::hades_ii_wine_dll_overrides(
+            std::path::Path::new("C:/Games/Risk of Rain Returns/RoRR.exe"),
+            true,
+        )
+        .is_empty());
     }
 }
 
