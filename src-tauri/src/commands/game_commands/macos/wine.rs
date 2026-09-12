@@ -298,6 +298,31 @@ pub(crate) fn launch_macos_wineskin_program(
     Ok(())
 }
 
+/// Activate the already-running wrapper after its Windows game process is
+/// observed. The initial `open -n` foregrounds the wrapper launcher, but Steam
+/// may create the actual game window much later and Wine can leave that child
+/// behind r2modmac. A second ordinary `open` activates the existing app; it
+/// deliberately omits `-n`, so it cannot create another Steam/game instance.
+pub(crate) fn activate_macos_wineskin_bundle(bundle_path: &std::path::Path) -> Result<(), String> {
+    let status = macos_wineskin_activation_command(bundle_path)
+        .status()
+        .map_err(|error| format!("Failed to activate Sikarugir bundle: {error}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "Could not bring Sikarugir bundle {:?} to the foreground (status {})",
+            bundle_path, status
+        ))
+    }
+}
+
+fn macos_wineskin_activation_command(bundle_path: &std::path::Path) -> std::process::Command {
+    let mut command = std::process::Command::new("open");
+    command.arg(bundle_path);
+    command
+}
+
 /// Serialize argv for Sikarugir's single `Program Flags` string using the
 /// quoting rules consumed by CommandLineToArgvW. Paths inside Steam prefixes
 /// commonly contain spaces, parentheses, and trailing backslashes.
@@ -535,6 +560,23 @@ mod tests {
             quote_windows_argument("C:\\space here\\"),
             "\"C:\\space here\\\\\""
         );
+    }
+
+    #[test]
+    fn activation_reuses_the_wrapper_instead_of_launching_another_instance() {
+        let command = macos_wineskin_activation_command(std::path::Path::new(
+            "/Users/Player/Applications/Sikarugir/Steam.app",
+        ));
+        assert_eq!(command.get_program(), "open");
+        assert_eq!(
+            command.get_args().collect::<Vec<_>>(),
+            vec![std::ffi::OsStr::new(
+                "/Users/Player/Applications/Sikarugir/Steam.app"
+            )]
+        );
+        assert!(command
+            .get_args()
+            .all(|argument| argument != std::ffi::OsStr::new("-n")));
     }
 }
 

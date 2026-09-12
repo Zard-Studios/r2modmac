@@ -169,6 +169,11 @@ pub(crate) fn launch_windows_direct_game_with_working_dir(
                             log::warn!(
                                 "[launch_windows_direct_game] Wineskin bundle started but game process not observed in time. Continuing optimistically."
                             );
+                        } else if let Err(error) = activate_macos_wineskin_bundle(&bundle_path) {
+                            log::warn!(
+                                "[launch_windows_direct_game] Game started, but its Sikarugir window could not be activated: {}",
+                                error
+                            );
                         }
                         return Ok(());
                     }
@@ -562,7 +567,15 @@ pub(super) fn launch_windows_steam_game(
                             || is_process_running_for_patterns(&process_patterns),
                             crate::commands::game_commands::launch_cancel::launch_cancelled,
                         ) {
-                            crate::commands::game_commands::steam_state::LaunchWaitOutcome::Started => return Ok(()),
+                            crate::commands::game_commands::steam_state::LaunchWaitOutcome::Started => {
+                                if let Err(error) = activate_macos_wineskin_bundle(&bundle_path) {
+                                    log::warn!(
+                                        "[launch_windows_steam_game] Hades/Steam started, but its Sikarugir window could not be activated: {}",
+                                        error
+                                    );
+                                }
+                                return Ok(());
+                            }
                             crate::commands::game_commands::steam_state::LaunchWaitOutcome::Blocked(reason) => {
                                 log::warn!(
                                     "[launch_windows_steam_game] Steam stalled the launch of app {}: {}",
