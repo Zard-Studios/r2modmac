@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import {
@@ -12,6 +13,23 @@ test('the Preferences SVG catalogue is the single source of truth', () => {
     for (const icon of PREFERENCE_ICON_NAMES) {
         assert.equal(PREFERENCE_ICON_COLORS[icon], PREFERENCE_ICON_CATALOG[icon].className, icon);
     }
+});
+
+test('the theme editor only offers icons that are still rendered in Preferences', () => {
+    const preferencesSource = readFileSync(
+        new URL('../src/components/modals/PreferencesModal.tsx', import.meta.url),
+        'utf8'
+    );
+    const renderedIcons = Array.from(
+        preferencesSource.matchAll(/<RowIcon kind="([a-z-]+)"/g),
+        (match) => match[1]
+    );
+
+    assert.deepEqual(
+        [...PREFERENCE_ICON_NAMES].sort(),
+        [...new Set(renderedIcons)].sort(),
+        'Removing or adding a Preferences row must update the custom-theme SVG controls too.'
+    );
 });
 
 test('the default palette remains multicolour with semantic status icons', () => {

@@ -1,9 +1,9 @@
 /**
  * The single catalogue for every SVG glyph used by Preferences.
  *
- * RowIcon and the theme editor both iterate this object. Adding a new
- * Preferences icon here therefore makes it available to custom themes without
- * maintaining a second list or a Rust struct field.
+ * RowIcon and the theme editor both iterate this object. The accompanying
+ * test keeps it in lockstep with the icons actually rendered by Preferences,
+ * so removed rows cannot leave ghost controls in custom themes.
  */
 export const PREFERENCE_ICON_CATALOG = {
     install: { label: 'Install', tone: 'accent', className: 'text-fg-accent' },
@@ -16,7 +16,6 @@ export const PREFERENCE_ICON_CATALOG = {
     cache: { label: 'Cache', tone: 'danger', className: 'text-fg-danger' },
     stream: { label: 'pls privacy', tone: 'fuchsia', className: 'text-fuchsia-400' },
     update: { label: 'Updates', tone: 'success', className: 'text-fg-success' },
-    support: { label: 'Support', tone: 'rose', className: 'text-rose-400' },
     folder: { label: 'Folders', tone: 'orange', className: 'text-orange-400' },
     game: { label: 'Games', tone: 'teal', className: 'text-teal-400' },
     profile: { label: 'Profiles', tone: 'purple', className: 'text-purple-400' },
