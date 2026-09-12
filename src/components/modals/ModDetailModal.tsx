@@ -340,7 +340,7 @@ export function ModDetailModal({
                             )}
                             {mod.icon && (
                                 <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                                    <svg className="w-6 h-6 text-[#ffffff]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <svg className="w-6 h-6 text-on-media" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7" />
                                     </svg>
                                 </div>
@@ -485,8 +485,8 @@ export function ModDetailModal({
                     <div className="overflow-y-auto flex-1 p-6 min-h-0 bg-gray-900">
                         <style>{`
                         .prose details {
-                            background-color: rgba(31, 41, 55, 0.5);
-                            border: 1px solid rgba(75, 85, 99, 0.4);
+                            background-color: rgb(var(--r2-gray-800) / calc(var(--r2-gray-800-alpha, 1) * 0.5));
+                            border: 1px solid rgb(var(--r2-gray-700) / calc(var(--r2-gray-700-alpha, 1) * 0.4));
                             border-radius: 0.5rem;
                             padding: 0.5rem;
                             margin-top: 1rem;
@@ -495,11 +495,11 @@ export function ModDetailModal({
                         .prose summary {
                             cursor: pointer;
                             font-weight: 600;
-                            color: #d1d5db;
+                            color: rgb(var(--r2-gray-300) / var(--r2-gray-300-alpha, 1));
                             outline: none;
                         }
                         .prose summary:hover {
-                            color: #ffffff;
+                            color: rgb(var(--r2-white) / var(--r2-white-alpha, 1));
                         }
                     `}</style>
                         {activeTab === 'description' && (
