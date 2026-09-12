@@ -7,6 +7,7 @@ import { ExportModal } from '../modals/ExportModal'
 import { CrossOverGuideModal } from '../modals/CrossOverGuideModal';
 import { UpdateModal } from '../modals/UpdateModal';
 import PreferencesModal, { type PreferencesSettings, type PreferencesTarget } from '../modals/PreferencesModal';
+import { shouldShowPreferencesModal } from '../../utils/modalVisibility';
 import { VerboseLogsWarningModal } from '../modals/VerboseLogsWarningModal';
 import { runningOnWindows } from '../../utils/platformUtils';
 import type { Package, PackageVersion, Community, CommunityPlatformInfo } from '../../types/thunderstore'
@@ -235,7 +236,7 @@ export function AppModals({
             )}
 
             <PreferencesModal
-                isOpen={showPreferences}
+                isOpen={shouldShowPreferencesModal(showPreferences, showUpdateModal && !!updateInfo)}
                 initialPanel={preferencesInitialPanel}
                 onClose={() => setShowPreferences(false)}
                 settings={preferences}
