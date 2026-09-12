@@ -2,7 +2,7 @@
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "r2modmac",
   "mainBinaryName": "r2modmac",
-  "version": "1.0.3",
+  "version": "1.0.5",
   "identifier": "com.r2modmac",
   "build": {
     "frontendDist": "../dist",
