@@ -60,6 +60,7 @@ const COMMUNITY_IMAGE_FALLBACKS: Record<string, string> = {
     'superhot-mind-control-delete': 'https://cdn.cloudflare.steamstatic.com/steam/apps/690040/library_600x900_2x.jpg',
     'slip-skid': 'https://cdn.cloudflare.steamstatic.com/steam/apps/2651350/library_600x900_2x.jpg',
     'big-walk': 'https://cdn.cloudflare.steamstatic.com/steam/apps/1478500/library_600x900_2x.jpg',
+    mewgenics: 'https://gcdn.thunderstore.io/live/community/mewgenics/mewgenics-cover-360x480.webp',
 };
 
 const getCommunityImage = (community: Community, images: Record<string, string>) => {

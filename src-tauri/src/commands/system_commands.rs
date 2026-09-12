@@ -153,6 +153,11 @@ async fn fetch_community_images_live() -> Result<std::collections::HashMap<Strin
         "https://i.ibb.co/xKCBqXM7/apps-7475-67120997535715720-38c3e502-0019-4560-826e-634bbaf5cb4b.jpg".to_string()
     });
 
+    // Ensure Mewgenics has a cover even if live scrape fails
+    images.entry("mewgenics".to_string()).or_insert_with(|| {
+        "https://gcdn.thunderstore.io/live/community/mewgenics/mewgenics-cover-360x480.webp".to_string()
+    });
+
     Ok(images)
 }
 
@@ -214,7 +219,7 @@ async fn fill_missing_community_images(images: &mut HashMap<String, String>) {
     .await;
 
     for (id, cover) in covers.into_iter().flatten() {
-        insert_community_image(images, &id, &cover, true);
+        insert_community_image(images, &id, &cover, false);
     }
 }
 
@@ -224,13 +229,25 @@ async fn fill_missing_community_images(images: &mut HashMap<String, String>) {
 /// community, so the choice is narrowed to assets under that community's own
 /// path and then left to the usual cover preference.
 fn extract_cover_from_community_page(html: &str, community_id: &str) -> Option<String> {
-    let prefix = format!("https://gcdn.thunderstore.io/assets/{}/", community_id);
+    // 1. Check for explicit cover_image_url in Thunderstore's serialized router state or metadata:
+    // e.g. \"cover_image_url\",\"https://gcdn.thunderstore.io/live/community/mewgenics/mewgenics-cover-360x480.webp\"
+    if let Ok(re_cover) = regex::Regex::new(r#"cover_image_url[^h]+(https://gcdn\.thunderstore\.io/[^"'\\\s<>]+)"#) {
+        if let Some(cap) = re_cover.captures(html) {
+            if let Some(matched) = cap.get(1) {
+                let url = normalize_community_image_url(matched.as_str());
+                if is_url_for_community(&url, community_id) && !is_obvious_non_cover(&url) {
+                    return Some(url);
+                }
+            }
+        }
+    }
+
     let re = regex::Regex::new(r#"https://gcdn\.thunderstore\.io/[^"'\\\s<>]+"#).ok()?;
 
     let mut fallback = None;
     for m in re.find_iter(html) {
         let url = m.as_str();
-        if !url.starts_with(&prefix) {
+        if !is_url_for_community(url, community_id) {
             continue;
         }
         if looks_like_community_cover(url) {
@@ -331,32 +348,45 @@ fn is_community_cdn_image(url: &str) -> bool {
         || lower.starts_with("https://gcdn.thunderstore.io/community/")
 }
 
+fn is_obvious_non_cover(url: &str) -> bool {
+    let lower = url.to_ascii_lowercase();
+    lower.contains("-bg-")
+        || lower.contains("-bg.")
+        || lower.contains("_bg")
+        || lower.contains("-icon-")
+        || lower.contains("-icon.")
+        || lower.contains("_icon")
+        || lower.contains("icon-192")
+        || lower.contains("logo")
+}
+
 fn looks_like_community_cover(url: &str) -> bool {
     let lower = url.to_ascii_lowercase();
     let has_cover_hint = lower.contains("360x480")
         || lower.contains("cover")
         || lower.contains("-cov")
         || lower.contains("_cov");
-    let obvious_non_cover = lower.contains("-bg-")
-        || lower.contains("_bg")
-        || lower.contains("-icon-")
-        || lower.contains("_icon")
-        || lower.contains("icon-192")
-        || lower.contains("logo");
 
-    is_community_cdn_image(url) && has_cover_hint && !obvious_non_cover
+    is_community_cdn_image(url) && has_cover_hint && !is_obvious_non_cover(url)
 }
 
 fn is_usable_community_image(url: &str) -> bool {
-    let lower = url.to_ascii_lowercase();
-    let obvious_non_cover = lower.contains("-bg-")
-        || lower.contains("_bg")
-        || lower.contains("-icon-")
-        || lower.contains("_icon")
-        || lower.contains("icon-192")
-        || lower.contains("logo");
+    is_community_cdn_image(url) && !is_obvious_non_cover(url)
+}
 
-    is_community_cdn_image(url) && !obvious_non_cover
+fn is_url_for_community(url: &str, community_id: &str) -> bool {
+    let lower = url.to_ascii_lowercase();
+    let id = community_id.trim().trim_matches('/').to_ascii_lowercase();
+    if id.is_empty() || !is_community_cdn_image(&lower) {
+        return false;
+    }
+
+    let id_underscores = id.replace('-', "_");
+    let id_hyphens = id.replace('_', "-");
+
+    lower.contains(&format!("/{}/", id))
+        || lower.contains(&format!("/{}/", id_underscores))
+        || lower.contains(&format!("/{}/", id_hyphens))
 }
 
 fn insert_community_image(
@@ -2100,6 +2130,49 @@ mod tests {
         assert_eq!(
             images.get("superhot-mind-control-delete").map(String::as_str),
             Some("https://gcdn.thunderstore.io/community/superhot-mind-control-delete/superhot-mcd.webp")
+        );
+    }
+
+    #[test]
+    fn extracts_cover_from_community_page_with_live_community_prefix() {
+        let html = r#"
+            <script>window.__reactRouterContext.streamController.enqueue("[\"hero_image_url\",\"https://gcdn.thunderstore.io/live/community/mewgenics/mewgenics-bg-1920x620.webp\",\"cover_image_url\",\"https://gcdn.thunderstore.io/live/community/mewgenics/mewgenics-cover-360x480.webp\",\"icon_url\",\"https://gcdn.thunderstore.io/live/community/mewgenics/mewgenics-icon-192x192.webp\"]");</script>
+        "#;
+
+        let cover = extract_cover_from_community_page(html, "mewgenics");
+        assert_eq!(
+            cover.as_deref(),
+            Some("https://gcdn.thunderstore.io/live/community/mewgenics/mewgenics-cover-360x480.webp")
+        );
+    }
+
+    #[test]
+    fn extracts_cover_from_community_page_with_assets_prefix() {
+        let html = r#"
+            <img src="https://gcdn.thunderstore.io/assets/cairn/cairn-bg-1920x620.webp"/>
+            <img src="https://gcdn.thunderstore.io/assets/cairn/cairn-icon-192x192.webp"/>
+            <img src="https://gcdn.thunderstore.io/assets/cairn/cairn-cover-360x480.webp"/>
+        "#;
+
+        let cover = extract_cover_from_community_page(html, "cairn");
+        assert_eq!(
+            cover.as_deref(),
+            Some("https://gcdn.thunderstore.io/assets/cairn/cairn-cover-360x480.webp")
+        );
+    }
+
+    #[test]
+    fn extracts_cover_with_nonstandard_name_as_fallback() {
+        let html = r#"
+            <img src="https://gcdn.thunderstore.io/live/community/sample/sample-bg.webp"/>
+            <img src="https://gcdn.thunderstore.io/live/community/sample/sample-icon.webp"/>
+            <img src="https://gcdn.thunderstore.io/live/community/sample/community_image.png"/>
+        "#;
+
+        let cover = extract_cover_from_community_page(html, "sample");
+        assert_eq!(
+            cover.as_deref(),
+            Some("https://gcdn.thunderstore.io/live/community/sample/community_image.png")
         );
     }
 
