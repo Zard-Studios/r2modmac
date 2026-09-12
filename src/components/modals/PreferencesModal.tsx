@@ -2,7 +2,11 @@ import { useState, useEffect, useRef } from 'react';
 import { Button } from '../ui';
 import { Toggle } from '../ui/Toggle';
 import { AppIcon, type IconName } from '../ui/icons';
-import { PREFERENCE_ICON_COLORS, type PreferencesIconName } from '../../utils/preferencesIconColors';
+import {
+    PREFERENCE_ICON_COLORS,
+    themedPreferenceIconStyle,
+    type PreferencesIconName,
+} from '../../utils/preferencesIconColors';
 import { DefaultGamePickerModal } from './DefaultGamePickerModal';
 import { ThemeEditorModal } from './ThemeEditorModal';
 import { KeybindsModal } from './KeybindsModal';
@@ -10,6 +14,7 @@ import { runningOnWindows } from '../../utils/platformUtils';
 import { UiPreviewLab } from './UiPreviewLab';
 import { overridesFromKeybinds, resolveKeybinds, type KeybindMap } from '../../utils/keybinds';
 import { useThemeStore } from '../../store/useThemeStore';
+import { isStockThemeId } from '../../utils/themePresets';
 import type { Community, CommunityPlatformInfo } from '../../types/thunderstore';
 import { getVersion } from '@tauri-apps/api/app';
 
@@ -107,10 +112,13 @@ function IconBox({
 }
 
 function RowIcon({ kind }: { kind: PreferencesIconName }) {
+    const hasThemePalette = useThemeStore(
+        (state) => state.preview !== null || !isStockThemeId(state.activeFileName)
+    );
     return (
         <IconBox
             colorClass={PREFERENCE_ICON_COLORS[kind]}
-            style={{ color: `rgb(var(--r2-pref-icon-${kind}))` }}
+            style={themedPreferenceIconStyle(kind, hasThemePalette)}
         >
             <AppIcon name={kind as Extract<IconName, PreferencesIconName>} className="h-5 w-5" strokeWidth={1.75} />
         </IconBox>

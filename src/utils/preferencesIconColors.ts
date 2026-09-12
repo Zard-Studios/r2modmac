@@ -34,3 +34,14 @@ export const PREFERENCE_ICON_NAMES = Object.freeze(
 export const PREFERENCE_ICON_COLORS = Object.fromEntries(
     PREFERENCE_ICON_NAMES.map((name) => [name, PREFERENCE_ICON_CATALOG[name].className])
 ) as Record<PreferencesIconName, string>;
+
+/**
+ * Custom themes provide these variables at the document root. The stock theme
+ * deliberately has no inline palette tokens, so it must keep its Tailwind
+ * colour class instead of resolving an absent custom property.
+ */
+export function themedPreferenceIconStyle(name: PreferencesIconName, hasThemePalette: boolean) {
+    return hasThemePalette
+        ? { color: `rgb(var(--r2-pref-icon-${name}))` }
+        : undefined;
+}

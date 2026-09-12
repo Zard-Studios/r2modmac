@@ -23,6 +23,7 @@ export interface ThemePreset extends Theme {
 }
 
 export const BUILTIN_PREFIX = 'builtin:';
+export const STOCK_THEME_ID = `${BUILTIN_PREFIX}default`;
 
 export const THEME_PRESETS: ThemePreset[] = [
     {
@@ -187,12 +188,17 @@ export function isBuiltinId(id: string | null | undefined): boolean {
     return !!id && id.startsWith(BUILTIN_PREFIX);
 }
 
+/** The Default entry is an editor convenience, not a palette with CSS tokens. */
+export function isStockThemeId(id: string | null | undefined): boolean {
+    return id === null || id === STOCK_THEME_ID;
+}
+
 /** Presets plus the stock look, in the order the editor lists them. */
 export function allBuiltinThemes(): ThemePreset[] {
     return [
         {
             ...DEFAULT_THEME,
-            id: `${BUILTIN_PREFIX}default`,
+            id: STOCK_THEME_ID,
             name: 'Default',
             origin: 'The stock r2modmac look',
         },

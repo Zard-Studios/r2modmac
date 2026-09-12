@@ -6,6 +6,7 @@ import {
     PREFERENCE_ICON_CATALOG,
     PREFERENCE_ICON_COLORS,
     PREFERENCE_ICON_NAMES,
+    themedPreferenceIconStyle,
 } from '../src/utils/preferencesIconColors.ts';
 
 test('the Preferences SVG catalogue is the single source of truth', () => {
@@ -40,4 +41,11 @@ test('the default palette remains multicolour with semantic status icons', () =>
     assert.equal(PREFERENCE_ICON_COLORS.update, 'text-fg-success');
     assert.equal(PREFERENCE_ICON_COLORS.warning, 'text-fg-warning');
     assert.equal(PREFERENCE_ICON_COLORS.cache, 'text-fg-danger');
+});
+
+test('the Default theme leaves icon colours to their stock classes', () => {
+    assert.equal(themedPreferenceIconStyle('version', false), undefined);
+    assert.deepEqual(themedPreferenceIconStyle('version', true), {
+        color: 'rgb(var(--r2-pref-icon-version))',
+    });
 });

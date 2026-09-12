@@ -15,6 +15,7 @@ import {
     BUILTIN_PREFIX,
     THEME_PRESETS,
     allBuiltinThemes,
+    isStockThemeId,
     findPreset,
     isBuiltinId,
 } from '../src/utils/themePresets.ts';
@@ -303,6 +304,12 @@ test('built-in ids are told apart from theme file names', () => {
     assert.ok(!isBuiltinId(null));
     assert.equal(findPreset('nord.toml'), null);
     assert.equal(findPreset(null), null);
+});
+
+test('the Default list entry remains the stock theme, not a token palette', () => {
+    assert.equal(isStockThemeId(null), true);
+    assert.equal(isStockThemeId(`${BUILTIN_PREFIX}default`), true);
+    assert.equal(isStockThemeId(`${BUILTIN_PREFIX}nord`), false);
 });
 
 test('every filled control in every preset carries a readable label', () => {
