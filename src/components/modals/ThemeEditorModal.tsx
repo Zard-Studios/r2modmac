@@ -1277,17 +1277,26 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
                         </div>
 
                         {/* Sidebar Footer */}
-                        <div className="shrink-0 space-y-2 border-t border-gray-700 p-3">
-                            <Button variant="secondary" fullWidth onClick={() => void handleDuplicate()} disabled={busy}>
-                                {builtin || !selectedId ? 'Duplicate & edit' : 'New from this'}
-                            </Button>
-                            <button
-                                onClick={() => void window.ipcRenderer.openThemesFolder()}
-                                className="flex w-full items-center justify-center gap-2 rounded-lg px-3 py-1.5 text-[12px] text-gray-400 transition-colors hover:bg-gray-800 hover:text-white"
+                        <div className="flex shrink-0 items-center gap-2 border-t border-gray-700 p-3">
+                            <Button
+                                variant="secondary"
+                                className="flex-1 min-w-0"
+                                onClick={() => void handleDuplicate()}
+                                disabled={busy}
+                                title={builtin || !selectedId ? 'Duplicate & edit' : 'New from this'}
                             >
-                                <AppIcon name="folder" className="h-3.5 w-3.5" />
-                                Open themes folder
-                            </button>
+                                <span className="block truncate">{builtin || !selectedId ? 'Duplicate & edit' : 'New from this'}</span>
+                            </Button>
+                            <Button
+                                variant="secondary"
+                                size="icon"
+                                onClick={() => void window.ipcRenderer.openThemesFolder()}
+                                title="Open themes folder"
+                                aria-label="Open themes folder"
+                                className="shrink-0"
+                            >
+                                <AppIcon name="folder" className="h-4 w-4" />
+                            </Button>
                         </div>
                     </div>
 
