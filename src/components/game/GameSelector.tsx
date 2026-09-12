@@ -3,6 +3,7 @@ import { memo, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { Community, CommunityPlatformInfo } from '../../types/thunderstore';
 import { LazyImage } from '../LazyImage';
+import { gameGridColumnCount } from '../../utils/gameGrid';
 
 interface GameSelectorProps {
     communities: Community[];
@@ -154,16 +155,16 @@ export const GameCard = memo(function GameCard({
                 {/* Favorite star — fixed scrim, for the same reason as the platform badge. */}
                 <div
                     key={backdropKey}
-                    className={`absolute top-2 left-2 p-1.5 rounded-full transition-all duration-200 z-20 shadow-md ${isFavorite
+                    className={`absolute top-2 left-2 h-7 w-7 p-0 flex items-center justify-center rounded-full transition-all duration-200 z-20 shadow-md ${isFavorite
                         ? 'bg-scrim/70 border border-on-media/15 backdrop-blur-sm text-yellow-400 opacity-100 hover:scale-110'
                         : showFavoriteAlways
                             ? 'bg-scrim/55 border border-on-media/10 backdrop-blur-sm text-on-media/80 opacity-100 hover:scale-110 hover:text-yellow-400 hover:border-yellow-400/50'
                             : 'bg-scrim/55 border border-on-media/10 backdrop-blur-sm text-on-media/80 opacity-0 group-hover:opacity-100 hover:text-yellow-400 hover:border-yellow-400/50 hover:scale-110'
-                        }`}
+                    }`}
                     onClick={(e) => onToggleFavorite(community.identifier, e)}
                     title={isFavorite ? "Remove from favorites" : "Add to favorites"}
                 >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 drop-shadow-sm shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 drop-shadow-sm shrink-0" viewBox="0 0 20 20" fill="currentColor">
                         <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
                     </svg>
                 </div>
@@ -179,17 +180,6 @@ export const GameCard = memo(function GameCard({
 });
 
 const GAME_GRID_GAP = 16;
-
-function responsiveColumnCount() {
-    const width = window.innerWidth;
-    if (width >= 1920) return 10;
-    if (width >= 1536) return 8;
-    if (width >= 1280) return 7;
-    if (width >= 1024) return 6;
-    if (width >= 768) return 5;
-    if (width >= 640) return 4;
-    return 3;
-}
 
 type GameSelectorRow =
     | { kind: 'favorites-heading' }
@@ -217,7 +207,7 @@ export function GameSelector({
 }: GameSelectorProps) {
     const containerRef = useRef<HTMLDivElement>(null);
     const virtualListRef = useRef<HTMLDivElement>(null);
-    const [columnCount, setColumnCount] = useState(responsiveColumnCount);
+    const [columnCount, setColumnCount] = useState(() => gameGridColumnCount(0));
     const [containerWidth, setContainerWidth] = useState(0);
     const [scrollMargin, setScrollMargin] = useState(0);
     const favorites = useMemo(
@@ -252,7 +242,7 @@ export function GameSelector({
             const virtualList = virtualListRef.current;
             const measuredElement = virtualList ?? container;
             const scrollElement = getScrollElement();
-            setColumnCount(responsiveColumnCount());
+            setColumnCount(gameGridColumnCount(measuredElement.clientWidth));
             setContainerWidth(measuredElement.clientWidth);
             if (scrollElement) {
                 const containerRect = measuredElement.getBoundingClientRect();
