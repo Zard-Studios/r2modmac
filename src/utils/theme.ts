@@ -628,14 +628,37 @@ function expandAccentRamp(reference: Ramp, accent: string, pivot: Ramp = referen
     const ref500 = labToLch(rgbToLab(parseHex(pivot[500])!));
     const chromaScale = ref500.C === 0 ? 0 : acc.C / ref500.C;
 
+    const pivot50 = labToLch(rgbToLab(parseHex(pivot[50])!));
+    const pivot950 = labToLch(rgbToLab(parseHex(pivot[950])!));
+
     const out = {} as Ramp;
     for (const shade of SHADES) {
         const ref = labToLch(rgbToLab(parseHex(reference[shade])!));
+        const deltaL = ref.L - ref500.L;
+        let targetL: number;
+        if (deltaL >= 0) {
+            if (acc.L + deltaL <= 0.985) {
+                targetL = acc.L + deltaL;
+            } else {
+                const refRange = Math.max(0.01, pivot50.L - ref500.L);
+                const t = deltaL / refRange;
+                targetL = acc.L + t * Math.max(0, 0.985 - acc.L);
+            }
+        } else {
+            if (acc.L + deltaL >= 0.05) {
+                targetL = acc.L + deltaL;
+            } else {
+                const refRange = Math.max(0.01, ref500.L - pivot950.L);
+                const t = (-deltaL) / refRange;
+                targetL = acc.L - t * Math.max(0, acc.L - 0.05);
+            }
+        }
+
         out[shade] = toHex(
             labToRgb(
                 lchToLab(
                     fitToGamut({
-                        L: clamp(acc.L + (ref.L - ref500.L), 0, 1),
+                        L: clamp(targetL, 0, 1),
                         C: ref.C * chromaScale,
                         h: acc.h + signedAngle(ref.h - ref500.h),
                     })

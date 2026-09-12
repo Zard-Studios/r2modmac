@@ -135,7 +135,7 @@ export const THEME_PRESETS: ThemePreset[] = [
             accent: '#bd93f9', // Purple
             accent_hover: '#caa9fa',
             danger: '#ff5555', // Red
-            warning: '#f1fa8c', // Yellow
+            warning: '#ffb86c', // Orange
             success: '#50fa7b', // Green
         },
     },

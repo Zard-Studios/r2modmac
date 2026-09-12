@@ -336,3 +336,49 @@ test('every filled control in every preset carries a readable label', () => {
         }
     }
 });
+
+test('stars and preference icons retain color and chroma across every preset', () => {
+    for (const preset of THEME_PRESETS) {
+        const palette = resolveTheme(normalizeTheme(preset));
+        // GameSelector stars use yellow-400
+        const starColor = palette.yellow[400];
+        const starChroma = oklch(starColor).C;
+        assert.ok(
+            starChroma >= 0.05,
+            `${preset.name}: favorite stars (yellow-400 = ${starColor}) lost saturation (C = ${starChroma.toFixed(3)})`
+        );
+
+        // Warning and keyboard preference icons
+        for (const role of ['warning', 'keyboard'] as const) {
+            const iconColor = palette.preferenceIcons[role];
+            const iconChroma = oklch(iconColor).C;
+            assert.ok(
+                iconChroma >= 0.05,
+                `${preset.name}: preference icon ${role} (${iconColor}) lost saturation (C = ${iconChroma.toFixed(3)})`
+            );
+        }
+    }
+});
+
+test('extreme pastel and neon anchors never collapse shade 400 or icons to white', () => {
+    for (const brightWarning of ['#f1fa8c', '#ffff00', '#fef08a']) {
+        const custom = normalizeTheme({
+            name: 'Bright',
+            colors: {
+                background: '#1a1a24',
+                surface: '#242432',
+                warning: brightWarning,
+            },
+        });
+        const palette = resolveTheme(custom);
+        assert.notEqual(palette.amber[400], '#ffffff');
+        assert.notEqual(palette.amber[400], '#fefffe');
+        assert.notEqual(palette.amber[400], '#fefffd');
+        assert.notEqual(palette.yellow[400], '#ffffff');
+        assert.notEqual(palette.yellow[400], '#fefffe');
+        assert.notEqual(palette.preferenceIcons.warning, '#fefffd');
+        assert.notEqual(palette.preferenceIcons.keyboard, '#fefffd');
+        assert.ok(oklch(palette.yellow[400]).C >= 0.04);
+        assert.ok(oklch(palette.preferenceIcons.warning).C >= 0.04);
+    }
+});
