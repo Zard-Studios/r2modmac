@@ -209,8 +209,8 @@ export function AppModals({
                             try {
                                 await window.ipcRenderer.installUpdate(updateInfo.download_url);
                                 unlisten(); // Clean up listener when done (or before closing)
-                                // The script waits for PID exit.
-                                window.close();
+                                // The native updater owns shutdown and restart. Closing the
+                                // webview here as well can race its hand-off on every platform.
                             } catch (e) {
                                 alert("Update failed: " + e);
                                 setProgressState((prev: any) => ({ ...prev, isOpen: false }));

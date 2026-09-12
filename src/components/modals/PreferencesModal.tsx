@@ -11,6 +11,7 @@ import { UiPreviewLab } from './UiPreviewLab';
 import { overridesFromKeybinds, resolveKeybinds, type KeybindMap } from '../../utils/keybinds';
 import { useThemeStore } from '../../store/useThemeStore';
 import type { Community, CommunityPlatformInfo } from '../../types/thunderstore';
+import { getVersion } from '@tauri-apps/api/app';
 
 const TROUBLESHOOTING_LOGS_EXPANDED_KEY = 'r2modmac:preferences:troubleshooting-logs-expanded';
 
@@ -157,6 +158,7 @@ export default function PreferencesModal({
     const defaultGameName = communities.find(c => c.identifier === defaultGame)?.name ?? null;
     const [restoringWarnings, setRestoringWarnings] = useState(false);
     const [checkingUpdates, setCheckingUpdates] = useState(false);
+    const [appVersion, setAppVersion] = useState<string | null>(null);
 
     // Track active state for a gentle reveal animation
     const [isVisible, setIsVisible] = useState(false);
@@ -211,6 +213,21 @@ export default function PreferencesModal({
         });
         return () => cancelAnimationFrame(frame);
     }, [initialPanel, isOpen]);
+
+    useEffect(() => {
+        if (!isOpen) return;
+
+        let cancelled = false;
+        void getVersion()
+            .then((version) => {
+                if (!cancelled) setAppVersion(version);
+            })
+            .catch(() => {
+                if (!cancelled) setAppVersion(null);
+            });
+
+        return () => { cancelled = true; };
+    }, [isOpen]);
 
     if (!isOpen) return null;
 
@@ -333,7 +350,7 @@ export default function PreferencesModal({
                                     <div>
                                         <p className="text-[15px] font-medium text-white">Check updates</p>
                                         <p className="text-[13px] text-gray-400 mt-0.5 leading-snug">
-                                            Check for new versions of r2modmac.
+                                            {appVersion ? `r2modmac v${appVersion}` : 'Check for new versions of r2modmac.'}
                                         </p>
                                     </div>
                                 </div>

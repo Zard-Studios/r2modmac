@@ -285,6 +285,45 @@ fn stage_windows_update(file_path: &Path, temp_dir: &Path) -> Result<PathBuf, St
     Ok(staged_path)
 }
 
+#[cfg(any(target_os = "windows", test))]
+fn windows_updater_script() -> &'static str {
+    r#"@echo off
+setlocal
+set "NEW_EXE=%~1"
+set "CURRENT_EXE=%~2"
+set "APP_PID=%~3"
+set "BACKUP_EXE=%CURRENT_EXE%.r2modmac-backup"
+set /a ATTEMPTS=0
+set /a WAIT_ATTEMPTS=0
+:wait_for_exit
+tasklist /FI "PID eq %APP_PID%" /NH | find "%APP_PID%" >nul
+if not errorlevel 1 (
+    timeout /t 1 /nobreak >nul
+    set /a WAIT_ATTEMPTS+=1
+    if %WAIT_ATTEMPTS% LSS 120 goto wait_for_exit
+    exit /b 1
+)
+:replace
+del /f /q "%BACKUP_EXE%" >nul 2>&1
+move /y "%CURRENT_EXE%" "%BACKUP_EXE%" >nul 2>&1
+if errorlevel 1 goto retry
+move /y "%NEW_EXE%" "%CURRENT_EXE%" >nul 2>&1
+if not errorlevel 1 goto replaced
+move /y "%BACKUP_EXE%" "%CURRENT_EXE%" >nul 2>&1
+:retry
+timeout /t 1 /nobreak >nul
+set /a ATTEMPTS+=1
+if %ATTEMPTS% LSS 60 goto replace
+if not exist "%CURRENT_EXE%" move /y "%BACKUP_EXE%" "%CURRENT_EXE%" >nul 2>&1
+start "" "%CURRENT_EXE%"
+exit /b 1
+:replaced
+start "" "%CURRENT_EXE%"
+del /f /q "%BACKUP_EXE%" >nul 2>&1
+del "%~f0"
+"#
+}
+
 #[cfg(target_os = "windows")]
 fn launch_windows_replacement(
     app: &AppHandle,
@@ -297,22 +336,7 @@ fn launch_windows_replacement(
     }
 
     let script_path = temp_dir.join("r2modmac_updater.bat");
-    let script = r#"@echo off
-setlocal
-set "NEW_EXE=%~1"
-set "CURRENT_EXE=%~2"
-set /a ATTEMPTS=0
-:replace
-timeout /t 1 /nobreak >nul
-move /y "%NEW_EXE%" "%CURRENT_EXE%" >nul 2>&1
-if not exist "%NEW_EXE%" goto replaced
-set /a ATTEMPTS+=1
-if %ATTEMPTS% LSS 30 goto replace
-exit /b 1
-:replaced
-start "" "%CURRENT_EXE%"
-del "%~f0"
-"#;
+    let script = windows_updater_script();
     fs::write(&script_path, script).map_err(|error| error.to_string())?;
 
     Command::new("cmd")
@@ -320,6 +344,7 @@ del "%~f0"
         .arg(&script_path)
         .arg(staged_exe)
         .arg(&current_exe)
+        .arg(std::process::id().to_string())
         .spawn()
         .map_err(|error| format!("Failed to launch updater script: {}", error))?;
     app.exit(0);
@@ -651,6 +676,17 @@ pub async fn install_update(app: AppHandle, download_url: String) -> Result<(), 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn windows_updater_waits_for_the_old_app_and_keeps_a_rollback_copy() {
+        let script = windows_updater_script();
+
+        assert!(script.contains("set \"APP_PID=%~3\""));
+        assert!(script.contains("tasklist /FI \"PID eq %APP_PID%\""));
+        assert!(script.contains("set \"BACKUP_EXE=%CURRENT_EXE%.r2modmac-backup\""));
+        assert!(script.contains("move /y \"%CURRENT_EXE%\" \"%BACKUP_EXE%\""));
+        assert!(script.contains("move /y \"%BACKUP_EXE%\" \"%CURRENT_EXE%\""));
+    }
 
     #[test]
     fn rejects_non_release_update_urls() {
