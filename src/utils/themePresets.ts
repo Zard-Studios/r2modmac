@@ -29,6 +29,7 @@ export const THEME_PRESETS: ThemePreset[] = [
     {
         id: `${BUILTIN_PREFIX}r2modmac-light`,
         name: 'r2modmac Light',
+        author: 'Zard Studios',
         origin: "The app's own palette, inverted",
         colors: {
             background: '#ffffff',
@@ -200,6 +201,7 @@ export function allBuiltinThemes(): ThemePreset[] {
             ...DEFAULT_THEME,
             id: STOCK_THEME_ID,
             name: 'Default',
+            author: 'Zard Studios',
             origin: 'The stock r2modmac look',
         },
         ...THEME_PRESETS,

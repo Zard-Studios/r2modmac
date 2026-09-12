@@ -390,6 +390,7 @@ function alignRampToBackdrop(reference: Ramp, backdrop: string): Ramp {
 /** The stock look, expressed as a theme. Also the starting point for a new one. */
 export const DEFAULT_THEME: Theme = {
     name: 'Default',
+    author: 'Zard Studios',
     colors: {
         background: DEFAULT_GRAY[900],
         surface: DEFAULT_GRAY[800],

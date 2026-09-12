@@ -636,7 +636,12 @@ test('quotes in a theme name cannot break out of the TOML string', () => {
 });
 
 test('an author is omitted rather than written empty', () => {
-    assert.ok(!themeToToml(DEFAULT_THEME).includes('author'));
+    assert.ok(!themeToToml({ ...DEFAULT_THEME, author: undefined }).includes('author'));
+    assert.ok(!themeToToml(normalizeTheme({ ...DEFAULT_THEME, author: '   ' })).includes('author'));
+});
+
+test('the default theme serialises its author', () => {
+    assert.match(themeToToml(DEFAULT_THEME), /^author = "Zard Studios"$/m);
 });
 
 test('per-colour opacity is clamped, serialised and applied as CSS tokens', () => {

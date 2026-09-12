@@ -963,7 +963,12 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
     const filteredBuiltins = useMemo(() => {
         const q = searchQuery.trim().toLowerCase();
         if (!q) return builtins;
-        return builtins.filter((b) => b.name.toLowerCase().includes(q) || (b.origin && b.origin.toLowerCase().includes(q)));
+        return builtins.filter(
+            (b) =>
+                b.name.toLowerCase().includes(q) ||
+                (b.author && b.author.toLowerCase().includes(q)) ||
+                (b.origin && b.origin.toLowerCase().includes(q))
+        );
     }, [builtins, searchQuery]);
 
     const groupedThemes = useMemo(() => {

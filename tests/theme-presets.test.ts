@@ -13,6 +13,7 @@ import {
 } from '../src/utils/theme.ts';
 import {
     BUILTIN_PREFIX,
+    STOCK_THEME_ID,
     THEME_PRESETS,
     allBuiltinThemes,
     isStockThemeId,
@@ -381,4 +382,13 @@ test('extreme pastel and neon anchors never collapse shade 400 or icons to white
         assert.ok(oklch(palette.yellow[400]).C >= 0.04);
         assert.ok(oklch(palette.preferenceIcons.warning).C >= 0.04);
     }
+});
+
+test('every builtin theme carries an author, with stock and light attributed to Zard Studios', () => {
+    for (const theme of allBuiltinThemes()) {
+        assert.ok(theme.author && theme.author.trim().length > 0, `${theme.name} is missing an author`);
+    }
+    assert.equal(findPreset(`${BUILTIN_PREFIX}r2modmac-light`)?.author, 'Zard Studios');
+    const defaultTheme = allBuiltinThemes().find((b) => b.id === STOCK_THEME_ID);
+    assert.equal(defaultTheme?.author, 'Zard Studios');
 });
