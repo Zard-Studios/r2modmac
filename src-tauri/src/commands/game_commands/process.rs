@@ -323,6 +323,58 @@ pub(crate) fn terminate_processes_running_executable(
     pids.len()
 }
 
+/// Windows has no Unix signals, but `taskkill` lets the shutdown loop retain
+/// the same escalation it uses elsewhere: first a normal termination request,
+/// then `/F` only after the polite attempts have been exhausted.
+#[cfg(not(unix))]
+pub(crate) fn terminate_processes_running_executable(
+    patterns: &[String],
+    executable_suffix: &str,
+    exclude: &str,
+    force: bool,
+) -> usize {
+    let compiled: Vec<regex::Regex> = patterns
+        .iter()
+        .filter_map(|pattern| regex::Regex::new(pattern).ok())
+        .collect();
+    if compiled.is_empty() {
+        return 0;
+    }
+
+    let mut system = System::new();
+    system.refresh_processes(ProcessesToUpdate::All, true);
+
+    let pids: Vec<u32> = system
+        .processes()
+        .values()
+        .filter(|process| {
+            process_matches_excluding(&process_text_candidates(process), &compiled, exclude)
+        })
+        .map(|process| process.pid().as_u32())
+        .collect();
+
+    for pid in &pids {
+        log::info!(
+            "[terminate_processes_running_executable] taskkill PID {} ({}){}",
+            pid,
+            executable_suffix,
+            if force { " (forced)" } else { "" }
+        );
+        let mut command = std::process::Command::new("taskkill");
+        command
+            .arg("/PID")
+            .arg(pid.to_string())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        if force {
+            command.arg("/F");
+        }
+        let _ = command.status();
+    }
+
+    pids.len()
+}
+
 pub(crate) fn is_process_running_for_executable(executable_path: &std::path::Path) -> bool {
     #[cfg(target_os = "macos")]
     {
