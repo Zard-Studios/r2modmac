@@ -1,5 +1,6 @@
 use super::*;
 use crate::tracing::{perfetto_te_ns, scoped_track_event, EventContext, TrackEventDebugArg};
+use crate::utils::mod_manifest::save_owned_mod_manifest;
 
 fn ensure_finalize_ready(finalize: bool, missing_payloads: usize) -> Result<(), String> {
     if finalize && missing_payloads > 0 {
@@ -155,6 +156,90 @@ fn return_of_modding_package_name(full_name: &str) -> &str {
         })
         .map(|(package, _)| package)
         .unwrap_or(full_name)
+}
+
+fn move_return_of_modding_payload_entry(
+    source: &std::path::Path,
+    destination: &std::path::Path,
+) -> Result<(), String> {
+    if !destination.exists() {
+        return fs::rename(source, destination).map_err(|error| {
+            format!(
+                "Failed to migrate ReturnOfModding payload {} -> {}: {error}",
+                source.display(),
+                destination.display()
+            )
+        });
+    }
+
+    if source.is_dir() && destination.is_dir() {
+        for entry in fs::read_dir(source).map_err(|error| error.to_string())? {
+            let entry = entry.map_err(|error| error.to_string())?;
+            move_return_of_modding_payload_entry(
+                &entry.path(),
+                &destination.join(entry.file_name()),
+            )?;
+        }
+        fs::remove_dir(source).map_err(|error| error.to_string())?;
+        return Ok(());
+    }
+
+    if source.is_file()
+        && destination.is_file()
+        && fs::read(source).ok() == fs::read(destination).ok()
+    {
+        fs::remove_file(source).map_err(|error| error.to_string())?;
+        return Ok(());
+    }
+
+    Err(format!(
+        "Cannot migrate ReturnOfModding payload because {} already exists with different contents",
+        destination.display()
+    ))
+}
+
+/// Repair the layout produced by r2modmac builds that preserved a package's
+/// top-level `plugins/` wrapper. ReturnOfModding searches for `main.lua`
+/// directly below `Author-Mod`, so the wrapper made otherwise valid Hades II
+/// packages invisible. This moves only the wrapper's direct children; nested
+/// folders such as `Scripts/` remain intact.
+fn migrate_nested_return_of_modding_plugins(
+    game_path: &std::path::Path,
+    package_name: &str,
+) -> Result<bool, String> {
+    let package_root = game_path
+        .join("ReturnOfModding")
+        .join("plugins")
+        .join(package_name);
+    let nested_plugins = package_root.join("plugins");
+    if !nested_plugins.is_dir() {
+        return Ok(false);
+    }
+
+    for entry in fs::read_dir(&nested_plugins).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        move_return_of_modding_payload_entry(&entry.path(), &package_root.join(entry.file_name()))?;
+    }
+    fs::remove_dir(&nested_plugins).map_err(|error| error.to_string())?;
+    Ok(true)
+}
+
+fn flatten_return_of_modding_manifest_paths(
+    files: &[String],
+    package_name: &str,
+) -> Vec<std::path::PathBuf> {
+    let nested_prefix = format!("ReturnOfModding/plugins/{package_name}/plugins/");
+    let flat_prefix = format!("ReturnOfModding/plugins/{package_name}/");
+    files
+        .iter()
+        .map(|file| {
+            std::path::PathBuf::from(
+                file.strip_prefix(&nested_prefix)
+                    .map(|suffix| format!("{flat_prefix}{suffix}"))
+                    .unwrap_or_else(|| file.clone()),
+            )
+        })
+        .collect()
 }
 
 use tauri::command;
@@ -938,10 +1023,44 @@ pub async fn sync_profile_to_game(
             .map(|full_name| (extract_mod_key(full_name), full_name.to_lowercase()))
             .collect::<std::collections::HashMap<_, _>>();
 
-        let stored = load_owned_mod_manifests(&app, &profile_id, GAME_MANIFEST_SCOPE)?
+        let mut stored = load_owned_mod_manifests(&app, &profile_id, GAME_MANIFEST_SCOPE)?
             .into_iter()
             .filter(|entry| manifest_matches_target_root(&entry.manifest, runtime_game_path))
             .collect::<Vec<_>>();
+        // Profiles created by the affected builds already look "installed" to
+        // reconciliation, so merely fixing new extraction would strand their
+        // nested payload forever. Repair it in place and rewrite the ownership
+        // manifest so later updates/removals still own the correct files.
+        for entry in &mut stored {
+            if crate::models::loaders::is_loader_package(
+                &crate::models::loaders::PackageLoader::ReturnOfModding,
+                &entry.manifest.mod_full_name,
+            ) {
+                continue;
+            }
+            let package_name = return_of_modding_package_name(&entry.manifest.mod_full_name);
+            if migrate_nested_return_of_modding_plugins(runtime_game_path, package_name)? {
+                let flattened =
+                    flatten_return_of_modding_manifest_paths(&entry.manifest.files, package_name);
+                save_owned_mod_manifest(
+                    &app,
+                    &profile_id,
+                    GAME_MANIFEST_SCOPE,
+                    &entry.manifest.mod_full_name,
+                    runtime_game_path,
+                    &flattened,
+                    &entry.manifest.backed_up_files,
+                )?;
+                entry.manifest.files = flattened
+                    .iter()
+                    .map(|path| path.to_string_lossy().replace('\\', "/"))
+                    .collect();
+                log::info!(
+                    "[sync_profile_to_game] Flattened legacy ReturnOfModding plugins wrapper for {}",
+                    entry.manifest.mod_full_name
+                );
+            }
+        }
         let (manifests_to_remove, manifests_to_keep): (Vec<_>, Vec<_>) =
             stored.into_iter().partition(|entry| {
                 all_profile_full_by_key
@@ -1369,9 +1488,10 @@ fn windows_bepinex_runtime_is_installed(game_path: &std::path::Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        ensure_finalize_ready, key_is_bepinex_runtime_pack, managed_install_root,
-        return_of_modding_mods_yaml, set_return_of_modding_plugin_enabled,
-        windows_bepinex_runtime_is_installed,
+        ensure_finalize_ready, flatten_return_of_modding_manifest_paths,
+        key_is_bepinex_runtime_pack, managed_install_root,
+        migrate_nested_return_of_modding_plugins, return_of_modding_mods_yaml,
+        set_return_of_modding_plugin_enabled, windows_bepinex_runtime_is_installed,
     };
 
     #[test]
@@ -1442,6 +1562,59 @@ mod tests {
         assert!(plugin.join("manifest.json").is_file());
         assert!(!plugin.join("manifest.json.old").exists());
         assert!(config.is_file());
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn existing_hades_plugin_wrappers_are_flattened_without_unpacking_child_folders() {
+        let root = std::env::temp_dir().join(format!(
+            "r2modmac-rom-wrapper-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let package = root.join("ReturnOfModding/plugins/NikkelM-Cosmetics_API");
+        std::fs::create_dir_all(package.join("plugins/Scripts")).unwrap();
+        std::fs::write(package.join("manifest.json"), b"manifest").unwrap();
+        std::fs::write(package.join("plugins/main.lua"), b"plugin").unwrap();
+        std::fs::write(package.join("plugins/Scripts/helper.lua"), b"helper").unwrap();
+
+        assert!(migrate_nested_return_of_modding_plugins(&root, "NikkelM-Cosmetics_API").unwrap());
+        assert_eq!(std::fs::read(package.join("main.lua")).unwrap(), b"plugin");
+        assert_eq!(
+            std::fs::read(package.join("Scripts/helper.lua")).unwrap(),
+            b"helper"
+        );
+        assert_eq!(
+            std::fs::read(package.join("manifest.json")).unwrap(),
+            b"manifest"
+        );
+        assert!(!package.join("plugins").exists());
+
+        let flattened = flatten_return_of_modding_manifest_paths(
+            &[
+                "ReturnOfModding/plugins/NikkelM-Cosmetics_API/manifest.json".to_string(),
+                "ReturnOfModding/plugins/NikkelM-Cosmetics_API/plugins/main.lua".to_string(),
+                "ReturnOfModding/plugins/NikkelM-Cosmetics_API/plugins/Scripts/helper.lua"
+                    .to_string(),
+            ],
+            "NikkelM-Cosmetics_API",
+        );
+        assert_eq!(
+            flattened,
+            vec![
+                std::path::PathBuf::from(
+                    "ReturnOfModding/plugins/NikkelM-Cosmetics_API/manifest.json"
+                ),
+                std::path::PathBuf::from("ReturnOfModding/plugins/NikkelM-Cosmetics_API/main.lua"),
+                std::path::PathBuf::from(
+                    "ReturnOfModding/plugins/NikkelM-Cosmetics_API/Scripts/helper.lua"
+                ),
+            ]
+        );
 
         std::fs::remove_dir_all(root).unwrap();
     }
