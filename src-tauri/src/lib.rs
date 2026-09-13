@@ -181,7 +181,7 @@ fn redact_existing_app_logs(app: &tauri::AppHandle) {
         let Ok(contents) = std::fs::read_to_string(&path) else {
             continue;
         };
-        let redacted = utils::log_privacy::redact(&contents);
+        let redacted = utils::log_privacy::redact_logs(&contents);
         if redacted != contents {
             let _ = std::fs::write(path, redacted);
         }
@@ -190,9 +190,9 @@ fn redact_existing_app_logs(app: &tauri::AppHandle) {
 
 pub(crate) fn set_log_privacy(app: &tauri::AppHandle, enabled: bool) {
     utils::log_privacy::set_enabled(enabled);
-    if enabled {
-        redact_existing_app_logs(app);
-    }
+    // Disk logs are always private, independently from the UI-only privacy
+    // toggle. Also migrate records written by an older app version.
+    redact_existing_app_logs(app);
 }
 
 #[tauri::command]
@@ -248,10 +248,8 @@ pub fn run() {
         .plugin(
             tauri_plugin_log::Builder::default()
                 .format(|out, message, record| {
-                    let redacted = utils::log_privacy::redact(&message.to_string());
-                    let file = record
-                        .file()
-                        .map(utils::log_privacy::redact);
+                    let redacted = utils::log_privacy::redact_logs(&message.to_string());
+                    let file = record.file().map(utils::log_privacy::redact_logs);
                     let timestamp = chrono::Local::now().to_rfc3339_opts(
                         chrono::SecondsFormat::Millis,
                         false,

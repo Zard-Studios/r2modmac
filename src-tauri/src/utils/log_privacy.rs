@@ -5,6 +5,10 @@ use std::sync::OnceLock;
 static ENABLED: AtomicBool = AtomicBool::new(false);
 static PATH_USERNAME: OnceLock<Regex> = OnceLock::new();
 static USERNAME_PATTERNS: OnceLock<Vec<Regex>> = OnceLock::new();
+static STEAM_USERDATA: OnceLock<Regex> = OnceLock::new();
+static STEAM_ID64: OnceLock<Regex> = OnceLock::new();
+static EMAIL_ADDRESS: OnceLock<Regex> = OnceLock::new();
+static SECRET_VALUE: OnceLock<Regex> = OnceLock::new();
 
 fn path_username() -> &'static Regex {
     PATH_USERNAME.get_or_init(|| {
@@ -40,6 +44,35 @@ fn username_patterns() -> &'static [Regex] {
         .as_slice()
 }
 
+fn steam_userdata() -> &'static Regex {
+    STEAM_USERDATA.get_or_init(|| {
+        Regex::new(r"(?i)(?P<prefix>[\\/]userdata[\\/])\d+")
+            .expect("the built-in Steam userdata expression is valid")
+    })
+}
+
+fn steam_id64() -> &'static Regex {
+    STEAM_ID64.get_or_init(|| {
+        Regex::new(r"\b7656119\d{10}\b").expect("the built-in SteamID expression is valid")
+    })
+}
+
+fn email_address() -> &'static Regex {
+    EMAIL_ADDRESS.get_or_init(|| {
+        Regex::new(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b")
+            .expect("the built-in email expression is valid")
+    })
+}
+
+fn secret_value() -> &'static Regex {
+    SECRET_VALUE.get_or_init(|| {
+        Regex::new(
+            r#"(?i)(?P<key>\b(?:authorization|api[_-]?key|access[_-]?token|refresh[_-]?token|token|password|passwd|secret|cookie)\b\s*[:=]\s*)(?P<value>[^\s,;]+)"#,
+        )
+        .expect("the built-in secret expression is valid")
+    })
+}
+
 pub fn set_enabled(enabled: bool) {
     ENABLED.store(enabled, Ordering::Release);
 }
@@ -48,6 +81,14 @@ pub fn redact(message: &str) -> String {
     if !ENABLED.load(Ordering::Acquire) {
         return message.to_string();
     }
+    redact_logs(message)
+}
+
+/// Remove personal and credential-shaped data from anything written to disk.
+///
+/// Log privacy is unconditional: a reporter should be able to attach a log
+/// without first knowing that the separate UI privacy option exists.
+pub fn redact_logs(message: &str) -> String {
     redact_with_patterns(message, username_patterns())
 }
 
@@ -58,7 +99,18 @@ fn redact_with_patterns(message: &str, usernames: &[Regex]) -> String {
     for username in usernames {
         redacted = username.replace_all(&redacted, "[user]").into_owned();
     }
-    redacted
+    redacted = steam_userdata()
+        .replace_all(&redacted, "${prefix}[steam-user]")
+        .into_owned();
+    redacted = steam_id64()
+        .replace_all(&redacted, "[steam-user]")
+        .into_owned();
+    redacted = email_address()
+        .replace_all(&redacted, "[email]")
+        .into_owned();
+    secret_value()
+        .replace_all(&redacted, "${key}[redacted]")
+        .into_owned()
 }
 
 #[cfg(test)]
@@ -72,7 +124,7 @@ pub(crate) fn redact_for_usernames(message: &str, usernames: &[&str]) -> String 
 
 #[cfg(test)]
 mod tests {
-    use super::redact_for_usernames;
+    use super::{redact_for_usernames, redact_logs, set_enabled};
 
     #[test]
     fn masks_user_segments_in_macos_windows_and_linux_paths() {
@@ -97,6 +149,24 @@ mod tests {
         assert_eq!(
             redact_for_usernames(raw, &["alice"]),
             "[user] failed: owner=[user]; mail=[user]@example.test; file:///Users/[user]/Game"
+        );
+    }
+
+    #[test]
+    fn disk_logs_are_redacted_even_when_ui_privacy_is_disabled() {
+        set_enabled(false);
+        let raw = "/Users/alice/Game token=abcd 76561198012345678";
+        let redacted = redact_logs(raw);
+
+        assert_eq!(redacted, "/Users/[user]/Game token=[redacted] [steam-user]");
+    }
+
+    #[test]
+    fn masks_steam_accounts_emails_and_secret_shaped_values() {
+        let raw = r"/userdata/123456789/config C:\Steam\userdata\987654321\config owner@example.test Authorization:Bearer-123 password=hunter2 access_token=abcd";
+        assert_eq!(
+            redact_for_usernames(raw, &[]),
+            r"/userdata/[steam-user]/config C:\Steam\userdata\[steam-user]\config [email] Authorization:[redacted] password=[redacted] access_token=[redacted]"
         );
     }
 }
