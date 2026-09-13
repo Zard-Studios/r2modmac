@@ -51,6 +51,15 @@ test('a community BepInEx fork still counts as the BepInEx runtime', () => {
     assert.ok(!isLoaderPackage('bepinex', 'Someone-SomeMod-1.0.0'));
 });
 
+test('Silksong repairs install only the current BepInEx package', () => {
+    assert.deepEqual(
+        loaderPackageIdsForCommunity('bepinex', 'hollow-knight-silksong'),
+        ['silksong_modding-BepInExPack_Silksong'],
+    );
+    assert.ok(!loaderPackageIdsForCommunity('bepinex', 'hollow-knight-silksong')
+        .includes('BepInEx-BepInExPack_Silksong'));
+});
+
 test('a mod named after BepInEx is not the runtime', () => {
     // These were read as the loader, so Apply skipped installing them and then
     // reported the profile as fully applied with the mods missing.

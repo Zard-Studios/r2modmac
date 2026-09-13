@@ -50,10 +50,17 @@ export const loaderPackageIdsForCommunity = (
     runtime: string | undefined,
     community: string,
 ): string[] => {
+    const normalizedCommunity = community.toLowerCase().replace(/[\s_]+/g, '-');
     if (runtime === 'returnofmodding' && isReturnOfModdingCommunity(community)) {
         // Hades II is hooked by Hell2Modding's d3d12.dll. The generic
         // ReturnOfModding pack ships version.dll and is not a valid fallback.
         return ['Hell2Modding-Hell2Modding'];
+    }
+    if (runtime === 'bepinex' && normalizedCommunity === 'hollow-knight-silksong') {
+        // The original BepInEx package is now a deprecated migration shim
+        // which depends on this package. Installing the shim therefore adds
+        // two apparent loaders and lets the old archive overwrite the new one.
+        return ['silksong_modding-BepInExPack_Silksong'];
     }
     return loaderPackageIds(runtime);
 };
