@@ -92,12 +92,6 @@ fn macos_bepinex_took_over(
     false
 }
 
-/// The message shown when the game started but the mods did not load.
-fn macos_mods_not_loaded_error() -> String {
-    "The game started, but BepInEx never loaded, so it is running unmodded. The loader could not attach to the game, this is not a problem with your mods. The r2modmac logs in the game folder record what Doorstop reported."
-        .to_string()
-}
-
 pub(crate) async fn launch_game_with_mods_for_macos(
     app: &AppHandle,
     game_identifier: &str,
@@ -233,10 +227,14 @@ pub(crate) async fn launch_game_with_mods_for_macos(
         let launched_at = std::time::SystemTime::now();
         launch_via_steam_for_game_path(app, game_path)?;
         if !macos_bepinex_took_over(&[&bepinex_root, &runtime_game_path], launched_at) {
-            // A cancelled wait proves nothing about the loader, so it must not
-            // be reported as mods that failed to load.
             super::super::launch_cancel::ensure_not_cancelled()?;
-            return Err(macos_mods_not_loaded_error());
+            // Disk logging is optional in BepInEx and may be buffered. A warm
+            // cache may not be rewritten either, so missing fresh filesystem
+            // activity is not evidence that injection failed. All actionable
+            // setup and launch failures have already been returned above.
+            log::warn!(
+                "[launch_game_with_mods] The game started, but no fresh BepInEx log/cache signal was observed. Continuing because disk logging may be disabled, buffered, or using an unchanged warm cache."
+            );
         }
         return Ok(());
     }
