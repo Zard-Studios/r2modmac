@@ -67,7 +67,7 @@ fn email_address() -> &'static Regex {
 fn secret_value() -> &'static Regex {
     SECRET_VALUE.get_or_init(|| {
         Regex::new(
-            r#"(?i)(?P<key>\b(?:authorization|api[_-]?key|access[_-]?token|refresh[_-]?token|token|password|passwd|secret|cookie)\b\s*[:=]\s*)(?P<value>[^\s,;]+)"#,
+            r#"(?i)(?P<key>\b(?:authorization|api[_-]?key|access[_-]?token|refresh[_-]?token|token|password|passwd|secret|cookie)\b["']?\s*[:=]\s*)(?P<value>bearer\s+[^\s,;]+|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;]+)"#,
         )
         .expect("the built-in secret expression is valid")
     })
@@ -168,5 +168,16 @@ mod tests {
             redact_for_usernames(raw, &[]),
             r"/userdata/[steam-user]/config C:\Steam\userdata\[steam-user]\config [email] Authorization:[redacted] password=[redacted] access_token=[redacted]"
         );
+    }
+
+    #[test]
+    fn masks_quoted_json_secrets_values_with_spaces_and_bearer_tokens() {
+        let raw = r#"{"token":"abc.def.ghi","safe":"visible"} password='two words' Authorization: Bearer abc.def.ghi"#;
+        let redacted = redact_for_usernames(raw, &[]);
+
+        assert!(!redacted.contains("abc.def.ghi"));
+        assert!(!redacted.contains("two words"));
+        assert!(redacted.contains(r#""safe":"visible""#));
+        assert_eq!(redacted.matches("[redacted]").count(), 3);
     }
 }
