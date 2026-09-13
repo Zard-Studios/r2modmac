@@ -126,14 +126,45 @@ mod tests {
             BepInExRoot::Game,
         );
 
-        assert!(script.contains("log_schema=2"));
+        assert!(script.contains("log_schema=3"));
         assert!(script.contains(&format!(
             "r2modmac_version=\"{}\"",
             env!("CARGO_PKG_VERSION")
         )));
         assert!(script.contains("timestamp\\tlevel\\tlaunch_id\\tcomponent\\tmessage"));
         assert!(script.contains("session_start schema=$log_schema"));
+        assert!(script.contains("sanitize_bootstrap_message()"));
+        assert!(script.contains("redact_log_literal \"$HOME\" \"[home]\""));
+        assert!(script.contains("redact_log_literal \"$USER\" \"[user]\""));
         assert!(!script.contains("argv=$*"));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn generated_launcher_remains_valid_shell_after_log_redaction_is_inserted() {
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+
+        let script = build_generated_macos_bepinex_script(
+            "Example.app/Contents/MacOS/Example",
+            "Example.app/Contents/MacOS/Example",
+            false,
+            true,
+            BepInExRoot::Game,
+        );
+        let mut child = Command::new("/bin/sh")
+            .arg("-n")
+            .stdin(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(script.as_bytes())
+            .unwrap();
+
+        assert!(child.wait().unwrap().success());
     }
 }
 

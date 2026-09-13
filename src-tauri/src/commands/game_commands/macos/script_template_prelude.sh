@@ -4,7 +4,7 @@ executable_name="__RELATIVE_EXEC__"
 launch_entry_name="__RELATIVE_LAUNCH_ENTRY__"
 launch_entry_uses_wrapper=__LAUNCH_ENTRY_USES_WRAPPER__
 write_debug_logs=__WRITE_DEBUG_LOGS__
-log_schema=2
+log_schema=3
 r2modmac_version="__R2MODMAC_VERSION__"
 
 a="/$0"; a=${{a%/*}}; a=${{a#/}}; a=${{a:-.}}; BASEDIR=$(cd "$a"; pwd -P)
@@ -44,13 +44,43 @@ if [ "$write_debug_logs" = "1" ]; then
     launch_log_id="$(date '+%s')-$$"
     printf '\ntimestamp\tlevel\tlaunch_id\tcomponent\tmessage\n' >> "$bootstrap_log"
 
+    redact_log_literal() {{
+        /usr/bin/awk -v needle="$1" -v replacement="$2" '
+            {{
+                if (needle == "") {{ printf "%s", $0; next }}
+                remaining = $0
+                result = ""
+                while ((position = index(remaining, needle)) > 0) {{
+                    result = result substr(remaining, 1, position - 1) replacement
+                    remaining = substr(remaining, position + length(needle))
+                }}
+                printf "%s%s", result, remaining
+            }}
+        '
+    }}
+
+    sanitize_bootstrap_message() {{
+        safe_message="$1"
+        if [ -n "${{HOME:-}}" ]; then
+            safe_message=$(printf '%s' "$safe_message" | redact_log_literal "$HOME" "[home]")
+        fi
+        if [ -n "${{USER:-}}" ]; then
+            safe_message=$(printf '%s' "$safe_message" | redact_log_literal "$USER" "[user]")
+        fi
+        if [ -n "${{LOGNAME:-}}" ] && [ "${{LOGNAME:-}}" != "${{USER:-}}" ]; then
+            safe_message=$(printf '%s' "$safe_message" | redact_log_literal "$LOGNAME" "[user]")
+        fi
+        printf '%s' "$safe_message"
+    }}
+
     log_bootstrap() {{
         log_level=INFO
         case "$1" in
             *failed*|*missing*|*unreachable*|*unsupported*) log_level=ERROR ;;
             *retry*|*skipped*) log_level=WARN ;;
         esac
-        printf '%s\t%s\t%s\t%s\t%s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$log_level" "$launch_log_id" "macos-launcher" "$1" >> "$bootstrap_log"
+        safe_message=$(sanitize_bootstrap_message "$1")
+        printf '%s\t%s\t%s\t%s\t%s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$log_level" "$launch_log_id" "macos-launcher" "$safe_message" >> "$bootstrap_log"
     }}
 else
     bootstrap_log="/dev/null"

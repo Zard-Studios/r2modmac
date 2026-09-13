@@ -68,9 +68,12 @@ pub(crate) fn configure_macos_bepinex_script(
     let has_steam_arg_helper = script.contains("steam_arg_helper()");
     let has_root_bootstrap_log =
         script.contains("bootstrap_log=\"$BASEDIR/r2modmac_bootstrap.log\"");
-    let has_structured_bootstrap_log = script.contains("log_schema=2")
+    let has_structured_bootstrap_log = script.contains("log_schema=3")
         && script.contains("timestamp\\tlevel\\tlaunch_id\\tcomponent\\tmessage")
         && script.contains("session_start schema=$log_schema")
+        && script.contains("sanitize_bootstrap_message()")
+        && script.contains("redact_log_literal \"$HOME\" \"[home]\"")
+        && script.contains("redact_log_literal \"$USER\" \"[user]\"")
         && !script.contains("argv=$*");
     let has_expected_debug_log_setting = script.contains(&format!(
         "write_debug_logs={}",
