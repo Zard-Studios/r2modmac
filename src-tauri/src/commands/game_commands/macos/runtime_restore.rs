@@ -148,6 +148,14 @@ pub(crate) fn configure_macos_doorstop_target_assembly(
     Ok(())
 }
 
+fn isolated_macos_bepinex_runtime_is_complete(
+    runtime_root: &std::path::Path,
+    tree_root: &std::path::Path,
+) -> bool {
+    tree_root != runtime_root
+        && has_complete_macos_bepinex_runtime_rooted(runtime_root, Some(tree_root))
+}
+
 pub(crate) async fn ensure_macos_bepinex_runtime_present(
     app: &AppHandle,
     profile_id: &str,
@@ -185,7 +193,7 @@ pub(crate) async fn ensure_macos_bepinex_runtime_present(
     // points at the tree rather than at a folder that is no longer there.
     let tree_root =
         crate::commands::game_commands::bepinex_install_root(app, profile_id, &runtime_root)?;
-    if tree_root != runtime_root && has_complete_macos_bepinex_runtime(&tree_root) {
+    if isolated_macos_bepinex_runtime_is_complete(&runtime_root, &tree_root) {
         normalize_macos_doorstop_config_file(&runtime_root.join("doorstop_config.ini"))?;
         configure_macos_doorstop_target_assembly(
             &runtime_root.join("doorstop_config.ini"),
@@ -316,5 +324,61 @@ pub(crate) async fn ensure_macos_bepinex_runtime_present(
         Ok(())
     } else {
         Err("No macOS BepInEx startup script found".to_string())
+    }
+}
+
+#[cfg(test)]
+mod isolated_runtime_layout_tests {
+    use super::isolated_macos_bepinex_runtime_is_complete;
+
+    fn world() -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "r2modmac-isolated-runtime-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    #[test]
+    fn loader_beside_game_and_core_in_profile_is_complete() {
+        let root = world();
+        let game = root.join("game");
+        let profile = root.join("profile");
+        std::fs::create_dir_all(&game).unwrap();
+        std::fs::create_dir_all(profile.join("BepInEx/core")).unwrap();
+        std::fs::write(game.join("libdoorstop.dylib"), b"loader").unwrap();
+        std::fs::write(game.join("run_bepinex.sh"), b"#!/bin/sh\n").unwrap();
+        std::fs::write(
+            profile.join("BepInEx/core/BepInEx.Preloader.dll"),
+            b"tailored runtime",
+        )
+        .unwrap();
+
+        assert!(isolated_macos_bepinex_runtime_is_complete(&game, &profile));
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn isolated_tree_without_game_loader_is_incomplete() {
+        let root = world();
+        let game = root.join("game");
+        let profile = root.join("profile");
+        std::fs::create_dir_all(&game).unwrap();
+        std::fs::create_dir_all(profile.join("BepInEx/core")).unwrap();
+        std::fs::write(
+            profile.join("BepInEx/core/BepInEx.Preloader.dll"),
+            b"tailored runtime",
+        )
+        .unwrap();
+
+        assert!(!isolated_macos_bepinex_runtime_is_complete(&game, &profile));
+
+        std::fs::remove_dir_all(root).unwrap();
     }
 }
