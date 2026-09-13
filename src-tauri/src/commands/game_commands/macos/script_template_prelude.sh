@@ -4,6 +4,8 @@ executable_name="__RELATIVE_EXEC__"
 launch_entry_name="__RELATIVE_LAUNCH_ENTRY__"
 launch_entry_uses_wrapper=__LAUNCH_ENTRY_USES_WRAPPER__
 write_debug_logs=__WRITE_DEBUG_LOGS__
+log_schema=2
+r2modmac_version="__R2MODMAC_VERSION__"
 
 a="/$0"; a=${{a%/*}}; a=${{a#/}}; a=${{a:-.}}; BASEDIR=$(cd "$a"; pwd -P)
 cd "$BASEDIR"
@@ -39,10 +41,16 @@ if [ "$write_debug_logs" = "1" ]; then
         export R2MODMAC_RESET_LOG_READY=1
     fi
 
-    printf '\n[%s] ---- r2modmac session pid=%s ----\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$$" >> "$bootstrap_log"
+    launch_log_id="$(date '+%s')-$$"
+    printf '\ntimestamp\tlevel\tlaunch_id\tcomponent\tmessage\n' >> "$bootstrap_log"
 
     log_bootstrap() {{
-        printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$1" >> "$bootstrap_log"
+        log_level=INFO
+        case "$1" in
+            *failed*|*missing*|*unreachable*|*unsupported*) log_level=ERROR ;;
+            *retry*|*skipped*) log_level=WARN ;;
+        esac
+        printf '%s\t%s\t%s\t%s\t%s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$log_level" "$launch_log_id" "macos-launcher" "$1" >> "$bootstrap_log"
     }}
 else
     bootstrap_log="/dev/null"
@@ -55,7 +63,7 @@ else
     }}
 fi
 
-log_bootstrap "wrapper_start pid=$$ ppid=$PPID argv=$*"
+log_bootstrap "session_start schema=$log_schema app_version=$r2modmac_version pid=$$ ppid=$PPID argc=$#"
 wrapper_arch=$(/usr/bin/arch 2>/dev/null || printf unknown)
 wrapper_translated=$(/usr/sbin/sysctl -in sysctl.proc_translated 2>/dev/null || printf 0)
 log_bootstrap "wrapper_arch=$wrapper_arch translated=$wrapper_translated"
@@ -139,7 +147,7 @@ if [ "$steam_launch_seen" = true ]; then
             shift
         done
         steam_launch_args_ready=true
-        log_bootstrap "steam_launch_args_ready source=bootstrap_relay argv=$*"
+        log_bootstrap "steam_launch_args_ready source=bootstrap_relay argc=$#"
         # Keep Steam bootstrap chain intact (overlay + SteamAPI context), then
         # continue in the relaunched script process.
         exec "$@"
@@ -171,7 +179,7 @@ ${{a}}"
             done
             IFS=$old_ifs
             steam_launch_args_ready=true
-            log_bootstrap "steam_launch_args_ready source=separator argv=$*"
+            log_bootstrap "steam_launch_args_ready source=separator argc=$#"
         fi
     fi
 
@@ -203,7 +211,7 @@ ${{a}}"
             done
             IFS=$old_ifs
             steam_launch_args_ready=true
-            log_bootstrap "steam_launch_args_ready source=executable_match argv=$*"
+            log_bootstrap "steam_launch_args_ready source=executable_match argc=$#"
         fi
     fi
 

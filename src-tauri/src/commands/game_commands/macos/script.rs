@@ -68,6 +68,10 @@ pub(crate) fn configure_macos_bepinex_script(
     let has_steam_arg_helper = script.contains("steam_arg_helper()");
     let has_root_bootstrap_log =
         script.contains("bootstrap_log=\"$BASEDIR/r2modmac_bootstrap.log\"");
+    let has_structured_bootstrap_log = script.contains("log_schema=2")
+        && script.contains("timestamp\\tlevel\\tlaunch_id\\tcomponent\\tmessage")
+        && script.contains("session_start schema=$log_schema")
+        && !script.contains("argv=$*");
     let has_expected_debug_log_setting = script.contains(&format!(
         "write_debug_logs={}",
         if write_debug_logs_to_game { 1 } else { 0 }
@@ -97,7 +101,7 @@ pub(crate) fn configure_macos_bepinex_script(
         && script.contains("exec_modded_arm64_env_failed status=$exec_status")
         && script.contains("steam_launch_exec_modded_arch_env_failed status=$exec_status");
     let has_native_arm64_direct_exec = script
-        .contains("steam_launch_exec_modded_arm64_direct argv=$*")
+        .contains("steam_launch_exec_modded_arm64_direct argc=$#")
         && script.contains("steam_launch_exec_modded_arm64_direct_failed status=$exec_status")
         && script.contains(
             "exec_modded_arm64_direct target=$modded_target_path wrapper=$modded_target_is_wrapper",
@@ -239,7 +243,7 @@ pub(crate) fn configure_macos_bepinex_script(
     let steam_launch_exec_deferred = script
         .contains("steam_launch_args_ready source=bootstrap_relay")
         && script.contains("steam_launch_args_ready source=separator")
-        && script.contains("steam_launch_exec_modded argv=$*");
+        && script.contains("steam_launch_exec_modded argc=$#");
     let has_legacy_bepinex_bootstrap_log = script
         .contains("bootstrap_log=\"$BASEDIR/BepInEx/r2modmac_bootstrap.log\"")
         || script.contains("mkdir -p \"$BASEDIR/BepInEx\"");
@@ -256,6 +260,7 @@ pub(crate) fn configure_macos_bepinex_script(
         || !has_root_doorstop_fallback
         || !steam_launch_order_ok
         || !has_root_bootstrap_log
+        || !has_structured_bootstrap_log
         || !removes_codesign_signature
         || !has_codesign_cache_guard
         || !logs_loader_environment

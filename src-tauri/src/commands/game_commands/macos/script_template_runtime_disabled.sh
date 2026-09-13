@@ -1,6 +1,6 @@
 if [ "$runtime_disabled" = true ]; then
     if [ "$steam_launch_args_ready" = true ]; then
-        log_bootstrap "steam_launch_exec_vanilla argv=$*"
+        log_bootstrap "steam_launch_exec_vanilla argc=$#"
         exec "$@"
     fi
 

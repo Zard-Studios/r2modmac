@@ -133,7 +133,7 @@ maybe_retry_x64_after_arm64_failure() {{
 
 if [ "$steam_launch_args_ready" = true ]; then
     if [ "$arch" = "arm64" ] && [ "$wrapper_arch" = "arm64" ] && [ "$wrapper_translated" = "0" ]; then
-        log_bootstrap "steam_launch_exec_modded_arm64_direct argv=$*"
+        log_bootstrap "steam_launch_exec_modded_arm64_direct argc=$#"
         "$@" >> "$exec_log" 2>&1
         exec_status=$?
         log_bootstrap "steam_launch_exec_modded_arm64_direct_failed status=$exec_status"
@@ -142,7 +142,7 @@ if [ "$steam_launch_args_ready" = true ]; then
         exit "$exec_status"
     fi
     if [ "$arch" = "arm64" ] && command -v /usr/bin/arch >/dev/null 2>&1; then
-        log_bootstrap "steam_launch_exec_modded_arm64_env argv=$*"
+        log_bootstrap "steam_launch_exec_modded_arm64_env argc=$#"
         /usr/bin/arch -arm64 \
             -e DOORSTOP_ENABLE="${{DOORSTOP_ENABLE}}" \
             -e DOORSTOP_ENABLED="${{DOORSTOP_ENABLED}}" \
@@ -173,7 +173,7 @@ if [ "$steam_launch_args_ready" = true ]; then
         exit "$exec_status"
     fi
     if [ "$arch" = "x64" ] && command -v /usr/bin/arch >/dev/null 2>&1; then
-        log_bootstrap "steam_launch_exec_modded_arch_env argv=$*"
+        log_bootstrap "steam_launch_exec_modded_arch_env argc=$#"
         /usr/bin/arch -x86_64 \
             -e DOORSTOP_ENABLE="${{DOORSTOP_ENABLE}}" \
             -e DOORSTOP_ENABLED="${{DOORSTOP_ENABLED}}" \
@@ -202,7 +202,7 @@ if [ "$steam_launch_args_ready" = true ]; then
         printf '[%s] steam_launch_exec_modded_arch_env_failed status=%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$exec_status" >> "$exec_log"
         exit "$exec_status"
     fi
-    log_bootstrap "steam_launch_exec_modded argv=$*"
+    log_bootstrap "steam_launch_exec_modded argc=$#"
     "$@" >> "$exec_log" 2>&1
     exec_status=$?
     log_bootstrap "steam_launch_exec_modded_failed status=$exec_status"

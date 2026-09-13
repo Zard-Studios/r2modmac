@@ -39,6 +39,7 @@ pub(crate) fn build_generated_macos_bepinex_script(
     .replace("__RELATIVE_LAUNCH_ENTRY__", relative_launch_entry)
     .replace("__LAUNCH_ENTRY_USES_WRAPPER__", launch_entry_uses_wrapper)
     .replace("__WRITE_DEBUG_LOGS__", write_debug_logs)
+    .replace("__R2MODMAC_VERSION__", env!("CARGO_PKG_VERSION"))
     .replace("__BEPINEX_ROOT__", bepinex_root.as_shell_path())
     .replace("${{", "${")
     .replace("{{", "{")
@@ -113,6 +114,26 @@ mod tests {
         assert!(script.contains(".r2modmac_codesign_state"));
         assert!(script.contains("codesign_adhoc_sign_skipped_cached"));
         assert!(script.contains("codesign_state_key"));
+    }
+
+    #[test]
+    fn generated_debug_log_has_a_schema_version_context_and_no_raw_argv() {
+        let script = build_generated_macos_bepinex_script(
+            "Example.app/Contents/MacOS/Example",
+            "Example.app/Contents/MacOS/Example",
+            false,
+            true,
+            BepInExRoot::Game,
+        );
+
+        assert!(script.contains("log_schema=2"));
+        assert!(script.contains(&format!(
+            "r2modmac_version=\"{}\"",
+            env!("CARGO_PKG_VERSION")
+        )));
+        assert!(script.contains("timestamp\\tlevel\\tlaunch_id\\tcomponent\\tmessage"));
+        assert!(script.contains("session_start schema=$log_schema"));
+        assert!(!script.contains("argv=$*"));
     }
 }
 
