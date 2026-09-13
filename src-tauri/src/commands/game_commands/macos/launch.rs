@@ -15,23 +15,61 @@ const BEPINEX_LOG_GRACE_MS: u64 = 20_000;
 /// games whose disk logging is off — Muck runs BepInEx and never writes one —
 /// while `cache/` is written by the preloader as it patches assemblies. Either
 /// one appearing after the launch means BepInEx got control.
+fn path_or_descendant_updated(path: &std::path::Path, launched_at: std::time::SystemTime) -> bool {
+    let Ok(metadata) = std::fs::symlink_metadata(path) else {
+        return false;
+    };
+
+    if metadata
+        .modified()
+        .is_ok_and(|modified| modified >= launched_at)
+    {
+        return true;
+    }
+
+    if !metadata.file_type().is_dir() {
+        return false;
+    }
+
+    std::fs::read_dir(path).is_ok_and(|entries| {
+        entries.flatten().any(|entry| {
+            let Ok(file_type) = entry.file_type() else {
+                return false;
+            };
+            !file_type.is_symlink() && path_or_descendant_updated(&entry.path(), launched_at)
+        })
+    })
+}
+
 fn macos_bepinex_signal_updated(
-    tree_root: &std::path::Path,
+    tree_roots: &[&std::path::Path],
     launched_at: std::time::SystemTime,
 ) -> bool {
-    let bepinex = tree_root.join("BepInEx");
-    let signals = [bepinex.join("LogOutput.log"), bepinex.join("cache")];
+    tree_roots.iter().any(|tree_root| {
+        let bepinex = tree_root.join("BepInEx");
 
-    signals.iter().any(|signal| {
-        // Anything left over from an earlier session proves nothing.
-        std::fs::metadata(signal)
-            .and_then(|meta| meta.modified())
-            .is_ok_and(|modified| modified >= launched_at)
+        // Cache directory mtimes do not change when BepInEx reuses and updates
+        // an existing cache file, so inspect its descendants as well.
+        if path_or_descendant_updated(&bepinex.join("cache"), launched_at) {
+            return true;
+        }
+
+        // BepInEx may rotate or disambiguate its disk log instead of writing the
+        // exact LogOutput.log path. Treat every LogOutput.log* file as evidence.
+        std::fs::read_dir(&bepinex).is_ok_and(|entries| {
+            entries.flatten().any(|entry| {
+                entry
+                    .file_name()
+                    .to_str()
+                    .is_some_and(|name| name.starts_with("LogOutput.log"))
+                    && path_or_descendant_updated(&entry.path(), launched_at)
+            })
+        })
     })
 }
 
 fn macos_bepinex_took_over(
-    tree_root: &std::path::Path,
+    tree_roots: &[&std::path::Path],
     launched_at: std::time::SystemTime,
 ) -> bool {
     let deadline =
@@ -45,7 +83,7 @@ fn macos_bepinex_took_over(
             return false;
         }
 
-        if macos_bepinex_signal_updated(tree_root, launched_at) {
+        if macos_bepinex_signal_updated(tree_roots, launched_at) {
             return true;
         }
         std::thread::sleep(std::time::Duration::from_millis(500));
@@ -194,7 +232,7 @@ pub(crate) async fn launch_game_with_mods_for_macos(
         }
         let launched_at = std::time::SystemTime::now();
         launch_via_steam_for_game_path(app, game_path)?;
-        if !macos_bepinex_took_over(&bepinex_root, launched_at) {
+        if !macos_bepinex_took_over(&[&bepinex_root, &runtime_game_path], launched_at) {
             // A cancelled wait proves nothing about the loader, so it must not
             // be reported as mods that failed to load.
             super::super::launch_cancel::ensure_not_cancelled()?;
@@ -538,8 +576,14 @@ mod bepinex_takeover_signal_tests {
         .unwrap();
 
         let before_any_test_file = std::time::UNIX_EPOCH;
-        assert!(macos_bepinex_signal_updated(&profile, before_any_test_file));
-        assert!(!macos_bepinex_signal_updated(&game, before_any_test_file));
+        assert!(macos_bepinex_signal_updated(
+            &[profile.as_path()],
+            before_any_test_file
+        ));
+        assert!(!macos_bepinex_signal_updated(
+            &[game.as_path()],
+            before_any_test_file
+        ));
 
         std::fs::remove_dir_all(root).unwrap();
     }
@@ -551,7 +595,46 @@ mod bepinex_takeover_signal_tests {
         std::fs::create_dir_all(profile.join("BepInEx/cache")).unwrap();
 
         let after_test_files = std::time::SystemTime::now() + std::time::Duration::from_secs(1);
-        assert!(!macos_bepinex_signal_updated(&profile, after_test_files));
+        assert!(!macos_bepinex_signal_updated(
+            &[profile.as_path()],
+            after_test_files
+        ));
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn game_root_log_can_confirm_an_isolated_profile_launch() {
+        let root = world("game-log");
+        let game = root.join("game");
+        let profile = root.join("profiles/active");
+        std::fs::create_dir_all(game.join("BepInEx")).unwrap();
+        std::fs::create_dir_all(profile.join("BepInEx")).unwrap();
+        std::fs::write(game.join("BepInEx/LogOutput.log.1"), b"Chainloader started").unwrap();
+
+        assert!(macos_bepinex_signal_updated(
+            &[profile.as_path(), game.as_path()],
+            std::time::UNIX_EPOCH
+        ));
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn updated_cache_child_confirms_launch_even_if_cache_directory_is_old() {
+        let root = world("cache-child");
+        let profile = root.join("profiles/active");
+        let cache = profile.join("BepInEx/cache");
+        std::fs::create_dir_all(&cache).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        let launched_at = std::time::SystemTime::now();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        std::fs::write(cache.join("patched-assembly.dll"), b"patched").unwrap();
+
+        assert!(macos_bepinex_signal_updated(
+            &[profile.as_path()],
+            launched_at
+        ));
 
         std::fs::remove_dir_all(root).unwrap();
     }
