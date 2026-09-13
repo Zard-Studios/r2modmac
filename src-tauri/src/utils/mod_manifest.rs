@@ -526,3 +526,63 @@ pub fn cleanup_owned_mod_manifests(
 
     Ok(removed_count)
 }
+
+#[cfg(test)]
+mod shared_loader_cleanup_tests {
+    use super::{cleanup_owned_mod_manifests, ModOwnershipManifest, StoredModOwnershipManifest};
+    use std::fs;
+    use std::path::{Path, PathBuf};
+
+    fn world() -> PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "r2modmac-shared-loader-cleanup-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    fn stored(root: &Path, name: &str, files: &[&str]) -> StoredModOwnershipManifest {
+        let manifest_path = root.join(format!("{name}.json"));
+        let backup_dir = root.join(format!("{name}_backup"));
+        fs::write(&manifest_path, b"manifest").unwrap();
+        StoredModOwnershipManifest {
+            manifest_path,
+            backup_dir,
+            manifest: ModOwnershipManifest {
+                mod_full_name: name.to_string(),
+                mod_key: name.to_lowercase(),
+                files: files.iter().map(|file| (*file).to_string()).collect(),
+                ..Default::default()
+            },
+        }
+    }
+
+    #[test]
+    fn removing_a_deprecated_loader_keeps_files_owned_by_current_loader() {
+        let root = world();
+        let shared = "BepInEx/core/BepInEx.Preloader.dll";
+        let deprecated_only = "deprecated-loader-marker.txt";
+        fs::create_dir_all(root.join("BepInEx/core")).unwrap();
+        fs::write(root.join(shared), b"current loader").unwrap();
+        fs::write(root.join(deprecated_only), b"obsolete").unwrap();
+
+        let deprecated = stored(&root, "deprecated", &[shared, deprecated_only]);
+        let current = stored(&root, "current", &[shared]);
+        let deprecated_manifest = deprecated.manifest_path.clone();
+
+        assert_eq!(
+            cleanup_owned_mod_manifests(&root, &[deprecated], &[current]).unwrap(),
+            1
+        );
+        assert!(root.join(shared).is_file());
+        assert!(!root.join(deprecated_only).exists());
+        assert!(!deprecated_manifest.exists());
+
+        fs::remove_dir_all(root).unwrap();
+    }
+}
