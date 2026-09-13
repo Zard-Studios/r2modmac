@@ -91,6 +91,12 @@ export const isLoaderPackage = (
     return false;
 };
 
+/** A loader candidate Repair may install rather than merely recognise. */
+export const isRepairableLoaderPackage = (
+    runtime: string | undefined,
+    candidate: { full_name: string; is_deprecated?: boolean },
+): boolean => !candidate.is_deprecated && isLoaderPackage(runtime, candidate.full_name);
+
 /** Human-readable loader name for messages. */
 export const loaderDisplayName = (runtime: string): string => {
     switch (runtime) {

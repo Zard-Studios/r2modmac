@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import type { InstalledMod, Profile } from '../src/types/profile.ts';
-import { isLoaderPackage, isReturnOfModdingCommunity, loaderDisplayName, loaderPackageIds, loaderPackageIdsForCommunity } from '../src/utils/loaderPackages.ts';
+import { isLoaderPackage, isRepairableLoaderPackage, isReturnOfModdingCommunity, loaderDisplayName, loaderPackageIds, loaderPackageIdsForCommunity } from '../src/utils/loaderPackages.ts';
 import { hasPendingRuntimeInstall } from '../src/utils/profileSync.ts';
 
 const profileWith = (mod: InstalledMod): Profile => ({
@@ -58,6 +58,17 @@ test('Silksong repairs install only the current BepInEx package', () => {
     );
     assert.ok(!loaderPackageIdsForCommunity('bepinex', 'hollow-knight-silksong')
         .includes('BepInEx-BepInExPack_Silksong'));
+});
+
+test('runtime repair rejects deprecated loader migration shims', () => {
+    assert.equal(isRepairableLoaderPackage('bepinex', {
+        full_name: 'BepInEx-BepInExPack_Silksong',
+        is_deprecated: true,
+    }), false);
+    assert.equal(isRepairableLoaderPackage('bepinex', {
+        full_name: 'silksong_modding-BepInExPack_Silksong',
+        is_deprecated: false,
+    }), true);
 });
 
 test('a mod named after BepInEx is not the runtime', () => {

@@ -42,7 +42,7 @@ import { useProfileActions } from './hooks/useProfileActions';
 import { useGameSync } from './hooks/useGameSync';
 import { compareVersions, findPinnedVersion, parsePackageReference } from './utils/modVersioning';
 import { getProfileModKey, hasPendingRuntimeInstall, migratePendingSyncBaselines, restoreInstalledMod } from './utils/profileSync';
-import { isLoaderPackage, isReturnOfModdingCommunity, loaderDisplayName, loaderPackageIdsForCommunity } from './utils/loaderPackages';
+import { isLoaderPackage, isRepairableLoaderPackage, isReturnOfModdingCommunity, loaderDisplayName, loaderPackageIdsForCommunity } from './utils/loaderPackages';
 import { isTextEntryTarget, shouldReleaseSearchFocus } from './utils/searchField';
 import { dialogStack } from './utils/dialogStack';
 import { censorText } from './utils/pathCensorUtils';
@@ -1827,7 +1827,7 @@ function App() {
       await window.ipcRenderer.beginProfileApplyTransaction(profile.id, community);
       repairTransactionStarted = true;
 
-      const matchesRuntime = (pkg: Package) => isLoaderPackage(runtime, pkg.full_name);
+      const matchesRuntime = (pkg: Package) => isRepairableLoaderPackage(runtime, pkg);
       const registeredLoader = profile.mods.find(mod => isLoaderPackage(runtime, mod.fullName));
 
       let loaderPackage = registeredLoader
