@@ -159,10 +159,39 @@ fn windows_rel_path_from_drive_c(
 ///   - `Program Name and Path`: Windows path relative to `C:\` with forward slashes and a leading `/`
 ///     (e.g. `/Program Files (x86)/Steam/steam.exe`)
 ///   - `Program Flags`: space-separated argument string (e.g. `-applaunch 1966720`)
-/// We temporarily overwrite these keys using `/usr/libexec/PlistBuddy`, call `open -n <bundle.app>`,
+/// We temporarily overwrite these keys using `/usr/bin/plutil`, call `open -n <bundle.app>`,
 /// and restore the original values after a short delay. This is the only reliable method — invoking
 /// the binary directly from the CLI causes `WineAppInitializationError` because `NSBundle.main()`
 /// does not resolve to the wrapper.
+fn read_plist_string(info_plist: &std::path::Path, key: &str) -> String {
+    std::process::Command::new("/usr/bin/plutil")
+        .args(["-extract", key, "raw"])
+        .arg(info_plist)
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .unwrap_or_default()
+        .trim_end_matches(['\r', '\n'])
+        .to_string()
+}
+
+fn write_plist_string(info_plist: &std::path::Path, key: &str, value: &str) -> Result<(), String> {
+    // Do not use PlistBuddy's `-c "Set ..."` form here. It parses the value as
+    // part of its own command language and strips the quotes and backslashes
+    // from Windows arguments such as `"C:\\Program Files\\..."`.
+    let status = std::process::Command::new("/usr/bin/plutil")
+        .args(["-replace", key, "-string", value])
+        .arg(info_plist)
+        .status()
+        .map_err(|error| format!("plutil failed: {error}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("plutil could not set key '{key}'"))
+    }
+}
+
 pub(crate) fn launch_macos_wineskin_program(
     bundle_path: &std::path::Path,
     prefix_root: &std::path::Path,
@@ -199,46 +228,19 @@ pub(crate) fn launch_macos_wineskin_program(
     );
 
     // Read original values so we can restore them after launch.
-    let plistbuddy = std::path::Path::new("/usr/libexec/PlistBuddy");
-    if !plistbuddy.exists() {
+    let plutil = std::path::Path::new("/usr/bin/plutil");
+    if !plutil.exists() {
         return Err(
-            "PlistBuddy not found at /usr/libexec/PlistBuddy (required for Sikarugir launch)"
-                .to_string(),
+            "plutil not found at /usr/bin/plutil (required for Sikarugir launch)".to_string(),
         );
     }
 
-    let read_key = |key: &str| -> String {
-        std::process::Command::new(plistbuddy)
-            .arg("-c")
-            .arg(format!("Print '{}'", key))
-            .arg(&info_plist)
-            .output()
-            .ok()
-            .and_then(|out| String::from_utf8(out.stdout).ok())
-            .unwrap_or_default()
-            .trim()
-            .to_string()
-    };
-
-    let write_key = |key: &str, value: &str| -> Result<(), String> {
-        let status = std::process::Command::new(plistbuddy)
-            .arg("-c")
-            .arg(format!("Set '{}' '{}'", key, value.replace('\'', "\\'")))
-            .arg(&info_plist)
-            .status()
-            .map_err(|e| format!("PlistBuddy failed: {}", e))?;
-        if !status.success() {
-            return Err(format!("PlistBuddy could not set key '{}'", key));
-        }
-        Ok(())
-    };
-
-    let orig_program = read_key("Program Name and Path");
-    let orig_flags = read_key("Program Flags");
+    let orig_program = read_plist_string(&info_plist, "Program Name and Path");
+    let orig_flags = read_plist_string(&info_plist, "Program Flags");
 
     // Write launch configuration.
-    write_key("Program Name and Path", &win_path)?;
-    write_key("Program Flags", &win_flags)?;
+    write_plist_string(&info_plist, "Program Name and Path", &win_path)?;
+    write_plist_string(&info_plist, "Program Flags", &win_flags)?;
 
     // Open the bundle as a new macOS application instance.
     let mut open_command = std::process::Command::new("open");
@@ -262,8 +264,8 @@ pub(crate) fn launch_macos_wineskin_program(
 
     if !open_status.success() {
         // Restore before returning error.
-        let _ = write_key("Program Name and Path", &orig_program);
-        let _ = write_key("Program Flags", &orig_flags);
+        let _ = write_plist_string(&info_plist, "Program Name and Path", &orig_program);
+        let _ = write_plist_string(&info_plist, "Program Flags", &orig_flags);
         return Err(format!(
             "'open -n {:?}' failed with status {}",
             bundle_path, open_status
@@ -277,22 +279,12 @@ pub(crate) fn launch_macos_wineskin_program(
     let orig_flags_clone = orig_flags.clone();
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_secs(5));
-        let _ = std::process::Command::new("/usr/libexec/PlistBuddy")
-            .arg("-c")
-            .arg(format!(
-                "Set 'Program Name and Path' '{}'",
-                orig_program_clone.replace('\'', "\\'")
-            ))
-            .arg(&info_plist_clone)
-            .status();
-        let _ = std::process::Command::new("/usr/libexec/PlistBuddy")
-            .arg("-c")
-            .arg(format!(
-                "Set 'Program Flags' '{}'",
-                orig_flags_clone.replace('\'', "\\'")
-            ))
-            .arg(&info_plist_clone)
-            .status();
+        let _ = write_plist_string(
+            &info_plist_clone,
+            "Program Name and Path",
+            &orig_program_clone,
+        );
+        let _ = write_plist_string(&info_plist_clone, "Program Flags", &orig_flags_clone);
     });
 
     Ok(())
@@ -321,69 +313,6 @@ fn macos_wineskin_activation_command(bundle_path: &std::path::Path) -> std::proc
     let mut command = std::process::Command::new("open");
     command.arg(bundle_path);
     command
-}
-
-/// Persist loader-related DLL choices for one Windows executable. This matters
-/// when Steam is already running: a second `steam.exe -applaunch` forwards the
-/// request to the existing client, whose children do not inherit the new
-/// launcher's WINEDLLOVERRIDES environment. Wine's per-application registry
-/// key is read by the game process itself and avoids changing other games in
-/// the same prefix.
-pub(crate) fn ensure_macos_wine_app_dll_overrides(
-    prefix_root: &std::path::Path,
-    executable_path: &std::path::Path,
-    dll_names: &[&str],
-) -> Result<(), String> {
-    let runner = find_macos_compat_runner_binary(Some(prefix_root), executable_path)
-        .ok_or_else(|| "Could not find Wine to configure the game DLL overrides".to_string())?;
-    let executable_name = executable_path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or_else(|| "Could not determine the Windows game executable name".to_string())?;
-
-    for dll_name in dll_names {
-        let status = macos_wine_registry_override_command(
-            &runner,
-            prefix_root,
-            executable_name,
-            dll_name,
-        )?
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map_err(|error| format!("Failed to configure Wine override for {dll_name}: {error}"))?;
-        if !status.success() {
-            return Err(format!(
-                "Wine could not configure the {dll_name} override (status {status})"
-            ));
-        }
-    }
-    Ok(())
-}
-
-fn macos_wine_registry_override_command(
-    runner: &std::path::Path,
-    prefix_root: &std::path::Path,
-    executable_name: &str,
-    dll_name: &str,
-) -> Result<std::process::Command, String> {
-    let mut command = std::process::Command::new(runner);
-    configure_macos_compat_runner_command(&mut command, runner, Some(prefix_root))?;
-    command.args([
-        "reg",
-        "add",
-        &format!(
-            "HKCU\\Software\\Wine\\AppDefaults\\{executable_name}\\DllOverrides"
-        ),
-        "/v",
-        dll_name,
-        "/t",
-        "REG_SZ",
-        "/d",
-        "native,builtin",
-        "/f",
-    ]);
-    Ok(command)
 }
 
 /// Serialize argv for Sikarugir's single `Program Flags` string using the
@@ -625,6 +554,27 @@ mod tests {
         );
     }
 
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn plist_round_trip_preserves_windows_quotes_and_backslashes() {
+        let root = unique_temp_dir("sikarugir_plist_flags");
+        let info_plist = root.join("Info.plist");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            &info_plist,
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict><key>Program Flags</key><string></string></dict></plist>"#,
+        )
+        .unwrap();
+
+        let flags = "-applaunch 1145350 --rom_modding_root_folder \"C:\\Program Files (x86)\\Steam\\steamapps\\common\\Hades II\\Ship\"";
+        write_plist_string(&info_plist, "Program Flags", flags).unwrap();
+
+        assert_eq!(read_plist_string(&info_plist, "Program Flags"), flags);
+        fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn activation_reuses_the_wrapper_instead_of_launching_another_instance() {
         let command = macos_wineskin_activation_command(std::path::Path::new(
@@ -640,39 +590,6 @@ mod tests {
         assert!(command
             .get_args()
             .all(|argument| argument != std::ffi::OsStr::new("-n")));
-    }
-
-    #[test]
-    fn wine_overrides_are_scoped_to_hades_in_its_prefix() {
-        let runner = std::path::Path::new("/mock/wine64");
-        let prefix = std::path::Path::new("/mock/Steam.app/Contents/SharedSupport/prefix");
-        let command = macos_wine_registry_override_command(
-            runner,
-            prefix,
-            "Hades2.exe",
-            "d3d12",
-        )
-        .unwrap();
-
-        assert_eq!(command.get_program(), runner);
-        assert!(command.get_envs().any(|(key, value)| {
-            key == std::ffi::OsStr::new("WINEPREFIX") && value == Some(prefix.as_os_str())
-        }));
-        assert_eq!(
-            command.get_args().collect::<Vec<_>>(),
-            vec![
-                "reg",
-                "add",
-                "HKCU\\Software\\Wine\\AppDefaults\\Hades2.exe\\DllOverrides",
-                "/v",
-                "d3d12",
-                "/t",
-                "REG_SZ",
-                "/d",
-                "native,builtin",
-                "/f",
-            ]
-        );
     }
 }
 
