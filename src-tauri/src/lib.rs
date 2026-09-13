@@ -249,13 +249,23 @@ pub fn run() {
             tauri_plugin_log::Builder::default()
                 .format(|out, message, record| {
                     let redacted = utils::log_privacy::redact(&message.to_string());
-                    out.finish(format_args!(
-                        "{}[{}][{}] {}",
-                        chrono::Local::now().format("[%Y-%m-%d][%H:%M:%S]"),
+                    let file = record
+                        .file()
+                        .map(utils::log_privacy::redact);
+                    let timestamp = chrono::Local::now().to_rfc3339_opts(
+                        chrono::SecondsFormat::Millis,
+                        false,
+                    );
+                    let formatted = utils::diagnostics::format_app_log(
+                        &timestamp,
+                        record.level().as_str(),
                         record.target(),
-                        record.level(),
-                        redacted
-                    ));
+                        record.module_path(),
+                        file.as_deref(),
+                        record.line(),
+                        &redacted,
+                    );
+                    out.finish(format_args!("{}", formatted));
                 })
                 // The plugin is built able to emit Debug so the Verbose logging
                 // preference can be toggled at runtime; the effective level is
@@ -284,6 +294,20 @@ pub fn run() {
             let settings = models::shared::load_settings_impl(app.handle());
             set_log_privacy(app.handle(), settings.stream_mode);
             apply_log_level(settings.verbose_logging);
+            log::info!(
+                "[startup] event=environment app_version={} os={} os_version={} architecture={} build={} process_id={} session_id={} verbose_logging={} privacy_redaction={} profile_isolation={} legacy_install_mode={}",
+                env!("CARGO_PKG_VERSION"),
+                std::env::consts::OS,
+                sysinfo::System::long_os_version().unwrap_or_else(|| "unknown".to_string()),
+                std::env::consts::ARCH,
+                if cfg!(debug_assertions) { "debug" } else { "release" },
+                std::process::id(),
+                utils::diagnostics::session_id(),
+                settings.verbose_logging,
+                settings.stream_mode,
+                settings.profile_isolation,
+                settings.legacy_install_mode,
+            );
 
             // Which loader a community uses comes from the Thunderstore
             // ecosystem schema. The embedded snapshot answers immediately; the
