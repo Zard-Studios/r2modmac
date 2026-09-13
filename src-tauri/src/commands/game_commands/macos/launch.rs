@@ -15,12 +15,25 @@ const BEPINEX_LOG_GRACE_MS: u64 = 20_000;
 /// games whose disk logging is off — Muck runs BepInEx and never writes one —
 /// while `cache/` is written by the preloader as it patches assemblies. Either
 /// one appearing after the launch means BepInEx got control.
-fn macos_bepinex_took_over(
-    game_path: &std::path::Path,
+fn macos_bepinex_signal_updated(
+    tree_root: &std::path::Path,
     launched_at: std::time::SystemTime,
 ) -> bool {
-    let bepinex = game_path.join("BepInEx");
+    let bepinex = tree_root.join("BepInEx");
     let signals = [bepinex.join("LogOutput.log"), bepinex.join("cache")];
+
+    signals.iter().any(|signal| {
+        // Anything left over from an earlier session proves nothing.
+        std::fs::metadata(signal)
+            .and_then(|meta| meta.modified())
+            .is_ok_and(|modified| modified >= launched_at)
+    })
+}
+
+fn macos_bepinex_took_over(
+    tree_root: &std::path::Path,
+    launched_at: std::time::SystemTime,
+) -> bool {
     let deadline =
         std::time::Instant::now() + std::time::Duration::from_millis(BEPINEX_LOG_GRACE_MS);
 
@@ -32,14 +45,8 @@ fn macos_bepinex_took_over(
             return false;
         }
 
-        for signal in &signals {
-            // Anything left over from an earlier session proves nothing.
-            if std::fs::metadata(signal)
-                .and_then(|meta| meta.modified())
-                .is_ok_and(|modified| modified >= launched_at)
-            {
-                return true;
-            }
+        if macos_bepinex_signal_updated(tree_root, launched_at) {
+            return true;
         }
         std::thread::sleep(std::time::Duration::from_millis(500));
     }
@@ -187,7 +194,7 @@ pub(crate) async fn launch_game_with_mods_for_macos(
         }
         let launched_at = std::time::SystemTime::now();
         launch_via_steam_for_game_path(app, game_path)?;
-        if !macos_bepinex_took_over(&runtime_game_path, launched_at) {
+        if !macos_bepinex_took_over(&bepinex_root, launched_at) {
             // A cancelled wait proves nothing about the loader, so it must not
             // be reported as mods that failed to load.
             super::super::launch_cancel::ensure_not_cancelled()?;
@@ -497,4 +504,55 @@ pub(crate) fn stop_game_for_macos(game_path: &std::path::Path) -> Result<(), Str
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod bepinex_takeover_signal_tests {
+    use super::macos_bepinex_signal_updated;
+
+    fn world(label: &str) -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "r2modmac-bepinex-signal-{}-{}-{}",
+            label,
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    #[test]
+    fn isolated_profile_log_proves_bepinex_loaded() {
+        let root = world("profile-log");
+        let game = root.join("game");
+        let profile = root.join("profiles/active");
+        std::fs::create_dir_all(game.join("BepInEx")).unwrap();
+        std::fs::create_dir_all(profile.join("BepInEx")).unwrap();
+        std::fs::write(
+            profile.join("BepInEx/LogOutput.log"),
+            b"Chainloader started",
+        )
+        .unwrap();
+
+        let before_any_test_file = std::time::UNIX_EPOCH;
+        assert!(macos_bepinex_signal_updated(&profile, before_any_test_file));
+        assert!(!macos_bepinex_signal_updated(&game, before_any_test_file));
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn stale_profile_signal_does_not_confirm_the_new_launch() {
+        let root = world("stale-profile-log");
+        let profile = root.join("profiles/active");
+        std::fs::create_dir_all(profile.join("BepInEx/cache")).unwrap();
+
+        let after_test_files = std::time::SystemTime::now() + std::time::Duration::from_secs(1);
+        assert!(!macos_bepinex_signal_updated(&profile, after_test_files));
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }
