@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import type { InstalledMod, Profile } from '../src/types/profile.ts';
-import { isLoaderPackage, loaderDisplayName, loaderPackageIds } from '../src/utils/loaderPackages.ts';
+import { isLoaderPackage, isReturnOfModdingCommunity, loaderDisplayName, loaderPackageIds, loaderPackageIdsForCommunity } from '../src/utils/loaderPackages.ts';
 import { hasPendingRuntimeInstall } from '../src/utils/profileSync.ts';
 
 const profileWith = (mod: InstalledMod): Profile => ({
@@ -25,6 +25,22 @@ test('the ReturnOfModding loader is more than one package', () => {
     assert.ok(isLoaderPackage('returnofmodding', 'Hell2Modding-Hell2Modding-1.0.110'));
     assert.ok(isLoaderPackage('returnofmodding', 'ReturnOfModding-ReturnOfModding-1.1.30'));
     assert.ok(!isLoaderPackage('returnofmodding', 'LuaENVY-ENVY-1.0.0'));
+});
+
+test('Hades II never falls back to the generic BepInEx bootstrap', () => {
+    assert.equal(isReturnOfModdingCommunity('hades-ii'), true);
+    assert.equal(isReturnOfModdingCommunity('Hades II'), true);
+    assert.equal(isReturnOfModdingCommunity('hadesii'), true);
+    assert.equal(isReturnOfModdingCommunity('risk-of-rain-returns', 'returnofmodding'), true);
+    assert.equal(isReturnOfModdingCommunity('lethal-company', 'bepinex'), false);
+    assert.deepEqual(
+        loaderPackageIdsForCommunity('returnofmodding', 'hades-ii'),
+        ['Hell2Modding-Hell2Modding'],
+    );
+    assert.ok(!loaderPackageIdsForCommunity('returnofmodding', 'hades-ii')
+        .includes('ReturnOfModding-ReturnOfModding'));
+    assert.ok(!loaderPackageIdsForCommunity('returnofmodding', 'hades-ii')
+        .some(id => id.toLowerCase().includes('bepinex')));
 });
 
 test('a community BepInEx fork still counts as the BepInEx runtime', () => {

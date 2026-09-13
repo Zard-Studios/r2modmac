@@ -6,6 +6,12 @@ import type { ModDownloadProgressEvent, ProfileApplySnapshotProgressEvent, Progr
 import { parsePackageReference } from '../utils/modVersioning';
 import { runningOnWindows } from '../utils/platformUtils';
 import { createFrameScheduler, runWithConcurrency } from '../utils/concurrency';
+import {
+    isLoaderPackage,
+    isReturnOfModdingCommunity,
+    loaderDisplayName,
+    loaderPackageIdsForCommunity,
+} from '../utils/loaderPackages';
 
 const MAX_PARALLEL_OPS = 10;
 
@@ -125,42 +131,92 @@ export function useGameSync({
                 await window.ipcRenderer.alert('Game Path Required', 'Please set the game directory in Settings first.');
                 return false;
             }
+
+            // Loader selection is a property of the community, not of whether
+            // its package happens to be present in the profile. In particular,
+            // Hades II uses ReturnOfModding/Hell2Modding and must never enter
+            // the generic BepInEx auto-install path while its profile is empty.
+            // Ask the backend, which resolves the authoritative ecosystem map;
+            // keep the Hades II fallback for older/offline maps.
+            const runtimeHealth = await window.ipcRenderer
+                .checkProfileRuntimeHealth(activeProfile.id, community, activeProfile.platform)
+                .catch(() => null);
+            const runtime = runtimeHealth?.runtime;
+            const isReturnOfModdingRuntime = isReturnOfModdingCommunity(community, runtime);
             updateProfile(activeProfile.id, { needs_sync: true, apply_interrupted: true });
             await persistProfilesNow();
 
             // ── Loader auto-install ───────────────────────────────────────────────
             const isBalatro = community === 'balatro';
             const isOuterWilds = community === 'outerwilds';
-            const hasLoaderInstalled = isBalatro
+            const hasLoaderInstalled = isReturnOfModdingRuntime
+                ? runtimeHealth?.status === 'healthy'
+                : isBalatro
                 ? activeProfile.mods.some(m => m.fullName.toLowerCase().includes('-lovely-'))
                 : isOuterWilds
                 ? activeProfile.mods.some(m => m.fullName.toLowerCase().includes('owml'))
                 : activeProfile.mods.some(m => m.fullName.toLowerCase().includes('bepinexpack'));
-            if (!hasLoaderInstalled) {
-                const requirementQuery = isOuterWilds ? 'OWML' : isBalatro ? 'lovely' : 'BepInExPack';
+            const canAutoInstallLoader = isReturnOfModdingRuntime
+                ? runtimeHealth?.status !== 'unsupported'
+                : !runtime
+                || runtime === 'bepinex'
+                || runtime === 'owml'
+                || runtime === 'lovely';
+            if (!hasLoaderInstalled && canAutoInstallLoader) {
                 setProgressState({
                     isOpen: true,
                     title: 'Checking Requirements',
                     progress: 0,
-                    currentTask: `Searching for ${isOuterWilds ? 'OWML' : isBalatro ? 'Lovely' : 'BepInExPack'}...`,
+                    currentTask: `Searching for ${isReturnOfModdingRuntime
+                        ? loaderDisplayName('returnofmodding')
+                        : isOuterWilds
+                        ? 'OWML'
+                        : isBalatro
+                        ? 'Lovely'
+                        : 'BepInExPack'}...`,
                     isCancelable: true,
                     operation: 'mod-sync',
                 });
-                const res = await window.ipcRenderer.getPackages(community, 0, 20, requirementQuery, 'downloads');
-                const packagesList = res && typeof res === 'object' && 'items' in res ? res.items : (Array.isArray(res) ? res : []);
-                
-                const loaderPkg = Array.isArray(packagesList)
-                    ? packagesList.find((p: Package) => isOuterWilds
-                        ? p.name.toLowerCase() === 'owml'
-                        : isBalatro
-                        ? p.full_name?.toLowerCase().includes('thunderstore-lovely') || p.name.toLowerCase() === 'lovely'
-                        : p.name.toLowerCase().includes('bepinexpack'))
-                    : null;
+
+                let loaderPkg: Package | null = null;
+                if (isReturnOfModdingRuntime) {
+                    // Hades II is a ReturnOfModding game. Resolve its loader by
+                    // the ecosystem package ids; never search the community for
+                    // a generic BepInExPack here.
+                    for (const packageId of loaderPackageIdsForCommunity('returnofmodding', community)) {
+                        const candidate = await window.ipcRenderer
+                            .fetchPackageByName(packageId, community)
+                            .catch(() => null);
+                        if (candidate
+                            && isLoaderPackage('returnofmodding', candidate.full_name)
+                            && candidate.versions.length > 0) {
+                            loaderPkg = candidate;
+                            break;
+                        }
+                    }
+                } else {
+                    const requirementQuery = isOuterWilds ? 'OWML' : isBalatro ? 'lovely' : 'BepInExPack';
+                    const res = await window.ipcRenderer.getPackages(community, 0, 20, requirementQuery, 'downloads');
+                    const packagesList = res && typeof res === 'object' && 'items' in res ? res.items : (Array.isArray(res) ? res : []);
+
+                    loaderPkg = Array.isArray(packagesList)
+                        ? packagesList.find((p: Package) => isOuterWilds
+                            ? p.name.toLowerCase() === 'owml'
+                            : isBalatro
+                            ? p.full_name?.toLowerCase().includes('thunderstore-lovely') || p.name.toLowerCase() === 'lovely'
+                            : p.name.toLowerCase().includes('bepinexpack')) || null
+                        : null;
+                }
 
                 if (loaderPkg) {
                     const version = loaderPkg.versions[0];
                     setProgressState(prev => ({ ...prev, progress: 20, currentTask: `Installing missing requirement: ${loaderPkg.name}...` }));
                     await installModWithDependencies(loaderPkg, version, new Set(), activeProfile.id, undefined, gamePath);
+                } else if (isReturnOfModdingRuntime) {
+                    setProgressState(prev => ({ ...prev, isOpen: false }));
+                    throw new Error(
+                        `No ${loaderDisplayName('returnofmodding')} loader package was found for this community.`
+                    );
                 }
                 setProgressState(prev => ({ ...prev, isOpen: false }));
             }

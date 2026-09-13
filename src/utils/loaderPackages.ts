@@ -31,6 +31,34 @@ export const loaderPackageIds = (runtime: string | undefined): string[] => {
 };
 
 /**
+ * ReturnOfModding communities must not enter the generic BepInEx bootstrap.
+ * The runtime answer normally comes from the backend ecosystem map; the Hades
+ * II spelling fallback keeps the guard active when the map is offline.
+ */
+export const isReturnOfModdingCommunity = (
+    community: string,
+    runtime?: string,
+): boolean => {
+    const normalized = community.toLowerCase().replace(/[\s_]+/g, '-');
+    return runtime === 'returnofmodding'
+        || normalized === 'hades-ii'
+        || normalized === 'hadesii';
+};
+
+/** The loader packages valid for a particular community, in lookup order. */
+export const loaderPackageIdsForCommunity = (
+    runtime: string | undefined,
+    community: string,
+): string[] => {
+    if (runtime === 'returnofmodding' && isReturnOfModdingCommunity(community)) {
+        // Hades II is hooked by Hell2Modding's d3d12.dll. The generic
+        // ReturnOfModding pack ships version.dll and is not a valid fallback.
+        return ['Hell2Modding-Hell2Modding'];
+    }
+    return loaderPackageIds(runtime);
+};
+
+/**
  * Whether `fullName` (with or without a version suffix) is the loader itself.
  *
  * BepInEx keeps a name check alongside the schema list: communities publish

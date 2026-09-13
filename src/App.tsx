@@ -42,7 +42,7 @@ import { useProfileActions } from './hooks/useProfileActions';
 import { useGameSync } from './hooks/useGameSync';
 import { compareVersions, findPinnedVersion, parsePackageReference } from './utils/modVersioning';
 import { getProfileModKey, hasPendingRuntimeInstall, migratePendingSyncBaselines, restoreInstalledMod } from './utils/profileSync';
-import { isLoaderPackage, loaderDisplayName, loaderPackageIds } from './utils/loaderPackages';
+import { isLoaderPackage, isReturnOfModdingCommunity, loaderDisplayName, loaderPackageIdsForCommunity } from './utils/loaderPackages';
 import { isTextEntryTarget, shouldReleaseSearchFocus } from './utils/searchField';
 import { dialogStack } from './utils/dialogStack';
 import { censorText } from './utils/pathCensorUtils';
@@ -1796,7 +1796,10 @@ function App() {
     // snapshot can incorrectly return success after BepInEx is damaged while
     // the app is open.
     const health = await refreshRuntimeHealth();
-    if (health?.status === 'healthy' || hasPendingRuntimeInstall(profile, health?.runtime)) return true;
+    const runtime = health && isReturnOfModdingCommunity(community, health.runtime)
+      ? 'returnofmodding'
+      : health?.runtime;
+    if (health?.status === 'healthy' || hasPendingRuntimeInstall(profile, runtime)) return true;
     if (!health || !health.repairable) {
       if (health?.status === 'unconfigured') setShowSettings(true);
       if (health?.status === 'unsupported') {
@@ -1824,8 +1827,8 @@ function App() {
       await window.ipcRenderer.beginProfileApplyTransaction(profile.id, community);
       repairTransactionStarted = true;
 
-      const matchesRuntime = (pkg: Package) => isLoaderPackage(health.runtime, pkg.full_name);
-      const registeredLoader = profile.mods.find(mod => isLoaderPackage(health.runtime, mod.fullName));
+      const matchesRuntime = (pkg: Package) => isLoaderPackage(runtime, pkg.full_name);
+      const registeredLoader = profile.mods.find(mod => isLoaderPackage(runtime, mod.fullName));
 
       let loaderPackage = registeredLoader
         ? await window.ipcRenderer.fetchPackageByName(
@@ -1839,7 +1842,7 @@ function App() {
         // the ecosystem schema and are asked for by name. Only BepInEx falls
         // back to a search, because communities keep publishing their own
         // BepInExPack forks.
-        for (const packageId of loaderPackageIds(health.runtime)) {
+        for (const packageId of loaderPackageIdsForCommunity(runtime, community)) {
           // The whole Author-Package id: fetchPackageByName needs the author,
           // and a bare name comes back empty (Thunderstore-lovely became
           // "lovely", so repairing Balatro found nothing).
@@ -1850,13 +1853,13 @@ function App() {
           }
         }
       }
-      if ((!loaderPackage || !matchesRuntime(loaderPackage)) && health.runtime === 'bepinex') {
+      if ((!loaderPackage || !matchesRuntime(loaderPackage)) && runtime === 'bepinex') {
         const result = await window.ipcRenderer.getPackages(community, 0, 30, 'BepInExPack', 'downloads');
         loaderPackage = result.items.find(matchesRuntime) || null;
       }
       if (!loaderPackage || loaderPackage.versions.length === 0) {
         throw new Error(
-          `No ${loaderDisplayName(health.runtime)} loader package was found for this community.`
+          `No ${loaderDisplayName(runtime || 'unknown')} loader package was found for this community.`
         );
       }
 
