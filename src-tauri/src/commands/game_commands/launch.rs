@@ -33,6 +33,28 @@ pub async fn launch_game_with_mods(
     profile_id: String,
     platform: Option<String>,
 ) -> Result<(), String> {
+    let launch_id = crate::utils::diagnostics::operation_id();
+    let started = std::time::Instant::now();
+    log::info!(
+        "[launch] event=start launch_id={} mode=modded game={} profile={} platform={}",
+        launch_id,
+        game_identifier,
+        profile_id,
+        platform.as_deref().unwrap_or("auto")
+    );
+    let result =
+        launch_game_with_mods_inner(app, game_identifier, profile_id, platform, &launch_id).await;
+    log_launch_result(&launch_id, "modded", started, &result);
+    result
+}
+
+async fn launch_game_with_mods_inner(
+    app: AppHandle,
+    game_identifier: String,
+    profile_id: String,
+    platform: Option<String>,
+    launch_id: &str,
+) -> Result<(), String> {
     // Clears any cancellation left by a previous attempt, so pressing Play
     // after stopping one launch does not abort the next one instantly.
     launch_cancel::begin_launch();
@@ -51,6 +73,17 @@ pub async fn launch_game_with_mods(
         .await?
         .ok_or_else(|| "Game path not found".to_string())?;
     let game_path = std::path::PathBuf::from(&game_path_str);
+    log::info!(
+        "[launch] event=path_resolved launch_id={} mode=modded game={} platform={} path={}",
+        launch_id,
+        game_identifier,
+        if is_windows_profile {
+            "windows"
+        } else {
+            "macos"
+        },
+        game_path.display()
+    );
 
     let is_outerwilds =
         is_outerwilds_identifier(&game_identifier) || is_outerwilds_game_path(&game_path);
@@ -117,6 +150,28 @@ pub async fn launch_game_vanilla(
     profile_id: String,
     platform: Option<String>,
 ) -> Result<(), String> {
+    let launch_id = crate::utils::diagnostics::operation_id();
+    let started = std::time::Instant::now();
+    log::info!(
+        "[launch] event=start launch_id={} mode=vanilla game={} profile={} platform={}",
+        launch_id,
+        game_identifier,
+        profile_id,
+        platform.as_deref().unwrap_or("auto")
+    );
+    let result =
+        launch_game_vanilla_inner(app, game_identifier, profile_id, platform, &launch_id).await;
+    log_launch_result(&launch_id, "vanilla", started, &result);
+    result
+}
+
+async fn launch_game_vanilla_inner(
+    app: AppHandle,
+    game_identifier: String,
+    profile_id: String,
+    platform: Option<String>,
+    launch_id: &str,
+) -> Result<(), String> {
     // Clears any cancellation left by a previous attempt, so pressing Play
     // after stopping one launch does not abort the next one instantly.
     launch_cancel::begin_launch();
@@ -125,6 +180,17 @@ pub async fn launch_game_vanilla(
         .await?
         .ok_or_else(|| "Game path not found".to_string())?;
     let game_path = std::path::PathBuf::from(&game_path_str);
+    log::info!(
+        "[launch] event=path_resolved launch_id={} mode=vanilla game={} platform={} path={}",
+        launch_id,
+        game_identifier,
+        if is_windows_profile {
+            "windows"
+        } else {
+            "macos"
+        },
+        game_path.display()
+    );
 
     let is_outerwilds =
         is_outerwilds_identifier(&game_identifier) || is_outerwilds_game_path(&game_path);
@@ -156,6 +222,64 @@ pub async fn launch_game_vanilla(
     }
 
     launch_game_vanilla_for_macos(&app, &game_identifier, &profile_id, &game_path_str).await
+}
+
+fn launch_outcome(result: &Result<(), String>) -> &'static str {
+    match result {
+        Ok(()) => "success",
+        Err(error) if error == launch_cancel::LAUNCH_CANCELLED_MESSAGE => "cancelled",
+        Err(_) => "error",
+    }
+}
+
+fn log_launch_result(
+    launch_id: &str,
+    mode: &str,
+    started: std::time::Instant,
+    result: &Result<(), String>,
+) {
+    let elapsed_ms = started.elapsed().as_millis();
+    match result {
+        Ok(()) => log::info!(
+            "[launch] event=finish launch_id={} mode={} outcome={} elapsed_ms={}",
+            launch_id,
+            mode,
+            launch_outcome(result),
+            elapsed_ms
+        ),
+        Err(error) if error == launch_cancel::LAUNCH_CANCELLED_MESSAGE => log::info!(
+            "[launch] event=finish launch_id={} mode={} outcome={} elapsed_ms={}",
+            launch_id,
+            mode,
+            launch_outcome(result),
+            elapsed_ms
+        ),
+        Err(error) => log::error!(
+            "[launch] event=finish launch_id={} mode={} outcome={} elapsed_ms={} error={}",
+            launch_id,
+            mode,
+            launch_outcome(result),
+            elapsed_ms,
+            error
+        ),
+    }
+}
+
+#[cfg(test)]
+mod launch_diagnostics_tests {
+    use super::launch_outcome;
+
+    #[test]
+    fn launch_results_have_distinct_searchable_outcomes() {
+        assert_eq!(launch_outcome(&Ok(())), "success");
+        assert_eq!(
+            launch_outcome(&Err(
+                super::launch_cancel::LAUNCH_CANCELLED_MESSAGE.to_string()
+            )),
+            "cancelled"
+        );
+        assert_eq!(launch_outcome(&Err("runtime missing".to_string())), "error");
+    }
 }
 
 #[command]
