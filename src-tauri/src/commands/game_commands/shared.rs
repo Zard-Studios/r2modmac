@@ -547,11 +547,25 @@ pub(crate) fn choose_bepinex_root(
     profile_dir: &std::path::Path,
     runtime_game_path: &std::path::Path,
 ) -> std::path::PathBuf {
-    if profile_isolation {
-        profile_dir.to_path_buf()
-    } else {
-        runtime_game_path.to_path_buf()
+    if !profile_isolation {
+        return runtime_game_path.to_path_buf();
     }
+
+    // A Windows game running through Wine can only open the isolated tree if
+    // the bottle exposes that host path through one of its drive mappings.
+    // Writing a raw `/Users/...` path into doorstop_config.ini looks valid to
+    // the host-side health check but is meaningless to the Windows process,
+    // which then starts without BepInEx. Keep the traditional game-local tree
+    // for bottles that cannot address the profile instead.
+    if let Some(prefix) = crate::models::shared::find_wine_prefix_root(runtime_game_path) {
+        if crate::commands::game_commands::map_native_path_to_wine_path(&prefix, profile_dir)
+            .is_none()
+        {
+            return runtime_game_path.to_path_buf();
+        }
+    }
+
+    profile_dir.to_path_buf()
 }
 
 /// The same choice, reading the setting for the caller.
@@ -565,16 +579,20 @@ pub(crate) fn bepinex_install_root(
         .map_err(|error| error.to_string())?
         .join("profiles")
         .join(profile_id);
-    Ok(choose_bepinex_root(
-        settings.profile_isolation,
-        &profile_dir,
-        runtime_game_path,
-    ))
+    let root = choose_bepinex_root(settings.profile_isolation, &profile_dir, runtime_game_path);
+    if settings.profile_isolation && root == runtime_game_path {
+        log::warn!(
+            "[bepinex_install_root] Wine cannot address the isolated profile; using the game-local BepInEx tree for {}",
+            runtime_game_path.display()
+        );
+    }
+    Ok(root)
 }
 
 #[cfg(test)]
 mod bepinex_root_choice_tests {
     use super::choose_bepinex_root;
+    use std::fs;
     use std::path::Path;
 
     const GAME: &str = "/Users/x/Library/Application Support/Steam/steamapps/common/Muck";
@@ -604,6 +622,55 @@ mod bepinex_root_choice_tests {
         let two = choose_bepinex_root(true, Path::new("/p/two"), Path::new(GAME));
         assert_ne!(one, two);
         assert!(!one.starts_with(GAME) && !two.starts_with(GAME));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_wine_bottle_without_a_drive_for_the_profile_uses_the_game_root() {
+        let root = std::env::temp_dir().join(format!(
+            "r2modmac-unmapped-profile-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let prefix = root.join("Bottle");
+        let game = prefix.join("drive_c/Games/Lethal Company");
+        let profile = root.join("Profiles/lethal-company");
+        fs::create_dir_all(prefix.join("dosdevices")).unwrap();
+        fs::create_dir_all(&game).unwrap();
+        fs::create_dir_all(&profile).unwrap();
+        std::os::unix::fs::symlink(prefix.join("drive_c"), prefix.join("dosdevices/c:")).unwrap();
+
+        assert_eq!(choose_bepinex_root(true, &profile, &game), game);
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_wine_bottle_with_a_drive_for_the_profile_keeps_isolation() {
+        let root = std::env::temp_dir().join(format!(
+            "r2modmac-mapped-profile-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let prefix = root.join("Bottle");
+        let game = prefix.join("drive_c/Games/Lethal Company");
+        let profile = root.join("Profiles/lethal-company");
+        fs::create_dir_all(prefix.join("dosdevices")).unwrap();
+        fs::create_dir_all(&game).unwrap();
+        fs::create_dir_all(&profile).unwrap();
+        std::os::unix::fs::symlink(prefix.join("drive_c"), prefix.join("dosdevices/c:")).unwrap();
+        std::os::unix::fs::symlink(&root, prefix.join("dosdevices/z:")).unwrap();
+
+        assert_eq!(choose_bepinex_root(true, &profile, &game), profile);
+
+        fs::remove_dir_all(root).unwrap();
     }
 }
 

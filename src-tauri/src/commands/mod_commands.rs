@@ -3681,11 +3681,18 @@ pub(crate) fn point_game_doorstop_ini_at_tree(
     }
 
     let bepinex = tree_root.join("BepInEx");
-    let written_path = crate::models::shared::find_wine_prefix_root(game_dir)
-        .and_then(|prefix| {
+    let written_path =
+        if let Some(prefix) = crate::models::shared::find_wine_prefix_root(game_dir) {
             crate::commands::game_commands::map_native_path_to_wine_path(&prefix, &bepinex)
-        })
-        .unwrap_or_else(|| bepinex.to_string_lossy().to_string());
+                .ok_or_else(|| {
+                    format!(
+                        "The Wine bottle cannot address the isolated BepInEx profile at {}",
+                        bepinex.display()
+                    )
+                })?
+        } else {
+            bepinex.to_string_lossy().to_string()
+        };
 
     let content = fs::read_to_string(&ini).map_err(|error| error.to_string())?;
     let updated = point_doorstop_ini_at_root(&content, &written_path);
@@ -8779,11 +8786,35 @@ mod game_ini_follows_tree_tests {
         assert_eq!(first, second);
         fs::remove_dir_all(root).unwrap();
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_unmapped_wine_profile_is_never_written_as_a_unix_path() {
+        let root = world("unmapped-wine");
+        let bottle = root.join("Bottle");
+        let game = bottle.join("drive_c/Games/Lethal Company");
+        let profile = root.join("profiles/abc");
+        fs::create_dir_all(bottle.join("dosdevices")).unwrap();
+        fs::create_dir_all(&game).unwrap();
+        fs::create_dir_all(profile.join("BepInEx/core")).unwrap();
+        std::os::unix::fs::symlink(bottle.join("drive_c"), bottle.join("dosdevices/c:")).unwrap();
+        fs::write(game.join("doorstop_config.ini"), SHIPPED).unwrap();
+
+        let error = point_game_doorstop_ini_at_tree(&game, &profile).unwrap_err();
+
+        assert!(error.contains("cannot address the isolated BepInEx profile"));
+        assert_eq!(
+            fs::read_to_string(game.join("doorstop_config.ini")).unwrap(),
+            SHIPPED
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
 }
 
 #[cfg(test)]
 mod fresh_lethal_company_bottle_tests {
     use super::*;
+    use crate::commands::game_commands::choose_bepinex_root;
     use crate::commands::game_commands::runtime_health::inspect_windows_bepinex;
     use std::io::{Cursor, Write};
 
@@ -8889,6 +8920,39 @@ dll_search_path_override =\n";
             &game.join("doorstop_config.ini"),
             &profile.join("BepInEx/core"),
         ));
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fresh_bottle_without_a_host_drive_keeps_bepinex_beside_the_game() {
+        let root = std::env::temp_dir().join(format!(
+            "r2modmac-lethal-unmapped-bottle-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let bottle = root.join("Bottle");
+        let game = bottle.join("drive_c/Games/Lethal Company");
+        let profile = root.join("Profiles/lethal-company");
+        fs::create_dir_all(bottle.join("dosdevices")).unwrap();
+        fs::create_dir_all(&game).unwrap();
+        fs::create_dir_all(&profile).unwrap();
+        std::os::unix::fs::symlink(bottle.join("drive_c"), bottle.join("dosdevices/c:")).unwrap();
+
+        let install_root = choose_bepinex_root(true, &profile, &game);
+        assert_eq!(install_root, game);
+
+        let pack = bepinex_pack_fixture();
+        let mut archive = zip::ZipArchive::new(Cursor::new(pack)).unwrap();
+        extract_bepinex_pack_to_root(&mut archive, &install_root, false, false).unwrap();
+
+        assert!(game.join("BepInEx/core/BepInEx.Preloader.dll").is_file());
+        assert!(game.join("winhttp.dll").is_file());
+        assert!(!inspect_windows_bepinex(&game, &game, false).blocks_modded_launch());
 
         fs::remove_dir_all(root).unwrap();
     }
