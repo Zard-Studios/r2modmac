@@ -1453,7 +1453,17 @@ fn normalize_return_of_modding_entry(
     let mut target = std::path::PathBuf::from("ReturnOfModding")
         .join("plugins")
         .join(package_name);
-    for component in components {
+    // ReturnOfModding packages may put their Lua payload either at archive
+    // root or below a top-level `plugins/` directory. r2modman treats those
+    // layouts identically: the *contents* of `plugins/` land directly in the
+    // package folder. Keeping that wrapper produced
+    // `Author-Mod/plugins/main.lua`, which ReturnOfModding never discovers.
+    let payload = if first == "plugins" {
+        &components[1..]
+    } else {
+        &components[..]
+    };
+    for component in payload {
         target.push(component);
     }
     Some(target)
@@ -2053,6 +2063,52 @@ mod return_of_modding_tests {
             "updates must preserve the user's ReturnOfModding config"
         );
         assert!(!root.join("BepInEx").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn plugin_flattens_the_top_level_plugins_wrapper_like_r2modman() {
+        let bytes = fixture(&[
+            ("manifest.json", b"{}"),
+            ("plugins/main.lua", b"plugin"),
+            ("plugins/config.lua", b"config"),
+            ("plugins/Scripts/helper.lua", b"helper"),
+        ]);
+        let root = test_dir("plugin-wrapper");
+        fs::create_dir_all(&root).unwrap();
+
+        let mut archive = zip::ZipArchive::new(Cursor::new(&bytes)).unwrap();
+        let files = collect_return_of_modding_files(
+            &mut archive,
+            "NikkelM-Cosmetics_API-1.1.4",
+        )
+        .unwrap();
+        assert!(files.contains(&std::path::PathBuf::from(
+            "ReturnOfModding/plugins/NikkelM-Cosmetics_API/main.lua"
+        )));
+        assert!(!files.iter().any(|path| path.components().any(|component| {
+            component.as_os_str().eq_ignore_ascii_case("plugins")
+                && path.starts_with(
+                    std::path::Path::new("ReturnOfModding/plugins/NikkelM-Cosmetics_API/plugins"),
+                )
+        })));
+
+        let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
+        extract_return_of_modding_to_root(
+            &mut archive,
+            &root,
+            "NikkelM-Cosmetics_API-1.1.4",
+        )
+        .unwrap();
+        let package = root.join("ReturnOfModding/plugins/NikkelM-Cosmetics_API");
+        assert_eq!(fs::read(package.join("main.lua")).unwrap(), b"plugin");
+        assert_eq!(fs::read(package.join("config.lua")).unwrap(), b"config");
+        assert_eq!(
+            fs::read(package.join("Scripts/helper.lua")).unwrap(),
+            b"helper"
+        );
+        assert!(!package.join("plugins").exists());
+
         fs::remove_dir_all(root).unwrap();
     }
 
