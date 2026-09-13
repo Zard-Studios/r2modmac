@@ -26,6 +26,137 @@ fn managed_install_root(
         bepinex_root
     }
 }
+
+fn return_of_modding_mods_yaml(
+    profile: &serde_json::Value,
+    community: &str,
+) -> Result<String, String> {
+    let entries = profile["mods"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|profile_mod| {
+            let full_name = profile_mod["fullName"].as_str()?;
+            let version = profile_mod["versionNumber"].as_str().unwrap_or("0.0.0");
+            let package_name = full_name
+                .strip_suffix(&format!("-{version}"))
+                .unwrap_or(full_name);
+            let (namespace, short_name) = package_name
+                .split_once('-')
+                .unwrap_or((package_name, package_name));
+            let mut version_parts = version
+                .split('.')
+                .map(|part| part.parse::<u64>().unwrap_or(0));
+            let source_is_online = profile_mod["source"].as_str() != Some("local");
+            let website_url = if source_is_online {
+                format!("https://thunderstore.io/c/{community}/p/{namespace}/{short_name}/")
+            } else {
+                String::new()
+            };
+
+            Some(serde_json::json!({
+                "manifestVersion": 1,
+                "name": package_name,
+                "authorName": profile_mod["author"].as_str().unwrap_or(namespace),
+                "websiteUrl": website_url,
+                "displayName": profile_mod["displayName"].as_str().unwrap_or(short_name),
+                "description": profile_mod["description"].as_str().unwrap_or(""),
+                "gameVersion": "0",
+                "networkMode": "both",
+                "packageType": "other",
+                "installMode": "managed",
+                "installedAtTime": 0,
+                "loaders": [],
+                "dependencies": [],
+                "incompatibilities": [],
+                "optionalDependencies": [],
+                "versionNumber": {
+                    "major": version_parts.next().unwrap_or(0),
+                    "minor": version_parts.next().unwrap_or(0),
+                    "patch": version_parts.next().unwrap_or(0),
+                },
+                "enabled": profile_mod["enabled"].as_bool().unwrap_or(true),
+                "onlineSource": source_is_online,
+                "trustedPackage": false,
+            }))
+        })
+        .collect::<Vec<_>>();
+
+    serde_yaml::to_string(&entries)
+        .map_err(|error| format!("Failed to serialize ReturnOfModding mods.yml: {error}"))
+}
+
+fn write_return_of_modding_mods_yml(
+    profile: &serde_json::Value,
+    community: &str,
+    game_path: &std::path::Path,
+) -> Result<(), String> {
+    let output = game_path.join("mods.yml");
+    let yaml = return_of_modding_mods_yaml(profile, community)?;
+    fs::write(&output, yaml)
+        .map_err(|error| format!("Failed to write ReturnOfModding mod list at {output:?}: {error}"))
+}
+
+fn set_return_of_modding_plugin_enabled(
+    game_path: &std::path::Path,
+    package_name: &str,
+    enabled: bool,
+) -> Result<bool, String> {
+    let plugin_dir = game_path
+        .join("ReturnOfModding")
+        .join("plugins")
+        .join(package_name);
+    if !plugin_dir.is_dir() {
+        return Ok(false);
+    }
+
+    // ReturnOfModding discovers a plugin by finding main.lua and then walking
+    // up to manifest.json. It does not consume the `enabled` field in
+    // mods.yml. Hide only the discovery marker instead of renaming every file
+    // in the package as r2modman does; this is reversible and leaves configs
+    // and plugin data untouched.
+    let active_manifest = plugin_dir.join("manifest.json");
+    let disabled_manifest = plugin_dir.join("manifest.json.old");
+    let (source, destination) = if enabled {
+        (&disabled_manifest, &active_manifest)
+    } else {
+        (&active_manifest, &disabled_manifest)
+    };
+
+    if !source.is_file() {
+        return Ok(false);
+    }
+    if destination.exists() {
+        return Err(format!(
+            "Cannot {} ReturnOfModding plugin {package_name}: both {:?} and {:?} exist",
+            if enabled { "enable" } else { "disable" },
+            active_manifest,
+            disabled_manifest
+        ));
+    }
+
+    fs::rename(source, destination).map_err(|error| {
+        format!(
+            "Failed to {} ReturnOfModding plugin {package_name}: {error}",
+            if enabled { "enable" } else { "disable" }
+        )
+    })?;
+    Ok(true)
+}
+
+fn return_of_modding_package_name(full_name: &str) -> &str {
+    full_name
+        .rsplit_once('-')
+        .filter(|(_, version)| {
+            version.contains('.')
+                && version
+                    .chars()
+                    .all(|character| character.is_ascii_digit() || character == '.')
+        })
+        .map(|(package, _)| package)
+        .unwrap_or(full_name)
+}
+
 use tauri::command;
 
 #[command]
@@ -791,6 +922,125 @@ pub async fn sync_profile_to_game(
         }));
     }
 
+    // ReturnOfModding keeps disabled plugins on disk, but it does not read the
+    // enabled field in mods.yml. Reusing the BepInEx reconciliation below
+    // would delete disabled plugins; this branch instead hides/restores each
+    // plugin's manifest.json, which is the runtime's discovery marker.
+    if is_return_of_modding_profile {
+        let all_profile_mods = profile["mods"].as_array().map(Vec::as_slice).unwrap_or(&[]);
+        let all_profile_full_names = all_profile_mods
+            .iter()
+            .filter_map(|mod_entry| mod_entry["fullName"].as_str())
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        let all_profile_full_by_key = all_profile_full_names
+            .iter()
+            .map(|full_name| (extract_mod_key(full_name), full_name.to_lowercase()))
+            .collect::<std::collections::HashMap<_, _>>();
+
+        let stored = load_owned_mod_manifests(&app, &profile_id, GAME_MANIFEST_SCOPE)?
+            .into_iter()
+            .filter(|entry| manifest_matches_target_root(&entry.manifest, runtime_game_path))
+            .collect::<Vec<_>>();
+        let (manifests_to_remove, manifests_to_keep): (Vec<_>, Vec<_>) =
+            stored.into_iter().partition(|entry| {
+                all_profile_full_by_key
+                    .get(&entry.manifest.mod_key)
+                    .is_none_or(|full| full != &entry.manifest.mod_full_name.to_lowercase())
+            });
+
+        let installed_manifest_keys = manifests_to_keep
+            .iter()
+            .filter(|entry| manifest_files_exist(runtime_game_path, &entry.manifest.files))
+            .map(|entry| entry.manifest.mod_key.clone())
+            .collect::<std::collections::HashSet<_>>();
+        let plugin_root = runtime_game_path.join("ReturnOfModding").join("plugins");
+        let installed_plugin_keys = fs::read_dir(&plugin_root)
+            .ok()
+            .into_iter()
+            .flatten()
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| entry.path().is_dir())
+            .map(|entry| extract_mod_key(&entry.file_name().to_string_lossy()))
+            .collect::<std::collections::HashSet<_>>();
+        let loader_installed =
+            !crate::models::loaders::return_of_modding_proxies(runtime_game_path).is_empty();
+
+        let mut to_install = desired_key_set
+            .iter()
+            .filter(|key| {
+                let Some(full_name) = desired_full_by_key.get(*key) else {
+                    return false;
+                };
+                if crate::models::loaders::is_loader_package(
+                    &crate::models::loaders::PackageLoader::ReturnOfModding,
+                    full_name,
+                ) {
+                    return !loader_installed && !installed_manifest_keys.contains(*key);
+                }
+                !installed_manifest_keys.contains(*key) && !installed_plugin_keys.contains(*key)
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        to_install.sort();
+
+        ensure_finalize_ready(finalize, to_install.len())?;
+        let mut removed = 0;
+        if finalize {
+            // A disabled plugin owns manifest.json even though its live file is
+            // manifest.json.old. Restore that one marker before uninstall or a
+            // version replacement so the ordinary ownership cleanup can remove
+            // the complete old package and never strand a stale .old file.
+            for entry in &manifests_to_remove {
+                let full_name = &entry.manifest.mod_full_name;
+                if !crate::models::loaders::is_loader_package(
+                    &crate::models::loaders::PackageLoader::ReturnOfModding,
+                    full_name,
+                ) {
+                    set_return_of_modding_plugin_enabled(
+                        runtime_game_path,
+                        return_of_modding_package_name(full_name),
+                        true,
+                    )?;
+                }
+            }
+            removed = cleanup_owned_mod_manifests(
+                runtime_game_path,
+                &manifests_to_remove,
+                &manifests_to_keep,
+            )?;
+            for profile_mod in all_profile_mods {
+                let Some(full_name) = profile_mod["fullName"].as_str() else {
+                    continue;
+                };
+                if crate::models::loaders::is_loader_package(
+                    &crate::models::loaders::PackageLoader::ReturnOfModding,
+                    full_name,
+                ) {
+                    continue;
+                }
+                set_return_of_modding_plugin_enabled(
+                    runtime_game_path,
+                    return_of_modding_package_name(full_name),
+                    profile_mod["enabled"].as_bool().unwrap_or(true),
+                )?;
+            }
+            write_return_of_modding_mods_yml(profile, &game_identifier, runtime_game_path)?;
+            log::debug!(
+                "[sync_profile_to_game] ReturnOfModding profile wrote mods.yml at {:?}",
+                runtime_game_path.join("mods.yml")
+            );
+        }
+
+        return Ok(serde_json::json!({
+            "removed": removed,
+            "to_install": to_install,
+            "already_installed": installed_manifest_keys.len() + installed_plugin_keys.len(),
+            "cached": 0,
+            "pending_removals": if finalize { 0 } else { manifests_to_remove.len() }
+        }));
+    }
+
     let all_manifests = load_owned_mod_manifests(&app, &profile_id, bepinex_scope)?;
     let (stored_manifests, foreign_manifests): (Vec<_>, Vec<_>) = all_manifests
         .into_iter()
@@ -1120,8 +1370,81 @@ fn windows_bepinex_runtime_is_installed(game_path: &std::path::Path) -> bool {
 mod tests {
     use super::{
         ensure_finalize_ready, key_is_bepinex_runtime_pack, managed_install_root,
+        return_of_modding_mods_yaml, set_return_of_modding_plugin_enabled,
         windows_bepinex_runtime_is_installed,
     };
+
+    #[test]
+    fn return_of_modding_mod_list_tracks_enabled_and_disabled_profile_entries() {
+        let profile = serde_json::json!({
+            "mods": [
+                {
+                    "fullName": "zerp-MainMenuRestoration-1.0.2",
+                    "versionNumber": "1.0.2",
+                    "displayName": "MainMenuRestoration",
+                    "author": "zerp",
+                    "description": "Restores an earlier main menu",
+                    "enabled": false
+                },
+                {
+                    "fullName": "Hell2Modding-Hell2Modding-1.0.112",
+                    "versionNumber": "1.0.112",
+                    "enabled": true
+                }
+            ]
+        });
+
+        let yaml = return_of_modding_mods_yaml(&profile, "hades-ii").unwrap();
+        let entries: serde_yaml::Value = serde_yaml::from_str(&yaml).unwrap();
+        let entries = entries.as_sequence().unwrap();
+
+        assert_eq!(entries.len(), 2);
+        assert_eq!(
+            entries[0]["name"].as_str(),
+            Some("zerp-MainMenuRestoration")
+        );
+        assert_eq!(entries[0]["enabled"].as_bool(), Some(false));
+        assert_eq!(entries[0]["versionNumber"]["patch"].as_u64(), Some(2));
+        assert_eq!(entries[1]["enabled"].as_bool(), Some(true));
+        assert_eq!(entries[1]["versionNumber"]["patch"].as_u64(), Some(112));
+    }
+
+    #[test]
+    fn return_of_modding_toggle_changes_the_runtime_discovery_marker_only() {
+        let root = std::env::temp_dir().join(format!(
+            "r2modmac-rom-toggle-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let plugin = root.join("ReturnOfModding/plugins/zerp-MainMenuRestoration");
+        let config = root.join("ReturnOfModding/config/zerp-MainMenuRestoration/menu.cfg");
+        std::fs::create_dir_all(&plugin).unwrap();
+        std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+        std::fs::write(plugin.join("manifest.json"), b"{}").unwrap();
+        std::fs::write(plugin.join("main.lua"), b"return {}").unwrap();
+        std::fs::write(&config, b"menu = random").unwrap();
+
+        assert!(
+            set_return_of_modding_plugin_enabled(&root, "zerp-MainMenuRestoration", false,)
+                .unwrap()
+        );
+        assert!(!plugin.join("manifest.json").exists());
+        assert!(plugin.join("manifest.json.old").is_file());
+        assert!(plugin.join("main.lua").is_file());
+        assert!(config.is_file());
+
+        assert!(
+            set_return_of_modding_plugin_enabled(&root, "zerp-MainMenuRestoration", true,).unwrap()
+        );
+        assert!(plugin.join("manifest.json").is_file());
+        assert!(!plugin.join("manifest.json.old").exists());
+        assert!(config.is_file());
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn only_the_runtime_pack_is_skipped_once_bepinex_is_installed() {

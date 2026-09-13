@@ -82,7 +82,10 @@ async fn transaction_targets(
         // The pack's proxy DLL is named per pack (version.dll for
         // ReturnOfModding, d3d12.dll for Hell2Modding), so every name a pack
         // can install has to be part of the transaction snapshot.
-        let mut targets = vec![game_root.join("ReturnOfModding")];
+        let mut targets = vec![
+            game_root.join("ReturnOfModding"),
+            game_root.join("mods.yml"),
+        ];
         for name in crate::models::loaders::RETURN_OF_MODDING_PROXY_NAMES {
             targets.push(game_root.join(name));
             targets.push(game_root.join(format!("{name}_DISABLED")));
