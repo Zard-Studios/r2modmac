@@ -158,6 +158,54 @@ fn return_of_modding_package_name(full_name: &str) -> &str {
         .unwrap_or(full_name)
 }
 
+fn reconcile_return_of_modding_plugin_visibility(
+    game_path: &std::path::Path,
+    managed_packages: impl IntoIterator<Item = String>,
+    active_profile_mods: &[serde_json::Value],
+) -> Result<usize, String> {
+    let active_states = active_profile_mods
+        .iter()
+        .filter_map(|profile_mod| {
+            let full_name = profile_mod["fullName"].as_str()?;
+            if crate::models::loaders::is_loader_package(
+                &crate::models::loaders::PackageLoader::ReturnOfModding,
+                full_name,
+            ) {
+                return None;
+            }
+            Some((
+                return_of_modding_package_name(full_name).to_lowercase(),
+                profile_mod["enabled"].as_bool().unwrap_or(true),
+            ))
+        })
+        .collect::<std::collections::HashMap<_, _>>();
+
+    // ReturnOfModding has one game-side plugin directory even though
+    // r2modmac exposes independent profiles. Only touch packages that an
+    // r2modmac ownership manifest claims; manually installed plugins remain
+    // outside our control. A package absent from the active profile is hidden
+    // just like a package whose frontend toggle is off.
+    let mut packages = managed_packages
+        .into_iter()
+        .map(|package| (package.to_lowercase(), package))
+        .collect::<std::collections::HashMap<_, _>>()
+        .into_values()
+        .collect::<Vec<_>>();
+    packages.sort_by_key(|package| package.to_lowercase());
+
+    let mut changed = 0;
+    for package in packages {
+        let enabled = active_states
+            .get(&package.to_lowercase())
+            .copied()
+            .unwrap_or(false);
+        if set_return_of_modding_plugin_enabled(game_path, &package, enabled)? {
+            changed += 1;
+        }
+    }
+    Ok(changed)
+}
+
 fn move_return_of_modding_payload_entry(
     source: &std::path::Path,
     destination: &std::path::Path,
@@ -1013,6 +1061,40 @@ pub async fn sync_profile_to_game(
     // plugin's manifest.json, which is the runtime's discovery marker.
     if is_return_of_modding_profile {
         let all_profile_mods = profile["mods"].as_array().map(Vec::as_slice).unwrap_or(&[]);
+        let mut managed_plugin_packages = std::collections::HashSet::new();
+        for candidate_profile in &profiles {
+            let Some(candidate_profile_id) = candidate_profile["id"].as_str() else {
+                continue;
+            };
+            let candidate_manifests = match load_owned_mod_manifests(
+                &app,
+                candidate_profile_id,
+                GAME_MANIFEST_SCOPE,
+            ) {
+                Ok(manifests) => manifests,
+                Err(error) => {
+                    log::warn!(
+                            "[sync_profile_to_game] Could not inspect ReturnOfModding ownership for profile {}: {}",
+                            candidate_profile_id,
+                            error
+                        );
+                    continue;
+                }
+            };
+            for entry in candidate_manifests {
+                if !manifest_matches_target_root(&entry.manifest, runtime_game_path)
+                    || crate::models::loaders::is_loader_package(
+                        &crate::models::loaders::PackageLoader::ReturnOfModding,
+                        &entry.manifest.mod_full_name,
+                    )
+                {
+                    continue;
+                }
+                managed_plugin_packages.insert(
+                    return_of_modding_package_name(&entry.manifest.mod_full_name).to_string(),
+                );
+            }
+        }
         let all_profile_full_names = all_profile_mods
             .iter()
             .filter_map(|mod_entry| mod_entry["fullName"].as_str())
@@ -1128,22 +1210,15 @@ pub async fn sync_profile_to_game(
                 &manifests_to_remove,
                 &manifests_to_keep,
             )?;
-            for profile_mod in all_profile_mods {
-                let Some(full_name) = profile_mod["fullName"].as_str() else {
-                    continue;
-                };
-                if crate::models::loaders::is_loader_package(
-                    &crate::models::loaders::PackageLoader::ReturnOfModding,
-                    full_name,
-                ) {
-                    continue;
-                }
-                set_return_of_modding_plugin_enabled(
-                    runtime_game_path,
-                    return_of_modding_package_name(full_name),
-                    profile_mod["enabled"].as_bool().unwrap_or(true),
-                )?;
-            }
+            let visibility_changes = reconcile_return_of_modding_plugin_visibility(
+                runtime_game_path,
+                managed_plugin_packages,
+                all_profile_mods,
+            )?;
+            log::debug!(
+                "[sync_profile_to_game] Reconciled ReturnOfModding visibility for the active profile ({} marker changes)",
+                visibility_changes
+            );
             write_return_of_modding_mods_yml(profile, &game_identifier, runtime_game_path)?;
             log::debug!(
                 "[sync_profile_to_game] ReturnOfModding profile wrote mods.yml at {:?}",
@@ -1490,8 +1565,9 @@ mod tests {
     use super::{
         ensure_finalize_ready, flatten_return_of_modding_manifest_paths,
         key_is_bepinex_runtime_pack, managed_install_root,
-        migrate_nested_return_of_modding_plugins, return_of_modding_mods_yaml,
-        set_return_of_modding_plugin_enabled, windows_bepinex_runtime_is_installed,
+        migrate_nested_return_of_modding_plugins, reconcile_return_of_modding_plugin_visibility,
+        return_of_modding_mods_yaml, set_return_of_modding_plugin_enabled,
+        windows_bepinex_runtime_is_installed,
     };
 
     #[test]
@@ -1562,6 +1638,80 @@ mod tests {
         assert!(plugin.join("manifest.json").is_file());
         assert!(!plugin.join("manifest.json.old").exists());
         assert!(config.is_file());
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn return_of_modding_profile_switches_and_individual_toggles_share_one_game_tree() {
+        let root = std::env::temp_dir().join(format!(
+            "r2modmac-rom-profiles-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let plugins = root.join("ReturnOfModding/plugins");
+        let first = plugins.join("Author-FirstMod");
+        let second = plugins.join("Author-SecondMod");
+        let manually_installed = plugins.join("Manual-UnmanagedMod");
+        let preserved_config = root.join("ReturnOfModding/config/Author-FirstMod/settings.cfg");
+        let preserved_data =
+            root.join("ReturnOfModding/plugins_data/Author-SecondMod/save-data.json");
+        for plugin in [&first, &second, &manually_installed] {
+            std::fs::create_dir_all(plugin).unwrap();
+            std::fs::write(plugin.join("manifest.json"), b"{}").unwrap();
+            std::fs::write(plugin.join("main.lua"), b"return {}").unwrap();
+        }
+        std::fs::create_dir_all(preserved_config.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(preserved_data.parent().unwrap()).unwrap();
+        std::fs::write(&preserved_config, b"setting = true").unwrap();
+        std::fs::write(&preserved_data, b"persistent").unwrap();
+
+        let managed = || {
+            vec![
+                "Author-FirstMod".to_string(),
+                "Author-SecondMod".to_string(),
+            ]
+        };
+        let first_profile = vec![serde_json::json!({
+            "fullName": "Author-FirstMod-1.0.0",
+            "enabled": true
+        })];
+        reconcile_return_of_modding_plugin_visibility(&root, managed(), &first_profile).unwrap();
+        assert!(first.join("manifest.json").is_file());
+        assert!(second.join("manifest.json.old").is_file());
+
+        let second_profile = vec![serde_json::json!({
+            "fullName": "Author-SecondMod-1.0.0",
+            "enabled": true
+        })];
+        reconcile_return_of_modding_plugin_visibility(&root, managed(), &second_profile).unwrap();
+        assert!(first.join("manifest.json.old").is_file());
+        assert!(second.join("manifest.json").is_file());
+
+        reconcile_return_of_modding_plugin_visibility(&root, managed(), &[]).unwrap();
+        assert!(first.join("manifest.json.old").is_file());
+        assert!(second.join("manifest.json.old").is_file());
+        assert!(manually_installed.join("manifest.json").is_file());
+
+        let individually_disabled = vec![serde_json::json!({
+            "fullName": "Author-FirstMod-1.0.0",
+            "enabled": false
+        })];
+        reconcile_return_of_modding_plugin_visibility(&root, managed(), &individually_disabled)
+            .unwrap();
+        assert!(first.join("manifest.json.old").is_file());
+        assert!(second.join("manifest.json.old").is_file());
+        assert!(manually_installed.join("manifest.json").is_file());
+        assert_eq!(std::fs::read(&preserved_config).unwrap(), b"setting = true");
+        assert_eq!(std::fs::read(&preserved_data).unwrap(), b"persistent");
+
+        reconcile_return_of_modding_plugin_visibility(&root, managed(), &first_profile).unwrap();
+        assert!(first.join("manifest.json").is_file());
+        assert!(second.join("manifest.json.old").is_file());
+        assert!(manually_installed.join("manifest.json").is_file());
 
         std::fs::remove_dir_all(root).unwrap();
     }
