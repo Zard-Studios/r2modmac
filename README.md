@@ -142,7 +142,7 @@ npm run tauri build
 ## 🤝 Contributing
 
 Contributions are welcome! Feel free to:
-- 🐛 [Report bugs using the required bug form](https://github.com/Zard-Studios/r2modmac/issues/new?template=bug_report.yml). Bug reports missing the information required to investigate and reproduce them may be closed as not planned.
+- 🐛 [Report bugs](https://github.com/Zard-Studios/r2modmac/issues/new?template=bug_report.yml). Bug reports missing the information required to investigate and reproduce them may be closed as not planned.
 - 💡 [Propose new features or open another topic](https://github.com/Zard-Studios/r2modmac/issues/new) using a free-form issue.
 - 🔧 Submit pull requests
 
