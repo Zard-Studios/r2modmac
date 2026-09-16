@@ -18,7 +18,7 @@ body:
       options:
         - label: I searched the existing issues and did not find a duplicate.
           required: true
-        - label: I am using a current or otherwise supported version of r2modmac.
+        - label: I provided the most accurate r2modmac version information available to me.
           required: true
         - label: I understand that an incomplete bug report may be closed as not planned.
           required: true
@@ -27,8 +27,8 @@ body:
     id: r2modmac-version
     attributes:
       label: r2modmac version
-      description: Enter the exact version shown in r2modmac settings. Do not write only "latest".
-      placeholder: "Example: 1.0.5"
+      description: Enter the exact version when known. Older releases may not display it in settings; in that case provide the release date, download filename, or write "Unknown (old version)". Do not write only "latest".
+      placeholder: "Examples: 1.0.5; downloaded around August 2026; Unknown (old version)"
     validations:
       required: true
 
@@ -96,11 +96,11 @@ body:
       required: true
 
   - type: input
-    id: game-and-profile
+    id: game-and-store
     attributes:
-      label: Game, store, and affected profile
-      description: Name the game, the store or launcher, and the affected profile or modpack if relevant.
-      placeholder: "Example: Hades II, Steam, profile Default"
+      label: Game and store or launcher
+      description: Name the affected game and where or how it is launched.
+      placeholder: "Example: Hades II, Steam"
     validations:
       required: true
 
