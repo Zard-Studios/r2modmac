@@ -27,7 +27,7 @@ body:
     id: r2modmac-version
     attributes:
       label: r2modmac version
-      description: Enter the exact version when known. Older releases may not display it in settings; in that case provide the release date, download filename, or write "Unknown (old version)". Do not write only "latest".
+      description: Enter the exact version when known. Older releases may not display it in settings; in that case provide the release date, or write "Unknown (old version)". Do not write only "latest".
       placeholder: "Examples: 1.0.5; downloaded around August 2026; Unknown (old version)"
     validations:
       required: true
