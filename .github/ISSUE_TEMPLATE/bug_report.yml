@@ -9,7 +9,7 @@ body:
       value: |
         Thanks for helping improve r2modmac.
 
-        This form is required for bug reports. Bug reports opened without the information needed to investigate and reproduce them may be closed as not planned. Feature requests and other topics may use a blank issue instead.
+        This form is required for bug reports. Bug reports opened without the information needed to investigate and reproduce them may be closed as not planned. For feature requests and other topics, choose Other instead.
 
   - type: checkboxes
     id: checks
