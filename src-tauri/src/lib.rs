@@ -583,7 +583,9 @@ pub fn run() {
                 let _ = app.emit("show-preferences", ());
             }
             "report_issue" => {
-                let _ = open::that("https://github.com/Zard-Studios/r2modmac/issues/new");
+                let _ = open::that(
+                    "https://github.com/Zard-Studios/r2modmac/issues/new?template=bug_report.yml",
+                );
             }
             "github" => {
                 let _ = open::that("https://github.com/Zard-Studios/r2modmac");

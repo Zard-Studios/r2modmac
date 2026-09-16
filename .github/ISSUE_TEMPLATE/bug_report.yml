@@ -1,0 +1,152 @@
+name: Bug report (required information)
+description: Use this form for bugs. Incomplete bug reports may be closed as not planned.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve r2modmac.
+
+        This form is required for bug reports. Bug reports opened without the information needed to investigate and reproduce them may be closed as not planned. Feature requests and other topics may use a blank issue instead.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched the existing issues and did not find a duplicate.
+          required: true
+        - label: I am using a current or otherwise supported version of r2modmac.
+          required: true
+        - label: I understand that an incomplete bug report may be closed as not planned.
+          required: true
+
+  - type: input
+    id: r2modmac-version
+    attributes:
+      label: r2modmac version
+      description: Enter the exact version shown in r2modmac settings. Do not write only "latest".
+      placeholder: "Example: 1.0.5"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: operating-system
+    attributes:
+      label: Operating system
+      options:
+        - macOS
+        - Windows
+        - Linux
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: system-details
+    attributes:
+      label: Operating system version and architecture
+      description: Include the exact OS release and CPU architecture.
+      placeholder: "Examples: macOS 15.6 arm64; Windows 11 24H2 x64; Ubuntu 24.04 x64"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: compatibility-layer
+    attributes:
+      label: Compatibility layer or game loader
+      description: Select Native when the game runs directly on the operating system.
+      options:
+        - Native / not applicable
+        - CrossOver (macOS)
+        - Whisky (macOS)
+        - Sikarugir (macOS)
+        - Wineskin / Kegworks (macOS)
+        - Porting Kit / Game Porting Toolkit (macOS)
+        - Wine (macOS or Linux)
+        - Proton / Proton-GE (Linux)
+        - Bottles (Linux)
+        - Lutris (Linux)
+        - Steam Linux Runtime (Linux)
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: compatibility-version
+    attributes:
+      label: Compatibility layer or loader version
+      description: Enter the exact version and engine/build when available. Enter "N/A" for a native game.
+      placeholder: "Examples: CrossOver 26.~; Proton 10.~; Wine 10.~; N/A"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: profile-platform
+    attributes:
+      label: Profile platform
+      description: Select the platform assigned to the affected r2modmac profile, not the operating system currently running r2modmac. Choose N/A only when the problem is not related to a specific profile.
+      options:
+        - macOS
+        - Windows
+        - N/A
+    validations:
+      required: true
+
+  - type: input
+    id: game-and-profile
+    attributes:
+      label: Game, store, and affected profile
+      description: Name the game, the store or launcher, and the affected profile or modpack if relevant.
+      placeholder: "Example: Hades II, Steam, profile Default"
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem description
+      description: Clearly describe what happened, what you expected, how often it happens, and whether it worked in an earlier r2modmac version.
+      placeholder: |
+        What happened:
+
+        What I expected:
+
+        Frequency (always / sometimes / once):
+
+        Last known working version, if any:
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Start from opening r2modmac and list the shortest reliable sequence that triggers the problem. Mention any relevant mods or settings.
+      placeholder: |
+        1. Open r2modmac...
+        2. Select...
+        3. Click...
+        4. Observe...
+    validations:
+      required: true
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Logs, screenshots, and videos
+      description: Optional. Enable verbose logging in r2modmac settings, reproduce the problem, then drag the log file or media here.
+      placeholder: Drag files here or paste links.
+    validations:
+      required: false
+
+  - type: textarea
+    id: additional-notes
+    attributes:
+      label: Anything else?
+      description: Optional. Add anything else you would like us to know.
+      placeholder: If you want to add something that was not covered above, write it here.
+    validations:
+      required: false

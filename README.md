@@ -142,8 +142,8 @@ npm run tauri build
 ## 🤝 Contributing
 
 Contributions are welcome! Feel free to:
-- 🐛 Report bugs
-- 💡 Propose new features
+- 🐛 [Report bugs using the required bug form](https://github.com/Zard-Studios/r2modmac/issues/new?template=bug_report.yml). Bug reports missing the information required to investigate and reproduce them may be closed as not planned.
+- 💡 [Propose new features or open another topic](https://github.com/Zard-Studios/r2modmac/issues/new) using a free-form issue.
 - 🔧 Submit pull requests
 
 ## 📝 License
@@ -179,6 +179,6 @@ r2modmac is and will always remain open-source. It has no analytics or telemetry
 
 **Made with ❤️ for the modding community**
 
-[Report Bug](https://github.com/Zard-Studios/r2modmac/issues) · [Request Feature](https://github.com/Zard-Studios/r2modmac/issues)
+[Report Bug](https://github.com/Zard-Studios/r2modmac/issues/new?template=bug_report.yml) · [Open a Free-form Issue](https://github.com/Zard-Studios/r2modmac/issues/new)
 
 </div>
