@@ -1,5 +1,5 @@
-name: Bug report (required information)
-description: Use this form for bugs. Incomplete bug reports may be closed as not planned.
+name: Bug report
+description: Report a reproducible problem with r2modmac
 title: "[Bug]: "
 labels:
   - bug
@@ -9,7 +9,7 @@ body:
       value: |
         Thanks for helping improve r2modmac.
 
-        This form is required for bug reports. Bug reports opened without the information needed to investigate and reproduce them may be closed as not planned. For feature requests and other topics, choose Other instead.
+        Please complete the required fields so the problem can be investigated and reproduced. For feature requests and other topics, choose Other instead.
 
   - type: checkboxes
     id: checks
@@ -17,10 +17,6 @@ body:
       label: Before submitting
       options:
         - label: I searched the existing issues and did not find a duplicate.
-          required: true
-        - label: I provided the most accurate r2modmac version information available to me.
-          required: true
-        - label: I understand that an incomplete bug report may be closed as not planned.
           required: true
 
   - type: input
@@ -40,7 +36,6 @@ body:
         - macOS
         - Windows
         - Linux
-        - Other
     validations:
       required: true
 
@@ -54,31 +49,65 @@ body:
       required: true
 
   - type: dropdown
+    id: problem-area
+    attributes:
+      label: Problem area
+      description: Select every area affected by the problem.
+      multiple: true
+      options:
+        - Application startup or crash
+        - User interface or usability
+        - Profile management
+        - Game detection or paths
+        - Game launch
+        - Mod installation, removal, or update
+        - Mod loader integration
+        - r2modmac installation or update
+        - Performance
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: mod-loader
+    attributes:
+      label: Affected mod loader
+      description: Select the in-game mod framework involved. This is separate from Wine, CrossOver, Proton, or another Windows compatibility tool. Select N/A when the problem is unrelated to a mod loader.
+      options:
+        - N/A
+        - BepInEx
+        - Lovely
+        - ReturnOfModding
+        - OWML
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
     id: compatibility-layer
     attributes:
-      label: Compatibility layer or game loader
-      description: Select Native when the game runs directly on the operating system.
+      label: Windows compatibility tool
+      description: Select the application or compatibility layer used to run the Windows version of the game. Select Native / not applicable when the game runs directly on the operating system.
       options:
         - Native / not applicable
-        - CrossOver (macOS)
+        - CrossOver (macOS or Linux)
         - Whisky (macOS)
-        - Sikarugir (macOS)
-        - Wineskin / Kegworks (macOS)
-        - Porting Kit / Game Porting Toolkit (macOS)
+        - Sikarugir / Kegworks (macOS)
+        - Wineskin (macOS)
+        - Porting Kit (macOS)
         - Wine (macOS or Linux)
         - Proton / Proton-GE (Linux)
         - Bottles (Linux)
         - Lutris (Linux)
-        - Steam Linux Runtime (Linux)
-        - Other
+        - N/A
     validations:
       required: true
 
   - type: input
     id: compatibility-version
     attributes:
-      label: Compatibility layer or loader version
-      description: Enter the exact version and engine/build when available. Enter "N/A" for a native game.
+      label: Compatibility tool version
+      description: Enter the exact application version and Wine/Proton engine or build when available. Enter "N/A" for a native game.
       placeholder: "Examples: CrossOver 26.~; Proton 10.~; Wine 10.~; N/A"
     validations:
       required: true
