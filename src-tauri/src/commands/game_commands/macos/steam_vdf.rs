@@ -8,6 +8,17 @@ pub(crate) fn find_next_non_whitespace(text: &str, mut index: usize, end: usize)
     None
 }
 
+fn find_ascii_case_insensitive(haystack: &str, needle: &str) -> Option<usize> {
+    let needle = needle.as_bytes();
+    if needle.is_empty() {
+        return Some(0);
+    }
+    haystack
+        .as_bytes()
+        .windows(needle.len())
+        .position(|candidate| candidate.eq_ignore_ascii_case(needle))
+}
+
 pub(crate) fn find_matching_brace(text: &str, open_index: usize, end: usize) -> Option<usize> {
     let bytes = text.as_bytes();
     let mut depth = 0usize;
@@ -59,7 +70,7 @@ pub(crate) fn find_block_by_key(
     let mut search_start = start;
 
     while search_start < end {
-        let relative_match = text[search_start..end].find(&pattern)?;
+        let relative_match = find_ascii_case_insensitive(&text[search_start..end], &pattern)?;
         let key_index = search_start + relative_match;
         let line_start = text[..key_index]
             .rfind('\n')
@@ -91,7 +102,8 @@ pub(crate) fn find_all_blocks_by_key(
     let mut matches = Vec::new();
 
     while search_start < end {
-        let Some(relative_match) = text[search_start..end].find(&pattern) else {
+        let Some(relative_match) = find_ascii_case_insensitive(&text[search_start..end], &pattern)
+        else {
             break;
         };
         let key_index = search_start + relative_match;
@@ -128,7 +140,7 @@ pub(crate) fn unescape_vdf_value(value: &str) -> String {
 
 pub(crate) fn extract_launch_options_from_app_block(block: &str) -> Option<String> {
     let re =
-        regex::Regex::new(r#"(?m)^[ \t]*"LaunchOptions"[ \t]*"((?:\\.|[^"])*)"[ \t]*$"#).ok()?;
+        regex::Regex::new(r#"(?mi)^[ \t]*"LaunchOptions"[ \t]*"((?:\\.|[^"])*)"[ \t]*$"#).ok()?;
     re.captures(block).and_then(|captures| {
         captures
             .get(1)
@@ -140,13 +152,28 @@ pub(crate) fn find_steam_apps_block(
     text: &str,
     app_id: Option<&str>,
 ) -> Option<(usize, usize, usize, String)> {
-    let (_, software_open, software_close, _) = find_block_by_key(text, "Software", 0, text.len())?;
-    let (_, valve_open, valve_close, _) =
-        find_block_by_key(text, "Valve", software_open + 1, software_close)?;
-    let (_, steam_open, steam_close, _) =
-        find_block_by_key(text, "Steam", valve_open + 1, valve_close)?;
-
-    let candidates = find_all_blocks_by_key(text, "apps", steam_open + 1, steam_close);
+    // LaunchOptions belong to the historical
+    // UserLocalConfigStore/Software/Valve/Steam/Apps branch. Newer files can
+    // also contain root-level or controller `apps` blocks; those are not
+    // interchangeable and Steam may ignore LaunchOptions written there.
+    // Prefer the Steam branch whenever it exists, and use the global search
+    // only for files that genuinely omit that hierarchy.
+    let steam_candidates = find_block_by_key(text, "Software", 0, text.len())
+        .and_then(|(_, software_open, software_close, _)| {
+            find_block_by_key(text, "Valve", software_open + 1, software_close)
+        })
+        .and_then(|(_, valve_open, valve_close, _)| {
+            find_block_by_key(text, "Steam", valve_open + 1, valve_close)
+        })
+        .map(|(_, steam_open, steam_close, _)| {
+            find_all_blocks_by_key(text, "apps", steam_open + 1, steam_close)
+        })
+        .unwrap_or_default();
+    let candidates = if steam_candidates.is_empty() {
+        find_all_blocks_by_key(text, "apps", 0, text.len())
+    } else {
+        steam_candidates
+    };
     if candidates.is_empty() {
         return None;
     }
@@ -222,7 +249,7 @@ pub(crate) fn update_launch_options_in_localconfig(
 
     let app_block = find_block_by_key(text, app_id, apps_open + 1, apps_close);
     let launch_options_re =
-        regex::Regex::new(r#"(?m)^[ \t]*"LaunchOptions"[ \t]*"((?:\\.|[^"])*)"[ \t]*\r?\n?"#)
+        regex::Regex::new(r#"(?mi)^[ \t]*"LaunchOptions"[ \t]*"((?:\\.|[^"])*)"[ \t]*\r?\n?"#)
             .map_err(|e| format!("Invalid launch options regex: {}", e))?;
 
     if let Some((_, app_open, app_close, app_indent)) = app_block {
@@ -288,4 +315,285 @@ pub(crate) fn update_launch_options_in_localconfig(
     }
 
     Ok((text.to_string(), None))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const DESIRED: &str = "/bin/bash \"/tmp/My Game/run_bepinex.sh\" %command%";
+
+    fn count_launch_options(text: &str) -> usize {
+        text.to_ascii_lowercase()
+            .matches("\"launchoptions\"")
+            .count()
+    }
+
+    #[test]
+    fn launch_options_accept_mixed_case_steam_vdf_keys() {
+        let localconfig = r#""UserLocalConfigStore"
+{
+    "software"
+    {
+        "VALVE"
+        {
+            "steam"
+            {
+                "Apps"
+                {
+                    "42"
+                    {
+                        "LastPlayed" "1"
+                    }
+                }
+            }
+        }
+    }
+}
+"#;
+
+        let (updated, previous) =
+            update_launch_options_in_localconfig(localconfig, "42", Some(DESIRED)).unwrap();
+
+        assert_eq!(previous, None);
+        assert_eq!(
+            get_launch_options_for_app(&updated, "42").as_deref(),
+            Some(DESIRED)
+        );
+    }
+
+    #[test]
+    fn launch_options_accept_root_level_apps_block() {
+        let localconfig = r#""UserLocalConfigStore"
+{
+    "apps"
+    {
+        "42"
+        {
+            "LastPlayed" "1"
+        }
+    }
+}
+"#;
+
+        let (updated, previous) =
+            update_launch_options_in_localconfig(localconfig, "42", Some(DESIRED)).unwrap();
+
+        assert_eq!(previous, None);
+        assert_eq!(
+            get_launch_options_for_app(&updated, "42").as_deref(),
+            Some(DESIRED)
+        );
+    }
+
+    #[test]
+    fn launch_options_prefer_steam_branch_over_root_apps_block() {
+        let localconfig = r#""UserLocalConfigStore"
+{
+    "apps"
+    {
+        "42"
+        {
+            "LastPlayed" "1"
+        }
+    }
+    "Software"
+    {
+        "valve"
+        {
+            "Steam"
+            {
+                "Apps"
+                {
+                    "42"
+                    {
+                        "cloud" "1"
+                    }
+                }
+            }
+        }
+    }
+}
+"#;
+
+        let (updated, _) =
+            update_launch_options_in_localconfig(localconfig, "42", Some(DESIRED)).unwrap();
+        let all_apps = find_all_blocks_by_key(&updated, "apps", 0, updated.len());
+        let (_, root_open, root_close, _) = &all_apps[0];
+        let (_, steam_open, steam_close, _) = &all_apps[1];
+
+        assert!(!updated[*root_open + 1..*root_close].contains("\"LaunchOptions\""));
+        assert!(updated[*steam_open + 1..*steam_close].contains("\"LaunchOptions\""));
+        assert_eq!(
+            get_launch_options_for_app(&updated, "42").as_deref(),
+            Some(DESIRED)
+        );
+    }
+
+    #[test]
+    fn launch_options_replace_differently_cased_existing_property_without_duplication() {
+        let localconfig = r#""UserLocalConfigStore"
+{
+    "Apps"
+    {
+        "42"
+        {
+            "launchoptions" "--old"
+        }
+    }
+}
+"#;
+
+        let (updated, previous) =
+            update_launch_options_in_localconfig(localconfig, "42", Some(DESIRED)).unwrap();
+
+        assert_eq!(previous.as_deref(), Some("--old"));
+        assert_eq!(
+            get_launch_options_for_app(&updated, "42").as_deref(),
+            Some(DESIRED)
+        );
+        assert_eq!(count_launch_options(&updated), 1);
+    }
+
+    #[test]
+    fn launch_options_choose_game_apps_block_over_controller_block() {
+        let localconfig = r#""UserLocalConfigStore"
+{
+    "controller_config"
+    {
+        "apps"
+        {
+            "42"
+            {
+                "UseSteamControllerConfig" "1"
+            }
+        }
+    }
+    "apps"
+    {
+        "42"
+        {
+            "LastPlayed" "1"
+        }
+    }
+}
+"#;
+
+        let (updated, _) =
+            update_launch_options_in_localconfig(localconfig, "42", Some(DESIRED)).unwrap();
+        let apps_blocks = find_all_blocks_by_key(&updated, "apps", 0, updated.len());
+        let (_, controller_open, controller_close, _) = &apps_blocks[0];
+        let (_, game_open, game_close, _) = &apps_blocks[1];
+
+        assert!(!updated[*controller_open + 1..*controller_close].contains("\"LaunchOptions\""));
+        assert!(updated[*game_open + 1..*game_close].contains("\"LaunchOptions\""));
+        assert_eq!(
+            get_launch_options_for_app(&updated, "42").as_deref(),
+            Some(DESIRED)
+        );
+    }
+
+    #[test]
+    fn launch_options_insert_missing_app_into_game_apps_block() {
+        let localconfig = r#""UserLocalConfigStore"
+{
+    "controller_config"
+    {
+        "apps"
+        {
+            "7"
+            {
+                "SteamControllerRumble" "1"
+            }
+        }
+    }
+    "apps"
+    {
+        "8"
+        {
+            "Playtime" "10"
+        }
+    }
+}
+"#;
+
+        let (updated, previous) =
+            update_launch_options_in_localconfig(localconfig, "42", Some(DESIRED)).unwrap();
+
+        assert_eq!(previous, None);
+        assert_eq!(
+            get_launch_options_for_app(&updated, "42").as_deref(),
+            Some(DESIRED)
+        );
+        let apps_blocks = find_all_blocks_by_key(&updated, "apps", 0, updated.len());
+        let (_, controller_open, controller_close, _) = &apps_blocks[0];
+        let (_, game_open, game_close, _) = &apps_blocks[1];
+        assert!(!updated[*controller_open + 1..*controller_close].contains("\"42\""));
+        assert!(updated[*game_open + 1..*game_close].contains("\"42\""));
+    }
+
+    #[test]
+    fn launch_options_clear_only_the_target_property() {
+        let localconfig = r#""UserLocalConfigStore"
+{
+    "apps"
+    {
+        "42"
+        {
+            "LaunchOptions" "--old"
+            "LastPlayed" "1"
+        }
+        "43"
+        {
+            "LaunchOptions" "--keep"
+        }
+    }
+}
+"#;
+
+        let (updated, previous) =
+            update_launch_options_in_localconfig(localconfig, "42", None).unwrap();
+
+        assert_eq!(previous.as_deref(), Some("--old"));
+        assert_eq!(get_launch_options_for_app(&updated, "42"), None);
+        assert_eq!(
+            get_launch_options_for_app(&updated, "43").as_deref(),
+            Some("--keep")
+        );
+        assert!(updated.contains("\"LastPlayed\" \"1\""));
+    }
+
+    #[test]
+    fn launch_options_round_trip_escaped_path() {
+        let localconfig = "\"UserLocalConfigStore\"\n{\n\t\"apps\"\n\t{\n\t}\n}\n";
+        let desired = r#"/bin/bash "/tmp/A \\ B/run_bepinex.sh" %command%"#;
+
+        let (updated, _) =
+            update_launch_options_in_localconfig(localconfig, "42", Some(desired)).unwrap();
+
+        assert_eq!(
+            get_launch_options_for_app(&updated, "42").as_deref(),
+            Some(desired)
+        );
+    }
+
+    #[test]
+    fn launch_options_reject_config_without_any_apps_block() {
+        let localconfig = r#""UserLocalConfigStore"
+{
+    "system"
+    {
+        "EnableGameOverlay" "1"
+    }
+}
+"#;
+
+        let error =
+            update_launch_options_in_localconfig(localconfig, "42", Some(DESIRED)).unwrap_err();
+
+        assert_eq!(
+            error,
+            "Steam localconfig.vdf does not contain an apps block"
+        );
+    }
 }

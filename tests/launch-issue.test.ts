@@ -36,6 +36,14 @@ test('an in-progress update is reported as an update', () => {
     );
 });
 
+test('a localconfig write failure is not mislabelled as a pending game update', () => {
+    const issue = describeLaunchIssue(
+        "Couldn't update Steam launch options for app 1147560 because Steam's localconfig.vdf files could not be processed. Reason: Steam localconfig.vdf does not contain an apps block"
+    );
+    assert.equal(issue.title, 'Steam Configuration Error');
+    assert.equal(issue.pointsAtSteam, false);
+});
+
 test('corrupt files win over the word "update" appearing elsewhere', () => {
     // This message contains neither "update" nor "cloud", but the ordering
     // guard matters if the wording ever changes.

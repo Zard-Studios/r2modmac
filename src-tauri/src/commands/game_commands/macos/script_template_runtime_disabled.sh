@@ -174,9 +174,9 @@ fi
 if [ "$root_loader_mode" = true ]; then
     export LD_LIBRARY_PATH="$BASEDIR:${{LD_LIBRARY_PATH}}"
     if [ -z "${{LD_PRELOAD:-}}" ]; then
-        export LD_PRELOAD="libdoorstop.dylib"
+        export LD_PRELOAD="${{doorstop_dylib}}"
     else
-        export LD_PRELOAD="libdoorstop.dylib:${{LD_PRELOAD}}"
+        export LD_PRELOAD="${{doorstop_dylib}}:${{LD_PRELOAD}}"
     fi
 
     if [ -n "${{DYLD_LIBRARY_PATH:-}}" ]; then
@@ -186,9 +186,9 @@ if [ "$root_loader_mode" = true ]; then
     fi
 
     if [ -n "${{DYLD_INSERT_LIBRARIES:-}}" ]; then
-        export DYLD_INSERT_LIBRARIES="libdoorstop.dylib:${{DYLD_INSERT_LIBRARIES}}"
+        export DYLD_INSERT_LIBRARIES="${{doorstop_dylib}}:${{DYLD_INSERT_LIBRARIES}}"
     else
-        export DYLD_INSERT_LIBRARIES="libdoorstop.dylib"
+        export DYLD_INSERT_LIBRARIES="${{doorstop_dylib}}"
     fi
 else
     export LD_LIBRARY_PATH="${{doorstop_libs}}:${{LD_LIBRARY_PATH}}"

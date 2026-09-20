@@ -2078,28 +2078,21 @@ mod return_of_modding_tests {
         fs::create_dir_all(&root).unwrap();
 
         let mut archive = zip::ZipArchive::new(Cursor::new(&bytes)).unwrap();
-        let files = collect_return_of_modding_files(
-            &mut archive,
-            "NikkelM-Cosmetics_API-1.1.4",
-        )
-        .unwrap();
+        let files =
+            collect_return_of_modding_files(&mut archive, "NikkelM-Cosmetics_API-1.1.4").unwrap();
         assert!(files.contains(&std::path::PathBuf::from(
             "ReturnOfModding/plugins/NikkelM-Cosmetics_API/main.lua"
         )));
         assert!(!files.iter().any(|path| path.components().any(|component| {
             component.as_os_str().eq_ignore_ascii_case("plugins")
-                && path.starts_with(
-                    std::path::Path::new("ReturnOfModding/plugins/NikkelM-Cosmetics_API/plugins"),
-                )
+                && path.starts_with(std::path::Path::new(
+                    "ReturnOfModding/plugins/NikkelM-Cosmetics_API/plugins",
+                ))
         })));
 
         let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
-        extract_return_of_modding_to_root(
-            &mut archive,
-            &root,
-            "NikkelM-Cosmetics_API-1.1.4",
-        )
-        .unwrap();
+        extract_return_of_modding_to_root(&mut archive, &root, "NikkelM-Cosmetics_API-1.1.4")
+            .unwrap();
         let package = root.join("ReturnOfModding/plugins/NikkelM-Cosmetics_API");
         assert_eq!(fs::read(package.join("main.lua")).unwrap(), b"plugin");
         assert_eq!(fs::read(package.join("config.lua")).unwrap(), b"config");
@@ -2312,6 +2305,17 @@ pub(crate) fn point_doorstop_ini_at_root(content: &str, bepinex_root: &str) -> S
     let mut lines: Vec<String> = Vec::new();
     let mut wrote_target = false;
     let mut wrote_search = false;
+    let existing_search = extract_ini_value(
+        content,
+        &["dllSearchPathOverride", "dll_search_path_override"],
+    );
+    let retarget_search = existing_search.as_deref().map_or(true, |value| {
+        let normalized = value.trim().replace('\\', "/").to_ascii_lowercase();
+        normalized.is_empty()
+            || normalized == "core"
+            || normalized == "bepinex/core"
+            || normalized.ends_with("/bepinex/core")
+    });
     for line in content.replace("\r\n", "\n").lines() {
         let key = line.split('=').next().unwrap_or("").trim();
         match key {
@@ -2320,7 +2324,14 @@ pub(crate) fn point_doorstop_ini_at_root(content: &str, bepinex_root: &str) -> S
                 wrote_target = true;
             }
             "dllSearchPathOverride" | "dll_search_path_override" => {
-                lines.push(format!("{key}={core}"));
+                if retarget_search {
+                    lines.push(format!("{key}={core}"));
+                } else {
+                    // Game-specific packs can require an unstripped corlib
+                    // directory beside the game (Skul uses `2020.3.34`). That
+                    // directory does not move with the isolated BepInEx tree.
+                    lines.push(line.to_string());
+                }
                 wrote_search = true;
             }
             _ => lines.push(line.to_string()),
@@ -3761,6 +3772,11 @@ pub(crate) fn extract_bepinex_pack_to_root<R: std::io::Read + std::io::Seek>(
     }
 
     let prefix = bepinex_prefix.unwrap_or_default();
+    let auxiliary_runtime_roots = if target_is_macos {
+        configured_macos_doorstop_auxiliary_roots(archive, &prefix)?
+    } else {
+        Vec::new()
+    };
     for i in 0..archive.len() {
         let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
         let Some(name) = normalize_zip_entry_name(file.name()) else {
@@ -3776,9 +3792,11 @@ pub(crate) fn extract_bepinex_pack_to_root<R: std::io::Read + std::io::Seek>(
             continue;
         }
 
-        let Some(normalized_relative_path) =
-            normalize_bepinex_pack_entry(relative_path, target_is_macos)
-        else {
+        let Some(normalized_relative_path) = normalize_bepinex_pack_entry_with_auxiliary_runtime(
+            relative_path,
+            target_is_macos,
+            &auxiliary_runtime_roots,
+        ) else {
             continue;
         };
         let outpath = target_root.join(remap_disabled_macos_runtime_path(
@@ -3806,6 +3824,19 @@ pub(crate) fn extract_bepinex_pack_to_root<R: std::io::Read + std::io::Seek>(
             {
                 set_script_executable(&outpath)?;
             }
+        }
+    }
+
+    for required_root in &auxiliary_runtime_roots {
+        let installed_root = target_root.join(remap_disabled_macos_runtime_path(
+            required_root,
+            target_is_macos && use_disabled_runtime,
+        ));
+        if !installed_root.is_dir() {
+            return Err(format!(
+                "BepInEx's Doorstop configuration requires Mono libraries in {}, but that directory was not present in the pack",
+                required_root.display()
+            ));
         }
     }
 
@@ -3911,6 +3942,11 @@ fn collect_bepinex_pack_files<R: std::io::Read + std::io::Seek>(
     }
 
     let prefix = bepinex_prefix.unwrap_or_default();
+    let auxiliary_runtime_roots = if target_is_macos {
+        configured_macos_doorstop_auxiliary_roots(archive, &prefix)?
+    } else {
+        Vec::new()
+    };
     let mut files = Vec::new();
 
     for i in 0..archive.len() {
@@ -3932,9 +3968,11 @@ fn collect_bepinex_pack_files<R: std::io::Read + std::io::Seek>(
             continue;
         }
 
-        let Some(normalized_relative_path) =
-            normalize_bepinex_pack_entry(relative_path, target_is_macos)
-        else {
+        let Some(normalized_relative_path) = normalize_bepinex_pack_entry_with_auxiliary_runtime(
+            relative_path,
+            target_is_macos,
+            &auxiliary_runtime_roots,
+        ) else {
             continue;
         };
         files.push(normalized_relative_path);
@@ -4030,6 +4068,103 @@ fn normalize_bepinex_pack_entry(
     }
 
     None
+}
+
+/// Read the pack's own Doorstop configuration and retain any relative Mono
+/// search directories it names. Some Unity games ship stripped framework
+/// assemblies, so their BepInEx pack includes a matching unstripped set beside
+/// the game (Skul's pack calls it `2020.3.34`). Treating a BepInEx pack as only
+/// `BepInEx/` plus loader files silently discarded those required assemblies
+/// and made Doorstop fall back to launching the vanilla game.
+fn configured_macos_doorstop_auxiliary_roots<R: std::io::Read + std::io::Seek>(
+    archive: &mut zip::ZipArchive<R>,
+    prefix: &str,
+) -> Result<Vec<std::path::PathBuf>, String> {
+    let mut configured = Vec::new();
+
+    for index in 0..archive.len() {
+        let mut file = archive.by_index(index).map_err(|error| error.to_string())?;
+        let Some(name) = normalize_zip_entry_name(file.name()) else {
+            continue;
+        };
+        let relative = if !prefix.is_empty() && name.starts_with(prefix) {
+            &name[prefix.len()..]
+        } else {
+            &name
+        };
+        if !relative.eq_ignore_ascii_case("doorstop_config.ini") {
+            continue;
+        }
+
+        let mut content = String::new();
+        file.read_to_string(&mut content)
+            .map_err(|error| error.to_string())?;
+        let Some(value) = extract_ini_value(
+            &content,
+            &["dllSearchPathOverride", "dll_search_path_override"],
+        ) else {
+            break;
+        };
+
+        // Doorstop accepts a colon-separated search list on Unix. Only archive
+        // relative paths are meaningful here; absolute paths and traversal are
+        // deliberately ignored rather than becoming extraction destinations.
+        for candidate in value.split(':') {
+            let normalized = candidate.trim().trim_start_matches("./").replace('\\', "/");
+            let path = std::path::Path::new(&normalized);
+            if normalized.is_empty()
+                || path.is_absolute()
+                || !path.components().all(|component| {
+                    matches!(
+                        component,
+                        std::path::Component::Normal(_) | std::path::Component::CurDir
+                    )
+                })
+            {
+                continue;
+            }
+            configured.push(std::path::PathBuf::from(normalized));
+        }
+        break;
+    }
+
+    configured.sort();
+    configured.dedup();
+    Ok(configured)
+}
+
+fn normalize_bepinex_pack_entry_with_auxiliary_runtime(
+    relative_path: &str,
+    target_is_macos: bool,
+    auxiliary_runtime_roots: &[std::path::PathBuf],
+) -> Option<std::path::PathBuf> {
+    if let Some(normalized) = normalize_bepinex_pack_entry(relative_path, target_is_macos) {
+        return Some(normalized);
+    }
+    if !target_is_macos {
+        return None;
+    }
+
+    let trimmed = relative_path
+        .trim_start_matches("./")
+        .trim_matches('/')
+        .replace('\\', "/");
+    let path = std::path::PathBuf::from(&trimmed);
+    if path.is_absolute()
+        || !path.components().all(|component| {
+            matches!(
+                component,
+                std::path::Component::Normal(_) | std::path::Component::CurDir
+            )
+        })
+    {
+        return None;
+    }
+
+    auxiliary_runtime_roots
+        .iter()
+        .any(|root| path == *root || path.starts_with(root))
+        .then_some(path)
 }
 
 fn extract_mod_key(input: &str) -> String {
@@ -8001,6 +8136,76 @@ mod extraction_characterisation_tests {
     }
 
     #[test]
+    fn a_macos_pack_keeps_the_auxiliary_runtime_named_by_doorstop() {
+        let root = temp_root("macos-auxiliary-runtime");
+        let bytes = zip_fixture(&[
+            (
+                "BepInExPack/BepInEx/core/BepInEx.Preloader.dll",
+                b"preloader",
+            ),
+            ("BepInExPack/libdoorstop.dylib", b"loader"),
+            (
+                "BepInExPack/doorstop_config.ini",
+                b"[UnityDoorstop]\nenabled=true\ntargetAssembly=BepInEx\\core\\BepInEx.Preloader.dll\ndllSearchPathOverride=2020.3.34\n",
+            ),
+            ("BepInExPack/2020.3.34/mscorlib.dll", b"unstripped-corlib"),
+            (
+                "BepInExPack/2020.3.34/UnityEngine.CoreModule.dll",
+                b"unity-core",
+            ),
+            ("BepInExPack/unrelated/readme.txt", b"not runtime"),
+        ]);
+
+        let mut source = archive(&bytes);
+        extract_bepinex_pack_to_root(&mut source, &root, true, false).unwrap();
+
+        assert_eq!(
+            fs::read(root.join("2020.3.34/mscorlib.dll")).unwrap(),
+            b"unstripped-corlib"
+        );
+        assert_eq!(
+            fs::read(root.join("2020.3.34/UnityEngine.CoreModule.dll")).unwrap(),
+            b"unity-core"
+        );
+        assert!(!root.join("unrelated/readme.txt").exists());
+        let config = fs::read_to_string(root.join("doorstop_config.ini")).unwrap();
+        assert!(config.contains("dllSearchPathOverride=2020.3.34"));
+
+        let mut manifest = archive(&bytes);
+        let managed = collect_bepinex_pack_files(&mut manifest, true).unwrap();
+        assert!(managed.contains(&std::path::PathBuf::from("2020.3.34/mscorlib.dll")));
+        assert!(managed.contains(&std::path::PathBuf::from(
+            "2020.3.34/UnityEngine.CoreModule.dll"
+        )));
+        assert!(!managed.contains(&std::path::PathBuf::from("unrelated/readme.txt")));
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_macos_pack_missing_its_configured_auxiliary_runtime_is_rejected() {
+        let root = temp_root("macos-missing-auxiliary-runtime");
+        let bytes = zip_fixture(&[
+            (
+                "BepInExPack/BepInEx/core/BepInEx.Preloader.dll",
+                b"preloader",
+            ),
+            ("BepInExPack/libdoorstop.dylib", b"loader"),
+            (
+                "BepInExPack/doorstop_config.ini",
+                b"[UnityDoorstop]\nenabled=true\ntargetAssembly=BepInEx\\core\\BepInEx.Preloader.dll\ndllSearchPathOverride=required-corlib\n",
+            ),
+        ]);
+
+        let error =
+            extract_bepinex_pack_to_root(&mut archive(&bytes), &root, true, false).unwrap_err();
+
+        assert!(error.contains("required-corlib"));
+        assert!(error.contains("was not present in the pack"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn the_disabled_runtime_variant_writes_somewhere_else_entirely() {
         // Installing into a switched-off profile must not touch the live tree.
         let live = temp_root("live");
@@ -8784,6 +8989,29 @@ mod game_ini_follows_tree_tests {
         let second = fs::read_to_string(game.join("doorstop_config.ini")).unwrap();
 
         assert_eq!(first, second);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_game_specific_unstripped_corlib_path_stays_beside_the_game() {
+        let root = world("custom-corlib");
+        let game = root.join("game");
+        let profile = root.join("profiles/abc");
+        fs::create_dir_all(&game).unwrap();
+        fs::write(
+            game.join("doorstop_config.ini"),
+            "[UnityDoorstop]\nenabled=true\ntargetAssembly=BepInEx\\core\\BepInEx.Preloader.dll\ndllSearchPathOverride=2020.3.34\n",
+        )
+        .unwrap();
+
+        point_game_doorstop_ini_at_tree(&game, &profile).unwrap();
+
+        let written = fs::read_to_string(game.join("doorstop_config.ini")).unwrap();
+        assert!(written.contains("dllSearchPathOverride=2020.3.34"));
+        let expected = profile.join("BepInEx").to_string_lossy().replace('/', "\\");
+        assert!(written.contains(&format!(
+            "targetAssembly={expected}\\core\\BepInEx.Preloader.dll"
+        )));
         fs::remove_dir_all(root).unwrap();
     }
 

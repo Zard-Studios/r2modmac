@@ -44,6 +44,11 @@ export function describeLaunchIssue(raw: string): LaunchIssue {
     if (lower.includes('corrupt') || lower.includes('missing game files') || lower.includes('verify')) {
         return { title: 'Game File Issue', message, pointsAtSteam: true };
     }
+    // Updating localconfig.vdf is r2modmac's setup step, not a game update
+    // downloading in Steam. Keep this ahead of the broad "updat" match.
+    if (lower.includes('steam launch option') || lower.includes('localconfig.vdf')) {
+        return { title: 'Steam Configuration Error', message, pointsAtSteam: false };
+    }
     // 'updat' rather than 'update': the in-progress message says "updating",
     // which does not contain "update".
     if (lower.includes('updat')) {

@@ -42,6 +42,40 @@ fn macos_bepinex_runtime_requires_unity6_log_writer_fix(runtime_root: &std::path
     version.0 == 5 && version < MIN_BEPINEX5_UNITY6_LOG_WRITER_FIX
 }
 
+fn configured_doorstop_search_override(content: &str) -> Option<&str> {
+    content.lines().find_map(|line| {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with('[')
+        {
+            return None;
+        }
+        let (key, value) = trimmed.split_once('=')?;
+        if key.trim().eq_ignore_ascii_case("dllSearchPathOverride")
+            || key.trim().eq_ignore_ascii_case("dll_search_path_override")
+        {
+            Some(value.trim())
+        } else {
+            None
+        }
+    })
+}
+
+/// Only the ordinary BepInEx core search path follows an isolated runtime.
+/// A different value belongs to the game pack (usually an unstripped corlib
+/// directory beside the game) and must remain relative to the game executable.
+fn doorstop_search_override_follows_bepinex_tree(content: &str) -> bool {
+    configured_doorstop_search_override(content).map_or(true, |value| {
+        let normalized = value.trim().replace('\\', "/").to_ascii_lowercase();
+        normalized.is_empty()
+            || normalized == "core"
+            || normalized == "bepinex/core"
+            || normalized.ends_with("/bepinex/core")
+    })
+}
+
 pub(crate) fn copy_macos_bepinex_runtime_root(
     source_root: &std::path::Path,
     game_path: &std::path::Path,
@@ -135,10 +169,27 @@ pub(crate) fn configure_macos_doorstop_target_assembly(
         content.clone()
     };
 
-    if let Ok(dll_search_re) = regex::Regex::new(r"(?m)^dllSearchPathOverride=.*$") {
-        updated = dll_search_re
-            .replace(&updated, dll_search_path_line.as_str())
-            .into_owned();
+    if doorstop_search_override_follows_bepinex_tree(&content) {
+        if let Ok(dll_search_re) =
+            regex::Regex::new(r"(?mi)^(dllSearchPathOverride|dll_search_path_override)=.*$")
+        {
+            if dll_search_re.is_match(&updated) {
+                updated = dll_search_re
+                    .replace(&updated, dll_search_path_line.as_str())
+                    .into_owned();
+            } else {
+                if !updated.ends_with('\n') {
+                    updated.push('\n');
+                }
+                updated.push_str(&dll_search_path_line);
+                updated.push('\n');
+            }
+        }
+    } else if let Some(search_override) = configured_doorstop_search_override(&content) {
+        log::info!(
+            "[macos_doorstop] Preserving game-specific Mono search override while repairing runtime: {}",
+            search_override
+        );
     }
 
     if updated != content {
@@ -329,7 +380,9 @@ pub(crate) async fn ensure_macos_bepinex_runtime_present(
 
 #[cfg(test)]
 mod isolated_runtime_layout_tests {
-    use super::isolated_macos_bepinex_runtime_is_complete;
+    use super::{
+        configure_macos_doorstop_target_assembly, isolated_macos_bepinex_runtime_is_complete,
+    };
 
     fn world() -> std::path::PathBuf {
         let root = std::env::temp_dir().join(format!(
@@ -379,6 +432,66 @@ mod isolated_runtime_layout_tests {
 
         assert!(!isolated_macos_bepinex_runtime_is_complete(&game, &profile));
 
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn runtime_repair_preserves_a_pack_specific_corlib_override() {
+        let root = world();
+        let game = root.join("game");
+        let profile = root.join("profile");
+        std::fs::create_dir_all(&game).unwrap();
+        std::fs::create_dir_all(profile.join("BepInEx/core")).unwrap();
+        std::fs::create_dir_all(game.join("2020.3.34")).unwrap();
+        std::fs::write(
+            profile.join("BepInEx/core/BepInEx.Preloader.dll"),
+            b"preloader",
+        )
+        .unwrap();
+        let config = game.join("doorstop_config.ini");
+        std::fs::write(
+            &config,
+            "[UnityDoorstop]\nenabled=true\ntargetAssembly=BepInEx\\core\\BepInEx.Preloader.dll\ndllSearchPathOverride=2020.3.34\n",
+        )
+        .unwrap();
+
+        configure_macos_doorstop_target_assembly(&config, &profile).unwrap();
+
+        let written = std::fs::read_to_string(&config).unwrap();
+        assert!(written.contains("dllSearchPathOverride=2020.3.34"));
+        assert!(written.contains(&format!(
+            "targetAssembly={}/BepInEx/core/BepInEx.Preloader.dll",
+            profile.display()
+        )));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn runtime_repair_retargets_only_the_standard_core_override() {
+        let root = world();
+        let game = root.join("game");
+        let profile = root.join("profile");
+        std::fs::create_dir_all(&game).unwrap();
+        std::fs::create_dir_all(profile.join("BepInEx/core")).unwrap();
+        std::fs::write(
+            profile.join("BepInEx/core/BepInEx.Preloader.dll"),
+            b"preloader",
+        )
+        .unwrap();
+        let config = game.join("doorstop_config.ini");
+        std::fs::write(
+            &config,
+            "[UnityDoorstop]\nenabled=true\ntargetAssembly=BepInEx\\core\\BepInEx.Preloader.dll\ndllSearchPathOverride=BepInEx\\core\n",
+        )
+        .unwrap();
+
+        configure_macos_doorstop_target_assembly(&config, &profile).unwrap();
+
+        let written = std::fs::read_to_string(&config).unwrap();
+        assert!(written.contains(&format!(
+            "dllSearchPathOverride={}/BepInEx/core",
+            profile.display()
+        )));
         std::fs::remove_dir_all(root).unwrap();
     }
 }

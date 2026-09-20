@@ -162,6 +162,46 @@ pub(crate) fn get_latest_localconfig_path(
     get_all_localconfig_paths(steam_root).into_iter().next()
 }
 
+fn log_localconfig_metadata(
+    app_id: &str,
+    index: usize,
+    total: usize,
+    path: &std::path::Path,
+    metadata: &fs::Metadata,
+) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        log::debug!(
+            "[ensure_macos_steam_launch_options] event=localconfig_candidate app_id={} index={} total={} path={} canonical_path={} size_bytes={} readonly={} mode={:#o} uid={} gid={} file_type={:?}",
+            app_id,
+            index,
+            total,
+            path.display(),
+            canonicalize_or_original(path).display(),
+            metadata.len(),
+            metadata.permissions().readonly(),
+            metadata.mode(),
+            metadata.uid(),
+            metadata.gid(),
+            metadata.file_type()
+        );
+    }
+
+    #[cfg(not(unix))]
+    log::debug!(
+        "[ensure_macos_steam_launch_options] event=localconfig_candidate app_id={} index={} total={} path={} canonical_path={} size_bytes={} readonly={} file_type={:?}",
+        app_id,
+        index,
+        total,
+        path.display(),
+        canonicalize_or_original(path).display(),
+        metadata.len(),
+        metadata.permissions().readonly(),
+        metadata.file_type()
+    );
+}
+
 pub(crate) fn get_all_localconfig_paths(steam_root: &std::path::Path) -> Vec<std::path::PathBuf> {
     fn steamid64_to_accountid(user_id: &str) -> Option<String> {
         const STEAMID64_BASE: u64 = 76561197960265728;
@@ -416,6 +456,8 @@ pub(crate) fn ensure_macos_steam_launch_options(
     };
     let mut settings_changed = false;
     let mut processed_localconfig = false;
+    let mut localconfig_failures = Vec::new();
+    let mut localconfig_failure_reasons = Vec::new();
     let mut steam_was_running: Option<bool> = None;
     let mut ensure_steam_stopped = || -> Result<(), String> {
         if steam_was_running.is_none() {
@@ -436,6 +478,18 @@ pub(crate) fn ensure_macos_steam_launch_options(
                                                           updated_text: &str,
                                                           action: &str|
      -> Result<(), String> {
+        let write = |path: &std::path::Path, text: &str| {
+            fs::write(path, text).map_err(|error| {
+                log::error!(
+                    "[ensure_macos_steam_launch_options] event=localconfig_write_failed app_id={} action={} path={} error={}",
+                    app_id,
+                    action,
+                    path.display(),
+                    error
+                );
+                format!("Failed to {} Steam launch options: {}", action, error)
+            })
+        };
         #[cfg(target_os = "macos")]
         let steam_app_running = is_steam_app_running_on_macos();
         #[cfg(not(target_os = "macos"))]
@@ -443,8 +497,7 @@ pub(crate) fn ensure_macos_steam_launch_options(
 
         if steam_app_running {
             ensure_steam_stopped()?;
-            return fs::write(localconfig_path, updated_text)
-                .map_err(|e| format!("Failed to {} Steam launch options: {}", action, e));
+            return write(localconfig_path, updated_text);
         }
 
         match fs::write(localconfig_path, updated_text) {
@@ -457,45 +510,98 @@ pub(crate) fn ensure_macos_steam_launch_options(
                         first_error
                     );
                 ensure_steam_stopped()?;
-                fs::write(localconfig_path, updated_text)
-                    .map_err(|e| format!("Failed to {} Steam launch options: {}", action, e))
+                write(localconfig_path, updated_text)
             }
         }
     };
 
-    for localconfig_path in localconfig_paths {
+    let localconfig_count = localconfig_paths.len();
+    for (localconfig_index, localconfig_path) in localconfig_paths.into_iter().enumerate() {
         let localconfig_started = std::time::Instant::now();
+        match fs::metadata(&localconfig_path) {
+            Ok(metadata) => log_localconfig_metadata(
+                &app_id,
+                localconfig_index + 1,
+                localconfig_count,
+                &localconfig_path,
+                &metadata,
+            ),
+            Err(error) => log::debug!(
+                "[ensure_macos_steam_launch_options] event=localconfig_metadata_failed app_id={} index={} total={} path={} error={}",
+                app_id,
+                localconfig_index + 1,
+                localconfig_count,
+                localconfig_path.display(),
+                error
+            ),
+        }
         let localconfig = match fs::read_to_string(&localconfig_path) {
             Ok(localconfig) => localconfig,
             Err(error) => {
+                let reason = format!("could not read file: {}", error);
+                localconfig_failures.push(format!("{}: {}", localconfig_path.display(), reason));
+                if !localconfig_failure_reasons.contains(&reason) {
+                    localconfig_failure_reasons.push(reason);
+                }
                 log::warn!(
-                    "[ensure_macos_steam_launch_options] skipping unreadable localconfig {}: {}",
+                    "[ensure_macos_steam_launch_options] event=localconfig_read_failed app_id={} index={} total={} path={} error={}",
+                    app_id,
+                    localconfig_index + 1,
+                    localconfig_count,
                     localconfig_path.display(),
                     error
                 );
                 continue;
             }
         };
+        log::debug!(
+            "[ensure_macos_steam_launch_options] event=localconfig_read app_id={} index={} total={} path={} bytes={}",
+            app_id,
+            localconfig_index + 1,
+            localconfig_count,
+            localconfig_path.display(),
+            localconfig.len()
+        );
 
         let scoped_backup_key = format!(
             "steam::{}::{}",
             canonicalize_or_original(&localconfig_path).to_string_lossy(),
             app_id
         );
-        let (updated_text, current_launch_options) =
-            match update_launch_options_in_localconfig(&localconfig, &app_id, desired) {
-                Ok(result) => result,
-                Err(error) => {
-                    log::warn!(
-                        "[ensure_macos_steam_launch_options] skipping localconfig {}: {}",
+        let (updated_text, current_launch_options) = match update_launch_options_in_localconfig(
+            &localconfig,
+            &app_id,
+            desired,
+        ) {
+            Ok(result) => result,
+            Err(error) => {
+                let reason = format!("unsupported Steam configuration: {}", error);
+                localconfig_failures.push(format!("{}: {}", localconfig_path.display(), reason));
+                if !localconfig_failure_reasons.contains(&reason) {
+                    localconfig_failure_reasons.push(reason);
+                }
+                log::warn!(
+                        "[ensure_macos_steam_launch_options] event=localconfig_parse_failed app_id={} index={} total={} path={} error={}",
+                        app_id,
+                        localconfig_index + 1,
+                        localconfig_count,
                         localconfig_path.display(),
                         error
                     );
-                    continue;
-                }
-            };
+                continue;
+            }
+        };
 
         processed_localconfig = true;
+        log::debug!(
+            "[ensure_macos_steam_launch_options] event=localconfig_parsed app_id={} index={} total={} path={} existing_launch_options={} update_required={}",
+            app_id,
+            localconfig_index + 1,
+            localconfig_count,
+            localconfig_path.display(),
+            current_launch_options.is_some(),
+            updated_text != localconfig
+        );
 
         if enable_mods {
             let expected = managed_launch_option
@@ -536,11 +642,24 @@ pub(crate) fn ensure_macos_steam_launch_options(
                     &updated_text,
                     "update",
                 )?;
-                let persisted = fs::read_to_string(&localconfig_path)
-                    .map_err(|e| format!("Failed to verify updated Steam launch options: {}", e))?;
+                let persisted = fs::read_to_string(&localconfig_path).map_err(|error| {
+                    log::error!(
+                        "[ensure_macos_steam_launch_options] event=localconfig_verify_read_failed app_id={} action=update path={} error={}",
+                        app_id,
+                        localconfig_path.display(),
+                        error
+                    );
+                    format!("Failed to verify updated Steam launch options: {}", error)
+                })?;
                 if get_launch_options_for_app(&persisted, &app_id).as_deref()
                     != Some(expected.as_str())
                 {
+                    log::error!(
+                        "[ensure_macos_steam_launch_options] event=localconfig_verify_mismatch app_id={} action=update path={} expected_present=true actual_present={}",
+                        app_id,
+                        localconfig_path.display(),
+                        get_launch_options_for_app(&persisted, &app_id).is_some()
+                    );
                     return Err(format!(
                         "Steam launch options were not persisted for app {} in {}",
                         app_id,
@@ -571,12 +690,24 @@ pub(crate) fn ensure_macos_steam_launch_options(
                     &restored_text,
                     "restore",
                 )?;
-                let persisted = fs::read_to_string(&localconfig_path).map_err(|e| {
-                    format!("Failed to verify restored Steam launch options: {}", e)
+                let persisted = fs::read_to_string(&localconfig_path).map_err(|error| {
+                    log::error!(
+                        "[ensure_macos_steam_launch_options] event=localconfig_verify_read_failed app_id={} action=restore path={} error={}",
+                        app_id,
+                        localconfig_path.display(),
+                        error
+                    );
+                    format!("Failed to verify restored Steam launch options: {}", error)
                 })?;
                 if get_launch_options_for_app(&persisted, &app_id).as_deref()
                     != Some(previous.as_str())
                 {
+                    log::error!(
+                        "[ensure_macos_steam_launch_options] event=localconfig_verify_mismatch app_id={} action=restore path={} expected_present=true actual_present={}",
+                        app_id,
+                        localconfig_path.display(),
+                        get_launch_options_for_app(&persisted, &app_id).is_some()
+                    );
                     return Err(format!(
                         "Steam launch options were not restored correctly for app {} in {}",
                         app_id,
@@ -598,13 +729,25 @@ pub(crate) fn ensure_macos_steam_launch_options(
         {
             let write_started = std::time::Instant::now();
             write_localconfig_with_optional_steam_stop(&localconfig_path, &updated_text, "clear")?;
-            let persisted = fs::read_to_string(&localconfig_path)
-                .map_err(|e| format!("Failed to verify cleared Steam launch options: {}", e))?;
+            let persisted = fs::read_to_string(&localconfig_path).map_err(|error| {
+                log::error!(
+                    "[ensure_macos_steam_launch_options] event=localconfig_verify_read_failed app_id={} action=clear path={} error={}",
+                    app_id,
+                    localconfig_path.display(),
+                    error
+                );
+                format!("Failed to verify cleared Steam launch options: {}", error)
+            })?;
             if get_launch_options_for_app(&persisted, &app_id)
                 .as_deref()
                 .map(|value| is_managed_macos_launch_option_for_game(value, game_path))
                 .unwrap_or(false)
             {
+                log::error!(
+                    "[ensure_macos_steam_launch_options] event=localconfig_verify_mismatch app_id={} action=clear path={} managed_option_still_present=true",
+                    app_id,
+                    localconfig_path.display()
+                );
                 return Err(format!(
                     "Managed Steam launch options are still present for app {} in {} after clearing",
                     app_id,
@@ -626,9 +769,21 @@ pub(crate) fn ensure_macos_steam_launch_options(
     }
 
     if !processed_localconfig {
+        let reasons = localconfig_failure_reasons.join("; ");
+        log::error!(
+            "[ensure_macos_steam_launch_options] event=no_usable_localconfig app_id={} candidates={} failures={}",
+            app_id,
+            localconfig_count,
+            localconfig_failures.join(" | ")
+        );
         return Err(format!(
-            "Couldn't update Steam launch options for app {} in any localconfig.vdf",
-            app_id
+            "Couldn't update Steam launch options for app {} because Steam's localconfig.vdf files could not be processed. Reason: {}",
+            app_id,
+            if reasons.is_empty() {
+                "no additional diagnostic was recorded"
+            } else {
+                reasons.as_str()
+            }
         ));
     }
 

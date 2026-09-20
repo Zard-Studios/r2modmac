@@ -6,6 +6,18 @@ if [ -f "$BEPINEX_LOG_PATH" ]; then
 fi
 R2MODMAC_LAUNCH_EPOCH=$(date +%s 2>/dev/null || printf 0)
 
+log_exec_result() {{
+    exec_mode="$1"
+    exec_result_status="$2"
+    if [ "$exec_result_status" = "0" ]; then
+        log_bootstrap "${{exec_mode}}_completed status=0"
+        printf '[%s] %s_completed status=0\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$exec_mode" >> "$exec_log"
+    else
+        log_bootstrap "${{exec_mode}}_failed status=${{exec_result_status}}"
+        printf '[%s] %s_failed status=%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$exec_mode" "$exec_result_status" >> "$exec_log"
+    fi
+}}
+
 maybe_retry_x64_after_arm64_failure() {{
     failed_mode="$1"
     failed_status="$2"
@@ -126,8 +138,7 @@ maybe_retry_x64_after_arm64_failure() {{
         -e DYLD_PRINT_TO_FILE="${{DYLD_PRINT_TO_FILE:-}}" \
         "$@" >> "$exec_log" 2>&1
     retry_status=$?
-    log_bootstrap "${{failed_mode}}_x64_fallback_failed status=${{retry_status}}"
-    printf '[%s] %s_x64_fallback_failed status=%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$failed_mode" "$retry_status" >> "$exec_log"
+    log_exec_result "${{failed_mode}}_x64_fallback" "$retry_status"
     exit "$retry_status"
 }}
 
@@ -136,8 +147,7 @@ if [ "$steam_launch_args_ready" = true ]; then
         log_bootstrap "steam_launch_exec_modded_arm64_direct argc=$#"
         "$@" >> "$exec_log" 2>&1
         exec_status=$?
-        log_bootstrap "steam_launch_exec_modded_arm64_direct_failed status=$exec_status"
-        printf '[%s] steam_launch_exec_modded_arm64_direct_failed status=%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$exec_status" >> "$exec_log"
+        log_exec_result "steam_launch_exec_modded_arm64_direct" "$exec_status"
         maybe_retry_x64_after_arm64_failure "steam_launch_exec_modded_arm64_direct" "$exec_status" "$@"
         exit "$exec_status"
     fi
@@ -167,8 +177,7 @@ if [ "$steam_launch_args_ready" = true ]; then
             -e DYLD_PRINT_TO_FILE="${{DYLD_PRINT_TO_FILE:-}}" \
             "$@" >> "$exec_log" 2>&1
         exec_status=$?
-        log_bootstrap "steam_launch_exec_modded_arm64_env_failed status=$exec_status"
-        printf '[%s] steam_launch_exec_modded_arm64_env_failed status=%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$exec_status" >> "$exec_log"
+        log_exec_result "steam_launch_exec_modded_arm64_env" "$exec_status"
         maybe_retry_x64_after_arm64_failure "steam_launch_exec_modded_arm64_env" "$exec_status" "$@"
         exit "$exec_status"
     fi
@@ -198,15 +207,13 @@ if [ "$steam_launch_args_ready" = true ]; then
             -e DYLD_PRINT_TO_FILE="${{DYLD_PRINT_TO_FILE:-}}" \
             "$@" >> "$exec_log" 2>&1
         exec_status=$?
-        log_bootstrap "steam_launch_exec_modded_arch_env_failed status=$exec_status"
-        printf '[%s] steam_launch_exec_modded_arch_env_failed status=%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$exec_status" >> "$exec_log"
+        log_exec_result "steam_launch_exec_modded_arch_env" "$exec_status"
         exit "$exec_status"
     fi
     log_bootstrap "steam_launch_exec_modded argc=$#"
     "$@" >> "$exec_log" 2>&1
     exec_status=$?
-    log_bootstrap "steam_launch_exec_modded_failed status=$exec_status"
-    printf '[%s] steam_launch_exec_modded_failed status=%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$exec_status" >> "$exec_log"
+    log_exec_result "steam_launch_exec_modded" "$exec_status"
     exit "$exec_status"
 fi
 
@@ -219,8 +226,7 @@ if [ "$arch" = "arm64" ] && [ "$wrapper_arch" = "arm64" ] && [ "$wrapper_transla
         "${{modded_target_path}}" >> "$exec_log" 2>&1
     fi
     exec_status=$?
-    log_bootstrap "exec_modded_arm64_direct_failed status=$exec_status"
-    printf '[%s] exec_modded_arm64_direct_failed status=%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$exec_status" >> "$exec_log"
+    log_exec_result "exec_modded_arm64_direct" "$exec_status"
     if [ "$modded_target_is_wrapper" = true ]; then
         maybe_retry_x64_after_arm64_failure "exec_modded_arm64_direct" "$exec_status" /bin/bash "${{modded_target_path}}"
     else
@@ -282,8 +288,7 @@ if [ "$arch" = "arm64" ] && command -v /usr/bin/arch >/dev/null 2>&1; then
             "${{modded_target_path}}" >> "$exec_log" 2>&1
     fi
     exec_status=$?
-    log_bootstrap "exec_modded_arm64_env_failed status=$exec_status"
-    printf '[%s] exec_modded_arm64_env_failed status=%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$exec_status" >> "$exec_log"
+    log_exec_result "exec_modded_arm64_env" "$exec_status"
     if [ "$modded_target_is_wrapper" = true ]; then
         maybe_retry_x64_after_arm64_failure "exec_modded_arm64_env" "$exec_status" /bin/bash "${{modded_target_path}}"
     else
@@ -345,8 +350,7 @@ if [ "$arch" = "x64" ] && command -v /usr/bin/arch >/dev/null 2>&1; then
             "${{modded_target_path}}" >> "$exec_log" 2>&1
     fi
     exec_status=$?
-    log_bootstrap "exec_modded_arch_env_failed status=$exec_status"
-    printf '[%s] exec_modded_arch_env_failed status=%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$exec_status" >> "$exec_log"
+    log_exec_result "exec_modded_arch_env" "$exec_status"
     exit "$exec_status"
 fi
 
@@ -358,6 +362,5 @@ else
     "${{modded_target_path}}" >> "$exec_log" 2>&1
 fi
 exec_status=$?
-log_bootstrap "exec_modded_failed status=$exec_status"
-printf '[%s] exec_modded_failed status=%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$exec_status" >> "$exec_log"
+log_exec_result "exec_modded" "$exec_status"
 exit "$exec_status"

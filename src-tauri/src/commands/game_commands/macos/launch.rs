@@ -222,7 +222,10 @@ pub(crate) async fn launch_game_with_mods_for_macos(
             log::info!(
                 "[launch_game_with_mods] Steam launch option differs (arch/script mismatch) — reconciling managed option before Steam launch."
             );
-            ensure_macos_steam_launch_options(app, game_path, true, true)?;
+            // An immediate steam://run follows below. Keep Steam closed after
+            // writing localconfig.vdf so that this launch is the process that
+            // reloads the newly persisted option.
+            ensure_macos_steam_launch_options(app, game_path, true, false)?;
         }
         let launched_at = std::time::SystemTime::now();
         launch_via_steam_for_game_path(app, game_path)?;

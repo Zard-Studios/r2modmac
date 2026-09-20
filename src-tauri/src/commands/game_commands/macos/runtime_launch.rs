@@ -1,5 +1,4 @@
 use super::*;
-
 pub(crate) fn remove_r2modmac_debug_logs(game_path: &std::path::Path) {
     let runtime_root = resolve_macos_runtime_root(game_path);
     for log_name in [

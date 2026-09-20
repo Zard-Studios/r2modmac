@@ -1,11 +1,117 @@
-/// Does the script point Doorstop's search path at a `core` directory?
+/// Does the script carry a non-empty Mono search override for Doorstop?
 ///
-/// Checked by shape rather than by literal, so a script that roots BepInEx in a
-/// profile is not rewritten on every launch for not saying `$BASEDIR`.
-fn doorstop_search_path_points_at_core(script: &str) -> bool {
-    regex::Regex::new(r#"(?m)^export DOORSTOP_MONO_DLL_SEARCH_PATH_OVERRIDE=".+/core"$"#)
+/// Most packs use BepInEx/core. Some game-specific packs deliberately point at
+/// an unstripped corlib directory beside the game instead (Skul uses
+/// `2020.3.34`), so requiring `/core` here would continuously erase the pack's
+/// working configuration.
+fn doorstop_search_path_is_configured(script: &str) -> bool {
+    regex::Regex::new(r#"(?m)^export DOORSTOP_MONO_DLL_SEARCH_PATH_OVERRIDE="[^"]+"$"#)
         .map(|pattern| pattern.is_match(script))
         .unwrap_or(false)
+}
+
+fn configured_doorstop_search_override(game_path: &std::path::Path) -> Option<String> {
+    let content = std::fs::read_to_string(game_path.join("doorstop_config.ini")).ok()?;
+    content.lines().find_map(|line| {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with('[')
+        {
+            return None;
+        }
+        let (key, value) = trimmed.split_once('=')?;
+        if key.trim().eq_ignore_ascii_case("dllSearchPathOverride")
+            || key.trim().eq_ignore_ascii_case("dll_search_path_override")
+        {
+            Some(value.trim().to_string())
+        } else {
+            None
+        }
+    })
+}
+
+fn escape_shell_double_quoted_literal(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('$', "\\$")
+        .replace('`', "\\`")
+}
+
+fn desired_doorstop_search_path(
+    game_path: &std::path::Path,
+    profile_root: Option<&str>,
+) -> Result<String, String> {
+    let default = profile_root
+        .map(|path| format!("{}/core", escape_shell_double_quoted_literal(path)))
+        .unwrap_or_else(|| "$BASEDIR/BepInEx/core".to_string());
+    if let Some(configured) = configured_doorstop_search_override(game_path) {
+        let normalized = configured.trim().replace('\\', "/");
+        let lower = normalized.to_ascii_lowercase();
+        let is_standard = normalized.is_empty()
+            || lower == "core"
+            || lower == "bepinex/core"
+            || lower.ends_with("/bepinex/core");
+        if !is_standard {
+            let relative = std::path::Path::new(&normalized);
+            let safe_relative = relative.components().all(|component| {
+                matches!(
+                    component,
+                    std::path::Component::Normal(_) | std::path::Component::CurDir
+                )
+            });
+            if safe_relative && game_path.join(relative).is_dir() {
+                let relative = normalized.trim_start_matches("./");
+                log::info!(
+                    "[configure_macos_bepinex_script] Preserving game-specific Doorstop Mono search override: {}",
+                    relative
+                );
+                return Ok(format!(
+                    "$BASEDIR/{}",
+                    escape_shell_double_quoted_literal(relative)
+                ));
+            }
+            return Err(format!(
+                "The BepInEx pack requires the Mono library directory {:?}, but it is missing or unsafe under {}. Reinstall the BepInEx pack before launching modded.",
+                configured,
+                game_path.display()
+            ));
+        }
+    }
+
+    // Recover configurations written by older r2modmac builds, which replaced
+    // a pack's custom override with BepInEx/core. A game pack's unstripped
+    // corlib directory is unambiguous when it is the only immediate child that
+    // contains both Mono's mscorlib and Unity's core module.
+    let mut corlib_candidates = std::fs::read_dir(game_path)
+        .ok()
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.path().is_dir())
+        .filter(|entry| {
+            entry.path().join("mscorlib.dll").is_file()
+                && entry.path().join("UnityEngine.CoreModule.dll").is_file()
+        })
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .collect::<Vec<_>>();
+    corlib_candidates.sort();
+    corlib_candidates.dedup();
+    if corlib_candidates.len() == 1 {
+        let relative = &corlib_candidates[0];
+        log::info!(
+            "[configure_macos_bepinex_script] Recovered game-specific Doorstop Mono search override from unstripped corlib directory: {}",
+            relative
+        );
+        return Ok(format!(
+            "$BASEDIR/{}",
+            escape_shell_double_quoted_literal(relative)
+        ));
+    }
+
+    Ok(default)
 }
 
 use super::*;
@@ -17,8 +123,28 @@ pub(crate) fn configure_macos_bepinex_script(
     bepinex_root: Option<&std::path::Path>,
 ) -> Result<(), String> {
     let profile_root = bepinex_root.map(|path| path.to_string_lossy().to_string());
+    let desired_search_path = desired_doorstop_search_path(game_path, profile_root.as_deref())?;
     if !script_path.exists() {
         return Ok(());
+    }
+
+    // fix5 briefly copied a current UnityDoorstop diagnostic build beside the
+    // game. That loader expects Doorstop.Entrypoint:Start, which older BepInEx
+    // 5 preloaders do not expose. It must never replace the loader shipped for
+    // the installed pack.
+    let incompatible_verbose_loader = game_path.join("libdoorstop_r2modmac_verbose.dylib");
+    if incompatible_verbose_loader.is_file() {
+        match fs::remove_file(&incompatible_verbose_loader) {
+            Ok(()) => log::info!(
+                "[configure_macos_bepinex_script] Removed incompatible temporary verbose Doorstop loader: {}",
+                incompatible_verbose_loader.display()
+            ),
+            Err(error) => log::warn!(
+                "[configure_macos_bepinex_script] Could not remove obsolete verbose Doorstop loader {}: {}. The compatible pack loader will still be used.",
+                incompatible_verbose_loader.display(),
+                error
+            ),
+        }
     }
 
     let executable_path = resolve_macos_executable_path(game_path)?;
@@ -89,10 +215,10 @@ pub(crate) fn configure_macos_bepinex_script(
         script.contains("wrapper_arch=") && script.contains("loader_env LD_LIBRARY_PATH=");
     let has_root_loader_mode_env = script.contains("root_loader_mode=false")
         && script.contains("DOORSTOP_IGNORE_DISABLED_ENV=0")
-        && doorstop_search_path_points_at_core(&script)
+        && doorstop_search_path_is_configured(&script)
         && script.contains("-e DOORSTOP_MONO_DLL_SEARCH_PATH_OVERRIDE=")
         && script.contains("root_loader_mode=$root_loader_mode")
-        && script.contains("export DYLD_INSERT_LIBRARIES=\"libdoorstop.dylib");
+        && script.contains("export DYLD_INSERT_LIBRARIES=\"${doorstop_dylib}\"");
     let has_arch_env_exec = script.contains("exec_modded_arch_env target=")
         && script.contains("exec_modded_arm64_env target=")
         && script.contains("native_macos_arch=")
@@ -101,15 +227,18 @@ pub(crate) fn configure_macos_bepinex_script(
     let has_dyld_loader_logging = script.contains("DYLD_PRINT_LIBRARIES=1")
         && script.contains("dyld_log=\"$BASEDIR/r2modmac_dyld.log\"");
     let has_exec_failure_logging = script.contains("exec_log=\"$BASEDIR/r2modmac_exec.log\"")
-        && script.contains("exec_modded_arm64_env_failed status=$exec_status")
-        && script.contains("steam_launch_exec_modded_arch_env_failed status=$exec_status");
+        && script.contains("log_exec_result()")
+        && script.contains("log_exec_result \"exec_modded_arm64_env\" \"$exec_status\"")
+        && script
+            .contains("log_exec_result \"steam_launch_exec_modded_arch_env\" \"$exec_status\"");
     let has_native_arm64_direct_exec = script
         .contains("steam_launch_exec_modded_arm64_direct argc=$#")
-        && script.contains("steam_launch_exec_modded_arm64_direct_failed status=$exec_status")
+        && script
+            .contains("log_exec_result \"steam_launch_exec_modded_arm64_direct\" \"$exec_status\"")
         && script.contains(
             "exec_modded_arm64_direct target=$modded_target_path wrapper=$modded_target_is_wrapper",
         )
-        && script.contains("exec_modded_arm64_direct_failed status=$exec_status")
+        && script.contains("log_exec_result \"exec_modded_arm64_direct\" \"$exec_status\"")
         && script.contains("[ \"$wrapper_arch\" = \"arm64\" ]")
         && script.contains("[ \"$wrapper_translated\" = \"0\" ]");
     let has_wrapper_modded_exec_support = script.contains("modded_target_path=")
@@ -128,7 +257,7 @@ pub(crate) fn configure_macos_bepinex_script(
         && script.contains("retry_skipped_clean_exit status=")
         && script.contains("retry_skipped_process_alive status=")
         && script.contains("retrying_x64_fallback status=")
-        && script.contains("x64_fallback_failed status=$retry_status");
+        && script.contains("log_exec_result \"${failed_mode}_x64_fallback\" \"$retry_status\"");
     let has_preloader_crash_arch_recovery = script.contains("R2MODMAC_LAUNCH_EPOCH")
         && script.contains("arm64_preloader_crash=false")
         && script.contains("retry_preloader_crash_detected status=")
@@ -146,7 +275,7 @@ pub(crate) fn configure_macos_bepinex_script(
         && script.contains("DOORSTOP_TARGET_ASSEMBLY=")
         && script.contains("DOORSTOP_BOOT_CONFIG_OVERRIDE=")
         && script.contains("DOORSTOP_IGNORE_DISABLED_ENV=0")
-        && doorstop_search_path_points_at_core(&script)
+        && doorstop_search_path_is_configured(&script)
         && script.contains("DOORSTOP_REDIRECT_OUTPUT_LOG=1")
         && script.contains("-e DOORSTOP_TARGET_ASSEMBLY=")
         && script.contains("-e DOORSTOP_MONO_DLL_SEARCH_PATH_OVERRIDE=");
@@ -250,6 +379,8 @@ pub(crate) fn configure_macos_bepinex_script(
     let has_legacy_bepinex_bootstrap_log = script
         .contains("bootstrap_log=\"$BASEDIR/BepInEx/r2modmac_bootstrap.log\"")
         || script.contains("mkdir -p \"$BASEDIR/BepInEx\"");
+    let has_incompatible_verbose_doorstop = script.contains("libdoorstop_r2modmac_verbose.dylib")
+        || script.contains("doorstop_diagnostic_loader=official_verbose_4.5.0");
     let steam_launch_pos = script.find("for a in \"$@\"").unwrap_or(usize::MAX);
     let doorstop_export_pos = script
         .find("DOORSTOP_INVOKE_DLL_PATH=")
@@ -285,7 +416,8 @@ pub(crate) fn configure_macos_bepinex_script(
         || !steam_launch_exec_deferred
         || !has_expected_debug_log_setting
         || has_unexpanded_template_braces
-        || has_legacy_bepinex_bootstrap_log;
+        || has_legacy_bepinex_bootstrap_log
+        || has_incompatible_verbose_doorstop;
     if needs_regeneration {
         log::debug!(
             "[configure_macos_bepinex_script] Regenerating script (has_doorstop={} early_exit_before_doorstop_ok={} early_exit_before_dyld_ok={} root_fallback_ok={} steam_launch_order_ok={} root_bootstrap_log_ok={} removes_codesign_signature={} has_codesign_cache_guard={} logs_loader_environment={} has_arch_env_exec={} has_dyld_loader_logging={} has_exec_failure_logging={} wrapper_modded_exec_support={} arm64_x64_fallback_retry={} preloader_crash_arch_recovery={} persistent_x64_state={} cross_generation_doorstop_bool_flags={} launch_entry_support={} steamemu_runtime_prep={} vanilla_steamemu_direct_launch={} steamemu_runtime_cleanup={} preserves_steam_dyld_hooks={} steam_launch_exec_deferred={} legacy_bepinex_bootstrap_log={}).",
@@ -353,6 +485,17 @@ pub(crate) fn configure_macos_bepinex_script(
                 .into_owned();
         }
     }
+
+    let search_path_re =
+        regex::Regex::new(r#"(?m)^export DOORSTOP_MONO_DLL_SEARCH_PATH_OVERRIDE="[^"]*"$"#)
+            .map_err(|error| error.to_string())?;
+    let search_path_export = format!(
+        "export DOORSTOP_MONO_DLL_SEARCH_PATH_OVERRIDE=\"{}\"",
+        desired_search_path
+    );
+    script = search_path_re
+        .replace(&script, regex::NoExpand(&search_path_export))
+        .into_owned();
 
     if let Some(idx) = script.find("BASEDIR=") {
         let insert_after = script[idx..]
@@ -423,24 +566,27 @@ pub(crate) fn configure_macos_bepinex_script(
 
 #[cfg(test)]
 mod doorstop_search_path_tests {
-    use super::doorstop_search_path_points_at_core;
+    use super::doorstop_search_path_is_configured;
 
     #[test]
-    fn both_roots_count_as_configured() {
-        assert!(doorstop_search_path_points_at_core(
+    fn standard_and_game_specific_paths_count_as_configured() {
+        assert!(doorstop_search_path_is_configured(
             "export DOORSTOP_MONO_DLL_SEARCH_PATH_OVERRIDE=\"$BASEDIR/BepInEx/core\"\n"
         ));
-        assert!(doorstop_search_path_points_at_core(
+        assert!(doorstop_search_path_is_configured(
             "export DOORSTOP_MONO_DLL_SEARCH_PATH_OVERRIDE=\"/Users/x/profiles/abc/BepInEx/core\"\n"
+        ));
+        assert!(doorstop_search_path_is_configured(
+            "export DOORSTOP_MONO_DLL_SEARCH_PATH_OVERRIDE=\"$BASEDIR/2020.3.34\"\n"
         ));
     }
 
     #[test]
     fn a_script_without_the_override_is_stale() {
-        assert!(!doorstop_search_path_points_at_core(
+        assert!(!doorstop_search_path_is_configured(
             "export DOORSTOP_ENABLED=1\n"
         ));
-        assert!(!doorstop_search_path_points_at_core(
+        assert!(!doorstop_search_path_is_configured(
             "export DOORSTOP_MONO_DLL_SEARCH_PATH_OVERRIDE=\"\"\n"
         ));
     }
@@ -515,6 +661,101 @@ mod configured_script_tests {
         let second = std::fs::read_to_string(&script).unwrap();
 
         assert_eq!(first, second);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn fix5_verbose_loader_is_removed_and_its_script_is_regenerated() {
+        let root = world("remove-incompatible-verbose-doorstop");
+        let profile = root.join("profiles/abc/BepInEx");
+        std::fs::create_dir_all(profile.join("core")).unwrap();
+        let script = root.join("run_bepinex.sh");
+
+        configure_macos_bepinex_script(&script, &root, true, Some(&profile)).unwrap();
+        let stale = std::fs::read_to_string(&script).unwrap().replace(
+            "root_doorstop_dylib=\"$BASEDIR/libdoorstop.dylib\"",
+            "root_doorstop_dylib=\"$BASEDIR/libdoorstop_r2modmac_verbose.dylib\"",
+        );
+        std::fs::write(&script, stale).unwrap();
+        let stale_loader = root.join("libdoorstop_r2modmac_verbose.dylib");
+        std::fs::write(&stale_loader, b"incompatible diagnostic loader").unwrap();
+
+        configure_macos_bepinex_script(&script, &root, true, Some(&profile)).unwrap();
+
+        let written = std::fs::read_to_string(&script).unwrap();
+        assert!(!stale_loader.exists());
+        assert!(!written.contains("libdoorstop_r2modmac_verbose.dylib"));
+        assert!(written.contains("root_doorstop_dylib=\"$BASEDIR/libdoorstop.dylib\""));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_game_specific_unstripped_corlib_override_survives_isolation() {
+        let root = world("unstripped-corlib");
+        let profile = root.join("profiles/abc/BepInEx");
+        std::fs::create_dir_all(profile.join("core")).unwrap();
+        std::fs::create_dir_all(root.join("2020.3.34")).unwrap();
+        std::fs::write(
+            root.join("doorstop_config.ini"),
+            "[UnityDoorstop]\nenabled=true\ntargetAssembly=BepInEx\\core\\BepInEx.Preloader.dll\ndllSearchPathOverride=2020.3.34\n",
+        )
+        .unwrap();
+        let script = root.join("run_bepinex.sh");
+
+        configure_macos_bepinex_script(&script, &root, false, Some(&profile)).unwrap();
+
+        let written = std::fs::read_to_string(&script).unwrap();
+        assert!(written.contains(r#"DOORSTOP_MONO_DLL_SEARCH_PATH_OVERRIDE="$BASEDIR/2020.3.34""#));
+        assert!(written.contains(&format!(
+            r#"DOORSTOP_INVOKE_DLL_PATH="{}/core/BepInEx.Preloader.dll""#,
+            profile.display()
+        )));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_missing_game_specific_corlib_stops_instead_of_launching_vanilla() {
+        let root = world("missing-unstripped-corlib");
+        let profile = root.join("profiles/abc/BepInEx");
+        std::fs::create_dir_all(profile.join("core")).unwrap();
+        std::fs::write(
+            root.join("doorstop_config.ini"),
+            "[UnityDoorstop]\nenabled=true\ntargetAssembly=BepInEx\\core\\BepInEx.Preloader.dll\ndllSearchPathOverride=2020.3.34\n",
+        )
+        .unwrap();
+        let script = root.join("run_bepinex.sh");
+
+        let error =
+            configure_macos_bepinex_script(&script, &root, false, Some(&profile)).unwrap_err();
+
+        assert!(error.contains("requires the Mono library directory"));
+        assert!(error.contains("2020.3.34"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn an_old_overwritten_override_is_recovered_from_the_corlib_files() {
+        let root = world("recover-unstripped-corlib");
+        let profile = root.join("profiles/abc/BepInEx");
+        std::fs::create_dir_all(profile.join("core")).unwrap();
+        std::fs::create_dir_all(root.join("2020.3.34")).unwrap();
+        std::fs::write(root.join("2020.3.34/mscorlib.dll"), b"mono").unwrap();
+        std::fs::write(root.join("2020.3.34/UnityEngine.CoreModule.dll"), b"unity").unwrap();
+        std::fs::write(
+            root.join("doorstop_config.ini"),
+            format!(
+                "[UnityDoorstop]\nenabled=true\ntargetAssembly={}\\core\\BepInEx.Preloader.dll\ndllSearchPathOverride={}\\core\n",
+                profile.display(),
+                profile.display()
+            ),
+        )
+        .unwrap();
+        let script = root.join("run_bepinex.sh");
+
+        configure_macos_bepinex_script(&script, &root, false, Some(&profile)).unwrap();
+
+        let written = std::fs::read_to_string(&script).unwrap();
+        assert!(written.contains(r#"DOORSTOP_MONO_DLL_SEARCH_PATH_OVERRIDE="$BASEDIR/2020.3.34""#));
         std::fs::remove_dir_all(root).unwrap();
     }
 }

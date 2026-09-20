@@ -117,6 +117,22 @@ mod tests {
     }
 
     #[test]
+    fn generated_script_does_not_label_clean_game_exit_as_failure() {
+        let script = build_generated_macos_bepinex_script(
+            "Example.app/Contents/MacOS/Example",
+            "Example.app/Contents/MacOS/Example",
+            false,
+            true,
+            BepInExRoot::Game,
+        );
+
+        assert!(script.contains("if [ \"$exec_result_status\" = \"0\" ]"));
+        assert!(script.contains("${exec_mode}_completed status=0"));
+        assert!(script.contains("${exec_mode}_failed status=${exec_result_status}"));
+        assert!(!script.contains("exec_modded_arch_env_failed status=$exec_status"));
+    }
+
+    #[test]
     fn generated_debug_log_has_a_schema_version_context_and_no_raw_argv() {
         let script = build_generated_macos_bepinex_script(
             "Example.app/Contents/MacOS/Example",
@@ -137,6 +153,21 @@ mod tests {
         assert!(script.contains("redact_log_literal \"$HOME\" \"[home]\""));
         assert!(script.contains("redact_log_literal \"$USER\" \"[user]\""));
         assert!(!script.contains("argv=$*"));
+    }
+
+    #[test]
+    fn generated_debug_launcher_keeps_the_packs_doorstop_loader() {
+        let script = build_generated_macos_bepinex_script(
+            "Example.app/Contents/MacOS/Example",
+            "Example.app/Contents/MacOS/Example",
+            false,
+            true,
+            BepInExRoot::Game,
+        );
+
+        assert!(script.contains("root_doorstop_dylib=\"$BASEDIR/libdoorstop.dylib\""));
+        assert!(!script.contains("libdoorstop_r2modmac_verbose.dylib"));
+        assert!(script.contains("export DYLD_INSERT_LIBRARIES=\"${doorstop_dylib}\""));
     }
 
     #[test]
