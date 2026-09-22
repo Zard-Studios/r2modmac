@@ -13,13 +13,16 @@ interface SettingsModalProps {
     onClose: () => void;
     selectedGame?: string;
     activeProfile?: Profile | null;
+    onSetBepinexIsolation: (profileId: string, isolated: boolean) => Promise<void>;
 }
 
-export function SettingsModal({ isOpen, onClose, selectedGame, activeProfile }: SettingsModalProps) {
+export function SettingsModal({ isOpen, onClose, selectedGame, activeProfile, onSetBepinexIsolation }: SettingsModalProps) {
     const [activeTab, setActiveTab] = useState<SettingsTab>('settings');
     const [isAnimating, setIsAnimating] = useState(false);
     const [steamPath, setSteamPath] = useState<string>('');
     const [loading, setLoading] = useState(false);
+    const [modeSaving, setModeSaving] = useState(false);
+    const [inheritedIsolation, setInheritedIsolation] = useState(true);
     const [gamePath, setGamePath] = useState<string | null>(null);
     const [checkingGamePath, setCheckingGamePath] = useState(false);
     const [gameSource, setGameSource] = useState<'steam' | 'manual' | 'unknown'>('unknown');
@@ -48,6 +51,7 @@ export function SettingsModal({ isOpen, onClose, selectedGame, activeProfile }: 
     const loadSettings = async () => {
         try {
             const settings = await window.ipcRenderer.getSettings();
+            setInheritedIsolation(settings.profile_isolation ?? true);
             if (activeProfilePlatform === 'mac') {
                 setSteamPath(settings.mac_steam_path || getLegacyMacSteamPath(settings.steam_path) || defaultMacSteamPath);
             } else {
@@ -433,6 +437,41 @@ export function SettingsModal({ isOpen, onClose, selectedGame, activeProfile }: 
                                             </button>
                                         </div>
                                     )}
+                                </div>
+                            )}
+
+                            {activeProfile && (
+                                <div className="mb-6 rounded-lg border border-gray-700 bg-gray-800/50 p-4">
+                                    <div className="flex items-center justify-between gap-4">
+                                        <div>
+                                            <div className="text-sm font-medium text-white">Isolate BepInEx for this profile</div>
+                                            <p className="mt-1 text-xs text-gray-400">
+                                                Off keeps BepInEx beside the game for compatibility. On stores a separate copy for this profile.
+                                            </p>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            role="switch"
+                                            aria-checked={activeProfile.bepinexIsolation ?? inheritedIsolation}
+                                            disabled={modeSaving || !gamePath}
+                                            onClick={async () => {
+                                                setModeSaving(true);
+                                                try {
+                                                    await onSetBepinexIsolation(activeProfile.id, !(activeProfile.bepinexIsolation ?? inheritedIsolation));
+                                                } catch (error) {
+                                                    await window.ipcRenderer.alert('Could not change BepInEx mode', String(error));
+                                                } finally {
+                                                    setModeSaving(false);
+                                                }
+                                            }}
+                                            className={`relative h-6 w-11 shrink-0 rounded-full transition-colors disabled:opacity-50 ${(activeProfile.bepinexIsolation ?? inheritedIsolation) ? 'bg-blue-500' : 'bg-gray-600'}`}
+                                        >
+                                            <span className={`absolute top-1 h-4 w-4 rounded-full bg-white transition-transform ${(activeProfile.bepinexIsolation ?? inheritedIsolation) ? 'left-6' : 'left-1'}`} />
+                                        </button>
+                                    </div>
+                                    <p className="mt-2 text-xs text-gray-500">
+                                        Changing this preserves the previous files in a backup and requires Apply to Game.
+                                    </p>
                                 </div>
                             )}
 

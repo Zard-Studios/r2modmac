@@ -213,7 +213,8 @@ pub(crate) fn isolated_bepinex_link_matches(
     tree_root: &std::path::Path,
 ) -> bool {
     if runtime_root == tree_root {
-        return tree_root.join("BepInEx").is_dir();
+        let tree = tree_root.join("BepInEx");
+        return tree.is_dir() && !tree.is_symlink();
     }
 
     let link = runtime_root.join("BepInEx");

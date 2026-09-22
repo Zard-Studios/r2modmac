@@ -73,4 +73,6 @@ export interface Profile {
     platform?: ProfilePlatform;
     distribution?: ProfileDistribution;
     launchMode?: ProfileLaunchMode;
+    /** Older profiles inherit the setting they were created with. */
+    bepinexIsolation?: boolean;
 }

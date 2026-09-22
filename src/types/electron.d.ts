@@ -94,6 +94,7 @@ export interface ProfileSyncResult {
 export interface IElectronAPI {
     getProfiles: () => Promise<Profile[]>;
     saveProfiles: (profiles: Profile[]) => Promise<boolean>;
+    setProfileBepinexIsolation: (profileId: string, isolated: boolean) => Promise<boolean>;
     selectFolder: () => Promise<string | null>;
     getUsername: () => Promise<string>;
     selectFile: (filters?: { name: string; extensions: string[] }[]) => Promise<string | null>;

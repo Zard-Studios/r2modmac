@@ -579,8 +579,19 @@ pub(crate) fn bepinex_install_root(
         .map_err(|error| error.to_string())?
         .join("profiles")
         .join(profile_id);
-    let root = choose_bepinex_root(settings.profile_isolation, &profile_dir, runtime_game_path);
-    if settings.profile_isolation && root == runtime_game_path {
+    let profiles = crate::commands::profile_commands::get_profiles(app.clone())?;
+    let isolation = profiles
+        .iter()
+        .find(|profile| profile.get("id").and_then(serde_json::Value::as_str) == Some(profile_id))
+        .map(|profile| {
+            profile
+                .get("bepinexIsolation")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(settings.profile_isolation)
+        })
+        .unwrap_or(false);
+    let root = choose_bepinex_root(isolation, &profile_dir, runtime_game_path);
+    if isolation && root == runtime_game_path {
         log::warn!(
             "[bepinex_install_root] Wine cannot address the isolated profile; using the game-local BepInEx tree for {}",
             runtime_game_path.display()

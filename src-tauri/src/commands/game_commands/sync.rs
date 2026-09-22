@@ -368,6 +368,11 @@ pub async fn sync_profile_to_game(
         bepinex_install_root(&app, &profile_id, runtime_game_path)?,
     );
     let profile_isolated = bepinex_root != runtime_game_path;
+    if !profile_isolated && runtime_game_path.join("BepInEx").is_symlink() {
+        // A prior isolated profile may have left its game-side alias. Never
+        // reconcile a game-local profile through another profile's tree.
+        crate::commands::game_commands::detach_isolated_bepinex_link(runtime_game_path)?;
+    }
     let bepinex_scope = if profile_isolated {
         PROFILE_MANIFEST_SCOPE
     } else {
@@ -379,8 +384,10 @@ pub async fn sync_profile_to_game(
     if profile_isolated
         && !bepinex_root.join("BepInEx").is_dir()
         && !bepinex_root.join("BepInEx_DISABLED").is_dir()
-        && (runtime_game_path.join("BepInEx").is_dir()
-            || runtime_game_path.join("BepInEx_DISABLED").is_dir())
+        && ((runtime_game_path.join("BepInEx").is_dir()
+            && !runtime_game_path.join("BepInEx").is_symlink())
+            || (runtime_game_path.join("BepInEx_DISABLED").is_dir()
+                && !runtime_game_path.join("BepInEx_DISABLED").is_symlink()))
     {
         log::info!(
             "[sync_profile_to_game] Moving the existing tree from {:?} into {:?}",

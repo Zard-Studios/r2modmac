@@ -4996,6 +4996,9 @@ async fn install_mod_bytes(
         let bepinex_root =
             crate::commands::game_commands::bepinex_install_root(&app, &profile_id, game_dir)?;
         let isolated = bepinex_root != game_dir;
+        if target_is_macos && !isolated && game_dir.join("BepInEx").is_symlink() {
+            crate::commands::game_commands::detach_isolated_bepinex_link(game_dir)?;
+        }
         let manifest_scope = if isolated {
             PROFILE_MANIFEST_SCOPE
         } else {
@@ -5022,7 +5025,7 @@ async fn install_mod_bytes(
                 return Err("Detected a macOS-only BepInEx pack. Please use a Windows/CrossOver-compatible pack for this profile.".to_string());
             }
 
-            if target_is_macos && isolated {
+            if target_is_macos && game_dir.join("BepInEx").is_symlink() {
                 crate::commands::game_commands::detach_isolated_bepinex_link(game_dir)?;
             }
 

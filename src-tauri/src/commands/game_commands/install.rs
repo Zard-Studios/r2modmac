@@ -121,6 +121,14 @@ pub async fn install_to_game(
         game_path.to_path_buf()
     };
     let runtime_game_path = runtime_game_path_buf.as_path();
+    if is_mac_profile
+        && runtime_game_path.join("BepInEx").is_symlink()
+        && bepinex_install_root(&app, &profile_id, runtime_game_path)? == runtime_game_path
+    {
+        // Repair/Apply must not write into another isolated profile through
+        // its game-side alias when this profile uses game-local mode.
+        detach_isolated_bepinex_link(runtime_game_path)?;
+    }
     let mac_runtime_present_before_sync = is_mac_profile
         && !is_vanilla
         && !is_balatro_profile

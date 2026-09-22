@@ -46,6 +46,7 @@ function fetchPackagesDeduped(gameId: string): Promise<number> {
 export const tauriAPI: IElectronAPI = {
     getProfiles: () => invoke<Profile[]>('get_profiles'),
     saveProfiles: (profiles) => invoke('save_profiles', { profiles }),
+    setProfileBepinexIsolation: (profileId, isolated) => invoke('set_profile_bepinex_isolation', { profileId, isolated }),
 
     // Placeholder implementations for now
     selectFolder: async () => invoke<string | null>('select_folder'),

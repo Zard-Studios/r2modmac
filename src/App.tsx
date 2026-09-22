@@ -3615,6 +3615,11 @@ function App() {
         onViewMod={setSelectedMod}
       />
       <AppModals
+        onSetBepinexIsolation={async (profileId, isolated) => {
+          await window.ipcRenderer.setProfileBepinexIsolation(profileId, isolated);
+          updateProfile(profileId, { bepinexIsolation: isolated, needs_sync: true });
+          void refreshRuntimeHealth();
+        }}
         selectedMod={selectedMod}
         setSelectedMod={setSelectedMod}
         activeProfileId={activeProfileId}

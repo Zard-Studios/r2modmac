@@ -64,6 +64,7 @@ export interface AppModalsProps {
     onDismissVerboseLogsWarning: () => void;
     onHideVerboseLogsWarning: () => Promise<void>;
     codeShareDisabled?: boolean;
+    onSetBepinexIsolation: (profileId: string, isolated: boolean) => Promise<void>;
 }
 
 export function AppModals({
@@ -87,6 +88,7 @@ export function AppModals({
     onDismissVerboseLogsWarning,
     onHideVerboseLogsWarning,
     codeShareDisabled = false,
+    onSetBepinexIsolation,
 }: AppModalsProps) {
 
     const activeProfile = activeProfileId ? profiles.find(p => p.id === activeProfileId) || null : null;
@@ -173,6 +175,7 @@ export function AppModals({
                 onClose={() => setShowSettings(false)}
                 selectedGame={selectedCommunity || undefined}
                 activeProfile={activeProfile}
+                onSetBepinexIsolation={onSetBepinexIsolation}
             />
 
             {showExportModal && activeProfileId && (

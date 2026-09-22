@@ -399,6 +399,9 @@ pub async fn check_profile_runtime_health(
         // Under isolation the tree sits in the profile while the loader stays
         // beside the game, so the two are looked for separately.
         let tree_root = bepinex_install_root(&app, &profile_id, &runtime_root)?;
+        if tree_root == runtime_root && runtime_root.join("BepInEx").is_symlink() {
+            return Ok(health("bepinex", vec!["runtime".to_string()]));
+        }
         let disabled = vanilla && tree_root.join("BepInEx_DISABLED").exists();
         let bep_dir = tree_root.join(if disabled {
             "BepInEx_DISABLED"

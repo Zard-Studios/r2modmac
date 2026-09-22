@@ -208,10 +208,9 @@ pub struct Settings {
     pub keybinds: BTreeMap<String, String>,
     /// Keep each profile's BepInEx tree in the profile instead of the game.
     ///
-    /// On, and deliberately absent from Preferences: every other manager works
-    /// this way, so it is how the app behaves rather than a choice to explain.
-    /// The file still honours `false`, which is the escape hatch for a game
-    /// that turns out to need its tree beside the executable.
+    /// Legacy fallback for profiles created before per-profile storage mode.
+    /// New profiles choose game-local storage explicitly; existing profiles
+    /// keep their previous location until the user changes that profile.
     #[serde(default = "default_true")]
     pub profile_isolation: bool,
 }

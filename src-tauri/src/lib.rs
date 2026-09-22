@@ -1,15 +1,5 @@
 pub mod commands;
 
-/// Whether `<profile>/BepInEx` is scratch space the app may delete at startup.
-///
-/// It was, back when the tree always lived beside the executable and the copy
-/// under the profile was only staging. With an isolated profile that same path
-/// is where the mods actually run from, so deleting it would wipe the profile
-/// on every launch.
-pub fn should_clean_profile_staging(legacy_install_mode: bool, profile_isolation: bool) -> bool {
-    !legacy_install_mode && !profile_isolation
-}
-
 #[cfg(debug_assertions)]
 mod dev_bridge;
 pub mod models;
@@ -433,7 +423,7 @@ pub fn run() {
                 }
             }
 
-            if let Ok(data_dir) = utils::paths::app_data_dir(app) {
+            if utils::paths::app_data_dir(app).is_ok() {
                 let mut settings = models::shared::load_settings_impl(&app.handle());
 
                 if !settings.thunderstore_chunk_cache_migrated {
@@ -447,44 +437,8 @@ pub fn run() {
                     let _ = models::shared::save_settings_impl(&app.handle(), &settings);
                 }
 
-                if should_clean_profile_staging(
-                    settings.legacy_install_mode,
-                    settings.profile_isolation,
-                ) {
-                    // Off the startup path. This walks every profile and deletes
-                    // its BepInEx tree, which on a large install is hundreds of
-                    // MB of recursive removal — and it ran inside `setup()`, so
-                    // the window was painted but answered no IPC until it
-                    // finished. What it removes is regenerable cache, so it is
-                    // safe to do a moment later on a background thread.
-                    let profiles_dir = data_dir.join("profiles");
-                    std::thread::spawn(move || {
-                        if !profiles_dir.exists() {
-                            return;
-                        }
-                        let Ok(entries) = std::fs::read_dir(&profiles_dir) else {
-                            return;
-                        };
-                        for entry in entries.filter_map(|e| e.ok()) {
-                            let profile_path = entry.path();
-                            if !profile_path.is_dir() {
-                                continue;
-                            }
-                            let bepinex_path = profile_path.join("BepInEx");
-                            if bepinex_path.exists() {
-                                log::debug!(
-                                    "[startup] Cleaning old profile cache: {:?}",
-                                    bepinex_path
-                                );
-                                let _ = std::fs::remove_dir_all(&bepinex_path);
-                            }
-                            let _ = std::fs::remove_file(profile_path.join("winhttp.dll"));
-                            let _ = std::fs::remove_file(profile_path.join("doorstop_config.ini"));
-                        }
-                    });
-                } else {
-                    log::debug!("[startup] Keeping the profile tree");
-                }
+                // A profile's BepInEx tree may be its live installation.
+                // Never delete it because another profile uses game-local mode.
             }
 
             // macOS: Create the bin folder and ensure run_bepinex.sh is executable
@@ -644,6 +598,7 @@ pub fn run() {
             commands::game_commands::launch_cancel::cancel_game_launch,
             commands::game_commands::launch::stop_game,
             commands::game_commands::sync::sync_profile_to_game,
+            commands::game_commands::profile_mode::set_profile_bepinex_isolation,
             commands::game_commands::sync_state::inspect_profile_sync_state,
             commands::mod_commands::install_mod,
             commands::mod_commands::begin_mod_operations,
@@ -728,27 +683,5 @@ mod app_log_storage_tests {
         assert!(directory.join("app.log.1").exists());
 
         std::fs::remove_dir_all(directory).unwrap();
-    }
-}
-
-#[cfg(test)]
-mod profile_staging_tests {
-    use super::should_clean_profile_staging;
-
-    #[test]
-    fn an_isolated_profile_is_never_cleaned() {
-        // The tree under the profile is the installation, not a copy of one.
-        assert!(!should_clean_profile_staging(false, true));
-        assert!(!should_clean_profile_staging(true, true));
-    }
-
-    #[test]
-    fn staging_beside_the_game_is_still_cleaned() {
-        assert!(should_clean_profile_staging(false, false));
-    }
-
-    #[test]
-    fn legacy_mode_keeps_its_cache_as_before() {
-        assert!(!should_clean_profile_staging(true, false));
     }
 }

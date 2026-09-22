@@ -142,6 +142,7 @@ export const useProfileStore = create<ProfileState>((set) => ({
             platform: platform || 'windows',
             distribution: distribution === 'manual' ? 'manual' : 'steam',
             launchMode: distribution === 'manual' ? 'direct' : 'auto',
+            bepinexIsolation: false,
             mods: [],
             needs_sync: false,
             dateCreated: Date.now(),
