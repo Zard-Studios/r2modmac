@@ -195,6 +195,7 @@ export function useModActions({
                 versionNumber: version.version_number,
                 iconUrl: version.icon,
                 enabled: true,
+                source: version.source || 'thunderstore',
             });
 
             // If Outer Wilds, dynamically load and install post-install dependencies!
@@ -283,6 +284,7 @@ export function useModActions({
                     versionNumber: ver.version_number,
                     iconUrl: ver.icon,
                     enabled: true,
+                    source: ver.source || 'thunderstore',
                     pending_sync: true,
                     pending_sync_status: 'queued',
                 });
@@ -485,6 +487,7 @@ export function useModActions({
                 versionNumber: version.version_number,
                 iconUrl: version.icon,
                 enabled: current?.enabled ?? true,
+                source: version.source || current?.source || 'thunderstore',
                 pending_sync: true,
                 pending_sync_status: 'queued',
                 synced_enabled: current?.synced_enabled ?? current?.enabled,
@@ -537,7 +540,9 @@ export function useModActions({
 
         const unresolved = updates.filter(update => {
             const key = getPackageKey(update.version.full_name).toLowerCase();
-            return planned.get(key)?.versionNumber !== update.version.version_number;
+            const staged = planned.get(key);
+            return staged?.versionNumber !== update.version.version_number
+                || (staged?.source || 'thunderstore') !== (update.version.source || 'thunderstore');
         });
         if (unresolved.length > 0) {
             throw new Error(`Update plan is incomplete: ${unresolved.map(update => update.pkg.name).join(', ')}`);

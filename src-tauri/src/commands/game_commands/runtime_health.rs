@@ -27,6 +27,14 @@ impl RuntimeHealth {
             self.runtime, self.status, details
         )
     }
+
+    pub(crate) fn needs_isolated_profile_link_repair(&self) -> bool {
+        self.runtime == "bepinex"
+            && self
+                .missing_components
+                .iter()
+                .any(|component| component == "profile-link")
+    }
 }
 
 fn profile_is_vanilla(app: &AppHandle, profile_id: &str) -> bool {
@@ -402,7 +410,8 @@ pub async fn check_profile_runtime_health(
                 || has_complete_macos_bepinex_runtime_rooted(game_path, Some(&tree_root))
         } else {
             has_complete_macos_bepinex_runtime_rooted(game_path, Some(&tree_root))
-        } && macos_bepinex_core_is_bootstrappable(&bep_dir.join("core"));
+        } && macos_bepinex_core_is_bootstrappable(&bep_dir.join("core"))
+            && (vanilla || isolated_bepinex_link_matches(&runtime_root, &tree_root));
         if complete {
             return Ok(health("bepinex", Vec::new()));
         }
@@ -414,6 +423,9 @@ pub async fn check_profile_runtime_health(
             missing.push("core".to_string());
         } else if !macos_bepinex_core_is_bootstrappable(&bep_dir.join("core")) {
             missing.push("preloader".to_string());
+        }
+        if !vanilla && !isolated_bepinex_link_matches(&runtime_root, &tree_root) {
+            missing.push("profile-link".to_string());
         }
         let doorstop = runtime_root.join(if disabled {
             "doorstop_libs_DISABLED"
@@ -436,6 +448,49 @@ pub async fn check_profile_runtime_health(
 
     let tree_root = bepinex_install_root(&app, &profile_id, game_path)?;
     Ok(inspect_windows_bepinex(game_path, &tree_root, vanilla))
+}
+
+/// Repair only the macOS profile link. A missing link does not justify
+/// downloading a different package (or changing its selected store).
+#[command]
+pub async fn repair_profile_runtime_link(
+    app: AppHandle,
+    profile_id: String,
+    game_identifier: String,
+    platform: Option<String>,
+) -> Result<RuntimeHealth, String> {
+    let health = check_profile_runtime_health(
+        app.clone(),
+        profile_id.clone(),
+        game_identifier.clone(),
+        platform.clone(),
+    )
+    .await?;
+    if !health.needs_isolated_profile_link_repair() {
+        return Ok(health);
+    }
+    if platform
+        .as_deref()
+        .unwrap_or(&get_profile_platform(&app, &profile_id))
+        != "mac"
+    {
+        return Err("Profile link repair is only available for macOS profiles".to_string());
+    }
+    let game_path = get_game_path(
+        app.clone(),
+        game_identifier.clone(),
+        Some("mac".to_string()),
+    )
+    .await?
+    .ok_or_else(|| "GAME_PATH_NOT_CONFIGURED".to_string())?;
+    let runtime_root = resolve_macos_runtime_root(std::path::Path::new(&game_path));
+    let tree_root = bepinex_install_root(&app, &profile_id, &runtime_root)?;
+    sync_macos_runtime_disabled_state_rooted(&runtime_root, false, Some(&tree_root))?;
+    log::info!(
+        "[runtime_health] Repaired BepInEx profile link for profile {}",
+        profile_id
+    );
+    check_profile_runtime_health(app, profile_id, game_identifier, platform).await
 }
 
 #[cfg(test)]

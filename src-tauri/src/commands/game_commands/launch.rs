@@ -58,13 +58,28 @@ async fn launch_game_with_mods_inner(
     // Clears any cancellation left by a previous attempt, so pressing Play
     // after stopping one launch does not abort the next one instantly.
     launch_cancel::begin_launch();
-    let health = super::runtime_health::check_profile_runtime_health(
+    let mut health = super::runtime_health::check_profile_runtime_health(
         app.clone(),
         profile_id.clone(),
         game_identifier.clone(),
         platform.clone(),
     )
     .await?;
+    if health.needs_isolated_profile_link_repair() {
+        let game_path = get_game_path(app.clone(), game_identifier.clone(), platform.clone())
+            .await?
+            .ok_or_else(|| "Game path not found".to_string())?;
+        let runtime_root = resolve_macos_runtime_root(std::path::Path::new(&game_path));
+        let tree_root = bepinex_install_root(&app, &profile_id, &runtime_root)?;
+        sync_macos_runtime_disabled_state_rooted(&runtime_root, false, Some(&tree_root))?;
+        health = super::runtime_health::check_profile_runtime_health(
+            app.clone(),
+            profile_id.clone(),
+            game_identifier.clone(),
+            platform.clone(),
+        )
+        .await?;
+    }
     if health.blocks_modded_launch() {
         return Err(health.modded_launch_error());
     }

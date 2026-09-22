@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { PackageVersion, Package } from '../../types/thunderstore';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { ModSource, PackageVersion, Package } from '../../types/thunderstore';
 import type { InstalledMod } from '../../types/profile';
 import DOMPurify from 'dompurify';
 import { LikeStat } from '../LikeStat';
 import { marked } from 'marked';
+import { packageIdentityKey } from '../../utils/modVersioning';
 
 const getGithubRepo = (url: string | undefined): { owner: string; repo: string } | null => {
     if (!url) return null;
@@ -36,6 +37,121 @@ interface ModDetailModalProps {
 
 type Tab = 'description' | 'changelog' | 'dependencies';
 
+const sourceName = (source?: ModSource) => {
+    if (source === 'hexium') return 'Hexium';
+    if (source === 'outerwilds') return 'Outer Wilds Mods';
+    return 'Thunderstore';
+};
+
+const versionChoiceKey = (version: PackageVersion) =>
+    `${version.source || 'thunderstore'}:${version.uuid4}:${version.version_number}`;
+
+function StoreLogo({ source, className = 'h-4 w-4' }: { source?: ModSource; className?: string }) {
+    const name = sourceName(source);
+    if (source === 'hexium') {
+        return (
+            <svg className={className} viewBox="0 0 32 32" role="img" aria-label={name}>
+                <title>{name}</title>
+                <path d="M16 2.5 28 9.25v13.5L16 29.5 4 22.75V9.25Z" fill="#6d28d9" stroke="#a78bfa" strokeWidth="1.5" />
+                <path d="M10 9v14h4.2v-5.2h3.6V23H22V9h-4.2v5.1h-3.6V9Z" fill="white" />
+            </svg>
+        );
+    }
+    if (source === 'outerwilds') {
+        return (
+            <svg className={className} viewBox="0 0 32 32" role="img" aria-label={name}>
+                <title>{name}</title>
+                <circle cx="16" cy="16" r="13" fill="#d97706" />
+                <path d="M16 7a9 9 0 1 0 0 18 9 9 0 0 0 0-18Zm0 4a5 5 0 1 1 0 10 5 5 0 0 1 0-10Z" fill="white" />
+            </svg>
+        );
+    }
+    return (
+        <svg className={`${className} text-teal-400`} viewBox="0 0 1000 896" role="img" aria-label={name}>
+            <title>{name}</title>
+            <path
+                d="M13.4223 496.845L209.485 838.17L300 650.202L200.99 477.966C189.992 458.897 189.992 436.945 200.99 417.779L324.555 202.755C335.561 183.611 354.447 172.666 376.421 172.675H442.857L314.286 462.366H473.143L257.143 881.384L690.941 361.014H557.588L648.593 172.675H808.03H900.762L1000 2.28882e-05H715.868H526.836H298.96C263.138 0.0084323 232.393 17.8324 214.461 48.9346L13.4223 398.9C-4.46781 430.078 -4.48036 465.827 13.4223 496.845ZM313.959 895.833H701.066C736.813 895.833 767.63 878.005 785.612 846.819L986.655 496.836C1004.44 465.827 1004.44 430.078 986.655 398.892L906.26 258.947H707.808L799.079 417.779C809.985 436.961 809.984 458.91 799.049 477.974L675.531 693.049C664.454 712.222 645.555 723.15 623.555 723.15H533.795L471.429 722.446L313.959 895.833Z"
+                fill="currentColor"
+            />
+        </svg>
+    );
+}
+
+function VersionSourcePicker({
+    versions,
+    selected,
+    onChange,
+}: {
+    versions: PackageVersion[];
+    selected: PackageVersion;
+    onChange: (version: PackageVersion) => void;
+}) {
+    const [isOpen, setIsOpen] = useState(false);
+    const rootRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        if (!isOpen) return;
+        const close = (event: PointerEvent) => {
+            if (!rootRef.current?.contains(event.target as Node)) setIsOpen(false);
+        };
+        const closeOnEscape = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') setIsOpen(false);
+        };
+        document.addEventListener('pointerdown', close);
+        document.addEventListener('keydown', closeOnEscape);
+        return () => {
+            document.removeEventListener('pointerdown', close);
+            document.removeEventListener('keydown', closeOnEscape);
+        };
+    }, [isOpen]);
+
+    return (
+        <div ref={rootRef} className="relative inline-block w-fit max-w-full">
+            <button
+                type="button"
+                onClick={() => setIsOpen(open => !open)}
+                className="flex max-w-full items-center gap-2.5 rounded-lg border border-gray-700 bg-gray-800 px-2.5 py-1.5 text-sm text-gray-200 transition-colors hover:border-gray-600 focus:border-blue-500 focus:outline-none"
+                aria-haspopup="listbox"
+                aria-expanded={isOpen}
+                aria-label={`Version ${selected.version_number} from ${sourceName(selected.source)}`}
+            >
+                <span className="flex items-center gap-2">
+                    <StoreLogo source={selected.source} />
+                    <span>v{selected.version_number}</span>
+                </span>
+                <svg className={`h-4 w-4 flex-shrink-0 text-gray-500 transition-transform ${isOpen ? 'rotate-180' : ''}`} viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                    <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 11.19l3.71-3.96a.75.75 0 1 1 1.1 1.02l-4.25 4.54a.75.75 0 0 1-1.1 0L5.21 8.25a.75.75 0 0 1 .02-1.04Z" clipRule="evenodd" />
+                </svg>
+            </button>
+            {isOpen && (
+                <div className="absolute left-0 top-full z-30 mt-1 w-max min-w-full max-w-[min(22rem,calc(100vw-3rem))] overflow-hidden rounded-lg border border-gray-700 bg-gray-800 py-1 shadow-xl" role="listbox">
+                    {versions.map(version => {
+                        const active = versionChoiceKey(version) === versionChoiceKey(selected);
+                        return (
+                            <button
+                                type="button"
+                                key={versionChoiceKey(version)}
+                                onClick={() => {
+                                    onChange(version);
+                                    setIsOpen(false);
+                                }}
+                                className={`flex w-full items-center gap-2 whitespace-nowrap px-3 py-2 text-left text-sm transition-colors ${active ? 'bg-blue-500/15 text-fg-accent' : 'text-gray-200 hover:bg-gray-700'}`}
+                                role="option"
+                                aria-selected={active}
+                                title={sourceName(version.source)}
+                            >
+                                <StoreLogo source={version.source} />
+                                <span>v{version.version_number}</span>
+                                <span className="ml-auto pl-4 text-xs text-gray-500">{sourceName(version.source)}</span>
+                            </button>
+                        );
+                    })}
+                </div>
+            )}
+        </div>
+    );
+}
+
 export function ModDetailModal({
     pkg,
     isOpen,
@@ -54,13 +170,36 @@ export function ModDetailModal({
     const installedLabel = legacyInstallMode ? 'Installed' : 'Added';
     const installActionLabel = legacyInstallMode ? 'Install' : 'Add';
 
+    const installedMod = useMemo(
+        () => installedMods.find(m => packageIdentityKey(m.fullName) === pkg.full_name.toLowerCase()),
+        [installedMods, pkg.full_name]
+    );
+    const installedVersionChoice = useMemo(() => {
+        if (!installedMod) return undefined;
+        const installedSource = installedMod.source || 'thunderstore';
+        return pkg.versions.find(version =>
+            version.version_number === installedMod.versionNumber
+            && (version.source || 'thunderstore') === installedSource
+        );
+    }, [installedMod, pkg.versions]);
+    const defaultVersionChoice = installedVersionChoice || pkg.versions[0];
+    const defaultVersionKey = defaultVersionChoice ? versionChoiceKey(defaultVersionChoice) : '';
     const [selectedVersionChoice, setSelectedVersionChoice] = useState(() => ({
-        pkgUuid: pkg.uuid4,
-        versionNumber: pkg.versions[0]?.version_number || '',
+        packageName: pkg.full_name,
+        versionKey: defaultVersionKey,
     }));
-    const selectedVersionNumber = selectedVersionChoice.pkgUuid === pkg.uuid4
-        ? selectedVersionChoice.versionNumber
-        : pkg.versions[0]?.version_number || '';
+    const selectedVersionKey = selectedVersionChoice.packageName === pkg.full_name
+        ? selectedVersionChoice.versionKey
+        : defaultVersionKey;
+    const wasOpenRef = useRef(isOpen);
+
+    useEffect(() => {
+        const justOpened = isOpen && !wasOpenRef.current;
+        wasOpenRef.current = isOpen;
+        if (justOpened) {
+            setSelectedVersionChoice({ packageName: pkg.full_name, versionKey: defaultVersionKey });
+        }
+    }, [defaultVersionKey, isOpen, pkg.full_name]);
     const [prevPkgUuid, setPrevPkgUuid] = useState(pkg.uuid4);
     const [versionsList, setVersionsList] = useState<PackageVersion[]>(pkg.versions);
 
@@ -70,17 +209,27 @@ export function ModDetailModal({
     }
 
     const selectedVersion = useMemo(
-        () => versionsList.find(v => v.version_number === selectedVersionNumber) || versionsList[0] || pkg.versions[0],
-        [versionsList, selectedVersionNumber, pkg.versions]
+        () => versionsList.find(v => versionChoiceKey(v) === selectedVersionKey) || versionsList[0] || pkg.versions[0],
+        [versionsList, selectedVersionKey, pkg.versions]
     );
     const mod = selectedVersion;
+    const packageNameParts = pkg.full_name.split('-', 2);
+    const storePageUrl = mod.source === 'hexium'
+        ? `https://${gameId}.hexium.gg/mods/${packageNameParts[0]}/${packageNameParts[1] || pkg.name}`
+        : mod.source === 'outerwilds'
+            ? pkg.package_url
+            : `https://thunderstore.io/c/${gameId}/p/${packageNameParts[0]}/${packageNameParts[1] || pkg.name}/`;
+    const websiteUrl = mod.website_url || storePageUrl;
     const isLocalMod = !!mod.isLocal;
     const localReadme = mod.localReadme?.trim() || '';
-    const installedVersionNumber = useMemo(
-        () => installedMods.find(m => m.fullName.startsWith(pkg.full_name))?.versionNumber || null,
-        [installedMods, pkg.full_name]
-    );
-    const isSelectedInstalled = !!installedVersionNumber && installedVersionNumber === mod.version_number;
+    const installedSource = installedMod?.source || 'thunderstore';
+    const selectedSource = mod.source || 'thunderstore';
+    const isSelectedInstalled = !!installedMod
+        && installedMod.versionNumber === mod.version_number
+        && installedSource === selectedSource;
+    const isStoreSwitch = !!installedMod
+        && installedMod.versionNumber === mod.version_number
+        && installedSource !== selectedSource;
     const isSelectedLatest = versionsList[0]?.version_number === mod.version_number;
 
     const [activeTab, setActiveTab] = useState<Tab>('description');
@@ -177,6 +326,7 @@ export function ModDetailModal({
                             is_active: true,
                             uuid4: String(rel.id || rel.tag_name),
                             file_size: zipAsset.size || 0,
+                            source: 'outerwilds',
                         });
                     }
                     if (mapped.length > 0 && !cancelled) {
@@ -196,8 +346,8 @@ export function ModDetailModal({
 
 
 
-    const handleVersionChange = (versionNumber: string) => {
-        setSelectedVersionChoice({ pkgUuid: pkg.uuid4, versionNumber });
+    const handleVersionChange = (version: PackageVersion) => {
+        setSelectedVersionChoice({ packageName: pkg.full_name, versionKey: versionChoiceKey(version) });
     };
 
     const fetchDependencies = useCallback(async (targetMod: PackageVersion) => {
@@ -214,18 +364,27 @@ export function ModDetailModal({
     const fetchContent = useCallback(async (targetMod: PackageVersion, type: 'readme' | 'changelog') => {
         setLoadingContent(true);
         try {
-            const parts = targetMod.full_name.split('-');
-            const owner = parts[0];
-            const name = parts[1];
-            const version = parts[2];
-
-            const url = `https://thunderstore.io/api/cyberstorm/package/${owner}/${name}/v/${version}/${type}/`;
+            const suffix = `-${targetMod.version_number}`;
+            const packageName = targetMod.full_name.endsWith(suffix)
+                ? targetMod.full_name.slice(0, -suffix.length)
+                : targetMod.full_name;
+            const separator = packageName.indexOf('-');
+            const owner = separator === -1 ? packageName : packageName.slice(0, separator);
+            const name = separator === -1 ? packageName : packageName.slice(separator + 1);
+            const url = targetMod.source === 'hexium'
+                ? `https://hexium.gg/api/experimental/package/${owner}/${name}/${targetMod.version_number}/${type}/`
+                : `https://thunderstore.io/api/cyberstorm/package/${owner}/${name}/v/${targetMod.version_number}/${type}/`;
 
             const jsonString = await window.ipcRenderer.fetchTextContent(url);
             const data = JSON.parse(jsonString);
 
             if (data.html) {
                 const sanitized = DOMPurify.sanitize(data.html);
+                if (type === 'readme') setReadmeContent(sanitized);
+                else setChangelogContent(sanitized);
+            } else if (typeof data.markdown === 'string' && data.markdown.trim()) {
+                const html = await marked.parse(data.markdown);
+                const sanitized = DOMPurify.sanitize(html);
                 if (type === 'readme') setReadmeContent(sanitized);
                 else setChangelogContent(sanitized);
             }
@@ -237,14 +396,15 @@ export function ModDetailModal({
     }, []);
 
     useEffect(() => {
-        if (!isOpen || loadingKey === mod.full_name) return;
+        const detailKey = versionChoiceKey(mod);
+        if (!isOpen || loadingKey === detailKey) return;
 
         let cancelled = false;
         const loadModDetails = async () => {
             await Promise.resolve();
             if (cancelled) return;
 
-            setLoadingKey(mod.full_name);
+            setLoadingKey(detailKey);
             setReadmeContent(null);
             setChangelogContent(null);
             setDependencies([]);
@@ -328,7 +488,7 @@ export function ModDetailModal({
                     <div className="flex items-start gap-5 p-6 border-b border-gray-700 bg-gray-900/50 flex-shrink-0">
                         {/* Icon - larger, clickable for lightbox */}
                         <div
-                            className="w-24 h-24 bg-gray-900 rounded-xl flex-shrink-0 overflow-hidden border border-gray-700 relative group shadow-lg cursor-pointer"
+                            className="relative h-32 w-32 flex-shrink-0 cursor-pointer overflow-hidden rounded-xl border border-gray-700 bg-gray-900 shadow-lg group"
                             onClick={() => mod.icon && setShowImageLightbox(true)}
                         >
                             {mod.icon ? (
@@ -348,10 +508,10 @@ export function ModDetailModal({
                         </div>
 
                         {/* Title & Info */}
-                        <div className="flex-1 min-w-0 flex flex-col justify-between h-24">
-                            <div className="flex justify-between items-start">
-                                <div className="min-w-0">
-                                    <div className="flex min-w-0 items-center gap-2.5">
+                        <div className="min-w-0 flex-1">
+                            <div className="flex items-start justify-between gap-4">
+                                <div className="min-w-0 flex-1">
+                                    <div className="flex min-w-0 flex-wrap items-center gap-2.5">
                                         <h2 className="truncate text-2xl font-bold leading-tight text-white">{mod.name}</h2>
                                         {showDeprecatedWarning && pkg.is_deprecated ? (
                                             <span className="inline-flex flex-shrink-0 items-center gap-1 rounded-full border border-red-500/35 bg-red-950/55 px-2 py-0.5 text-[11px] font-semibold text-fg-danger">
@@ -361,24 +521,44 @@ export function ModDetailModal({
                                                 Deprecated
                                             </span>
                                         ) : null}
+                                        {isSelectedInstalled ? (
+                                            <span className="inline-flex flex-shrink-0 rounded-full border border-green-500/30 bg-green-500/15 px-2 py-0.5 text-[11px] font-semibold text-fg-success">
+                                                {installedLabel}
+                                            </span>
+                                        ) : isSelectedLatest ? (
+                                            <span className="inline-flex flex-shrink-0 rounded-full border border-blue-500/30 bg-blue-500/15 px-2 py-0.5 text-[11px] font-semibold text-fg-accent">
+                                                Latest version
+                                            </span>
+                                        ) : (
+                                            <span className="inline-flex flex-shrink-0 rounded-full border border-amber-500/30 bg-amber-500/15 px-2 py-0.5 text-[11px] font-semibold text-fg-warning">
+                                                Outdated version
+                                            </span>
+                                        )}
                                     </div>
                                     <p className="text-sm text-gray-400 mt-0.5">
                                         {isLocalMod ? 'Custom local mod' : `by ${mod.full_name.split('-')[0]}`}
                                     </p>
+                                    <div className="mt-2">
+                                        <VersionSourcePicker
+                                            versions={versionsList}
+                                            selected={mod}
+                                            onChange={handleVersionChange}
+                                        />
+                                    </div>
                                 </div>
-                                <div className="text-right flex flex-col items-end">
+                                <div className="flex flex-shrink-0 flex-col items-end text-right">
                                     <span className="text-[10px] uppercase text-gray-500 font-bold tracking-wider">Updated</span>
                                     <span className="text-sm text-gray-300">{new Date(pkg.date_updated).toLocaleDateString()}</span>
-                                    {mod.website_url && (
+                                    {websiteUrl && (
                                         <button
                                             onClick={() => {
                                                 import('@tauri-apps/plugin-shell').then(({ open }) => {
-                                                    open(mod.website_url!);
+                                                    open(websiteUrl);
                                                 });
                                             }}
                                             className="flex items-center gap-1 text-sm text-fg-accent hover:text-fg-accent transition-colors mt-1"
                                         >
-                                            Website
+                                            {mod.website_url ? 'Website' : sourceName(mod.source)}
                                             <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
                                             </svg>
@@ -387,9 +567,8 @@ export function ModDetailModal({
                                 </div>
                             </div>
 
-                            {/* Stats row - aligned at bottom */}
-                            <div className="flex items-center gap-4 text-xs text-gray-500 mt-auto">
-                                <span className="bg-gray-700 px-2.5 py-1 rounded-md text-gray-300 font-medium">v{mod.version_number}</span>
+                            {/* Independent row so metadata never competes with the version picker. */}
+                            <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-gray-500">
                                 {!isLocalMod && (
                                     <>
                                         <span className="flex items-center gap-1.5" title={`${mod.downloads.toLocaleString()} downloads`}>
@@ -425,39 +604,6 @@ export function ModDetailModal({
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                             </svg>
                         </button>
-                    </div>
-
-                    {/* Version picker */}
-                    <div className="px-6 py-3 border-b border-gray-700 bg-gray-900/30 flex items-center justify-between gap-3">
-                        <div className="flex items-center gap-2">
-                            <span className="text-xs uppercase tracking-wider text-gray-500 font-bold">Version</span>
-                            <select
-                                value={selectedVersionNumber}
-                                onChange={(e) => handleVersionChange(e.target.value)}
-                                className="bg-gray-800 border border-gray-700 text-gray-200 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:border-blue-500"
-                            >
-                                {versionsList.map((v) => (
-                                    <option key={v.uuid4} value={v.version_number}>
-                                        v{v.version_number}
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
-                        <div className="flex items-center gap-2 text-xs">
-                            {isSelectedInstalled ? (
-                                <span className="px-2 py-1 rounded-full bg-green-500/15 text-fg-success border border-green-500/30">
-                                    {installedLabel}
-                                </span>
-                            ) : isSelectedLatest ? (
-                                <span className="px-2 py-1 rounded-full bg-blue-500/15 text-fg-accent border border-blue-500/30">
-                                    Latest version
-                                </span>
-                            ) : (
-                                <span className="px-2 py-1 rounded-full bg-amber-500/15 text-fg-warning border border-amber-500/30">
-                                    Outdated version
-                                </span>
-                            )}
-                        </div>
                     </div>
 
                     {/* Tabs */}
@@ -636,7 +782,13 @@ export function ModDetailModal({
                                     : 'bg-blue-600 hover:bg-blue-500 text-on-accent'
                                     }`}
                             >
-                                {isSelectedInstalled ? installedLabel : isInstalled ? `Update to v${mod.version_number}` : `${installActionLabel} v${mod.version_number}`}
+                                {isSelectedInstalled
+                                    ? installedLabel
+                                    : isStoreSwitch
+                                        ? `Switch to ${sourceName(mod.source)}`
+                                        : isInstalled
+                                            ? `Update to v${mod.version_number}`
+                                            : `${installActionLabel} v${mod.version_number}`}
                             </button>
                         </div>
                     )}

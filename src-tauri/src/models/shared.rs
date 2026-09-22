@@ -10,6 +10,15 @@ use tokio::sync::RwLock;
 /// grows unbounded as the user browses different games.
 const MAX_CACHED_GAMES: usize = 1;
 
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, Eq, PartialEq, Hash)]
+#[serde(rename_all = "lowercase")]
+pub enum ModSource {
+    #[default]
+    Thunderstore,
+    Hexium,
+    Outerwilds,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct PackageVersion {
     pub name: String,
@@ -31,6 +40,8 @@ pub struct PackageVersion {
     // date_created and is_active are truly unused in the install/UI flow.
     pub uuid4: String,
     pub full_name: String,
+    #[serde(default)]
+    pub source: ModSource,
     #[serde(skip_deserializing, default)]
     pub date_created: String,
     #[serde(skip_deserializing, default)]

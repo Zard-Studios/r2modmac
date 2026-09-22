@@ -1,3 +1,5 @@
+export type ModSource = 'thunderstore' | 'hexium' | 'outerwilds';
+
 export interface Community {
     identifier: string;
     name: string;
@@ -22,6 +24,7 @@ export interface PackageVersion {
     file_size: number;
     localReadme?: string;
     isLocal?: boolean;
+    source?: ModSource;
 }
 
 export interface Package {

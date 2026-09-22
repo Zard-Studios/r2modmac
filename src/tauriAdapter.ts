@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import type { IElectronAPI, ThemeSummary } from './types/electron';
 import type { Profile } from './types/profile';
-import type { Community, Package, CommunityPlatformInfo } from './types/thunderstore';
+import type { Community, Package, CommunityPlatformInfo, ModSource } from './types/thunderstore';
 
 const PACKAGE_FETCH_DEDUP_WINDOW_MS = 1_000;
 const packageFetchesInFlight = new Map<string, Promise<number>>();
@@ -138,7 +138,7 @@ export const tauriAPI: IElectronAPI = {
     async lookupPackagesByNames(gameId: string, names: string[]) {
         return await invoke('lookup_packages_by_names', { gameId, names });
     },
-    fetchPackageByName: async (name: string, gameId?: string | null) => invoke<Package | null>('fetch_package_by_name', { name, gameId }),
+    fetchPackageByName: async (name: string, gameId?: string | null, source?: ModSource) => invoke<Package | null>('fetch_package_by_name', { name, gameId, source }),
     importProfile: async (code) => invoke<any>('import_profile', { code }),
     importProfileFromFile: async (path) => invoke<any>('import_profile_from_file', { path }),
     importProfileConfigs: async (profileId, archivePath) => invoke<number>('import_profile_configs', { profileId, archivePath }),
@@ -194,6 +194,8 @@ export const tauriAPI: IElectronAPI = {
     },
     checkProfileRuntimeHealth: async (profileId, gameIdentifier, platform?) =>
         invoke('check_profile_runtime_health', { profileId, gameIdentifier, platform }),
+    repairProfileRuntimeLink: async (profileId, gameIdentifier, platform?) =>
+        invoke('repair_profile_runtime_link', { profileId, gameIdentifier, platform }),
     inspectProfileSyncState: async (profileId, gameIdentifier, platform?) =>
         invoke('inspect_profile_sync_state', { profileId, gameIdentifier, platform }),
     beginProfileApplyTransaction: async (profileId, gameIdentifier) =>

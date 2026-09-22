@@ -50,7 +50,13 @@ export const inferPendingSyncKind = (
     baseline: InstalledModSnapshot | null | undefined = mod.sync_baseline,
 ): PendingSyncKind => {
     if (baseline === null || baseline === undefined) return mod.pending_sync_kind || 'add';
-    if (baseline.versionNumber !== mod.versionNumber || baseline.fullName !== mod.fullName) return 'update';
+    const baselineSource = baseline.source || 'thunderstore';
+    const desiredSource = mod.source || 'thunderstore';
+    if (
+        baseline.versionNumber !== mod.versionNumber
+        || baseline.fullName !== mod.fullName
+        || baselineSource !== desiredSource
+    ) return 'update';
     return mod.enabled ? 'enable' : 'disable';
 };
 

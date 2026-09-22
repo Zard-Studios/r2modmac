@@ -74,6 +74,159 @@ fn rename_runtime_items(
     Ok(())
 }
 
+fn is_profile_bepinex_target(path: &std::path::Path) -> bool {
+    let components = path
+        .components()
+        .filter_map(|component| component.as_os_str().to_str())
+        .collect::<Vec<_>>();
+    components
+        .windows(3)
+        .any(|parts| parts[0] == "com.r2modmac" && parts[1] == "profiles" && !parts[2].is_empty())
+        && path.file_name().and_then(|name| name.to_str()) == Some("BepInEx")
+}
+
+fn profile_bepinex_link_target(
+    runtime_root: &std::path::Path,
+    link: &std::path::Path,
+) -> Option<std::path::PathBuf> {
+    let target = fs::read_link(link).ok()?;
+    Some(if target.is_absolute() {
+        target
+    } else {
+        runtime_root.join(target)
+    })
+}
+
+/// BepInEx's preloader and patchers resolve their core directory relative to
+/// the game root even when Doorstop loads the preloader from an isolated
+/// profile. Expose the selected profile tree at the path those components
+/// actually use.
+pub(crate) fn sync_isolated_bepinex_link(
+    runtime_root: &std::path::Path,
+    tree_root: &std::path::Path,
+    disable: bool,
+) -> Result<(), String> {
+    let link = runtime_root.join("BepInEx");
+    let metadata = fs::symlink_metadata(&link).ok();
+
+    if disable {
+        if let Some(metadata) = metadata {
+            if metadata.file_type().is_symlink() {
+                let target = profile_bepinex_link_target(runtime_root, &link);
+                if target.as_deref().is_some_and(is_profile_bepinex_target) {
+                    fs::remove_file(&link).map_err(|error| {
+                        format!(
+                            "Failed to remove the isolated BepInEx link at {}: {}",
+                            link.display(),
+                            error
+                        )
+                    })?;
+                }
+            }
+        }
+        return Ok(());
+    }
+
+    let target = tree_root.join("BepInEx");
+    if !target.is_dir() {
+        return Err(format!(
+            "The selected profile has no active BepInEx directory at {}",
+            target.display()
+        ));
+    }
+
+    if let Some(metadata) = metadata {
+        if metadata.file_type().is_symlink() {
+            let existing_target = profile_bepinex_link_target(runtime_root, &link);
+            let is_same_target = existing_target
+                .as_deref()
+                .and_then(|path| fs::canonicalize(path).ok())
+                .zip(fs::canonicalize(&target).ok())
+                .is_some_and(|(existing, desired)| existing == desired);
+            if is_same_target {
+                return Ok(());
+            }
+            if !existing_target
+                .as_deref()
+                .is_some_and(is_profile_bepinex_target)
+            {
+                return Err(format!(
+                    "Cannot activate the isolated BepInEx profile because {} is a symlink not managed by r2modmac",
+                    link.display()
+                ));
+            }
+            fs::remove_file(&link).map_err(|error| {
+                format!(
+                    "Failed to replace the previous profile BepInEx link at {}: {}",
+                    link.display(),
+                    error
+                )
+            })?;
+        } else {
+            return Err(format!(
+                "Cannot activate the isolated BepInEx profile because {} already exists and is not an r2modmac profile link. Move that folder aside, then repair the runtime.",
+                link.display()
+            ));
+        }
+    }
+
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(&target, &link).map_err(|error| {
+            format!(
+                "Failed to link the selected profile's BepInEx tree at {}: {}",
+                link.display(),
+                error
+            )
+        })?;
+        Ok(())
+    }
+    #[cfg(not(unix))]
+    {
+        Err("Isolated BepInEx profiles require a Unix symbolic link".to_string())
+    }
+}
+
+/// Unlink only the selected profile's game-side alias before extracting a new
+/// pack. Otherwise archive writes would follow the alias into the profile.
+pub(crate) fn detach_isolated_bepinex_link(runtime_root: &std::path::Path) -> Result<(), String> {
+    let link = runtime_root.join("BepInEx");
+    if !link.is_symlink() {
+        return Ok(());
+    }
+    // Apply can switch profiles. The current alias may legitimately point to
+    // another r2modmac profile, but never unlink an unrelated user symlink.
+    if !profile_bepinex_link_target(runtime_root, &link)
+        .as_deref()
+        .is_some_and(is_profile_bepinex_target)
+    {
+        return Err(format!(
+            "Cannot replace an unrecognized BepInEx link at {}",
+            link.display()
+        ));
+    }
+    fs::remove_file(&link).map_err(|error| error.to_string())
+}
+
+pub(crate) fn isolated_bepinex_link_matches(
+    runtime_root: &std::path::Path,
+    tree_root: &std::path::Path,
+) -> bool {
+    if runtime_root == tree_root {
+        return tree_root.join("BepInEx").is_dir();
+    }
+
+    let link = runtime_root.join("BepInEx");
+    let Some(target) = profile_bepinex_link_target(runtime_root, &link) else {
+        return false;
+    };
+    let Ok(metadata) = fs::symlink_metadata(&link) else {
+        return false;
+    };
+    metadata.file_type().is_symlink()
+        && fs::canonicalize(target).ok() == fs::canonicalize(tree_root.join("BepInEx")).ok()
+}
+
 /// The same toggle with the BepInEx tree somewhere other than the game.
 ///
 /// An isolated profile keeps the tree, while the loader that boots it stays
@@ -89,7 +242,7 @@ pub(crate) fn sync_macos_runtime_disabled_state_rooted(
     if let Some(tree_root) = tree_root {
         if tree_root != runtime_root {
             rename_runtime_items(tree_root, disable, &["BepInEx"], &[])?;
-            return rename_runtime_items(
+            rename_runtime_items(
                 &runtime_root,
                 disable,
                 &["doorstop_libs"],
@@ -98,7 +251,9 @@ pub(crate) fn sync_macos_runtime_disabled_state_rooted(
                     "libdoorstop.dylib",
                     ".doorstop_version",
                 ],
-            );
+            )?;
+            sync_isolated_bepinex_link(&runtime_root, tree_root, disable)?;
+            return Ok(());
         }
     }
     let dir_items = ["BepInEx", "doorstop_libs"];

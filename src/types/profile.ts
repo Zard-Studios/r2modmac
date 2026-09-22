@@ -1,7 +1,7 @@
 export type ProfilePlatform = 'windows' | 'mac';
 export type ProfileDistribution = 'steam' | 'manual';
 export type ProfileLaunchMode = 'auto' | 'steam' | 'direct';
-export type InstalledModSource = 'thunderstore' | 'local';
+export type InstalledModSource = 'thunderstore' | 'hexium' | 'outerwilds' | 'local';
 export type PendingSyncKind = 'add' | 'update' | 'enable' | 'disable';
 export type PendingSyncStatus = 'queued' | 'syncing' | 'ready' | 'failed';
 

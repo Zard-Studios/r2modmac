@@ -1,4 +1,5 @@
 import type { Package, PackageVersion } from '../types/thunderstore.ts';
+import type { InstalledModSource } from '../types/profile.ts';
 
 const VERSION_SUFFIX = /-(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)$/;
 
@@ -34,6 +35,25 @@ export function findPinnedVersion(pkg: Package, requestedVersion: string, label 
         throw new Error(`${label}: pinned version ${requestedVersion} is unavailable; refusing to use latest`);
     }
     return version;
+}
+
+export function findPinnedVersionForSource(
+    pkg: Package,
+    requestedVersion: string,
+    source?: InstalledModSource,
+    label = pkg.full_name,
+): PackageVersion {
+    if (source && source !== 'local') {
+        const version = pkg.versions.find(candidate =>
+            candidate.version_number === requestedVersion
+            && (candidate.source || 'thunderstore') === source
+        );
+        if (!version) {
+            throw new Error(`${label}: pinned version ${requestedVersion} from ${source} is unavailable`);
+        }
+        return version;
+    }
+    return findPinnedVersion(pkg, requestedVersion, label);
 }
 
 function compareIdentifier(left: string, right: string): number {

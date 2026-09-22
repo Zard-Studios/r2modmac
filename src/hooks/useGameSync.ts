@@ -3,7 +3,7 @@ import type { Package } from '../types/thunderstore';
 import type { InstalledMod, PendingModRemoval } from '../types/profile';
 import { useProfileStore } from '../store/useProfileStore';
 import type { ModDownloadProgressEvent, ProfileApplySnapshotProgressEvent, ProgressSetter } from '../types/progress';
-import { parsePackageReference } from '../utils/modVersioning';
+import { findPinnedVersionForSource, parsePackageReference } from '../utils/modVersioning';
 import { runningOnWindows } from '../utils/platformUtils';
 import { createFrameScheduler, runWithConcurrency } from '../utils/concurrency';
 import {
@@ -443,10 +443,16 @@ export function useGameSync({
                             return;
                         }
 
-                        const pkg = await window.ipcRenderer.fetchPackageByName(modInProfile.fullName, community);
+                        const pkg = await window.ipcRenderer.fetchPackageByName(
+                            modInProfile.fullName,
+                            community,
+                            modInProfile.source === 'local' ? undefined : modInProfile.source,
+                        );
                         if (pkg) {
-                            const version = pkg.versions.find((v: any) => v.version_number === modInProfile.versionNumber);
-                            if (!version) {
+                            let version;
+                            try {
+                                version = findPinnedVersionForSource(pkg, modInProfile.versionNumber, modInProfile.source);
+                            } catch {
                                 skippedVersionMismatch.push(`${modKey} (requested v${modInProfile.versionNumber})`);
                                 status = 'Skipped (version not found)';
                                 return;
@@ -492,6 +498,7 @@ export function useGameSync({
                                                     versionNumber: depVersion.version_number,
                                                     iconUrl: depVersion.icon,
                                                     enabled: true,
+                                                    source: depVersion.source || 'outerwilds',
                                                     pending_sync: false,
                                                     synced_enabled: true
                                                 });

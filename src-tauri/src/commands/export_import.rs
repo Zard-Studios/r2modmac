@@ -5,11 +5,36 @@ use std::fs;
 use std::io::{Seek, Write};
 use tauri::{command, AppHandle};
 
+const THUNDERSTORE_PROFILE_CREATE_URL: &str =
+    "https://thunderstore.io/api/experimental/legacyprofile/create/";
+const THUNDERSTORE_PROFILE_GET_BASE_URL: &str =
+    "https://thunderstore.io/api/experimental/legacyprofile/get";
+const HEXIUM_PROFILE_CREATE_URL: &str = "https://hexium.gg/api/experimental/legacyprofile/create/";
+const HEXIUM_PROFILE_GET_BASE_URL: &str = "https://hexium.gg/api/experimental/legacyprofile/get";
+
 fn profile_has_local_mods(profile: &serde_json::Value) -> bool {
     profile["mods"]
         .as_array()
         .map(|mods| mods.iter().any(|m| m["source"].as_str() == Some("local")))
         .unwrap_or(false)
+}
+
+fn profile_has_mod_source(profile: &serde_json::Value, source: &str) -> bool {
+    profile["mods"]
+        .as_array()
+        .map(|mods| {
+            mods.iter()
+                .any(|profile_mod| profile_mod["source"].as_str() == Some(source))
+        })
+        .unwrap_or(false)
+}
+
+fn share_profile_endpoint(profile: &serde_json::Value) -> &'static str {
+    if profile_has_mod_source(profile, "hexium") {
+        HEXIUM_PROFILE_CREATE_URL
+    } else {
+        THUNDERSTORE_PROFILE_CREATE_URL
+    }
 }
 
 fn build_export_mods(profile: &serde_json::Value) -> Vec<serde_json::Value> {
@@ -44,7 +69,9 @@ fn build_export_mods(profile: &serde_json::Value) -> Vec<serde_json::Value> {
                 "enabled": enabled
             });
 
-            if m["source"].as_str() == Some("local") {
+            if matches!(m["source"].as_str(), Some("hexium") | Some("outerwilds")) {
+                value["source"] = m["source"].clone();
+            } else if m["source"].as_str() == Some("local") {
                 if let Some(local_id) = m["localId"].as_str() {
                     value["source"] = serde_json::json!("local");
                     value["localId"] = serde_json::json!(local_id);
@@ -326,9 +353,9 @@ pub async fn export_profile(
 pub async fn share_profile(app: AppHandle, profile_id: String) -> Result<String, String> {
     let profile = find_profile(&app, &profile_id)?;
 
-    // Outer Wilds (and any game using a non-Thunderstore mod source) cannot be shared
-    // via Thunderstore codes: the mods are not in the Thunderstore registry, so the
-    // generated code would be unresolvable on import. Use Export as File instead.
+    // Outer Wilds has no compatible profile-code service. Hexium does: mixed and
+    // Hexium-only profiles are uploaded there while Thunderstore-only profiles keep
+    // using Thunderstore, preserving compatibility with existing r2modman codes.
     let game_identifier = profile["gameIdentifier"]
         .as_str()
         .unwrap_or("")
@@ -347,10 +374,11 @@ pub async fn share_profile(app: AppHandle, profile_id: String) -> Result<String,
     let base64_data = base64::engine::general_purpose::STANDARD.encode(&zip_buffer);
     let payload = format!("#r2modman\n{}", base64_data);
 
-    // 6. Upload to Thunderstore
+    // Store the opaque profile payload on the matching repository. The returned UUID
+    // remains a normal share code; import probes both repositories automatically.
     let client = reqwest::Client::new();
     let response = client
-        .post("https://thunderstore.io/api/experimental/legacyprofile/create/")
+        .post(share_profile_endpoint(&profile))
         .header("Content-Type", "application/octet-stream")
         .body(payload)
         .send()
@@ -383,6 +411,35 @@ fn sanitize_code(code: &str) -> String {
     }
 }
 
+fn decode_shared_profile(content: &str, code: &str) -> Result<Option<serde_json::Value>, String> {
+    if !content.starts_with("#r2modman") {
+        return Ok(None);
+    }
+
+    let base64_data = content.trim_start_matches("#r2modman").trim();
+    let zip_data = base64::engine::general_purpose::STANDARD
+        .decode(base64_data)
+        .map_err(|e| {
+            log::warn!("[import_profile] Base64 decode failed: {}", e);
+            e.to_string()
+        })?;
+    log::debug!(
+        "[import_profile] Decoded {} bytes, creating zip archive...",
+        zip_data.len()
+    );
+    let cursor = std::io::Cursor::new(zip_data.clone());
+    let archive = zip::ZipArchive::new(cursor).map_err(|e| {
+        log::warn!("[import_profile] Zip archive creation failed: {}", e);
+        e.to_string()
+    })?;
+    let mut result = process_zip_archive(archive)?;
+    let staged = std::env::temp_dir().join(format!("r2modmac-import-{}.r2z", sanitize_code(code)));
+    if fs::write(&staged, &zip_data).is_ok() {
+        result["archivePath"] = serde_json::json!(staged.to_string_lossy().to_string());
+    }
+    Ok(Some(result))
+}
+
 #[command]
 pub async fn import_profile(_app: AppHandle, code: String) -> Result<serde_json::Value, String> {
     log::info!("[import_profile] Starting import with provided code");
@@ -391,67 +448,47 @@ pub async fn import_profile(_app: AppHandle, code: String) -> Result<serde_json:
         .build()
         .map_err(|e| e.to_string())?;
 
-    // Strategy 1: Profile Code
-    let profile_url = format!(
-        "https://thunderstore.io/api/experimental/legacyprofile/get/{}/",
-        code
-    );
-    log::debug!(
-        "[import_profile] Strategy 1: Trying profile code URL: {}",
-        profile_url
-    );
+    // Strategy 1: Profile code. Both services return ordinary UUIDs, so probe both
+    // backends. Thunderstore stays first for backward compatibility; a miss or a
+    // network failure still allows Hexium codes to resolve.
+    let encoded_code = urlencoding::encode(code.trim());
+    for (backend, base_url) in [
+        ("Thunderstore", THUNDERSTORE_PROFILE_GET_BASE_URL),
+        ("Hexium", HEXIUM_PROFILE_GET_BASE_URL),
+    ] {
+        let profile_url = format!("{}/{}/", base_url, encoded_code);
+        log::debug!(
+            "[import_profile] Strategy 1: Trying {} profile code URL: {}",
+            backend,
+            profile_url
+        );
 
-    let response = client.get(&profile_url).send().await;
-
-    match response {
-        Ok(res) => {
-            log::debug!(
-                "[import_profile] Strategy 1: Got response with status: {}",
-                res.status()
-            );
-            if res.status().is_success() {
+        match client.get(&profile_url).send().await {
+            Ok(res) if res.status().is_success() => {
                 let content = res.text().await.unwrap_or_default();
                 log::debug!(
-                    "[import_profile] Strategy 1: Content length: {}, starts with #r2modman: {}",
-                    content.len(),
-                    content.starts_with("#r2modman")
+                    "[import_profile] Strategy 1: {} returned {} bytes",
+                    backend,
+                    content.len()
                 );
-
-                if content.starts_with("#r2modman") {
-                    log::debug!("[import_profile] Strategy 1: Detected r2modman profile, decoding base64...");
-                    let base64_data = content.trim_start_matches("#r2modman").trim();
-                    let zip_data = base64::engine::general_purpose::STANDARD
-                        .decode(base64_data)
-                        .map_err(|e| {
-                            log::warn!("[import_profile] Strategy 1: Base64 decode failed: {}", e);
-                            e.to_string()
-                        })?;
-                    log::debug!(
-                        "[import_profile] Strategy 1: Decoded {} bytes, creating zip archive...",
-                        zip_data.len()
-                    );
-                    let cursor = std::io::Cursor::new(zip_data.clone());
-                    let archive = zip::ZipArchive::new(cursor).map_err(|e| {
-                        log::warn!(
-                            "[import_profile] Strategy 1: Zip archive creation failed: {}",
-                            e
-                        );
-                        e.to_string()
-                    })?;
-                    log::debug!("[import_profile] Strategy 1: Processing zip archive...");
-                    let mut result = process_zip_archive(archive)?;
-                    let staged = std::env::temp_dir()
-                        .join(format!("r2modmac-import-{}.r2z", sanitize_code(&code)));
-                    if fs::write(&staged, &zip_data).is_ok() {
-                        result["archivePath"] =
-                            serde_json::json!(staged.to_string_lossy().to_string());
-                    }
+                if let Some(result) = decode_shared_profile(&content, &code)? {
                     return Ok(result);
                 }
             }
-        }
-        Err(e) => {
-            log::warn!("[import_profile] Strategy 1: Request failed: {}", e);
+            Ok(res) => {
+                log::debug!(
+                    "[import_profile] Strategy 1: {} returned status {}",
+                    backend,
+                    res.status()
+                );
+            }
+            Err(e) => {
+                log::warn!(
+                    "[import_profile] Strategy 1: {} request failed: {}",
+                    backend,
+                    e
+                );
+            }
         }
     }
 
@@ -688,7 +725,9 @@ fn process_zip_archive(
                 "enabled": enabled
             });
 
-            if source == "local" {
+            if matches!(source, "hexium" | "outerwilds") {
+                value["source"] = serde_json::json!(source);
+            } else if source == "local" {
                 value["source"] = serde_json::json!("local");
                 value["localId"] = m["localId"].clone();
                 value["payload"] = m["payload"].clone();
@@ -911,5 +950,74 @@ mod tests {
         assert_eq!(result["name"], "test");
         assert_eq!(result["mods"][0]["name"], "Author-Mod");
         assert_eq!(result["mods"][0]["version"], "1.2.3");
+    }
+
+    #[test]
+    fn hexium_profiles_use_hexiums_code_service() {
+        let thunderstore_profile = serde_json::json!({
+            "mods": [{
+                "fullName": "Author-Mod-1.0.0",
+                "versionNumber": "1.0.0",
+                "source": "thunderstore"
+            }]
+        });
+        let mixed_profile = serde_json::json!({
+            "mods": [
+                {
+                    "fullName": "Author-Mod-1.0.0",
+                    "versionNumber": "1.0.0",
+                    "source": "thunderstore"
+                },
+                {
+                    "fullName": "HexAuthor-HexMod-2.0.0",
+                    "versionNumber": "2.0.0",
+                    "source": "hexium"
+                }
+            ]
+        });
+
+        assert_eq!(
+            share_profile_endpoint(&thunderstore_profile),
+            THUNDERSTORE_PROFILE_CREATE_URL
+        );
+        assert_eq!(
+            share_profile_endpoint(&mixed_profile),
+            HEXIUM_PROFILE_CREATE_URL
+        );
+    }
+
+    #[test]
+    fn mixed_store_sources_survive_profile_export_and_import() {
+        let profile = serde_json::json!({
+            "name": "Mixed stores",
+            "mods": [
+                {
+                    "fullName": "TsAuthor-ThunderMod-1.4.0",
+                    "versionNumber": "1.4.0",
+                    "enabled": true,
+                    "source": "thunderstore"
+                },
+                {
+                    "fullName": "HexAuthor-HexMod-2.1.0",
+                    "versionNumber": "2.1.0",
+                    "enabled": false,
+                    "source": "hexium"
+                }
+            ]
+        });
+        let export = build_export_data(&profile);
+        let yaml = serde_yaml::to_string(&export).unwrap();
+        let archive = zip_archive_with_file("export.r2x", &yaml);
+
+        let imported = process_zip_archive(archive).unwrap();
+
+        assert_eq!(imported["mods"].as_array().unwrap().len(), 2);
+        assert_eq!(imported["mods"][0]["name"], "TsAuthor-ThunderMod");
+        assert_eq!(imported["mods"][0]["version"], "1.4.0");
+        assert!(imported["mods"][0]["source"].is_null());
+        assert_eq!(imported["mods"][1]["name"], "HexAuthor-HexMod");
+        assert_eq!(imported["mods"][1]["version"], "2.1.0");
+        assert_eq!(imported["mods"][1]["enabled"], false);
+        assert_eq!(imported["mods"][1]["source"], "hexium");
     }
 }

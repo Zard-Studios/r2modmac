@@ -1,5 +1,5 @@
 import type { InstalledMod, Profile } from './profile';
-import type { Community, Package, CommunityPlatformInfo } from './thunderstore';
+import type { Community, Package, CommunityPlatformInfo, ModSource } from './thunderstore';
 import type { ConfigFileInfo } from '../tauriAdapter';
 import type { ProfileSyncInspection } from '../utils/profileSync';
 
@@ -143,7 +143,7 @@ export interface IElectronAPI {
         modpacks?: boolean
     ): Promise<{ items: Package[]; total: number; }>;
     lookupPackagesByNames: (gameId: string, names: string[]) => Promise<{ found: Package[]; unknown: string[] }>;
-    fetchPackageByName: (name: string, gameId?: string | null) => Promise<Package | null>;
+    fetchPackageByName: (name: string, gameId?: string | null, source?: ModSource) => Promise<Package | null>;
     importProfile: (code: string) => Promise<any>;
     importProfileFromFile: (path: string) => Promise<any>;
     importProfileConfigs: (profileId: string, archivePath: string) => Promise<number>;
@@ -171,6 +171,7 @@ export interface IElectronAPI {
     lookupPackagesByNames: (gameId: string, names: string[]) => Promise<any>;
     syncProfileToGame: (profileId: string, gameIdentifier: string, useLegacyCache?: boolean, finalize?: boolean) => Promise<ProfileSyncResult>;
     checkProfileRuntimeHealth: (profileId: string, gameIdentifier: string, platform?: 'windows' | 'mac') => Promise<RuntimeHealth>;
+    repairProfileRuntimeLink: (profileId: string, gameIdentifier: string, platform?: 'windows' | 'mac') => Promise<RuntimeHealth>;
     inspectProfileSyncState: (profileId: string, gameIdentifier: string, platform?: 'windows' | 'mac') => Promise<ProfileSyncInspection>;
     beginProfileApplyTransaction: (profileId: string, gameIdentifier: string) => Promise<boolean>;
     rollbackProfileApplyTransaction: (profileId: string, gameIdentifier: string) => Promise<boolean>;

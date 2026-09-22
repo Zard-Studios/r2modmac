@@ -52,7 +52,7 @@ const ensureModIdentity = (mod: InstalledMod): InstalledMod => {
     if (mod.uuid4?.trim()) return mod;
     const identity = mod.source === 'local' && mod.localId
         ? `local:${mod.localId}`
-        : `thunderstore:${mod.fullName.toLowerCase()}`;
+        : `${mod.source || 'thunderstore'}:${mod.fullName.toLowerCase()}`;
     return { ...mod, uuid4: identity };
 };
 

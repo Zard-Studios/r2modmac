@@ -31,7 +31,7 @@ import { LaunchIssueModal } from './components/modals/LaunchIssueModal';
 import { ConfirmModal, type ConfirmRequest } from './components/modals/ConfirmModal';
 import { describeLaunchIssue, isLaunchCancelled, type LaunchIssue } from './utils/launchIssue';
 import type { AppSettings, RuntimeHealth, UpdateInfo } from './types/electron';
-import type { InstalledMod } from './types/profile';
+import type { InstalledMod, InstalledModSource } from './types/profile';
 import { MAC_IMAGE_CACHE_KEY, MAC_PLATFORM_CACHE_KEY } from './constants/cacheKeys';
 import type { PreferencesSettings, PreferencesTarget } from './components/modals/PreferencesModal';
 import type { ProgressState } from './types/progress';
@@ -40,7 +40,7 @@ import { useModActions } from './hooks/useModActions';
 import type { ProfileModUpdate } from './hooks/useModActions';
 import { useProfileActions } from './hooks/useProfileActions';
 import { useGameSync } from './hooks/useGameSync';
-import { compareVersions, findPinnedVersion, parsePackageReference } from './utils/modVersioning';
+import { compareVersions, findPinnedVersionForSource, parsePackageReference } from './utils/modVersioning';
 import { getProfileModKey, hasPendingRuntimeInstall, migratePendingSyncBaselines, restoreInstalledMod } from './utils/profileSync';
 import { isLoaderPackage, isRepairableLoaderPackage, isReturnOfModdingCommunity, loaderDisplayName, loaderPackageIdsForCommunity } from './utils/loaderPackages';
 import { isTextEntryTarget, shouldReleaseSearchFocus } from './utils/searchField';
@@ -95,7 +95,7 @@ interface ImportedProfileMod {
   name?: string;
   version?: string;
   enabled?: boolean;
-  source?: string;
+  source?: InstalledModSource;
   payload?: string;
   displayName?: string;
   author?: string;
@@ -1822,6 +1822,18 @@ function App() {
     let repairTransactionStarted = false;
 
     try {
+      // A missing game-side link is a wiring problem, not a missing mod. Keep
+      // the selected Hexium/Thunderstore package and version untouched.
+      if (runtime === 'bepinex' && health.missingComponents.length === 1 && health.missingComponents[0] === 'profile-link') {
+        const repaired = await window.ipcRenderer.repairProfileRuntimeLink(profile.id, community, profile.platform);
+        if (repaired.status !== 'healthy') {
+          throw new Error(`The profile link was repaired, but the runtime is still ${repaired.status} (${repaired.missingComponents.join(', ')}).`);
+        }
+        await refreshRuntimeHealth();
+        setProgressState(previous => ({ ...previous, progress: 100, currentTask: 'Runtime repaired.' }));
+        window.setTimeout(() => setProgressState(previous => ({ ...previous, isOpen: false })), 500);
+        return true;
+      }
       const gamePath = await window.ipcRenderer.getGamePath(community, profile.platform);
       if (!gamePath) throw new Error('The game directory is not configured.');
       await window.ipcRenderer.beginProfileApplyTransaction(profile.id, community);
@@ -1829,14 +1841,17 @@ function App() {
 
       const matchesRuntime = (pkg: Package) => isRepairableLoaderPackage(runtime, pkg);
       const registeredLoader = profile.mods.find(mod => isLoaderPackage(runtime, mod.fullName));
+      const registeredSource = registeredLoader?.source === 'hexium' || registeredLoader?.source === 'outerwilds'
+        ? registeredLoader.source : 'thunderstore';
 
       let loaderPackage = registeredLoader
         ? await window.ipcRenderer.fetchPackageByName(
-            parsePackageReference(registeredLoader.fullName).packageName,
-            community
+            registeredLoader.fullName,
+            community,
+            registeredSource
           )
         : null;
-      if (!loaderPackage || !matchesRuntime(loaderPackage)) {
+      if (!registeredLoader && (!loaderPackage || !matchesRuntime(loaderPackage))) {
         // The loader package differs per community - Hades II is served by
         // Hell2Modding, not by ReturnOfModding - so the candidates come from
         // the ecosystem schema and are asked for by name. Only BepInEx falls
@@ -1853,7 +1868,7 @@ function App() {
           }
         }
       }
-      if ((!loaderPackage || !matchesRuntime(loaderPackage)) && runtime === 'bepinex') {
+      if (!registeredLoader && (!loaderPackage || !matchesRuntime(loaderPackage)) && runtime === 'bepinex') {
         const result = await window.ipcRenderer.getPackages(community, 0, 30, 'BepInExPack', 'downloads');
         loaderPackage = result.items.find(matchesRuntime) || null;
       }
@@ -1863,9 +1878,15 @@ function App() {
         );
       }
 
-      const newestVersion = loaderPackage.versions.reduce((newest, candidate) =>
-        compareVersions(candidate.version_number, newest.version_number) > 0 ? candidate : newest
-      );
+      const newestVersion = registeredLoader
+        ? loaderPackage.versions.find(candidate => candidate.version_number === registeredLoader.versionNumber &&
+            (candidate.source || 'thunderstore') === registeredSource)
+        : loaderPackage.versions.reduce((newest, candidate) =>
+            compareVersions(candidate.version_number, newest.version_number) > 0 ? candidate : newest
+          );
+      if (!matchesRuntime(loaderPackage) || !newestVersion) {
+        throw new Error(`The selected ${registeredSource} loader version is unavailable; repair will not switch stores or versions silently.`);
+      }
       const enabledByPackage = new Map(profile.mods.map(mod => [
         parsePackageReference(mod.fullName).packageName.toLowerCase(),
         mod.enabled,
@@ -1877,6 +1898,9 @@ function App() {
         currentTask: `Reinstalling ${loaderPackage.name} v${newestVersion.version_number}...`,
       }));
       await installModWithDependencies(loaderPackage, newestVersion, new Set(), profile.id, undefined, gamePath);
+      if (runtime === 'bepinex' && profile.platform === 'mac') {
+        await window.ipcRenderer.repairProfileRuntimeLink(profile.id, community, profile.platform);
+      }
 
       const repairedProfile = useProfileStore.getState().profiles.find(candidate => candidate.id === profile.id);
       if (repairedProfile) {
@@ -2172,7 +2196,7 @@ function App() {
       : 'Imported Profile';
     const importedMods: ImportedProfileMod[] = Array.isArray(result?.mods) ? result.mods : [];
     const localMods = importedMods.filter((mod) => mod.source === 'local');
-    const thunderstoreMods = importedMods.filter((mod) => mod.source !== 'local' && getProfileModName(mod));
+    const remoteMods = importedMods.filter((mod) => mod.source !== 'local' && getProfileModName(mod));
 
     if (!targetProfile || !targetCommunity) {
       return {
@@ -2200,14 +2224,14 @@ function App() {
       isCancelable: true,
     });
 
-    const modNames = Array.from(new Set(thunderstoreMods.map(getProfileModName).filter(Boolean)));
+    const modNames = Array.from(new Set(remoteMods.map(getProfileModName).filter(Boolean)));
     const lookup = modNames.length > 0
       ? await window.ipcRenderer.lookupPackagesByNames(targetCommunity, modNames)
       : { found: [], unknown: [] };
 
     const foundPackages: Package[] = Array.isArray(lookup?.found) ? lookup.found : [];
     const unknownMods: string[] = Array.isArray(lookup?.unknown) ? lookup.unknown : [];
-    const failedMods: string[] = unknownMods.map((name) => `${name} (not found on Thunderstore)`);
+    const failedMods: string[] = unknownMods.map((name) => `${name} (not found in the enabled mod stores)`);
 
     if (customModImportCancelledRef.current) {
       return { handled: true, cancelled: true, profileName, importedCount: 0, failedMods };
@@ -2217,7 +2241,7 @@ function App() {
       setProgressState(prev => ({ ...prev, isOpen: false, isCancelable: false }));
       const proceed = await requestConfirm({
         title: 'Some mods cannot be found',
-        message: `${unknownMods.length} mod(s) from "${profileName}" were not found on Thunderstore and will be skipped:\n\n${unknownMods.join('\n')}\n\nContinue importing the remaining mods into "${targetProfile.name}"?`,
+        message: `${unknownMods.length} mod(s) from "${profileName}" were not found in the available stores and will be skipped:\n\n${unknownMods.join('\n')}\n\nContinue importing the remaining mods into "${targetProfile.name}"?`,
         confirmLabel: 'Import the rest',
       });
       if (!proceed) {
@@ -2232,14 +2256,14 @@ function App() {
       });
     }
 
-    const resolvedThunderstoreMods = thunderstoreMods.filter((mod) => {
+    const resolvedRemoteMods = remoteMods.filter((mod) => {
       const modName = getProfileModName(mod);
       return modName && !unknownMods.includes(modName);
     });
-    const totalSteps = resolvedThunderstoreMods.length + localMods.length;
+    const totalSteps = resolvedRemoteMods.length + localMods.length;
     let completedSteps = 0;
     let importedCount = 0;
-    const stagedThunderstoreMods: InstalledMod[] = [];
+    const stagedRemoteMods: InstalledMod[] = [];
     const resolutionFailures: string[] = [];
 
     const updateMergeProgress = (task: string) => {
@@ -2253,7 +2277,7 @@ function App() {
       }));
     };
 
-    for (const mod of resolvedThunderstoreMods) {
+    for (const mod of resolvedRemoteMods) {
       if (customModImportCancelledRef.current) {
         return { handled: true, cancelled: true, profileName, importedCount, failedMods };
       }
@@ -2267,11 +2291,17 @@ function App() {
           throw new Error('Package not found after lookup');
         }
         if (!mod.version) throw new Error('Profile entry has no pinned version');
-        const exactPkg = pkg.versions.some((v) => v.version_number === mod.version)
+        const remoteSource = mod.source === 'hexium' || mod.source === 'outerwilds' || mod.source === 'thunderstore'
+          ? mod.source
+          : undefined;
+        const exactPkg = pkg.versions.some((v) =>
+          v.version_number === mod.version
+          && (!remoteSource || (v.source || 'thunderstore') === remoteSource)
+        )
           ? pkg
-          : await window.ipcRenderer.fetchPackageByName(`${modName}-${mod.version}`, targetCommunity);
+          : await window.ipcRenderer.fetchPackageByName(`${modName}-${mod.version}`, targetCommunity, remoteSource);
         if (!exactPkg) throw new Error(`Pinned version ${mod.version} is unavailable`);
-        const version = findPinnedVersion(exactPkg, mod.version, modName);
+        const version = findPinnedVersionForSource(exactPkg, mod.version, remoteSource, modName);
 
         const installedMod: InstalledMod = {
           uuid4: version.uuid4,
@@ -2279,10 +2309,12 @@ function App() {
           versionNumber: version.version_number,
           iconUrl: version.icon,
           enabled: mod.enabled ?? true,
+          source: version.source
+            || (mod.source === 'hexium' || mod.source === 'outerwilds' ? mod.source : 'thunderstore'),
           pending_sync: true,
           synced_enabled: undefined,
         };
-        stagedThunderstoreMods.push(installedMod);
+        stagedRemoteMods.push(installedMod);
       } catch (error) {
         console.error(`Failed to add profile mod ${modName}`, error);
         const reason = error instanceof Error ? error.message : String(error || 'unknown resolution error');
@@ -2303,8 +2335,8 @@ function App() {
         failedMods,
       };
     }
-    for (const mod of stagedThunderstoreMods) addMod(targetProfile.id, mod);
-    importedCount += stagedThunderstoreMods.length;
+    for (const mod of stagedRemoteMods) addMod(targetProfile.id, mod);
+    importedCount += stagedRemoteMods.length;
 
     for (const mod of localMods) {
       if (customModImportCancelledRef.current) {

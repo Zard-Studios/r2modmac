@@ -3729,6 +3729,12 @@ pub(crate) fn relocate_bepinex_tree(
 ) -> Result<(), String> {
     for name in ["BepInEx", "BepInEx_DISABLED"] {
         let source = game_root.join(name);
+        if source.is_symlink() {
+            return Err(format!(
+                "Refusing to relocate {} through a symbolic link",
+                source.display()
+            ));
+        }
         if !source.is_dir() {
             continue;
         }
@@ -5016,6 +5022,10 @@ async fn install_mod_bytes(
                 return Err("Detected a macOS-only BepInEx pack. Please use a Windows/CrossOver-compatible pack for this profile.".to_string());
             }
 
+            if target_is_macos && isolated {
+                crate::commands::game_commands::detach_isolated_bepinex_link(game_dir)?;
+            }
+
             log::debug!(
                 "[install_mod] Detected BepInExPack - installing to game root {:?} (into_disabled_runtime={}, {} managed files)",
                 game_dir,
@@ -5047,6 +5057,13 @@ async fn install_mod_bytes(
             if isolated {
                 relocate_bepinex_tree(game_dir, &bepinex_root)?;
                 point_game_doorstop_ini_at_tree(game_dir, &bepinex_root)?;
+                if target_is_macos && !install_into_disabled_runtime {
+                    crate::commands::game_commands::sync_isolated_bepinex_link(
+                        game_dir,
+                        &bepinex_root,
+                        false,
+                    )?;
+                }
                 log::debug!(
                     "[install_mod] Moved the BepInEx tree into {:?}; the loader stays with the game",
                     bepinex_root
@@ -5930,7 +5947,7 @@ fn load_packages_from_disk(app: &AppHandle, game_id: &str) -> Option<GamePackage
             return None;
         }
     };
-    let cache_file = cache_dir.join(format!("{}_packages_v2.json.gz", game_id));
+    let cache_file = cache_dir.join(format!("{}_packages_v3.json.gz", game_id));
     if !cache_file.exists() {
         log::debug!(
             "[load_packages_from_disk] Cache file does not exist: {:?}",
@@ -5975,7 +5992,7 @@ fn load_packages_from_disk(app: &AppHandle, game_id: &str) -> Option<GamePackage
 /// forth between the handful of games anyone actually plays.
 const MAX_PACKAGE_CACHES_ON_DISK: usize = 5;
 
-const PACKAGE_CACHE_SUFFIX: &str = "_packages_v2.json.gz";
+const PACKAGE_CACHE_SUFFIX: &str = "_packages_v3.json.gz";
 
 /// The caches to remove, oldest first, keeping the `keep` most recently written.
 ///
@@ -6032,7 +6049,7 @@ fn save_packages_to_disk(
         .map_err(|e| format!("Failed to get cache dir: {}", e))?;
     std::fs::create_dir_all(&cache_dir)
         .map_err(|e| format!("Failed to create cache dir: {}", e))?;
-    let cache_file = cache_dir.join(format!("{}_packages_v2.json.gz", game_id));
+    let cache_file = cache_dir.join(format!("{}_packages_v3.json.gz", game_id));
     let file = std::fs::File::create(cache_file)
         .map_err(|e| format!("Failed to create cache file: {}", e))?;
     let mut encoder = flate2::write::GzEncoder::new(file, flate2::Compression::default());
@@ -6087,6 +6104,155 @@ fn parse_index_chunk_urls(index_json: &str) -> Result<Vec<String>, String> {
     }
 
     Err("Index JSON has no valid chunk URLs".to_string())
+}
+
+async fn fetch_package_index_urls(
+    client: &reqwest::Client,
+    game_id: &str,
+) -> Result<Vec<String>, String> {
+    let sources = [
+        (
+            "Thunderstore",
+            format!(
+                "https://thunderstore.io/c/{}/api/v1/package-listing-index/",
+                game_id
+            ),
+            true,
+        ),
+        (
+            "Hexium",
+            format!(
+                "https://{}.hexium.gg/api/v1/package-listing-index/",
+                game_id
+            ),
+            false,
+        ),
+    ];
+    let mut urls = Vec::new();
+    let mut required_error = None;
+
+    for (label, index_url, required) in sources {
+        let response = match client.get(&index_url).send().await {
+            Ok(response) => response,
+            Err(error) => {
+                if required {
+                    required_error = Some(format!("Failed to fetch {label} index: {error}"));
+                } else {
+                    log::debug!("[fetch_packages] {label} is unavailable for {game_id}: {error}");
+                }
+                continue;
+            }
+        };
+        if !response.status().is_success() {
+            if required {
+                required_error = Some(format!(
+                    "{label} index request failed with status {}",
+                    response.status()
+                ));
+            } else {
+                log::debug!(
+                    "[fetch_packages] {label} has no catalogue for {game_id} ({})",
+                    response.status()
+                );
+            }
+            continue;
+        }
+        let bytes = response.bytes().await.map_err(|error| error.to_string())?;
+        let index_json = decode_gzip_or_plain(&bytes, &format!("{label} index"))?;
+        match parse_index_chunk_urls(&index_json) {
+            Ok(mut source_urls) => urls.append(&mut source_urls),
+            Err(error) if required => required_error = Some(error),
+            Err(error) => log::warn!("[fetch_packages] Invalid {label} index: {error}"),
+        }
+    }
+
+    if urls.is_empty() {
+        return Err(required_error.unwrap_or_else(|| "No package catalogues are available".into()));
+    }
+    Ok(urls)
+}
+
+fn source_for_catalogue_url(url: &str) -> crate::models::shared::ModSource {
+    if url.contains("hexium.gg") {
+        crate::models::shared::ModSource::Hexium
+    } else {
+        crate::models::shared::ModSource::Thunderstore
+    }
+}
+
+fn version_sort_key(version: &str) -> (Vec<u64>, bool, String) {
+    let without_build = version.split('+').next().unwrap_or(version);
+    let mut parts = without_build.splitn(2, '-');
+    let core = parts.next().unwrap_or_default();
+    let prerelease = parts.next();
+    (
+        core.split('.')
+            .map(|part| part.parse().unwrap_or(0))
+            .collect(),
+        prerelease.is_none(),
+        prerelease.unwrap_or_default().to_string(),
+    )
+}
+
+fn compare_package_versions(
+    left: &crate::models::shared::PackageVersion,
+    right: &crate::models::shared::PackageVersion,
+) -> std::cmp::Ordering {
+    let left_key = version_sort_key(&left.version_number);
+    let right_key = version_sort_key(&right.version_number);
+    left_key
+        .cmp(&right_key)
+        .then_with(|| match (left.source, right.source) {
+            (
+                crate::models::shared::ModSource::Thunderstore,
+                crate::models::shared::ModSource::Hexium,
+            ) => std::cmp::Ordering::Greater,
+            (
+                crate::models::shared::ModSource::Hexium,
+                crate::models::shared::ModSource::Thunderstore,
+            ) => std::cmp::Ordering::Less,
+            _ => std::cmp::Ordering::Equal,
+        })
+}
+
+fn merge_package_lists(
+    target: &mut Vec<crate::models::shared::Package>,
+    incoming: Vec<crate::models::shared::Package>,
+) {
+    for package in incoming {
+        if let Some(existing) = target
+            .iter_mut()
+            .find(|candidate| candidate.full_name.eq_ignore_ascii_case(&package.full_name))
+        {
+            if package.date_updated > existing.date_updated {
+                existing.date_updated = package.date_updated.clone();
+            }
+            existing.is_deprecated &= package.is_deprecated;
+            existing.has_nsfw_content |= package.has_nsfw_content;
+            for category in package.categories {
+                if !existing
+                    .categories
+                    .iter()
+                    .any(|item| item.eq_ignore_ascii_case(&category))
+                {
+                    existing.categories.push(category);
+                }
+            }
+            for version in package.versions {
+                if !existing.versions.iter().any(|candidate| {
+                    candidate.source == version.source
+                        && candidate.version_number == version.version_number
+                }) {
+                    existing.versions.push(version);
+                }
+            }
+            existing
+                .versions
+                .sort_by(|left, right| compare_package_versions(right, left));
+        } else {
+            target.push(package);
+        }
+    }
 }
 
 async fn load_chunk(
@@ -6161,6 +6327,13 @@ async fn load_chunk(
                     continue;
                 }
             };
+
+        let source = source_for_catalogue_url(url);
+        for package in &mut packages {
+            for version in &mut package.versions {
+                version.source = source;
+            }
+        }
 
         drop(json_str);
 
@@ -6379,6 +6552,7 @@ pub async fn fetch_packages(
                         full_name: full_name.clone(),
                         date_created: latest_release_date.clone(),
                         is_active: true,
+                        source: crate::models::shared::ModSource::Outerwilds,
                     };
 
                     let mut versions_list = vec![version_struct];
@@ -6408,6 +6582,7 @@ pub async fn fetch_packages(
                                     full_name: full_name.clone(),
                                     date_created: pre_date,
                                     is_active: true,
+                                    source: crate::models::shared::ModSource::Outerwilds,
                                 });
                             }
                         }
@@ -6597,6 +6772,7 @@ pub async fn fetch_packages(
                 full_name: full_name.clone(),
                 date_created: latest_release_date.clone(),
                 is_active: true,
+                source: crate::models::shared::ModSource::Outerwilds,
             };
 
             let mut versions_list = vec![version_struct];
@@ -6624,6 +6800,7 @@ pub async fn fetch_packages(
                             full_name: full_name.clone(),
                             date_created: pre_date,
                             is_active: true,
+                            source: crate::models::shared::ModSource::Outerwilds,
                         });
                     }
                 }
@@ -6778,7 +6955,7 @@ pub async fn fetch_packages(
         // needs these chunks, so one of the two has to hold its own copy.
         let mut all_packages = Vec::new();
         for chunk in &cache.chunks {
-            all_packages.extend(chunk.packages.clone());
+            merge_package_lists(&mut all_packages, chunk.packages.clone());
         }
         let count = all_packages.len();
         log::debug!(
@@ -6800,43 +6977,10 @@ pub async fn fetch_packages(
         let app_handle = app.clone();
         tokio::spawn(async move {
             let client = thunderstore_client();
-            let index_url = format!(
-                "https://thunderstore.io/c/{}/api/v1/package-listing-index/",
-                game_id_clone
-            );
-
-            let resp = match client.get(&index_url).send().await {
-                Ok(r) => r,
-                Err(e) => {
-                    log::warn!("[fetch_packages] Background index check failed: {}", e);
-                    return;
-                }
-            };
-            if !resp.status().is_success() {
-                log::warn!(
-                    "[fetch_packages] Background index check status failed: {}",
-                    resp.status()
-                );
-                return;
-            }
-            let bytes = match resp.bytes().await {
-                Ok(b) => b,
-                Err(e) => {
-                    log::warn!("[fetch_packages] Background index body read failed: {}", e);
-                    return;
-                }
-            };
-            let index_json = match decode_gzip_or_plain(&bytes, "index") {
-                Ok(j) => j,
-                Err(e) => {
-                    log::warn!("[fetch_packages] Background index decode failed: {}", e);
-                    return;
-                }
-            };
-            let online_chunk_urls = match parse_index_chunk_urls(&index_json) {
+            let online_chunk_urls = match fetch_package_index_urls(&client, &game_id_clone).await {
                 Ok(urls) => urls,
                 Err(e) => {
-                    log::warn!("[fetch_packages] Background index parse failed: {}", e);
+                    log::warn!("[fetch_packages] Background index check failed: {}", e);
                     return;
                 }
             };
@@ -6904,7 +7048,7 @@ pub async fn fetch_packages(
             // Merge everything
             let mut final_packages = Vec::new();
             for chunk in &kept_chunks {
-                final_packages.extend(chunk.packages.clone());
+                merge_package_lists(&mut final_packages, chunk.packages.clone());
             }
             final_packages.shrink_to_fit();
             let count = final_packages.len();
@@ -6941,28 +7085,8 @@ pub async fn fetch_packages(
         return Ok(count);
     }
 
-    // 2. Cache miss: Fetch the index (list of chunk URLs)
-    let index_url = format!(
-        "https://thunderstore.io/c/{}/api/v1/package-listing-index/",
-        game_id
-    );
-    log::debug!("[fetch_packages] Fetching index from: {}", index_url);
-
-    let resp = client
-        .get(&index_url)
-        .send()
-        .await
-        .map_err(|e| format!("Failed to fetch index: {}", e))?;
-    if !resp.status().is_success() {
-        return Err(format!(
-            "Index request failed with status {}",
-            resp.status()
-        ));
-    }
-
-    let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
-    let index_json = decode_gzip_or_plain(&bytes, "index")?;
-    let chunk_urls: Vec<String> = parse_index_chunk_urls(&index_json)?;
+    // 2. Cache miss: fetch the Thunderstore and optional Hexium indexes.
+    let chunk_urls = fetch_package_index_urls(client, &game_id).await?;
     let total_chunks = chunk_urls.len();
     log::debug!("[fetch_packages] Found {} chunks", total_chunks);
     if total_chunks == 0 {
@@ -7052,7 +7176,7 @@ pub async fn fetch_packages(
                     Ok(chunk) => {
                         let mut packages_lock = packages_arc.write().await;
                         if let Some(existing) = packages_lock.get_mut(&game_id_clone) {
-                            existing.extend(chunk.packages.clone());
+                            merge_package_lists(existing, chunk.packages.clone());
                         }
                         chunks.push(chunk);
                     }
@@ -7411,6 +7535,7 @@ pub async fn fetch_package_by_name(
     state: tauri::State<'_, AppState>,
     name: String,
     game_id: Option<String>,
+    source: Option<crate::models::shared::ModSource>,
 ) -> Result<Option<crate::models::shared::Package>, String> {
     // If this is Outer Wilds and the cache is empty, fetch the package list first
     if game_id.as_deref() == Some("outerwilds") {
@@ -7493,7 +7618,13 @@ pub async fn fetch_package_by_name(
 
         if let Some(pkg) = found_pkg {
             if let Some(ref v) = version_str {
-                if pkg.versions.iter().any(|ver| ver.version_number == *v) {
+                if pkg.versions.iter().any(|ver| {
+                    ver.version_number == *v
+                        && source
+                            .as_ref()
+                            .map(|wanted| &ver.source == wanted)
+                            .unwrap_or(true)
+                }) {
                     log::debug!("[fetch_package_by_name] Found package version in cache");
                     return Ok(Some(pkg));
                 }
@@ -7506,7 +7637,7 @@ pub async fn fetch_package_by_name(
 
     // 4. Fallback to network. Exact-version imports can require many calls for
     // large profiles, so serialize them and honor Thunderstore rate limiting.
-    let url = if let Some(ref v) = version_str {
+    let thunderstore_url = if let Some(ref v) = version_str {
         format!(
             "https://thunderstore.io/api/experimental/package/{}/{}/{}/",
             namespace, package_name, v
@@ -7517,8 +7648,34 @@ pub async fn fetch_package_by_name(
             namespace, package_name
         )
     };
-
-    log::debug!("[fetch_package_by_name] Cache miss. Fetching from: {}", url);
+    let hexium_url = if let Some(ref v) = version_str {
+        format!(
+            "https://hexium.gg/api/experimental/package/{}/{}/{}/",
+            namespace, package_name, v
+        )
+    } else {
+        format!(
+            "https://hexium.gg/api/experimental/package/{}/{}/",
+            namespace, package_name
+        )
+    };
+    let source_urls = if source == Some(crate::models::shared::ModSource::Hexium) {
+        [
+            (crate::models::shared::ModSource::Hexium, hexium_url),
+            (
+                crate::models::shared::ModSource::Thunderstore,
+                thunderstore_url,
+            ),
+        ]
+    } else {
+        [
+            (
+                crate::models::shared::ModSource::Thunderstore,
+                thunderstore_url,
+            ),
+            (crate::models::shared::ModSource::Hexium, hexium_url),
+        ]
+    };
 
     ensure_mod_operations_not_cancelled()?;
     let _exact_fetch_guard = if version_str.is_some() {
@@ -7530,61 +7687,69 @@ pub async fn fetch_package_by_name(
     } else {
         None
     };
-    let mut delay = Duration::from_millis(500);
     let mut response = None;
+    let mut resolved_source = crate::models::shared::ModSource::Thunderstore;
     let mut last_error = String::new();
-    for attempt in 1..=6 {
-        ensure_mod_operations_not_cancelled()?;
-        if version_str.is_some() {
-            throttle_exact_package_request().await?;
-        }
-        let request = thunderstore_client().get(&url).send();
-        let response_result = tokio::select! {
-            result = request => result,
-            _ = wait_for_mod_operations_cancelled() => return Err(DOWNLOAD_CANCELLED.to_string()),
-        };
-        match response_result {
-            Ok(candidate) => {
-                let status = candidate.status();
-                if status.is_success() || status == reqwest::StatusCode::NOT_FOUND {
-                    response = Some(candidate);
+    for (source, url) in source_urls {
+        log::debug!("[fetch_package_by_name] Trying {:?}: {}", source, url);
+        let mut delay = Duration::from_millis(500);
+        for attempt in 1..=6 {
+            ensure_mod_operations_not_cancelled()?;
+            if version_str.is_some() {
+                throttle_exact_package_request().await?;
+            }
+            let request = thunderstore_client().get(&url).send();
+            let response_result = tokio::select! {
+                result = request => result,
+                _ = wait_for_mod_operations_cancelled() => return Err(DOWNLOAD_CANCELLED.to_string()),
+            };
+            match response_result {
+                Ok(candidate) => {
+                    let status = candidate.status();
+                    if status.is_success() {
+                        response = Some(candidate);
+                        resolved_source = source;
+                        break;
+                    }
+                    if status == reqwest::StatusCode::NOT_FOUND {
+                        last_error = format!("{:?} returned 404", source);
+                        break;
+                    }
+                    last_error = format!("{:?} returned {}", source, status);
+                    if attempt < 6
+                        && (status == reqwest::StatusCode::TOO_MANY_REQUESTS
+                            || status.is_server_error())
+                    {
+                        let wait = candidate
+                            .headers()
+                            .get(reqwest::header::RETRY_AFTER)
+                            .and_then(|value| value.to_str().ok())
+                            .and_then(|value| value.parse::<u64>().ok())
+                            .map(|seconds| Duration::from_secs(seconds.min(60)))
+                            .unwrap_or(delay);
+                        sleep_unless_mod_operations_cancelled(wait).await?;
+                        delay = (delay * 2).min(Duration::from_secs(8));
+                        continue;
+                    }
                     break;
                 }
-                last_error = format!("Thunderstore returned {}", status);
-                if attempt < 6
-                    && (status == reqwest::StatusCode::TOO_MANY_REQUESTS
-                        || status.is_server_error())
-                {
-                    let wait = candidate
-                        .headers()
-                        .get(reqwest::header::RETRY_AFTER)
-                        .and_then(|value| value.to_str().ok())
-                        .and_then(|value| value.parse::<u64>().ok())
-                        .map(|seconds| Duration::from_secs(seconds.min(60)))
-                        .unwrap_or(delay);
-                    log::debug!(
-                        "[fetch_package_by_name] {} for {}; retrying {}/6 in {:?}",
-                        status,
-                        name,
-                        attempt + 1,
-                        wait
-                    );
-                    sleep_unless_mod_operations_cancelled(wait).await?;
-                    delay = (delay * 2).min(Duration::from_secs(8));
-                    continue;
-                }
-                response = Some(candidate);
-                break;
-            }
-            Err(error) => {
-                last_error = error.to_string();
-                if attempt < 6 {
-                    sleep_unless_mod_operations_cancelled(delay).await?;
-                    delay = (delay * 2).min(Duration::from_secs(8));
-                    continue;
+                Err(error) => {
+                    last_error = error.to_string();
+                    if attempt < 6 {
+                        sleep_unless_mod_operations_cancelled(delay).await?;
+                        delay = (delay * 2).min(Duration::from_secs(8));
+                        continue;
+                    }
                 }
             }
+            break;
         }
+        if response.is_some() {
+            break;
+        }
+    }
+    if response.is_none() && last_error.ends_with("returned 404") {
+        return Ok(None);
     }
     let response = response.ok_or_else(|| {
         format!(
@@ -7592,10 +7757,6 @@ pub async fn fetch_package_by_name(
             name, last_error
         )
     })?;
-
-    if response.status() == 404 {
-        return Ok(None);
-    }
 
     if !response.status().is_success() {
         return Err(format!("Failed to fetch package: {}", response.status()));
@@ -7636,7 +7797,7 @@ pub async fn fetch_package_by_name(
             .as_str()
             .filter(|value| !value.is_empty())
             .map(str::to_string)
-            .unwrap_or_else(|| format!("thunderstore:{}", ver_full.to_lowercase()));
+            .unwrap_or_else(|| format!("{:?}:{}", resolved_source, ver_full.to_lowercase()));
 
         let requested_version = version_str.as_deref().unwrap_or_default();
         let expected_full_name = format!("{}-{}", clean_name, requested_version);
@@ -7673,16 +7834,30 @@ pub async fn fetch_package_by_name(
             full_name: ver_full,
             date_created: val["date_created"].as_str().unwrap_or("").to_string(),
             is_active: val["is_active"].as_bool().unwrap_or(true),
+            source: resolved_source,
         };
 
         crate::models::shared::Package {
             name: package_name.to_string(),
             full_name: clean_name.to_string(),
             owner: namespace.to_string(),
-            package_url: format!(
-                "https://thunderstore.io/package/{}/{}/",
-                namespace, package_name
-            ),
+            package_url: match resolved_source {
+                crate::models::shared::ModSource::Hexium => game_id
+                    .as_deref()
+                    .map(|game| {
+                        format!(
+                            "https://{}.hexium.gg/mods/{}/{}",
+                            game, namespace, package_name
+                        )
+                    })
+                    .unwrap_or_else(|| {
+                        format!("https://hexium.gg/mods/{}/{}", namespace, package_name)
+                    }),
+                _ => format!(
+                    "https://thunderstore.io/package/{}/{}/",
+                    namespace, package_name
+                ),
+            },
             date_created: "".to_string(),
             date_updated: "".to_string(),
             uuid4: "".to_string(),
@@ -7738,6 +7913,7 @@ pub async fn fetch_package_by_name(
                 .unwrap_or("")
                 .to_string(),
             is_active: latest_val["is_active"].as_bool().unwrap_or(true),
+            source: resolved_source,
         };
 
         let pkg_name = val["name"].as_str().unwrap_or(package_name).to_string();
@@ -7793,6 +7969,7 @@ pub async fn fetch_package_by_name(
                     for exact_version in &pkg.versions {
                         if !cached_package.versions.iter().any(|candidate| {
                             candidate.version_number == exact_version.version_number
+                                && candidate.source == exact_version.source
                         }) {
                             cached_package.versions.push(exact_version.clone());
                         }
@@ -7811,6 +7988,73 @@ pub async fn fetch_package_by_name(
 mod tests {
     use super::*;
     use std::io::{Cursor, Write};
+
+    fn catalogue_package(version: &str, source: crate::models::shared::ModSource) -> Package {
+        let source_name = match source {
+            crate::models::shared::ModSource::Thunderstore => "thunderstore",
+            crate::models::shared::ModSource::Hexium => "hexium",
+            crate::models::shared::ModSource::Outerwilds => "outerwilds",
+        };
+        serde_json::from_value(serde_json::json!({
+            "name": "SharedMod",
+            "full_name": "Author-SharedMod",
+            "date_updated": "2026-09-22T00:00:00Z",
+            "uuid4": format!("{source_name}-package"),
+            "versions": [{
+                "name": "SharedMod",
+                "full_name": format!("Author-SharedMod-{version}"),
+                "version_number": version,
+                "download_url": format!("https://example.invalid/{source_name}/{version}.zip"),
+                "uuid4": format!("{source_name}-{version}"),
+                "source": source_name
+            }]
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn merged_catalogue_keeps_both_stores_and_prefers_newest() {
+        let mut packages = vec![catalogue_package(
+            "1.0.0",
+            crate::models::shared::ModSource::Thunderstore,
+        )];
+        merge_package_lists(
+            &mut packages,
+            vec![catalogue_package(
+                "2.0.0",
+                crate::models::shared::ModSource::Hexium,
+            )],
+        );
+
+        assert_eq!(packages.len(), 1);
+        assert_eq!(packages[0].versions.len(), 2);
+        assert_eq!(packages[0].versions[0].version_number, "2.0.0");
+        assert_eq!(
+            packages[0].versions[0].source,
+            crate::models::shared::ModSource::Hexium
+        );
+    }
+
+    #[test]
+    fn merged_catalogue_prefers_thunderstore_when_versions_match() {
+        let mut packages = vec![catalogue_package(
+            "1.0.0",
+            crate::models::shared::ModSource::Hexium,
+        )];
+        merge_package_lists(
+            &mut packages,
+            vec![catalogue_package(
+                "1.0.0",
+                crate::models::shared::ModSource::Thunderstore,
+            )],
+        );
+
+        assert_eq!(packages[0].versions.len(), 2);
+        assert_eq!(
+            packages[0].versions[0].source,
+            crate::models::shared::ModSource::Thunderstore
+        );
+    }
 
     fn temp_dir(label: &str) -> std::path::PathBuf {
         let unique = std::time::SystemTime::now()

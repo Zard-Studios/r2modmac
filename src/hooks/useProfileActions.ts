@@ -2,7 +2,7 @@ import type { Package } from '../types/thunderstore';
 import type { InstalledMod } from '../types/profile';
 import type { ProgressSetter } from '../types/progress';
 import { useProfileStore } from '../store/useProfileStore';
-import { findPinnedVersion } from '../utils/modVersioning';
+import { findPinnedVersionForSource } from '../utils/modVersioning';
 
 const getErrorMessage = (err: unknown, fallback: string) => {
     if (err instanceof Error && err.message) return err.message;
@@ -39,8 +39,8 @@ export function useProfileActions({
             if (profileName.startsWith('Imported: ')) profileName = profileName.substring(10);
 
             const localMods = result.mods.filter((m: any) => m.source === 'local');
-            const thunderstoreMods = result.mods.filter((m: any) => m.source !== 'local');
-            const modNames = thunderstoreMods.map((m: any) => m.name);
+            const remoteMods = result.mods.filter((m: any) => m.source !== 'local');
+            const modNames = remoteMods.map((m: any) => m.name);
             const lookup = modNames.length > 0
                 ? await window.ipcRenderer.lookupPackagesByNames(selectedCommunity!, modNames)
                 : { found: [], unknown: [] };
@@ -52,7 +52,7 @@ export function useProfileActions({
                     progress: 0,
                     currentTask: 'Resolving pinned versions...',
                 });
-                const modsToAdd = thunderstoreMods;
+                const modsToAdd = remoteMods;
                 const resolvedMods: InstalledMod[] = [];
                 const failedMods: string[] = [];
 
@@ -60,17 +60,26 @@ export function useProfileActions({
                     const mod = modsToAdd[index];
                     try {
                         const pkg = lookup.found.find((p: Package) => p.full_name.toLowerCase() === mod.name.toLowerCase());
-                        const exactPkg = pkg?.versions.some((v: any) => v.version_number === mod.version)
+                        const exactPkg = pkg?.versions.some((v: any) =>
+                            v.version_number === mod.version
+                            && (!mod.source || v.source === mod.source)
+                        )
                             ? pkg
-                            : await window.ipcRenderer.fetchPackageByName(`${mod.name}-${mod.version}`, selectedCommunity);
+                            : await window.ipcRenderer.fetchPackageByName(`${mod.name}-${mod.version}`, selectedCommunity, mod.source);
                         if (!exactPkg) throw new Error(`pinned version ${mod.version} does not exist`);
-                        const version = findPinnedVersion(exactPkg, mod.version, mod.name);
+                        const version = findPinnedVersionForSource(
+                            exactPkg,
+                            mod.version,
+                            mod.source,
+                            mod.name,
+                        );
                         resolvedMods.push({
                             uuid4: version.uuid4,
                             fullName: version.full_name,
                             versionNumber: version.version_number,
                             iconUrl: version.icon,
                             enabled: mod.enabled,
+                            source: version.source || mod.source || 'thunderstore',
                             pending_sync: true,
                         });
                     } catch (error) {

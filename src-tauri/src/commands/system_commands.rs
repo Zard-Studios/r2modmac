@@ -11,6 +11,7 @@ use tauri::{command, AppHandle, Emitter, Manager, State};
 
 const COMMUNITIES_CACHE_FILE: &str = "communities_v1.json.gz";
 const COMMUNITY_IMAGES_CACHE_FILE: &str = "community_images_v1.json.gz";
+const MIN_VALID_COMMUNITY_IMAGE_COUNT: usize = 20;
 
 fn read_gz_json_cache<T: serde::de::DeserializeOwned>(
     app: &AppHandle,
@@ -230,8 +231,10 @@ async fn fill_missing_community_images(images: &mut HashMap<String, String>) {
 /// path and then left to the usual cover preference.
 fn extract_cover_from_community_page(html: &str, community_id: &str) -> Option<String> {
     // 1. Check for explicit cover_image_url in Thunderstore's serialized router state or metadata:
-    // e.g. \"cover_image_url\",\"https://gcdn.thunderstore.io/live/community/mewgenics/mewgenics-cover-360x480.webp\"
-    if let Ok(re_cover) = regex::Regex::new(r#"cover_image_url[^h]+(https://gcdn\.thunderstore\.io/[^"'\\\s<>]+)"#) {
+    // e.g. \"cover_image_url\",\"https://ccdn.thunderstore.io/assets/example/example-cover-360x480.webp\"
+    if let Ok(re_cover) = regex::Regex::new(
+        r#"cover_image_url[^h]+(https://(?:gcdn|ccdn)\.thunderstore\.io/[^"'\\\s<>]+)"#,
+    ) {
         if let Some(cap) = re_cover.captures(html) {
             if let Some(matched) = cap.get(1) {
                 let url = normalize_community_image_url(matched.as_str());
@@ -242,7 +245,9 @@ fn extract_cover_from_community_page(html: &str, community_id: &str) -> Option<S
         }
     }
 
-    let re = regex::Regex::new(r#"https://gcdn\.thunderstore\.io/[^"'\\\s<>]+"#).ok()?;
+    let re =
+        regex::Regex::new(r#"https://(?:gcdn|ccdn)\.thunderstore\.io/[^"'\\\s<>]+"#)
+            .ok()?;
 
     let mut fallback = None;
     for m in re.find_iter(html) {
@@ -315,13 +320,42 @@ pub async fn fetch_community_images(
         &app,
         COMMUNITY_IMAGES_CACHE_FILE,
     ) {
+        if !refresh {
+            return Ok(cached);
+        }
+
+        if cached.len() < MIN_VALID_COMMUNITY_IMAGE_COUNT {
+            log::warn!(
+                "[fetch_community_images] Cached artwork map is incomplete ({} entries); rebuilding it synchronously",
+                cached.len()
+            );
+            let fresh = fetch_community_images_live().await?;
+            if fresh.len() < MIN_VALID_COMMUNITY_IMAGE_COUNT {
+                return Err(format!(
+                    "Refusing to replace artwork cache with an incomplete map ({} entries)",
+                    fresh.len()
+                ));
+            }
+            let mut merged = cached;
+            merged.extend(fresh);
+            write_gz_json_cache(&app, COMMUNITY_IMAGES_CACHE_FILE, &merged);
+            return Ok(merged);
+        }
+
         if refresh {
             let app_for_task = app.clone();
+            let cached_for_task = cached.clone();
             tokio::spawn(async move {
                 match fetch_community_images_live().await {
-                    Ok(fresh) => {
-                        write_gz_json_cache(&app_for_task, COMMUNITY_IMAGES_CACHE_FILE, &fresh)
+                    Ok(fresh) if fresh.len() >= MIN_VALID_COMMUNITY_IMAGE_COUNT => {
+                        let mut merged = cached_for_task;
+                        merged.extend(fresh);
+                        write_gz_json_cache(&app_for_task, COMMUNITY_IMAGES_CACHE_FILE, &merged)
                     }
+                    Ok(fresh) => log::warn!(
+                        "[fetch_community_images] Refusing to replace artwork cache with an incomplete map ({} entries)",
+                        fresh.len()
+                    ),
                     Err(e) => {
                         log::warn!("[fetch_community_images] Background refresh failed: {}", e)
                     }
@@ -332,6 +366,12 @@ pub async fn fetch_community_images(
     }
 
     let fresh = fetch_community_images_live().await?;
+    if fresh.len() < MIN_VALID_COMMUNITY_IMAGE_COUNT {
+        return Err(format!(
+            "Refusing to create artwork cache from an incomplete map ({} entries)",
+            fresh.len()
+        ));
+    }
     write_gz_json_cache(&app, COMMUNITY_IMAGES_CACHE_FILE, &fresh);
     Ok(fresh)
 }
@@ -346,6 +386,9 @@ fn is_community_cdn_image(url: &str) -> bool {
         || lower.starts_with("https://gcdn.thunderstore.io/assets/")
         // Thunderstore has used this shorter path for newer communities.
         || lower.starts_with("https://gcdn.thunderstore.io/community/")
+        || lower.starts_with("https://ccdn.thunderstore.io/live/community/")
+        || lower.starts_with("https://ccdn.thunderstore.io/assets/")
+        || lower.starts_with("https://ccdn.thunderstore.io/community/")
 }
 
 fn is_obvious_non_cover(url: &str) -> bool {
@@ -422,8 +465,10 @@ fn extract_community_images_from_html(html: &str) -> Result<HashMap<String, Stri
     // can drift independently from the community identifier.
     let re_community_link = regex::Regex::new(r#"<a[^>]+href=["']/c/([^/"']+)/["'][^>]*>"#)
         .map_err(|e| e.to_string())?;
-    let re_img_src = regex::Regex::new(r#"src=["'](https://gcdn\.thunderstore\.io/[^"']+)["']"#)
-        .map_err(|e| e.to_string())?;
+    let re_img_src = regex::Regex::new(
+        r#"src=["'](https://(?:gcdn|ccdn)\.thunderstore\.io/[^"']+)["']"#,
+    )
+    .map_err(|e| e.to_string())?;
 
     for cap in re_community_link.captures_iter(html) {
         let (Some(link), Some(community_id)) = (cap.get(0), cap.get(1)) else {
@@ -453,7 +498,7 @@ fn extract_community_images_from_html(html: &str) -> Result<HashMap<String, Stri
     // does not guarantee a stable cover filename, so derive the community id from
     // any CDN asset while still rejecting obvious hero/icon/logo assets.
     let re_direct_cover = regex::Regex::new(
-        r#"(https://gcdn\.thunderstore\.io/(?:live/community|assets|community)/([^/"'\\\s<>]+)/[^"'\\\s<>]+)"#,
+        r#"(https://(?:gcdn|ccdn)\.thunderstore\.io/(?:live/community|assets|community)/([^/"'\\\s<>]+)/[^"'\\\s<>]+)"#,
     )
     .map_err(|e| e.to_string())?;
 
@@ -487,7 +532,11 @@ fn validate_text_content_url(raw_url: &str) -> Result<reqwest::Url, String> {
         Some(host)
             if matches!(
                 host.as_str(),
-                "api.github.com" | "thunderstore.io" | "www.thunderstore.io"
+                "api.github.com"
+                    | "thunderstore.io"
+                    | "www.thunderstore.io"
+                    | "hexium.gg"
+                    | "www.hexium.gg"
             ) =>
         {
             Ok(url)
@@ -2093,6 +2142,20 @@ mod tests {
     }
 
     #[test]
+    fn extracts_covers_from_the_current_community_cdn() {
+        let html = r#"
+            \"cover_image_url\",\"https://ccdn.thunderstore.io/assets/shadows-over-loathing/shadows-over-loathing-cover-360x480.webp\"
+        "#;
+
+        let images = extract_community_images_from_html(html).unwrap();
+
+        assert_eq!(
+            images.get("shadows-over-loathing").map(String::as_str),
+            Some("https://ccdn.thunderstore.io/assets/shadows-over-loathing/shadows-over-loathing-cover-360x480.webp")
+        );
+    }
+
+    #[test]
     fn fallback_ignores_obvious_hero_and_icon_urls() {
         let html = r#"
             "https://gcdn.thunderstore.io/live/community/sample/sample-bg-1920x620.webp",
@@ -2188,6 +2251,10 @@ mod tests {
         .is_ok());
         assert!(validate_text_content_url(
             "https://thunderstore.io/api/cyberstorm/package/owner/mod/v/1.0.0/readme/"
+        )
+        .is_ok());
+        assert!(validate_text_content_url(
+            "https://hexium.gg/api/experimental/package/owner/mod/1.0.0/readme/"
         )
         .is_ok());
 

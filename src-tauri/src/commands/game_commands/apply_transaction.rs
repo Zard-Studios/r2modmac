@@ -121,7 +121,9 @@ fn backup_name(index: usize) -> String {
 }
 
 fn copy_target(source: &std::path::Path, destination: &std::path::Path) -> Result<(), String> {
-    if source.is_dir() {
+    if source.is_symlink() {
+        copy_symlink(source, destination)
+    } else if source.is_dir() {
         copy_dir_recursive(source, destination).map_err(|error| error.to_string())
     } else if source.is_file() {
         if let Some(parent) = destination.parent() {
@@ -135,8 +137,26 @@ fn copy_target(source: &std::path::Path, destination: &std::path::Path) -> Resul
     }
 }
 
+fn copy_symlink(source: &std::path::Path, destination: &std::path::Path) -> Result<(), String> {
+    #[cfg(unix)]
+    {
+        let target = fs::read_link(source).map_err(|error| error.to_string())?;
+        if let Some(parent) = destination.parent() {
+            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        std::os::unix::fs::symlink(target, destination).map_err(|error| error.to_string())
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (source, destination);
+        Err("Cannot snapshot symbolic links on this platform".to_string())
+    }
+}
+
 fn target_size(target: &std::path::Path) -> u64 {
-    if target.is_dir() {
+    if target.is_symlink() {
+        0
+    } else if target.is_dir() {
         calculate_dir_size(target).unwrap_or(0)
     } else {
         fs::metadata(target)
@@ -164,13 +184,17 @@ fn copy_target_with_progress(
             );
         }
     );
-    if source.is_dir() {
+    if source.is_symlink() {
+        copy_symlink(source, destination)?;
+    } else if source.is_dir() {
         fs::create_dir_all(destination).map_err(|error| error.to_string())?;
         for entry in fs::read_dir(source).map_err(|error| error.to_string())? {
             let entry = entry.map_err(|error| error.to_string())?;
             let source_path = entry.path();
             let destination_path = destination.join(entry.file_name());
-            if entry
+            if source_path.is_symlink() {
+                copy_symlink(&source_path, &destination_path)?;
+            } else if entry
                 .file_type()
                 .map_err(|error| error.to_string())?
                 .is_dir()
@@ -196,7 +220,9 @@ fn copy_target_with_progress(
 }
 
 fn remove_target(target: &std::path::Path) -> Result<(), String> {
-    if target.is_dir() {
+    if target.is_symlink() {
+        fs::remove_file(target).map_err(|error| error.to_string())
+    } else if target.is_dir() {
         fs::remove_dir_all(target).map_err(|error| error.to_string())
     } else if target.exists() || target.is_symlink() {
         fs::remove_file(target).map_err(|error| error.to_string())
@@ -214,6 +240,9 @@ fn configs_written_since_the_snapshot(
     target: &std::path::Path,
     backup: &std::path::Path,
 ) -> Vec<(std::path::PathBuf, Vec<u8>)> {
+    if target.is_symlink() || backup.is_symlink() {
+        return Vec::new();
+    }
     let live_config = target.join("config");
     if !live_config.is_dir() {
         return Vec::new();
@@ -267,7 +296,7 @@ fn restore_snapshot(
         }
 
         remove_target(target)?;
-        if backup.exists() {
+        if backup.exists() || backup.is_symlink() {
             copy_target(&backup, target)?;
         }
 
@@ -329,7 +358,11 @@ pub async fn begin_profile_apply_transaction(
     // that walk alone used to cost more than the whole operation now does.
     let mut pending: Vec<(usize, &std::path::PathBuf)> = Vec::new();
     for (index, target) in targets.iter().enumerate() {
-        if !target.exists() {
+        if !target.exists() && !target.is_symlink() {
+            continue;
+        }
+        if target.is_symlink() {
+            pending.push((index, target));
             continue;
         }
         if try_clone_tree(target, &backup_root.join(backup_name(index))) {
@@ -488,6 +521,39 @@ mod tests {
 
         assert_eq!(fs::read(target.join("mod.dll")).unwrap(), b"old");
         assert!(!target.join("new-only.dll").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn snapshot_restore_preserves_profile_tree_behind_bepinex_link() {
+        let root = std::env::temp_dir().join(format!(
+            "r2modmac-apply-link-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let profile_tree = root.join("profile/BepInEx");
+        let game_link = root.join("game/BepInEx");
+        let backup = root.join("backup");
+        fs::create_dir_all(&profile_tree).unwrap();
+        fs::create_dir_all(game_link.parent().unwrap()).unwrap();
+        fs::create_dir_all(&backup).unwrap();
+        fs::write(profile_tree.join("marker"), b"profile-data").unwrap();
+        std::os::unix::fs::symlink(&profile_tree, &game_link).unwrap();
+        copy_target_with_progress(&game_link, &backup.join(backup_name(0)), &mut |_| {}).unwrap();
+
+        fs::remove_file(&game_link).unwrap();
+        fs::create_dir_all(&game_link).unwrap();
+        fs::write(game_link.join("partial"), b"failed install").unwrap();
+        restore_snapshot(&backup, &[game_link.clone()]).unwrap();
+
+        assert!(game_link.is_symlink());
+        assert_eq!(fs::read_link(&game_link).unwrap(), profile_tree);
+        assert_eq!(fs::read(game_link.join("marker")).unwrap(), b"profile-data");
+        assert!(!game_link.join("partial").exists());
         fs::remove_dir_all(root).unwrap();
     }
 
