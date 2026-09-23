@@ -22,10 +22,11 @@ export function SettingsModal({ isOpen, onClose, selectedGame, activeProfile, on
     const [steamPath, setSteamPath] = useState<string>('');
     const [loading, setLoading] = useState(false);
     const [modeSaving, setModeSaving] = useState(false);
-    const [inheritedIsolation, setInheritedIsolation] = useState(true);
+    const [inheritedIsolation, setInheritedIsolation] = useState(false);
     const [gamePath, setGamePath] = useState<string | null>(null);
     const [checkingGamePath, setCheckingGamePath] = useState(false);
     const [gameSource, setGameSource] = useState<'steam' | 'manual' | 'unknown'>('unknown');
+    const [gameLoader, setGameLoader] = useState<{ key: string; loader: string } | null>(null);
     
     const contentWrapperRef = useRef<HTMLDivElement>(null);
     const settingsRef = useRef<HTMLDivElement>(null);
@@ -35,6 +36,9 @@ export function SettingsModal({ isOpen, onClose, selectedGame, activeProfile, on
 
 
     const activeProfilePlatform: ProfilePlatform = activeProfile?.platform === 'mac' ? 'mac' : 'windows';
+    const loaderKey = activeProfile
+        ? `${activeProfile.id}:${activeProfile.gameIdentifier}:${activeProfilePlatform}`
+        : null;
     // A Windows profile only lives in a compatibility prefix when the host is
     // not Windows, so the bottle wording has to stay off a real Windows install.
     const isWindowsHost = runningOnWindows();
@@ -51,7 +55,7 @@ export function SettingsModal({ isOpen, onClose, selectedGame, activeProfile, on
     const loadSettings = async () => {
         try {
             const settings = await window.ipcRenderer.getSettings();
-            setInheritedIsolation(settings.profile_isolation ?? true);
+            setInheritedIsolation(settings.profile_isolation ?? false);
             if (activeProfilePlatform === 'mac') {
                 setSteamPath(settings.mac_steam_path || getLegacyMacSteamPath(settings.steam_path) || defaultMacSteamPath);
             } else {
@@ -89,6 +93,18 @@ export function SettingsModal({ isOpen, onClose, selectedGame, activeProfile, on
         };
         init();
     }, [isOpen, selectedGame, activeProfilePlatform]);
+
+    useEffect(() => {
+        if (!isOpen || !activeProfile || !loaderKey) return;
+        let current = true;
+        window.ipcRenderer.getGameLoader(activeProfile.gameIdentifier, activeProfilePlatform)
+            .then(loader => { if (current) setGameLoader({ key: loaderKey, loader }); })
+            .catch(error => {
+                console.error('Failed to resolve game loader', error);
+                if (current) setGameLoader({ key: loaderKey, loader: 'unknown' });
+            });
+        return () => { current = false; };
+    }, [isOpen, activeProfile?.id, activeProfile?.gameIdentifier, activeProfilePlatform, loaderKey]);
 
     // Modal Entrance/Exit Animation State
     const [prevIsOpen, setPrevIsOpen] = useState(isOpen);
@@ -440,7 +456,7 @@ export function SettingsModal({ isOpen, onClose, selectedGame, activeProfile, on
                                 </div>
                             )}
 
-                            {activeProfile && (
+                            {activeProfile && gameLoader?.key === loaderKey && gameLoader.loader === 'bepinex' && (
                                 <div className="mb-6 rounded-lg border border-gray-700 bg-gray-800/50 p-4">
                                     <div className="flex items-center justify-between gap-4">
                                         <div>

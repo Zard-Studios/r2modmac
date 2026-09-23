@@ -124,7 +124,7 @@ pub async fn set_profile_bepinex_isolation(
     if is_game_running(app.clone(), game_identifier.clone(), Some(platform.clone())).await? {
         return Err("Close the game before changing BepInEx storage mode".to_string());
     }
-    let game_path = get_game_path(app.clone(), game_identifier, Some(platform.clone()))
+    let game_path = get_game_path(app.clone(), game_identifier.clone(), Some(platform.clone()))
         .await?
         .ok_or_else(|| "Set the game directory before changing BepInEx storage mode".to_string())?;
     let runtime_root = if platform == "mac" {
@@ -132,6 +132,11 @@ pub async fn set_profile_bepinex_isolation(
     } else {
         Path::new(&game_path).to_path_buf()
     };
+    if crate::models::loaders::resolve_loader(&game_identifier, &runtime_root)
+        != crate::models::loaders::PackageLoader::BepInEx
+    {
+        return Err("BepInEx isolation is only available for BepInEx games".to_string());
+    }
     let profile_root = crate::utils::paths::app_data_dir(&app)
         .map_err(|error| error.to_string())?
         .join("profiles")

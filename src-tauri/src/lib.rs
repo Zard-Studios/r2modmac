@@ -587,6 +587,7 @@ pub fn run() {
             commands::game_commands::paths::open_game_folder,
             commands::game_commands::paths::find_game_executable,
             commands::game_commands::runtime_health::check_profile_runtime_health,
+            commands::game_commands::runtime_health::get_game_loader,
             commands::game_commands::runtime_health::repair_profile_runtime_link,
             commands::game_commands::apply_transaction::begin_profile_apply_transaction,
             commands::game_commands::apply_transaction::rollback_profile_apply_transaction,

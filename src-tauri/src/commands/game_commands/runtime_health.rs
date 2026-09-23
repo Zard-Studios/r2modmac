@@ -2,6 +2,31 @@ use super::*;
 use serde::Serialize;
 use tauri::command;
 
+/// The community loader, including a game-folder override when one is known.
+/// This is available even before the game directory has been configured.
+#[command]
+pub async fn get_game_loader(
+    app: AppHandle,
+    game_identifier: String,
+    platform: Option<String>,
+) -> Result<String, String> {
+    if let Ok(Some(game_path)) = get_game_path(app, game_identifier.clone(), platform).await {
+        return Ok(crate::models::loaders::resolve_loader(
+            &game_identifier,
+            std::path::Path::new(&game_path),
+        )
+        .runtime_name()
+        .to_string());
+    }
+    if is_outerwilds_identifier(&game_identifier) {
+        return Ok("owml".to_string());
+    }
+    Ok(crate::models::loaders::loader_for_community(&game_identifier)
+        .unwrap_or(crate::models::loaders::PackageLoader::BepInEx)
+        .runtime_name()
+        .to_string())
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeHealth {

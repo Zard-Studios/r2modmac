@@ -241,7 +241,7 @@ impl Settings {
             default_profile: None,
             active_theme: None,
             keybinds: BTreeMap::new(),
-            profile_isolation: true,
+            profile_isolation: false,
         }
     }
 }
@@ -820,13 +820,13 @@ mod settings_stable_order_tests {
     }
 
     #[test]
-    fn profile_isolation_is_on_and_stays_settable_by_hand() {
-        assert!(Settings::default().profile_isolation);
-        // A settings file written before the field existed still gets it.
+    fn profile_isolation_defaults_off_but_preserves_legacy_settings() {
+        assert!(!Settings::default().profile_isolation);
+        // Existing settings without the field retain their prior fallback.
         let older: Settings =
             serde_json::from_str(r#"{"steam_path":null,"game_paths":{}}"#).unwrap();
         assert!(older.profile_isolation);
-        // The escape hatch: a game that needs its tree beside the executable.
+        // An explicit choice stays authoritative.
         let opted_out: Settings =
             serde_json::from_str(r#"{"steam_path":null,"profile_isolation":false}"#).unwrap();
         assert!(!opted_out.profile_isolation);
