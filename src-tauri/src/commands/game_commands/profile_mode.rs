@@ -1,4 +1,6 @@
-use std::{fs, path::Path};
+use std::{fs, io::Read, path::Path};
+
+use sha2::{Digest, Sha256};
 
 use tauri::{command, AppHandle};
 
@@ -25,6 +27,67 @@ fn ensure_no_symlinks(directory: &Path) -> Result<(), String> {
     Ok(())
 }
 
+fn verify_copied_tree(source: &Path, staged: &Path) -> Result<(), String> {
+    let mut source_entries = fs::read_dir(source)
+        .map_err(|error| error.to_string())?
+        .map(|entry| entry.map(|entry| entry.file_name()))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+    let mut staged_entries = fs::read_dir(staged)
+        .map_err(|error| error.to_string())?
+        .map(|entry| entry.map(|entry| entry.file_name()))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+    source_entries.sort();
+    staged_entries.sort();
+    if source_entries != staged_entries {
+        return Err(format!(
+            "Copied BepInEx tree differs from {}",
+            source.display()
+        ));
+    }
+
+    for name in source_entries {
+        let original = source.join(&name);
+        let copied = staged.join(&name);
+        let original_type = fs::symlink_metadata(&original)
+            .map_err(|error| error.to_string())?
+            .file_type();
+        let copied_type = fs::symlink_metadata(&copied)
+            .map_err(|error| error.to_string())?
+            .file_type();
+        if original_type.is_dir() && copied_type.is_dir() {
+            verify_copied_tree(&original, &copied)?;
+        } else if original_type.is_file() && copied_type.is_file() {
+            let hash = |path: &Path| -> Result<[u8; 32], String> {
+                let mut file = fs::File::open(path).map_err(|error| error.to_string())?;
+                let mut digest = Sha256::new();
+                let mut buffer = [0_u8; 64 * 1024];
+                loop {
+                    let count = file.read(&mut buffer).map_err(|error| error.to_string())?;
+                    if count == 0 {
+                        break;
+                    }
+                    digest.update(&buffer[..count]);
+                }
+                Ok(digest.finalize().into())
+            };
+            if hash(&original)? != hash(&copied)? {
+                return Err(format!(
+                    "Copied BepInEx file differs from {}",
+                    original.display()
+                ));
+            }
+        } else {
+            return Err(format!(
+                "Copied BepInEx entry has a different type: {}",
+                original.display()
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn migrate_tree(source_root: &Path, destination_root: &Path, name: &str) -> Result<(), String> {
     let source = source_root.join(name);
     let destination = destination_root.join(name);
@@ -38,18 +101,24 @@ fn migrate_tree(source_root: &Path, destination_root: &Path, name: &str) -> Resu
     if source.exists() && !has_source {
         return Err(format!("{} is not a directory", source.display()));
     }
-    if has_source {
-        ensure_no_symlinks(&source)?;
+    if !has_source {
+        return Err(format!(
+            "Cannot migrate missing BepInEx tree at {}",
+            source.display()
+        ));
     }
+    ensure_no_symlinks(&source)?;
     fs::create_dir_all(destination_root).map_err(|error| error.to_string())?;
     let marker = uuid::Uuid::new_v4();
     let staged = destination_root.join(format!(".{name}.r2modmac-{marker}.staging"));
     let backup = destination_root.join(format!("{name}.r2modmac-backup-{marker}"));
-    if has_source {
-        if let Err(error) = copy_dir_recursive(&source, &staged) {
-            let _ = fs::remove_dir_all(&staged);
-            return Err(format!("Could not stage {}: {error}", source.display()));
-        }
+    if let Err(error) = copy_dir_recursive(&source, &staged) {
+        let _ = fs::remove_dir_all(&staged);
+        return Err(format!("Could not stage {}: {error}", source.display()));
+    }
+    if let Err(error) = verify_copied_tree(&source, &staged) {
+        let _ = fs::remove_dir_all(&staged);
+        return Err(error);
     }
     if destination.is_symlink() {
         // Only r2modmac-owned profile links are eligible for replacement.
@@ -74,16 +143,14 @@ fn migrate_tree(source_root: &Path, destination_root: &Path, name: &str) -> Resu
             backup.display()
         );
     }
-    if has_source {
-        if let Err(error) = fs::rename(&staged, &destination) {
-            if backup.exists() {
-                let _ = fs::rename(&backup, &destination);
-            }
-            return Err(format!(
-                "Could not activate {}: {error}",
-                destination.display()
-            ));
+    if let Err(error) = fs::rename(&staged, &destination) {
+        if backup.exists() {
+            let _ = fs::rename(&backup, &destination);
         }
+        return Err(format!(
+            "Could not activate {}: {error}",
+            destination.display()
+        ));
     }
     Ok(())
 }
@@ -152,13 +219,23 @@ pub async fn set_profile_bepinex_isolation(
     } else {
         (&profile_root, &runtime_root)
     };
+    if !isolated
+        && !["BepInEx", "BepInEx_DISABLED"]
+            .iter()
+            .any(|name| source.join(name).is_dir())
+    {
+        return Err(
+            "This profile has no local BepInEx files to migrate; its mode was not changed"
+                .to_string(),
+        );
+    }
     for name in ["BepInEx", "BepInEx_DISABLED"] {
         // A game-side link may belong to another profile. It is never a
         // source for a migration into this profile.
         if isolated && source.join(name).is_symlink() {
             continue;
         }
-        if isolated && !source.join(name).is_dir() {
+        if !source.join(name).is_dir() && !source.join(name).is_symlink() {
             continue;
         }
         migrate_tree(source, destination, name)?;
@@ -230,6 +307,41 @@ mod tests {
             })
             .unwrap();
         assert_eq!(fs::read(backup.join("plugins/old.dll")).unwrap(), b"old");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn missing_source_never_displaces_existing_game_tree() {
+        let root =
+            std::env::temp_dir().join(format!("r2modmac-profile-mode-{}", uuid::Uuid::new_v4()));
+        let source = root.join("source");
+        let destination = root.join("destination");
+        fs::create_dir_all(destination.join("BepInEx/plugins")).unwrap();
+        fs::write(destination.join("BepInEx/plugins/working.dll"), b"keep me").unwrap();
+
+        assert!(migrate_tree(&source, &destination, "BepInEx").is_err());
+        assert_eq!(
+            fs::read(destination.join("BepInEx/plugins/working.dll")).unwrap(),
+            b"keep me"
+        );
+        assert_eq!(fs::read_dir(&destination).unwrap().count(), 1);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn copied_tree_verification_detects_same_size_corruption() {
+        let root =
+            std::env::temp_dir().join(format!("r2modmac-profile-mode-{}", uuid::Uuid::new_v4()));
+        let source = root.join("source");
+        let staged = root.join("staged");
+        fs::create_dir_all(source.join("plugins")).unwrap();
+        fs::create_dir_all(staged.join("plugins")).unwrap();
+        fs::write(source.join("plugins/mod.dll"), b"correct").unwrap();
+        fs::write(staged.join("plugins/mod.dll"), b"corrupt").unwrap();
+
+        assert!(verify_copied_tree(&source, &staged).is_err());
+        fs::write(staged.join("plugins/mod.dll"), b"correct").unwrap();
+        assert!(verify_copied_tree(&source, &staged).is_ok());
         fs::remove_dir_all(root).unwrap();
     }
 
