@@ -1799,6 +1799,15 @@ function App() {
     const runtime = health && isReturnOfModdingCommunity(community, health.runtime)
       ? 'returnofmodding'
       : health?.runtime;
+    if (health?.missingComponents.includes('profile-location')) {
+      await window.ipcRenderer.alert(
+        'Profile storage needs migration',
+        'BepInEx still points to files in the profile while this profile is marked game-local. ' +
+        'The BepInEx link was left untouched. A normal Repair would not safely resolve this mismatch; ' +
+        'do not reinstall the modpack until the local migration is available.'
+      );
+      return false;
+    }
     if (health?.status === 'healthy' || hasPendingRuntimeInstall(profile, runtime)) return true;
     if (!health || !health.repairable) {
       if (health?.status === 'unconfigured') setShowSettings(true);

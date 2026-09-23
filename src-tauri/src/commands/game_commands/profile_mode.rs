@@ -297,6 +297,23 @@ pub async fn set_profile_bepinex_isolation(
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(settings.profile_isolation);
     if current == isolated {
+        if !isolated {
+            if let Some(game_path) =
+                get_game_path(app.clone(), game_identifier.clone(), Some(platform.clone())).await?
+            {
+                let runtime_root = if platform == "mac" {
+                    resolve_macos_runtime_root(Path::new(&game_path))
+                } else {
+                    Path::new(&game_path).to_path_buf()
+                };
+                if ["BepInEx", "BepInEx_DISABLED"]
+                    .iter()
+                    .any(|name| runtime_root.join(name).is_symlink())
+                {
+                    return Err("This profile is marked game-local, but BepInEx still points to a profile directory. No files were changed; local migration is required.".to_string());
+                }
+            }
+        }
         return Ok(true);
     }
     if is_game_running(app.clone(), game_identifier.clone(), Some(platform.clone())).await? {

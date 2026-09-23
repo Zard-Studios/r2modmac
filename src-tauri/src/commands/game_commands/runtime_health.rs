@@ -42,6 +42,13 @@ impl RuntimeHealth {
     }
 
     pub(crate) fn modded_launch_error(&self) -> String {
+        if self
+            .missing_components
+            .iter()
+            .any(|component| component == "profile-location")
+        {
+            return "BepInEx still points to a profile directory, but this profile is marked game-local. Modded launch was blocked without changing files; complete the local migration first.".to_string();
+        }
         let details = if self.missing_components.is_empty() {
             String::new()
         } else {
@@ -101,6 +108,15 @@ fn health(runtime: &str, missing_components: Vec<String>) -> RuntimeHealth {
         status: status.to_string(),
         repairable: !missing_components.is_empty(),
         missing_components,
+    }
+}
+
+fn game_local_profile_link_mismatch() -> RuntimeHealth {
+    RuntimeHealth {
+        runtime: "bepinex".to_string(),
+        status: "incomplete".to_string(),
+        missing_components: vec!["profile-location".to_string()],
+        repairable: false,
     }
 }
 
@@ -424,8 +440,15 @@ pub async fn check_profile_runtime_health(
         // Under isolation the tree sits in the profile while the loader stays
         // beside the game, so the two are looked for separately.
         let tree_root = bepinex_install_root(&app, &profile_id, &runtime_root)?;
-        if tree_root == runtime_root && runtime_root.join("BepInEx").is_symlink() {
-            return Ok(health("bepinex", vec!["runtime".to_string()]));
+        if tree_root == runtime_root
+            && ["BepInEx", "BepInEx_DISABLED"]
+                .iter()
+                .any(|name| runtime_root.join(name).is_symlink())
+        {
+            // This is a storage-mode mismatch, not a missing loader. A normal
+            // Repair could download/reinstall BepInEx over a recoverable
+            // profile tree, so leave the link untouched and disallow repair.
+            return Ok(game_local_profile_link_mismatch());
         }
         let disabled = vanilla && tree_root.join("BepInEx_DISABLED").exists();
         let bep_dir = tree_root.join(if disabled {
@@ -524,6 +547,17 @@ pub async fn repair_profile_runtime_link(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mismatched_game_local_link_blocks_play_without_loader_repair() {
+        let health = game_local_profile_link_mismatch();
+        assert!(health.blocks_modded_launch());
+        assert!(!health.repairable);
+        assert!(!health.needs_isolated_profile_link_repair());
+        assert!(health
+            .modded_launch_error()
+            .contains("without changing files"));
+    }
 
     fn test_dir(label: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!(

@@ -368,10 +368,11 @@ pub async fn sync_profile_to_game(
         bepinex_install_root(&app, &profile_id, runtime_game_path)?,
     );
     let profile_isolated = bepinex_root != runtime_game_path;
-    if !profile_isolated && runtime_game_path.join("BepInEx").is_symlink() {
-        // A prior isolated profile may have left its game-side alias. Never
-        // reconcile a game-local profile through another profile's tree.
-        crate::commands::game_commands::detach_isolated_bepinex_link(runtime_game_path)?;
+    if !profile_isolated
+        && crate::models::loaders::resolve_loader(&game_identifier, runtime_game_path)
+            == crate::models::loaders::PackageLoader::BepInEx
+    {
+        require_game_local_bepinex_tree(runtime_game_path)?;
     }
     let bepinex_scope = if profile_isolated {
         PROFILE_MANIFEST_SCOPE
@@ -1567,15 +1568,51 @@ fn windows_bepinex_runtime_is_installed(game_path: &std::path::Path) -> bool {
     .any(|core_dir| super::runtime_health::core_directory_has_preloader(core_dir))
 }
 
+fn require_game_local_bepinex_tree(runtime_game_path: &std::path::Path) -> Result<(), String> {
+    if ["BepInEx", "BepInEx_DISABLED"]
+        .iter()
+        .any(|name| runtime_game_path.join(name).is_symlink())
+    {
+        // An older update can leave the profile flag set to game-local while
+        // the game still points at an isolated tree. Detaching here would
+        // make Apply see an empty runtime and possibly download the modpack.
+        // Preserve both trees until the offline migration can reconcile them.
+        return Err("BepInEx still points to a profile directory although this profile is marked game-local. The BepInEx link was left untouched. Complete the local migration before Apply to Game.".to_string());
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         ensure_finalize_ready, flatten_return_of_modding_manifest_paths,
         key_is_bepinex_runtime_pack, managed_install_root,
         migrate_nested_return_of_modding_plugins, reconcile_return_of_modding_plugin_visibility,
-        return_of_modding_mods_yaml, set_return_of_modding_plugin_enabled,
-        windows_bepinex_runtime_is_installed,
+        require_game_local_bepinex_tree, return_of_modding_mods_yaml,
+        set_return_of_modding_plugin_enabled, windows_bepinex_runtime_is_installed,
     };
+
+    #[cfg(unix)]
+    #[test]
+    fn game_local_sync_refuses_to_detach_an_existing_profile_link() {
+        let root =
+            std::env::temp_dir().join(format!("r2modmac-game-local-link-{}", uuid::Uuid::new_v4()));
+        let game = root.join("game");
+        let profile = root.join("profile");
+        std::fs::create_dir_all(&game).unwrap();
+        std::fs::create_dir_all(profile.join("BepInEx/core")).unwrap();
+        std::fs::write(profile.join("BepInEx/core/BepInEx.Preloader.dll"), b"core").unwrap();
+        std::os::unix::fs::symlink(profile.join("BepInEx"), game.join("BepInEx")).unwrap();
+
+        assert!(require_game_local_bepinex_tree(&game).is_err());
+        assert!(game.join("BepInEx").is_symlink());
+        assert!(profile.join("BepInEx/core/BepInEx.Preloader.dll").is_file());
+        std::fs::remove_file(game.join("BepInEx")).unwrap();
+        std::os::unix::fs::symlink(profile.join("BepInEx"), game.join("BepInEx_DISABLED")).unwrap();
+        assert!(require_game_local_bepinex_tree(&game).is_err());
+        assert!(game.join("BepInEx_DISABLED").is_symlink());
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn return_of_modding_mod_list_tracks_enabled_and_disabled_profile_entries() {
