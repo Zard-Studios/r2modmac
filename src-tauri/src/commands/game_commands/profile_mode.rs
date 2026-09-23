@@ -59,6 +59,24 @@ fn verify_copied_tree(source: &Path, staged: &Path) -> Result<(), String> {
         if original_type.is_dir() && copied_type.is_dir() {
             verify_copied_tree(&original, &copied)?;
         } else if original_type.is_file() && copied_type.is_file() {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let original_mode = fs::metadata(&original)
+                    .map_err(|error| error.to_string())?
+                    .permissions()
+                    .mode();
+                let copied_mode = fs::metadata(&copied)
+                    .map_err(|error| error.to_string())?
+                    .permissions()
+                    .mode();
+                if original_mode & 0o111 != copied_mode & 0o111 {
+                    return Err(format!(
+                        "Copied BepInEx file lost executable permissions: {}",
+                        original.display()
+                    ));
+                }
+            }
             let hash = |path: &Path| -> Result<[u8; 32], String> {
                 let mut file = fs::File::open(path).map_err(|error| error.to_string())?;
                 let mut digest = Sha256::new();
@@ -213,6 +231,14 @@ pub async fn set_profile_bepinex_isolation(
             "This Wine bottle cannot access an isolated BepInEx tree; use game-local mode"
                 .to_string(),
         );
+    }
+    // Wine may already have fallen back to the game-local tree even though an
+    // older profile inherited the isolation flag. There is nothing to copy in
+    // that case, and requiring a profile-side tree would make OFF impossible.
+    if !isolated && choose_bepinex_root(current, &profile_root, &runtime_root) == runtime_root {
+        profile["bepinexIsolation"] = serde_json::Value::Bool(false);
+        crate::commands::profile_commands::save_profiles(app, profiles).await?;
+        return Ok(true);
     }
     let (source, destination) = if isolated {
         (&runtime_root, &profile_root)
