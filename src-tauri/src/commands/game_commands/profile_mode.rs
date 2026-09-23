@@ -1,4 +1,8 @@
-use std::{fs, io::Read, path::Path};
+use std::{
+    fs,
+    io::Read,
+    path::{Component, Path},
+};
 
 use sha2::{Digest, Sha256};
 
@@ -9,6 +13,95 @@ use super::{
     resolve_macos_runtime_root, sync_isolated_bepinex_link,
 };
 use crate::utils::file_ops::copy_dir_recursive;
+use crate::utils::mod_manifest::{
+    load_owned_mod_manifests, ModOwnershipManifest, PROFILE_MANIFEST_SCOPE,
+};
+
+/// Check that an isolated profile can be reconstructed entirely from local
+/// files before changing any game-side path. This is deliberately strict:
+/// old/incomplete ownership metadata needs a recovery path, not a download
+/// hidden inside a storage-mode toggle.
+fn preflight_local_bepinex_payload(
+    profile_root: &Path,
+    game_root: &Path,
+    enabled_mods: &[String],
+    manifests: &[ModOwnershipManifest],
+) -> Result<(), String> {
+    for full_name in enabled_mods {
+        let matching = manifests
+            .iter()
+            .filter(|manifest| manifest.mod_full_name.eq_ignore_ascii_case(full_name))
+            .collect::<Vec<_>>();
+        if matching.len() != 1 || matching[0].files.is_empty() {
+            return Err(format!(
+                "Cannot migrate {full_name} offline: its local file inventory is missing or ambiguous"
+            ));
+        }
+        for relative in &matching[0].files {
+            let path = Path::new(relative);
+            if path.as_os_str().is_empty()
+                || path
+                    .components()
+                    .any(|component| !matches!(component, Component::Normal(_)))
+            {
+                return Err(format!(
+                    "Cannot migrate {full_name}: unsafe inventory path {relative}"
+                ));
+            }
+            let first = path.components().next();
+            let source_root = if matches!(first, Some(Component::Normal(part)) if part == "BepInEx" || part == "BepInEx_DISABLED")
+            {
+                profile_root
+            } else {
+                // With isolation the loader entry points and non-BepInEx
+                // root files were installed beside the game, not in the
+                // profile-side BepInEx tree.
+                game_root
+            };
+            let mut current = source_root.to_path_buf();
+            for component in path.components() {
+                current.push(component);
+                let metadata = fs::symlink_metadata(&current).map_err(|error| {
+                    format!(
+                        "Cannot migrate {full_name} offline: missing {} ({error})",
+                        current.display()
+                    )
+                })?;
+                if metadata.file_type().is_symlink() {
+                    return Err(format!(
+                        "Cannot migrate {full_name}: inventory traverses symlink {}",
+                        current.display()
+                    ));
+                }
+            }
+            if !current.is_file() {
+                return Err(format!(
+                    "Cannot migrate {full_name}: inventory entry is not a file: {}",
+                    current.display()
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn enabled_profile_mod_names(profile: &serde_json::Value) -> Result<Vec<String>, String> {
+    let mods = profile["mods"]
+        .as_array()
+        .ok_or_else(|| "Cannot migrate offline: profile mod list is missing".to_string())?;
+    mods.iter()
+        .filter(|item| item["enabled"].as_bool().unwrap_or(true))
+        .map(|item| {
+            item["fullName"]
+                .as_str()
+                .filter(|name| !name.trim().is_empty())
+                .map(str::to_owned)
+                .ok_or_else(|| {
+                    "Cannot migrate offline: an enabled mod has no package identity".to_string()
+                })
+        })
+        .collect()
+}
 
 fn ensure_no_symlinks(directory: &Path) -> Result<(), String> {
     for entry in fs::read_dir(directory).map_err(|error| error.to_string())? {
@@ -255,6 +348,14 @@ pub async fn set_profile_bepinex_isolation(
                 .to_string(),
         );
     }
+    if !isolated {
+        let enabled_mods = enabled_profile_mod_names(profile)?;
+        let manifests = load_owned_mod_manifests(&app, &profile_id, PROFILE_MANIFEST_SCOPE)?
+            .into_iter()
+            .map(|stored| stored.manifest)
+            .collect::<Vec<_>>();
+        preflight_local_bepinex_payload(&profile_root, &runtime_root, &enabled_mods, &manifests)?;
+    }
     for name in ["BepInEx", "BepInEx_DISABLED"] {
         // A game-side link may belong to another profile. It is never a
         // source for a migration into this profile.
@@ -298,6 +399,98 @@ pub async fn set_profile_bepinex_isolation(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn manifest(full_name: &str, files: &[&str]) -> ModOwnershipManifest {
+        ModOwnershipManifest {
+            mod_full_name: full_name.to_string(),
+            files: files.iter().map(|file| (*file).to_string()).collect(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn offline_preflight_checks_profile_payload_and_game_side_loader() {
+        let root = std::env::temp_dir().join(format!(
+            "r2modmac-profile-preflight-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let profile = root.join("profile");
+        let game = root.join("game");
+        fs::create_dir_all(profile.join("BepInEx/plugins")).unwrap();
+        fs::create_dir_all(&game).unwrap();
+        fs::write(profile.join("BepInEx/plugins/mod.dll"), b"mod").unwrap();
+        fs::write(game.join("run_bepinex.sh"), b"loader").unwrap();
+        let mods = vec!["Author-Mod-1.0.0".to_string()];
+        let inventory = vec![manifest(
+            "Author-Mod-1.0.0",
+            &["BepInEx/plugins/mod.dll", "run_bepinex.sh"],
+        )];
+        assert!(preflight_local_bepinex_payload(&profile, &game, &mods, &inventory).is_ok());
+
+        fs::remove_file(profile.join("BepInEx/plugins/mod.dll")).unwrap();
+        assert!(
+            preflight_local_bepinex_payload(&profile, &game, &mods, &inventory)
+                .unwrap_err()
+                .contains("missing")
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn offline_preflight_rejects_missing_inventory_and_path_traversal() {
+        let root = std::env::temp_dir().join(format!(
+            "r2modmac-profile-preflight-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let mods = vec!["Author-Mod-1.0.0".to_string()];
+        assert!(preflight_local_bepinex_payload(&root, &root, &mods, &[]).is_err());
+        let unsafe_inventory = vec![manifest("Author-Mod-1.0.0", &["../outside.dll"])];
+        assert!(
+            preflight_local_bepinex_payload(&root, &root, &mods, &unsafe_inventory)
+                .unwrap_err()
+                .contains("unsafe")
+        );
+    }
+
+    #[test]
+    fn offline_preflight_does_not_ignore_enabled_mod_without_identity() {
+        assert!(enabled_profile_mod_names(&serde_json::json!({
+            "mods": [{"enabled": true}]
+        }))
+        .is_err());
+        assert!(enabled_profile_mod_names(&serde_json::json!({
+            "mods": [{"enabled": false}]
+        }))
+        .unwrap()
+        .is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn offline_preflight_refuses_symlinked_payload() {
+        let root = std::env::temp_dir().join(format!(
+            "r2modmac-profile-preflight-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let profile = root.join("profile");
+        let game = root.join("game");
+        fs::create_dir_all(profile.join("BepInEx/plugins")).unwrap();
+        fs::create_dir_all(&game).unwrap();
+        std::os::unix::fs::symlink(&game, profile.join("BepInEx/plugins/external")).unwrap();
+        let inventory = vec![manifest(
+            "Author-Mod-1.0.0",
+            &["BepInEx/plugins/external/mod.dll"],
+        )];
+        assert!(preflight_local_bepinex_payload(
+            &profile,
+            &game,
+            &["Author-Mod-1.0.0".to_string()],
+            &inventory,
+        )
+        .unwrap_err()
+        .contains("symlink"));
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn migration_copies_without_deleting_source_and_backs_up_destination() {
