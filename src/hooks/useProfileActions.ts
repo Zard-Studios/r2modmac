@@ -3,6 +3,7 @@ import type { InstalledMod } from '../types/profile';
 import type { ProgressSetter } from '../types/progress';
 import { useProfileStore } from '../store/useProfileStore';
 import { findPinnedVersionForSource } from '../utils/modVersioning';
+import { runningOnMacOS } from '../utils/platformUtils';
 
 const getErrorMessage = (err: unknown, fallback: string) => {
     if (err instanceof Error && err.message) return err.message;
@@ -101,7 +102,10 @@ export function useProfileActions({
                     return;
                 }
 
-                const newProfileId = createProfile(profileName, selectedCommunity!, chosenPlatform);
+                // Share files may say macOS, but the recipient's host decides
+                // which runtime this newly imported profile can use.
+                const targetPlatform = runningOnMacOS() ? chosenPlatform : 'windows';
+                const newProfileId = createProfile(profileName, selectedCommunity!, targetPlatform);
                 for (const mod of resolvedMods) addMod(newProfileId, mod);
                 let installedCount = resolvedMods.length;
                 const localFailures: string[] = [];

@@ -3,6 +3,11 @@ export function runningOnWindows(): boolean {
     return navigator.userAgent.includes('Win');
 }
 
+/** macOS profiles are available only in the macOS desktop release. */
+export function runningOnMacOS(): boolean {
+    return typeof navigator !== 'undefined' && navigator.userAgent.includes('Mac');
+}
+
 /** Returns the platform-appropriate label for the "reveal in file manager" action. */
 export function revealInFileManagerLabel(): string {
     const ua = navigator.userAgent;

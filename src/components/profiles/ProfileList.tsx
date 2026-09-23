@@ -5,7 +5,7 @@ import type { CommunityPlatformInfo } from '../../types/thunderstore';
 import { Button, HoverMarquee } from '../ui';
 import { Toggle } from '../ui/Toggle';
 import { PlatformPicker } from './PlatformPicker';
-import { revealInFileManagerLabel } from '../../utils/platformUtils';
+import { revealInFileManagerLabel, runningOnMacOS } from '../../utils/platformUtils';
 import { getProfileAvatarGradient, getProfileInitial } from '../../utils/profileAvatar';
 import { KeyboardShortcuts } from '../KeyboardShortcuts';
 
@@ -184,6 +184,8 @@ export function ProfileList({
         ? filteredProfiles.find(profile => profile.id === openProfileMenuId) ?? null
         : null;
     const isMacCompatible = selectedGamePlatform?.mac ?? false;
+    const isMacHost = runningOnMacOS();
+    const canChooseMacProfile = isMacHost && isMacCompatible;
 
     const closeProfileMenu = () => {
         if (profileMenuCloseTimeoutRef.current !== null) {
@@ -220,7 +222,7 @@ export function ProfileList({
     const handleCreate = (e: React.FormEvent) => {
         e.preventDefault();
         if (newProfileName.trim()) {
-            const platform = (isMacCompatible || selectedPlatform === 'mac') ? selectedPlatform : 'windows';
+            const platform = isMacHost ? selectedPlatform : 'windows';
             onCreateProfile(newProfileName.trim(), platform);
             setNewProfileName('');
             setIsCreating(false);
@@ -231,7 +233,7 @@ export function ProfileList({
     const handleImport = (e: React.FormEvent) => {
         e.preventDefault();
         if (importCode.trim()) {
-            if (isMacCompatible) {
+            if (canChooseMacProfile) {
                 // Show the platform picker before importing
                 setPendingImport(importCode.trim());
                 setSelectedPlatform('windows');
@@ -587,7 +589,7 @@ export function ProfileList({
                         >
                             <div className="flex justify-between items-start mb-4">
                                 <h2 className="text-2xl font-bold text-white">Create New Profile</h2>
-                                {!isMacCompatible && (
+                                {isMacHost && !isMacCompatible && (
                                     <div
                                         onClick={() => setSelectedPlatform(selectedPlatform === 'mac' ? 'windows' : 'mac')}
                                         className="flex items-center gap-3 cursor-pointer group select-none"
@@ -614,7 +616,7 @@ export function ProfileList({
                                     autoFocus
                                 />
 
-                                {isMacCompatible && (
+                                {canChooseMacProfile && (
                                     <div className="mb-6">
                                         <PlatformPicker
                                             value={selectedPlatform}
@@ -694,7 +696,7 @@ export function ProfileList({
                                                     { name: 'r2modman Profile', extensions: ['r2z', 'zip'] }
                                                 ]);
                                                 if (filePath) {
-                                                    if (isMacCompatible) {
+                                                    if (canChooseMacProfile) {
                                                         // Show platform picker before importing file
                                                         setPendingImport({ file: filePath });
                                                         setSelectedPlatform('windows');
@@ -729,9 +731,9 @@ export function ProfileList({
                 )
             }
 
-            {/* Import Platform Picker - shown after code/file is ready, but only for Mac-compatible games */}
+            {/* Only macOS offers a platform choice for Mac-compatible games. */}
             {
-                pendingImport !== null && (
+                isMacHost && pendingImport !== null && (
                     <div
                         className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4"
                         onClick={() => {

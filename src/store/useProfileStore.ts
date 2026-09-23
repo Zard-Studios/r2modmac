@@ -8,6 +8,7 @@ import type {
 } from '../types/profile.ts';
 import { getProfileModKey, inferPendingSyncKind, restoreInstalledMod, snapshotInstalledMod } from '../utils/profileSync.ts';
 import { packageIdentityKey } from '../utils/modVersioning.ts';
+import { runningOnMacOS } from '../utils/platformUtils.ts';
 
 // Debounced save to prevent rapid-fire file writes causing race conditions
 let saveTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -139,7 +140,7 @@ export const useProfileStore = create<ProfileState>((set) => ({
             id: crypto.randomUUID(),
             name,
             gameIdentifier,
-            platform: platform || 'windows',
+            platform: runningOnMacOS() && platform === 'mac' ? 'mac' : 'windows',
             distribution: distribution === 'manual' ? 'manual' : 'steam',
             launchMode: distribution === 'manual' ? 'direct' : 'auto',
             bepinexIsolation: false,
@@ -164,6 +165,7 @@ export const useProfileStore = create<ProfileState>((set) => ({
     duplicateProfile: async (profileId) => {
         const source = useProfileStore.getState().profiles.find((p) => p.id === profileId);
         if (!source) return null;
+        const convertingMacProfile = !runningOnMacOS() && source.platform === 'mac';
 
         const newId = crypto.randomUUID();
 
@@ -177,10 +179,12 @@ export const useProfileStore = create<ProfileState>((set) => ({
             ...source,
             id: newId,
             name: nextCopyName(source.name, useProfileStore.getState().profiles),
+            platform: runningOnMacOS() && source.platform === 'mac' ? 'mac' : 'windows',
+            bepinexIsolation: convertingMacProfile ? false : source.bepinexIsolation,
             mods: source.mods.map((mod) => ({ ...mod })),
             // The duplicate has not been written into the game folder, whatever
             // state the original was in.
-            needs_sync: source.mods.length > 0,
+            needs_sync: source.mods.length > 0 || convertingMacProfile,
             apply_interrupted: false,
             pending_removals: [],
             dateCreated: Date.now(),
