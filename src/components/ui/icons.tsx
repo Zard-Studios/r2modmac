@@ -2,6 +2,7 @@ import {
     Ban,
     Check,
     Clock3,
+    CircleHelp,
     Copy,
     Download,
     EyeOff,
@@ -56,6 +57,7 @@ export type IconName =
     | 'logs'
     | 'layout'
     | 'warning'
+    | 'help'
     | 'cache'
     | 'stream'
     | 'update'
@@ -87,6 +89,7 @@ const ICONS: Record<IconName, LucideIcon> = {
     logs: FileText,
     layout: PanelsTopLeft,
     warning: TriangleAlert,
+    help: CircleHelp,
     cache: Trash2,
     stream: EyeOff,
     update: RefreshCw,

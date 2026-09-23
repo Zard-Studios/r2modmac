@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Button } from '../ui';
+import { Toggle } from '../ui/Toggle';
+import { AppIcon } from '../ui/icons';
 import type { Profile, ProfilePlatform } from '../../types/profile';
 import { ConfigEditorTab } from './ConfigEditorTab';
 import { PathCensor, CensoredInput } from '../ui/PathCensor';
@@ -457,47 +459,42 @@ export function SettingsModal({ isOpen, onClose, selectedGame, activeProfile, on
                             )}
 
                             {activeProfile && gameLoader?.key === loaderKey && gameLoader.loader === 'bepinex' && (
-                                <div className="mb-6 flex items-center justify-between gap-4 rounded-lg border border-gray-700 bg-gray-800/50 p-4">
-                                    <div className="flex min-w-0 items-center gap-2">
-                                        <span className="text-sm font-medium text-white">Isolate BepInEx in this profile</span>
+                                <div className="mb-6 flex items-center justify-between gap-4 border-t border-gray-700 pt-5">
+                                    <div className="flex min-w-0 items-center gap-1.5">
+                                        <span className="text-sm font-medium text-gray-200">Isolate BepInEx in this profile</span>
                                         <span className="group relative shrink-0">
                                             <button
                                                 type="button"
                                                 aria-label="About BepInEx isolation"
                                                 aria-describedby="bepinex-isolation-help"
-                                                className="flex h-5 w-5 items-center justify-center rounded-full border border-gray-500 text-xs font-semibold text-gray-400 hover:border-gray-300 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                                                className="flex h-6 w-6 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-gray-700 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
                                             >
-                                                ?
+                                                <AppIcon name="help" className="h-4 w-4" />
                                             </button>
                                             <span
                                                 id="bepinex-isolation-help"
                                                 role="tooltip"
-                                                className="pointer-events-none invisible absolute bottom-full left-1/2 z-20 mb-2 w-64 -translate-x-1/2 rounded-lg border border-gray-600 bg-gray-950 p-3 text-left text-xs leading-relaxed text-gray-200 opacity-0 shadow-xl transition-opacity group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100"
+                                                className="pointer-events-none invisible absolute bottom-full left-0 z-20 mb-2 w-56 rounded-lg border border-gray-600 bg-gray-800 p-3 text-left text-xs leading-relaxed text-gray-200 opacity-0 shadow-lg transition-opacity group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100"
                                             >
-                                                Off keeps BepInEx beside the game for compatibility. On stores a separate copy for this profile. Changing this keeps a backup; use Apply to Game afterward.
+                                                On stores this profile&apos;s BepInEx files separately. Off keeps them in the game folder. Changing modes backs up the previous files; apply the profile afterward.
                                             </span>
                                         </span>
                                     </div>
-                                    <button
-                                        type="button"
-                                        role="switch"
-                                        aria-label="Isolate BepInEx in this profile"
-                                        aria-checked={activeProfile.bepinexIsolation ?? inheritedIsolation}
+                                    <Toggle
+                                        label="Isolate BepInEx in this profile"
+                                        value={activeProfile.bepinexIsolation ?? inheritedIsolation}
                                         disabled={modeSaving || !gamePath}
-                                        onClick={async () => {
+                                        onChange={async (next) => {
                                             setModeSaving(true);
                                             try {
-                                                await onSetBepinexIsolation(activeProfile.id, !(activeProfile.bepinexIsolation ?? inheritedIsolation));
+                                                await onSetBepinexIsolation(activeProfile.id, next);
                                             } catch (error) {
                                                 await window.ipcRenderer.alert('Could not change BepInEx mode', String(error));
                                             } finally {
                                                 setModeSaving(false);
                                             }
                                         }}
-                                        className={`relative h-6 w-11 shrink-0 rounded-full transition-colors disabled:opacity-50 ${(activeProfile.bepinexIsolation ?? inheritedIsolation) ? 'bg-blue-500' : 'bg-gray-600'}`}
-                                    >
-                                        <span className={`absolute top-1 h-4 w-4 rounded-full bg-white transition-transform ${(activeProfile.bepinexIsolation ?? inheritedIsolation) ? 'left-6' : 'left-1'}`} />
-                                    </button>
+                                    />
                                 </div>
                             )}
 
