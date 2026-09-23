@@ -988,6 +988,7 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
     // Parsed cfg (only when isCfgFile)
     const [parsedCfg, setParsedCfg] = useState<ParsedCfg | null>(null);
     const [fileLoading, setFileLoading] = useState(false);
+    const [fileError, setFileError] = useState<string | null>(null);
     const [forceRawView, setForceRawView] = useState(false);
     
     // Filter controls
@@ -1145,7 +1146,9 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
 
     // Load selected file content
     const loadFile = useCallback(async (file: ConfigFileInfo) => {
+        setSelectedFile(file);
         setFileLoading(true);
+        setFileError(null);
         setIsDirty(false);
         setSaveStatus('idle');
         setCollapsedSections(new Set());
@@ -1165,10 +1168,10 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
             } else {
                 setParsedCfg(null);
             }
-            setSelectedFile(file);
             // isDirty stays false — auto-formatting is display-only
         } catch (e) {
             console.error('Failed to read config file', e);
+            setFileError(String(e));
             setRawContent('');
             setLineCountState(1);
             if (textareaRef.current) {
@@ -1742,6 +1745,11 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
                             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                         </svg>
+                    </div>
+                ) : fileError ? (
+                    <div role="alert" className="flex flex-col items-center justify-center h-full gap-2 px-6 text-center">
+                        <p className="text-sm font-medium text-red-400">Could not open {selectedFile.name}</p>
+                        <p className="text-xs text-gray-400 break-words">{fileError}</p>
                     </div>
                 ) : (
                     <>

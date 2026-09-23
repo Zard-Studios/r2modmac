@@ -881,11 +881,17 @@ fn collect_game_config_files(
         return;
     }
 
-    for directory in [
-        runtime_root.join("BepInEx").join("config"),
-        runtime_root.join("BepInEx").join("plugins"),
-        runtime_root.join("ReturnOfModding").join("config"),
-    ] {
+    // An isolated profile may expose its BepInEx tree through a game-side
+    // symlink. Those files are already collected from the profile root above;
+    // listing them under the game root makes reads fail the path-containment
+    // check (and must not weaken that security check).
+    let bepinex_root = runtime_root.join("BepInEx");
+    let mut directories = vec![runtime_root.join("ReturnOfModding").join("config")];
+    if !bepinex_root.is_symlink() {
+        directories.push(bepinex_root.join("config"));
+        directories.push(bepinex_root.join("plugins"));
+    }
+    for directory in directories {
         if directory.is_dir() {
             collect_config_files(&directory, configured_root, out);
         }
