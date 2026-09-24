@@ -373,6 +373,10 @@ pub async fn sync_profile_to_game(
             == crate::models::loaders::PackageLoader::BepInEx
     {
         require_game_local_bepinex_tree(runtime_game_path)?;
+        if super::profile_mode::game_local_manifest_mismatch(&app, &profile_id, runtime_game_path)?
+        {
+            return Err("This game-local profile still has BepInEx ownership records in profile storage. Repair the local inventory before Apply; no files were downloaded or removed.".to_string());
+        }
     }
     let bepinex_scope = if profile_isolated {
         PROFILE_MANIFEST_SCOPE

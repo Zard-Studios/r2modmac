@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     fs,
     io::Read,
     path::{Component, Path},
@@ -14,8 +15,23 @@ use super::{
 };
 use crate::utils::file_ops::copy_dir_recursive;
 use crate::utils::mod_manifest::{
-    load_owned_mod_manifests, ModOwnershipManifest, PROFILE_MANIFEST_SCOPE,
+    load_owned_mod_manifests, manifest_matches_target_root, ModOwnershipManifest,
+    StoredModOwnershipManifest, GAME_MANIFEST_SCOPE, PROFILE_MANIFEST_SCOPE,
 };
+
+fn file_digest(path: &Path) -> Result<[u8; 32], String> {
+    let mut file = fs::File::open(path).map_err(|error| error.to_string())?;
+    let mut digest = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let count = file.read(&mut buffer).map_err(|error| error.to_string())?;
+        if count == 0 {
+            break;
+        }
+        digest.update(&buffer[..count]);
+    }
+    Ok(digest.finalize().into())
+}
 
 /// Check that an isolated profile can be reconstructed entirely from local
 /// files before changing any game-side path. This is deliberately strict:
@@ -170,20 +186,7 @@ fn verify_copied_tree(source: &Path, staged: &Path) -> Result<(), String> {
                     ));
                 }
             }
-            let hash = |path: &Path| -> Result<[u8; 32], String> {
-                let mut file = fs::File::open(path).map_err(|error| error.to_string())?;
-                let mut digest = Sha256::new();
-                let mut buffer = [0_u8; 64 * 1024];
-                loop {
-                    let count = file.read(&mut buffer).map_err(|error| error.to_string())?;
-                    if count == 0 {
-                        break;
-                    }
-                    digest.update(&buffer[..count]);
-                }
-                Ok(digest.finalize().into())
-            };
-            if hash(&original)? != hash(&copied)? {
+            if file_digest(&original)? != file_digest(&copied)? {
                 return Err(format!(
                     "Copied BepInEx file differs from {}",
                     original.display()
@@ -273,6 +276,236 @@ fn game_local_layout_needs_reconciliation(profile_root: &Path, runtime_root: &Pa
     })
 }
 
+fn manifest_needs_game_scope(
+    profile: &StoredModOwnershipManifest,
+    game_manifests: &[StoredModOwnershipManifest],
+    game_root: &Path,
+) -> bool {
+    !game_manifests.iter().any(|game| {
+        game.manifest.mod_full_name == profile.manifest.mod_full_name
+            && game.manifest.mod_key == profile.manifest.mod_key
+            && game.manifest.files == profile.manifest.files
+            && game.manifest.backed_up_files == profile.manifest.backed_up_files
+            && manifest_matches_target_root(&game.manifest, game_root)
+    })
+}
+
+fn current_profile_manifest_names(profile: &serde_json::Value) -> HashSet<String> {
+    profile["mods"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|item| item["fullName"].as_str())
+        .map(|name| name.to_ascii_lowercase())
+        .collect()
+}
+
+pub(super) fn game_local_manifest_mismatch(
+    app: &AppHandle,
+    profile_id: &str,
+    game_root: &Path,
+) -> Result<bool, String> {
+    let profiles = crate::commands::profile_commands::get_profiles(app.clone())?;
+    let profile = profiles
+        .iter()
+        .find(|profile| profile["id"].as_str() == Some(profile_id))
+        .ok_or("Profile not found")?;
+    let current_mods = current_profile_manifest_names(profile);
+    let profile_manifests = load_owned_mod_manifests(app, profile_id, PROFILE_MANIFEST_SCOPE)?
+        .into_iter()
+        .filter(|stored| current_mods.contains(&stored.manifest.mod_full_name.to_ascii_lowercase()))
+        .collect::<Vec<_>>();
+    if profile_manifests.is_empty() {
+        return Ok(false);
+    }
+    let game_manifests = load_owned_mod_manifests(app, profile_id, GAME_MANIFEST_SCOPE)?;
+    Ok(profile_manifests
+        .iter()
+        .any(|profile| manifest_needs_game_scope(profile, &game_manifests, game_root)))
+}
+
+fn safe_inventory_path(relative: &Path) -> bool {
+    !relative.as_os_str().is_empty()
+        && relative
+            .components()
+            .all(|component| matches!(component, Component::Normal(_)))
+}
+
+fn regular_inventory_file(root: &Path, relative: &Path) -> bool {
+    if !safe_inventory_path(relative) {
+        return false;
+    }
+    let mut path = root.to_path_buf();
+    for component in relative.components() {
+        path.push(component);
+        let Ok(metadata) = fs::symlink_metadata(&path) else {
+            return false;
+        };
+        if metadata.file_type().is_symlink() {
+            return false;
+        }
+    }
+    path.is_file()
+}
+
+/// Retain the original profile inventory. A partially copied game inventory
+/// can be retried without deleting any original metadata or mod payload.
+fn copy_manifests_to_game_scope(
+    profile_root: &Path,
+    game_root: &Path,
+    profile_manifests: &[StoredModOwnershipManifest],
+    game_manifests: &[StoredModOwnershipManifest],
+) -> Result<(), String> {
+    if profile_manifests.is_empty() {
+        return Ok(());
+    }
+    let source_dir = profile_manifests[0]
+        .manifest_path
+        .parent()
+        .ok_or("Invalid profile manifest location")?;
+    let game_dir = source_dir
+        .parent()
+        .ok_or("Invalid manifest scope location")?
+        .join(GAME_MANIFEST_SCOPE);
+    if game_dir.is_symlink() {
+        return Err(format!("Refusing to write through {}", game_dir.display()));
+    }
+
+    let target_hint = fs::canonicalize(game_root)
+        .map_err(|error| format!("Cannot resolve game directory: {error}"))?
+        .to_string_lossy()
+        .to_string();
+    let mut prepared = Vec::new();
+    for stored in profile_manifests {
+        if stored.manifest_path.is_symlink() {
+            return Err(format!(
+                "Refusing to read {}",
+                stored.manifest_path.display()
+            ));
+        }
+        let mut migrated = stored.manifest.clone();
+        migrated.target_root_hint = Some(target_hint.clone());
+        let name = stored
+            .manifest_path
+            .file_name()
+            .ok_or("Invalid manifest filename")?;
+        let destination = game_dir.join(name);
+        if destination.is_symlink() {
+            return Err(format!("Refusing to use {}", destination.display()));
+        }
+        if game_manifests.iter().any(|entry| {
+            entry.manifest.mod_key == stored.manifest.mod_key && entry.manifest_path != destination
+        }) {
+            return Err(format!(
+                "Game inventory already claims package {} under another manifest",
+                stored.manifest.mod_full_name
+            ));
+        }
+        if let Some(existing) = game_manifests
+            .iter()
+            .find(|entry| entry.manifest_path == destination)
+        {
+            if serde_json::to_value(&existing.manifest).map_err(|error| error.to_string())?
+                != serde_json::to_value(&migrated).map_err(|error| error.to_string())?
+            {
+                return Err(format!(
+                    "Game inventory conflicts with {}. No manifest was replaced",
+                    destination.display()
+                ));
+            }
+        } else if destination.exists() || destination.is_symlink() {
+            return Err(format!(
+                "Unrecognized game inventory at {}",
+                destination.display()
+            ));
+        }
+        let source_backup = &stored.backup_dir;
+        let destination_backup = game_dir.join(
+            source_backup
+                .file_name()
+                .ok_or("Invalid manifest backup location")?,
+        );
+        if source_backup.is_dir() {
+            ensure_no_symlinks(source_backup)?;
+            if destination_backup.exists() || destination_backup.is_symlink() {
+                if destination_backup.is_symlink()
+                    || !destination_backup.is_dir()
+                    || verify_copied_tree(source_backup, &destination_backup).is_err()
+                {
+                    return Err(format!(
+                        "Game inventory backup conflicts at {}",
+                        destination_backup.display()
+                    ));
+                }
+            }
+        } else if source_backup.exists() || source_backup.is_symlink() {
+            return Err(format!(
+                "Invalid manifest backup at {}",
+                source_backup.display()
+            ));
+        } else if !stored.manifest.backed_up_files.is_empty() {
+            return Err(format!(
+                "Missing manifest backup at {}",
+                source_backup.display()
+            ));
+        }
+        for relative in &stored.manifest.backed_up_files {
+            if !regular_inventory_file(source_backup, Path::new(relative)) {
+                return Err(format!("Missing or unsafe inventory backup: {relative}"));
+            }
+        }
+
+        for relative in &stored.manifest.files {
+            let path = Path::new(relative);
+            let game_file = game_root.join(path);
+            if !regular_inventory_file(game_root, path) {
+                return Err(format!(
+                    "Game file is missing or unsafe: {}",
+                    game_file.display()
+                ));
+            }
+            if matches!(path.components().next(), Some(Component::Normal(part)) if part == "BepInEx" || part == "BepInEx_DISABLED")
+            {
+                let source_file = profile_root.join(path);
+                if !regular_inventory_file(profile_root, path)
+                    || file_digest(&source_file)? != file_digest(&game_file)?
+                {
+                    return Err(format!(
+                        "Game file differs from this profile: {}",
+                        game_file.display()
+                    ));
+                }
+            }
+        }
+        prepared.push((
+            destination,
+            destination_backup,
+            source_backup.clone(),
+            migrated,
+        ));
+    }
+
+    fs::create_dir_all(&game_dir).map_err(|error| error.to_string())?;
+    for (destination, destination_backup, source_backup, migrated) in prepared {
+        if source_backup.is_dir() && !destination_backup.exists() {
+            let staged_backup =
+                game_dir.join(format!(".r2modmac-backup-{}.staging", uuid::Uuid::new_v4()));
+            crate::utils::file_ops::copy_dir_recursive(&source_backup, &staged_backup)
+                .map_err(|error| error.to_string())?;
+            fs::rename(&staged_backup, &destination_backup).map_err(|error| error.to_string())?;
+        }
+        if !destination.exists() {
+            let staged = game_dir.join(format!(
+                ".r2modmac-manifest-{}.staging",
+                uuid::Uuid::new_v4()
+            ));
+            crate::utils::stable_json::write_file(&staged, &migrated)?;
+            fs::rename(&staged, &destination).map_err(|error| error.to_string())?;
+        }
+    }
+    Ok(())
+}
+
 /// Switch one profile without deleting its old BepInEx installation. Existing
 /// profiles with no override retain the setting under which they were created.
 #[command]
@@ -323,8 +556,29 @@ pub async fn set_profile_bepinex_isolation(
         .map_err(|error| error.to_string())?
         .join("profiles")
         .join(&profile_id);
-    let needs_reconciliation = !isolated
-        && game_local_layout_needs_reconciliation(&profile_root, &runtime_root);
+    let current_mods = current_profile_manifest_names(profile);
+    let profile_manifests = if isolated {
+        Vec::new()
+    } else {
+        load_owned_mod_manifests(&app, &profile_id, PROFILE_MANIFEST_SCOPE)?
+            .into_iter()
+            .filter(|stored| {
+                current_mods.contains(&stored.manifest.mod_full_name.to_ascii_lowercase())
+            })
+            .collect()
+    };
+    let game_manifests = if isolated {
+        Vec::new()
+    } else {
+        load_owned_mod_manifests(&app, &profile_id, GAME_MANIFEST_SCOPE)?
+    };
+    let needs_layout_reconciliation =
+        !isolated && game_local_layout_needs_reconciliation(&profile_root, &runtime_root);
+    let needs_manifest_reconciliation = !isolated
+        && profile_manifests
+            .iter()
+            .any(|manifest| manifest_needs_game_scope(manifest, &game_manifests, &runtime_root));
+    let needs_reconciliation = needs_layout_reconciliation || needs_manifest_reconciliation;
     if current == isolated && !needs_reconciliation {
         return Ok(true);
     }
@@ -365,11 +619,28 @@ pub async fn set_profile_bepinex_isolation(
     }
     if !isolated {
         let enabled_mods = enabled_profile_mod_names(profile)?;
-        let manifests = load_owned_mod_manifests(&app, &profile_id, PROFILE_MANIFEST_SCOPE)?
-            .into_iter()
-            .map(|stored| stored.manifest)
+        let enabled_to_preflight = if current || needs_layout_reconciliation {
+            enabled_mods
+        } else {
+            enabled_mods
+                .into_iter()
+                .filter(|name| {
+                    profile_manifests
+                        .iter()
+                        .any(|stored| stored.manifest.mod_full_name.eq_ignore_ascii_case(name))
+                })
+                .collect()
+        };
+        let manifests = profile_manifests
+            .iter()
+            .map(|stored| stored.manifest.clone())
             .collect::<Vec<_>>();
-        preflight_local_bepinex_payload(&profile_root, &runtime_root, &enabled_mods, &manifests)?;
+        preflight_local_bepinex_payload(
+            &profile_root,
+            &runtime_root,
+            &enabled_to_preflight,
+            &manifests,
+        )?;
         // Validate every tree before replacing either one. In particular, a
         // disabled-tree symlink cannot be detached by migrate_tree; finding it
         // only after moving the active tree would leave a half-migrated game.
@@ -377,17 +648,31 @@ pub async fn set_profile_bepinex_isolation(
             let source_tree = profile_root.join(name);
             let game_tree = runtime_root.join(name);
             if source_tree.is_symlink() {
-                return Err(format!("Refusing to copy through {}", source_tree.display()));
+                return Err(format!(
+                    "Refusing to copy through {}",
+                    source_tree.display()
+                ));
             }
             if source_tree.is_dir() {
                 ensure_no_symlinks(&source_tree)?;
                 if game_tree.is_symlink() && name != "BepInEx" {
-                    return Err(format!("Refusing to replace the symlink {}", game_tree.display()));
+                    return Err(format!(
+                        "Refusing to replace the symlink {}",
+                        game_tree.display()
+                    ));
                 }
             }
         }
     }
     for name in ["BepInEx", "BepInEx_DISABLED"] {
+        // A profile already marked game-local may only lack metadata, or just
+        // one of the two trees. Never replace a real game tree in either case.
+        if !isolated && !current {
+            let game_tree = runtime_root.join(name);
+            if game_tree.is_dir() && !game_tree.is_symlink() {
+                continue;
+            }
+        }
         // A game-side link may belong to another profile. It is never a
         // source for a migration into this profile.
         if isolated && source.join(name).is_symlink() {
@@ -416,10 +701,18 @@ pub async fn set_profile_bepinex_isolation(
             sync_isolated_bepinex_link(&runtime_root, &profile_root, false)?;
         }
     } else {
-        crate::commands::mod_commands::point_game_doorstop_ini_at_tree(
+        copy_manifests_to_game_scope(
+            &profile_root,
             &runtime_root,
-            &runtime_root,
+            &profile_manifests,
+            &game_manifests,
         )?;
+        if current || needs_layout_reconciliation {
+            crate::commands::mod_commands::point_game_doorstop_ini_at_tree(
+                &runtime_root,
+                &runtime_root,
+            )?;
+        }
     }
     profile["bepinexIsolation"] = serde_json::Value::Bool(isolated);
     profile["needs_sync"] = serde_json::Value::Bool(true);
@@ -439,13 +732,133 @@ mod tests {
         }
     }
 
+    #[test]
+    fn removed_mods_do_not_request_a_second_inventory_migration() {
+        let current = current_profile_manifest_names(&serde_json::json!({
+            "mods": [
+                {"fullName": "Author-Current-1.0.0", "enabled": true},
+                {"fullName": "Author-Disabled-1.0.0", "enabled": false}
+            ]
+        }));
+        assert!(current.contains("author-current-1.0.0"));
+        assert!(current.contains("author-disabled-1.0.0"));
+        assert!(!current.contains("author-removed-1.0.0"));
+    }
+
+    #[test]
+    fn game_scope_inventory_copy_is_verified_and_retryable() {
+        let root = std::env::temp_dir().join(format!(
+            "r2modmac-manifest-migration-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let profile = root.join("profile");
+        let game = root.join("game");
+        let scope = profile.join(".r2modmac/manifests/profile");
+        fs::create_dir_all(profile.join("BepInEx/plugins")).unwrap();
+        fs::create_dir_all(game.join("BepInEx/plugins")).unwrap();
+        fs::create_dir_all(&scope).unwrap();
+        fs::write(profile.join("BepInEx/plugins/mod.dll"), b"mod").unwrap();
+        fs::write(game.join("BepInEx/plugins/mod.dll"), b"mod").unwrap();
+        let mut owned = manifest("Author-Mod-1.0.0", &["BepInEx/plugins/mod.dll"]);
+        owned.backed_up_files = vec!["BepInEx/plugins/mod.dll".to_string()];
+        owned.match_terms = vec!["mod".to_string()];
+        owned.target_root_hint = Some(profile.to_string_lossy().to_string());
+        let original = scope.join("mod.json");
+        crate::utils::stable_json::write_file(&original, &owned).unwrap();
+        fs::create_dir_all(scope.join("mod_backup/BepInEx/plugins")).unwrap();
+        fs::write(
+            scope.join("mod_backup/BepInEx/plugins/mod.dll"),
+            b"previous",
+        )
+        .unwrap();
+        let stored = StoredModOwnershipManifest {
+            manifest_path: original.clone(),
+            backup_dir: scope.join("mod_backup"),
+            manifest: owned.clone(),
+        };
+
+        assert!(manifest_needs_game_scope(&stored, &[], &game));
+        copy_manifests_to_game_scope(&profile, &game, &[stored.clone()], &[]).unwrap();
+        let copied_path = scope.parent().unwrap().join("game/mod.json");
+        let copied: ModOwnershipManifest =
+            serde_json::from_slice(&fs::read(&copied_path).unwrap()).unwrap();
+        assert_eq!(copied.files, owned.files);
+        assert_eq!(copied.backed_up_files, owned.backed_up_files);
+        assert_eq!(
+            fs::read(
+                scope
+                    .parent()
+                    .unwrap()
+                    .join("game/mod_backup/BepInEx/plugins/mod.dll")
+            )
+            .unwrap(),
+            b"previous"
+        );
+        assert!(manifest_matches_target_root(&copied, &game));
+        assert_eq!(
+            fs::read(&original).unwrap(),
+            crate::utils::stable_json::to_pretty_string(&owned)
+                .unwrap()
+                .as_bytes()
+        );
+        let copied_stored = StoredModOwnershipManifest {
+            manifest_path: copied_path,
+            backup_dir: scope.parent().unwrap().join("game/mod_backup"),
+            manifest: copied,
+        };
+        assert!(!manifest_needs_game_scope(
+            &stored,
+            &[copied_stored.clone()],
+            &game
+        ));
+        copy_manifests_to_game_scope(&profile, &game, &[stored.clone()], &[copied_stored.clone()])
+            .unwrap();
+
+        let mut conflicting = copied_stored.clone();
+        conflicting.manifest.mod_full_name = "Other-Owner-9.0.0".to_string();
+        crate::utils::stable_json::write_file(&conflicting.manifest_path, &conflicting.manifest)
+            .unwrap();
+        let conflicting_bytes = fs::read(&conflicting.manifest_path).unwrap();
+        assert!(copy_manifests_to_game_scope(
+            &profile,
+            &game,
+            &[stored.clone()],
+            &[conflicting.clone()]
+        )
+        .unwrap_err()
+        .contains("conflicts"));
+        assert_eq!(
+            fs::read(&conflicting.manifest_path).unwrap(),
+            conflicting_bytes
+        );
+        crate::utils::stable_json::write_file(
+            &copied_stored.manifest_path,
+            &copied_stored.manifest,
+        )
+        .unwrap();
+
+        fs::write(game.join("BepInEx/plugins/mod.dll"), b"other profile").unwrap();
+        assert!(
+            copy_manifests_to_game_scope(&profile, &game, &[stored], &[copied_stored.clone()])
+                .unwrap_err()
+                .contains("differs")
+        );
+        fs::write(game.join("BepInEx/plugins/mod.dll"), b"mod").unwrap();
+        crate::utils::mod_manifest::cleanup_owned_mod_manifests(&game, &[copied_stored], &[])
+            .unwrap();
+        assert_eq!(
+            fs::read(game.join("BepInEx/plugins/mod.dll")).unwrap(),
+            b"previous"
+        );
+        assert!(original.exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
     #[cfg(unix)]
     #[test]
     fn game_local_reconciliation_detects_stale_link_without_switch_toggle() {
-        let root = std::env::temp_dir().join(format!(
-            "r2modmac-reconciliation-{}",
-            uuid::Uuid::new_v4()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("r2modmac-reconciliation-{}", uuid::Uuid::new_v4()));
         let profile = root.join("profile");
         let game = root.join("game");
         fs::create_dir_all(profile.join("BepInEx")).unwrap();

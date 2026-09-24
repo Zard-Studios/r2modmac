@@ -370,6 +370,10 @@ fn best_effort_remove_generated_entries(
         .iter()
         .flat_map(|entry| entry.manifest.match_terms.iter().cloned())
         .collect::<HashSet<_>>();
+    let restored_paths = manifests_to_remove
+        .iter()
+        .flat_map(|entry| entry.manifest.backed_up_files.iter().cloned())
+        .collect::<HashSet<_>>();
 
     if removed_terms.is_empty() {
         return Ok(0);
@@ -408,6 +412,18 @@ fn best_effort_remove_generated_entries(
             let name = entry.file_name().to_string_lossy().to_string();
             if !entry_matches_terms(&name, &removed_terms)
                 || entry_matches_terms(&name, &kept_terms)
+            {
+                continue;
+            }
+
+            let relative = match path.strip_prefix(target_root) {
+                Ok(relative) => relative.to_string_lossy().replace('\\', "/"),
+                Err(_) => continue,
+            };
+            let prefix = format!("{relative}/");
+            if restored_paths
+                .iter()
+                .any(|restored| restored == &relative || restored.starts_with(&prefix))
             {
                 continue;
             }
@@ -492,6 +508,9 @@ pub fn cleanup_owned_mod_manifests(
             if kept_paths
                 .iter()
                 .any(|path| path == &scoped_root || path.starts_with(&scoped_prefix))
+                || backup_paths
+                    .iter()
+                    .any(|path| path == &scoped_root || path.starts_with(&scoped_prefix))
             {
                 continue;
             }

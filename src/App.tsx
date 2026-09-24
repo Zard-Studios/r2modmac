@@ -1799,7 +1799,7 @@ function App() {
     const runtime = health && isReturnOfModdingCommunity(community, health.runtime)
       ? 'returnofmodding'
       : health?.runtime;
-    if (health?.missingComponents.includes('profile-location')) {
+    if (health?.missingComponents.includes('profile-location') || health?.missingComponents.includes('inventory-location')) {
       setIsRepairingRuntime(true);
       try {
         // Reconcile the existing local payload even when the stored switch is
@@ -1809,10 +1809,10 @@ function App() {
         updateProfile(profile.id, { bepinexIsolation: false, needs_sync: true });
         const repaired = await refreshRuntimeHealth();
         await window.ipcRenderer.alert(
-          repaired?.status === 'healthy' ? 'BepInEx moved to the game' : 'BepInEx needs attention',
+          repaired?.status === 'healthy' ? 'BepInEx storage repaired' : 'BepInEx needs attention',
           repaired?.status === 'healthy'
-            ? 'The local BepInEx files are now in the game folder. Click “Apply to Game” before launching modded.'
-            : 'The local files were copied, but the runtime is not healthy yet. Do not launch modded until the remaining issue is resolved.'
+            ? 'The game-local BepInEx files and this profile’s ownership records are aligned. Click “Apply to Game” before launching modded.'
+            : 'The runtime is not healthy yet. Do not launch modded until the remaining issue is resolved.'
         );
         return false;
       } catch (error) {

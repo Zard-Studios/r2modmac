@@ -49,6 +49,13 @@ impl RuntimeHealth {
         {
             return "BepInEx still points to a profile directory, but this profile is marked game-local. Modded launch was blocked without changing files; complete the local migration first.".to_string();
         }
+        if self
+            .missing_components
+            .iter()
+            .any(|component| component == "inventory-location")
+        {
+            return "The BepInEx files are game-local, but this profile's ownership records were not migrated. Modded launch was blocked without changing files; repair the local inventory first.".to_string();
+        }
         let details = if self.missing_components.is_empty() {
             String::new()
         } else {
@@ -450,6 +457,16 @@ pub async fn check_profile_runtime_health(
             // profile tree, so leave the link untouched and disallow repair.
             return Ok(game_local_profile_link_mismatch());
         }
+        if tree_root == runtime_root
+            && super::profile_mode::game_local_manifest_mismatch(&app, &profile_id, &runtime_root)?
+        {
+            return Ok(RuntimeHealth {
+                runtime: "bepinex".to_string(),
+                status: "incomplete".to_string(),
+                missing_components: vec!["inventory-location".to_string()],
+                repairable: false,
+            });
+        }
         let disabled = vanilla && tree_root.join("BepInEx_DISABLED").exists();
         let bep_dir = tree_root.join(if disabled {
             "BepInEx_DISABLED"
@@ -498,6 +515,16 @@ pub async fn check_profile_runtime_health(
     }
 
     let tree_root = bepinex_install_root(&app, &profile_id, game_path)?;
+    if tree_root == game_path
+        && super::profile_mode::game_local_manifest_mismatch(&app, &profile_id, game_path)?
+    {
+        return Ok(RuntimeHealth {
+            runtime: "bepinex".to_string(),
+            status: "incomplete".to_string(),
+            missing_components: vec!["inventory-location".to_string()],
+            repairable: false,
+        });
+    }
     Ok(inspect_windows_bepinex(game_path, &tree_root, vanilla))
 }
 
