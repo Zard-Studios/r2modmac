@@ -115,6 +115,7 @@ export function useGameSync({
             }
         };
         let applyTransactionStarted = false;
+        let activatingProfile = false;
 
         try {
             await window.ipcRenderer.beginModOperations();
@@ -228,6 +229,7 @@ export function useGameSync({
 
             // ── Profile sync ──────────────────────────────────────────────────────
             const syncResult = await window.ipcRenderer.syncProfileToGame(refreshedProfile.id, community, legacyInstallMode, false);
+            activatingProfile = !!syncResult.needs_profile_activation;
             const missingKeys = new Set(syncResult.to_install.map((key: string) => key.toLowerCase()));
             const reconciledProfile = useProfileStore.getState().profiles.find(profile => profile.id === activeProfile.id) || refreshedProfile;
             updateProfile(activeProfile.id, {
@@ -256,7 +258,7 @@ export function useGameSync({
             const skippedVersionMismatch: string[] = [];
             const failedInstalls: string[] = [];
             let actuallyInstalled = 0;
-            const hasSyncWork = (syncResult.pending_removals ?? 0) > 0 || syncResult.to_install.length > 0 || !!syncResult.needs_config_switch;
+            const hasSyncWork = (syncResult.pending_removals ?? 0) > 0 || syncResult.to_install.length > 0 || !!syncResult.needs_config_switch || !!syncResult.needs_profile_activation;
             if (hasSyncWork) {
                 setProgressState({
                     isOpen: true,
@@ -740,7 +742,10 @@ export function useGameSync({
 
             let rolledBack = false;
             if (applyTransactionStarted) {
-                if (wasCancelled) {
+                // A profile activation may already have replaced the previous
+                // profile's files. Keeping a partial download while recording
+                // the new active marker would leave the game in a mixed state.
+                if (wasCancelled && !activatingProfile) {
                     try {
                         await window.ipcRenderer.commitProfileApplyTransaction(activeProfile.id, community);
                     } catch (commitError) {

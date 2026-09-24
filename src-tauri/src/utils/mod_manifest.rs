@@ -546,9 +546,209 @@ pub fn cleanup_owned_mod_manifests(
     Ok(removed_count)
 }
 
+/// Deactivate only paths explicitly listed by the outgoing profile. Profile
+/// switching must not use fuzzy generated-file cleanup: those matches can
+/// include user files or a different store's package with the same name.
+pub fn deactivate_exact_owned_mod_manifests(
+    target_root: &Path,
+    outgoing: &[StoredModOwnershipManifest],
+    incoming: &[StoredModOwnershipManifest],
+) -> Result<usize, String> {
+    let kept_paths = incoming
+        .iter()
+        .flat_map(|entry| entry.manifest.files.iter().cloned())
+        .collect::<HashSet<_>>();
+
+    for entry in outgoing {
+        for relative in &entry.manifest.files {
+            let path = Path::new(relative);
+            if path.is_absolute()
+                || path
+                    .components()
+                    .any(|component| !matches!(component, std::path::Component::Normal(_)))
+            {
+                return Err(format!("Unsafe owned mod path: {relative}"));
+            }
+            if kept_paths.contains(relative) || relative.to_ascii_lowercase().contains("/config/") {
+                continue;
+            }
+            let mut parent = target_root.to_path_buf();
+            for component in path
+                .components()
+                .take(path.components().count().saturating_sub(1))
+            {
+                parent.push(component.as_os_str());
+                if parent.is_symlink() {
+                    return Err(format!(
+                        "Managed path crosses a symbolic link: {}",
+                        parent.display()
+                    ));
+                }
+            }
+            let target = target_root.join(path);
+            if entry.manifest.backed_up_files.contains(relative) {
+                let backup = entry.backup_dir.join(path);
+                if !backup.is_file() {
+                    return Err(format!(
+                        "Missing backup for managed file {}; switch was stopped",
+                        relative
+                    ));
+                }
+                if let Some(parent) = target.parent() {
+                    fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+                }
+                fs::copy(&backup, &target).map_err(|error| error.to_string())?;
+            } else if target.exists() || target.is_symlink() {
+                if target.is_symlink() || target.is_file() {
+                    fs::remove_file(&target).map_err(|error| error.to_string())?;
+                } else if target.is_dir() {
+                    fs::remove_dir(&target).map_err(|error| {
+                        format!(
+                            "Refusing to remove nonempty managed directory {}: {}",
+                            target.display(),
+                            error
+                        )
+                    })?;
+                }
+                prune_empty_parent_dirs(&target, target_root);
+            }
+        }
+    }
+
+    for entry in outgoing {
+        if entry.manifest_path.exists() {
+            fs::remove_file(&entry.manifest_path).map_err(|error| error.to_string())?;
+        }
+        if entry.backup_dir.exists() {
+            fs::remove_dir_all(&entry.backup_dir).map_err(|error| error.to_string())?;
+        }
+    }
+    Ok(outgoing.len())
+}
+
+/// An incoming install may have temporarily backed up the outgoing profile's
+/// bytes at the same path. Do not let that backup resurrect the old profile on
+/// a later uninstall. Carry forward only a genuine pre-existing backup from
+/// the outgoing manifest, if one exists.
+pub fn reconcile_switch_backups(
+    outgoing: &[StoredModOwnershipManifest],
+    incoming: &[StoredModOwnershipManifest],
+) -> Result<(), String> {
+    let mut previous = std::collections::HashMap::<String, Option<PathBuf>>::new();
+    for entry in outgoing {
+        for relative in &entry.manifest.files {
+            let original = entry
+                .manifest
+                .backed_up_files
+                .contains(relative)
+                .then(|| entry.backup_dir.join(relative));
+            if let Some(existing) = previous.insert(relative.clone(), original.clone()) {
+                if existing != original {
+                    return Err(format!(
+                        "Conflicting outgoing owners for {relative}; switch was stopped"
+                    ));
+                }
+            }
+        }
+    }
+    for entry in incoming {
+        let mut manifest = entry.manifest.clone();
+        let mut changed = false;
+        manifest.backed_up_files.retain(|relative| {
+            if previous.contains_key(relative) {
+                changed = true;
+                previous[relative].is_some()
+            } else {
+                true
+            }
+        });
+        for relative in &entry.manifest.backed_up_files {
+            let Some(original) = previous.get(relative) else {
+                continue;
+            };
+            let destination = entry.backup_dir.join(relative);
+            if let Some(source) = original {
+                if !source.is_file() {
+                    return Err(format!("Missing original backup for {relative}"));
+                }
+                if let Some(parent) = destination.parent() {
+                    fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+                }
+                fs::copy(source, &destination).map_err(|error| error.to_string())?;
+            } else if destination.is_file() {
+                fs::remove_file(&destination).map_err(|error| error.to_string())?;
+            }
+        }
+        if changed {
+            crate::utils::stable_json::write_file(&entry.manifest_path, &manifest)?;
+        }
+    }
+    Ok(())
+}
+
+pub fn transfer_shared_mod_manifest(
+    app: &AppHandle,
+    incoming_profile_id: &str,
+    target_root: &Path,
+    outgoing: &StoredModOwnershipManifest,
+) -> Result<(), String> {
+    let destination = backup_dir_path(
+        app,
+        incoming_profile_id,
+        GAME_MANIFEST_SCOPE,
+        &outgoing.manifest.mod_full_name,
+    )?;
+    if destination.is_symlink() {
+        return Err(format!(
+            "Unsafe manifest backup at {}",
+            destination.display()
+        ));
+    }
+    if destination.exists() {
+        fs::remove_dir_all(&destination).map_err(|error| error.to_string())?;
+    }
+    for relative in &outgoing.manifest.backed_up_files {
+        let path = Path::new(relative);
+        if path.is_absolute()
+            || path
+                .components()
+                .any(|component| !matches!(component, std::path::Component::Normal(_)))
+        {
+            return Err(format!("Unsafe backup path: {relative}"));
+        }
+        let source = outgoing.backup_dir.join(path);
+        if !source.is_file() || source.is_symlink() {
+            return Err(format!("Missing safe backup for {relative}"));
+        }
+        let target = destination.join(path);
+        if let Some(parent) = target.parent() {
+            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        fs::copy(source, target).map_err(|error| error.to_string())?;
+    }
+    let files = outgoing
+        .manifest
+        .files
+        .iter()
+        .map(PathBuf::from)
+        .collect::<Vec<_>>();
+    save_owned_mod_manifest(
+        app,
+        incoming_profile_id,
+        GAME_MANIFEST_SCOPE,
+        &outgoing.manifest.mod_full_name,
+        target_root,
+        &files,
+        &outgoing.manifest.backed_up_files,
+    )
+}
+
 #[cfg(test)]
 mod shared_loader_cleanup_tests {
-    use super::{cleanup_owned_mod_manifests, ModOwnershipManifest, StoredModOwnershipManifest};
+    use super::{
+        cleanup_owned_mod_manifests, deactivate_exact_owned_mod_manifests,
+        reconcile_switch_backups, ModOwnershipManifest, StoredModOwnershipManifest,
+    };
     use std::fs;
     use std::path::{Path, PathBuf};
 
@@ -602,6 +802,70 @@ mod shared_loader_cleanup_tests {
         assert!(!root.join(deprecated_only).exists());
         assert!(!deprecated_manifest.exists());
 
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn profile_switch_removes_only_outgoing_owned_files() {
+        let root = world();
+        fs::create_dir_all(root.join("BepInEx/plugins")).unwrap();
+        fs::create_dir_all(root.join("BepInEx/config")).unwrap();
+        fs::write(root.join("BepInEx/plugins/AOnly.dll"), b"A").unwrap();
+        fs::write(root.join("BepInEx/plugins/Shared.dll"), b"B").unwrap();
+        fs::write(root.join("BepInEx/plugins/Manual.dll"), b"manual").unwrap();
+        fs::write(root.join("BepInEx/config/user.cfg"), b"settings").unwrap();
+        let outgoing = stored(
+            &root,
+            "A",
+            &[
+                "BepInEx/plugins/AOnly.dll",
+                "BepInEx/plugins/Shared.dll",
+                "BepInEx/config/user.cfg",
+            ],
+        );
+        let incoming = stored(&root, "B", &["BepInEx/plugins/Shared.dll"]);
+        assert_eq!(
+            deactivate_exact_owned_mod_manifests(&root, &[outgoing], &[incoming]).unwrap(),
+            1
+        );
+        assert!(!root.join("BepInEx/plugins/AOnly.dll").exists());
+        assert_eq!(
+            fs::read(root.join("BepInEx/plugins/Shared.dll")).unwrap(),
+            b"B"
+        );
+        assert_eq!(
+            fs::read(root.join("BepInEx/plugins/Manual.dll")).unwrap(),
+            b"manual"
+        );
+        assert_eq!(
+            fs::read(root.join("BepInEx/config/user.cfg")).unwrap(),
+            b"settings"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn profile_switch_refuses_parent_traversal() {
+        let root = world();
+        let outgoing = stored(&root, "unsafe", &["../outside.txt"]);
+        assert!(deactivate_exact_owned_mod_manifests(&root, &[outgoing], &[]).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn switch_does_not_save_outgoing_bytes_as_incoming_uninstall_backup() {
+        let root = world();
+        let relative = "BepInEx/plugins/Shared.dll";
+        let outgoing = stored(&root, "A", &[relative]);
+        let mut incoming = stored(&root, "B", &[relative]);
+        incoming.manifest.backed_up_files = vec![relative.into()];
+        fs::create_dir_all(incoming.backup_dir.join("BepInEx/plugins")).unwrap();
+        fs::write(incoming.backup_dir.join(relative), b"A payload").unwrap();
+        reconcile_switch_backups(&[outgoing], &[incoming.clone()]).unwrap();
+        let saved: ModOwnershipManifest =
+            serde_json::from_slice(&fs::read(&incoming.manifest_path).unwrap()).unwrap();
+        assert!(saved.backed_up_files.is_empty());
+        assert!(!incoming.backup_dir.join(relative).exists());
         fs::remove_dir_all(root).unwrap();
     }
 }

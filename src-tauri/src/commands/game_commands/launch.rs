@@ -88,6 +88,26 @@ async fn launch_game_with_mods_inner(
         .await?
         .ok_or_else(|| "Game path not found".to_string())?;
     let game_path = std::path::PathBuf::from(&game_path_str);
+    let runtime_root = if is_windows_profile {
+        game_path.clone()
+    } else {
+        resolve_macos_runtime_root(&game_path)
+    };
+    if crate::models::loaders::resolve_loader(&game_identifier, &game_path)
+        == crate::models::loaders::PackageLoader::BepInEx
+        && bepinex_install_root(&app, &profile_id, &runtime_root)? == runtime_root
+    {
+        if let Some(active) =
+            super::profile_activation::read_active_profile(&runtime_root, &game_identifier)?
+        {
+            if active != profile_id {
+                return Err(format!(
+                    "Profile {} is not active in this game. Apply to Game before modded Play; the game files were not changed.",
+                    profile_id
+                ));
+            }
+        }
+    }
     log::info!(
         "[launch] event=path_resolved launch_id={} mode=modded game={} platform={} path={}",
         launch_id,

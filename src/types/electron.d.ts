@@ -90,6 +90,7 @@ export interface ProfileSyncResult {
     cached: number;
     pending_removals: number;
     needs_config_switch?: boolean;
+    needs_profile_activation?: boolean;
 }
 
 export interface IElectronAPI {

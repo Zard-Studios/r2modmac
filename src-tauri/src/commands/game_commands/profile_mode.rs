@@ -552,6 +552,15 @@ pub async fn set_profile_bepinex_isolation(
     {
         return Err("BepInEx isolation is only available for BepInEx games".to_string());
     }
+    if current && !isolated {
+        if let Some(active) =
+            super::profile_activation::read_active_profile(&runtime_root, &game_identifier)?
+        {
+            if active != profile_id {
+                return Err("Another profile is recorded as active in this game. Select and apply that profile before changing this one's BepInEx storage mode.".to_string());
+            }
+        }
+    }
     let profile_root = crate::utils::paths::app_data_dir(&app)
         .map_err(|error| error.to_string())?
         .join("profiles")
@@ -717,6 +726,13 @@ pub async fn set_profile_bepinex_isolation(
     profile["bepinexIsolation"] = serde_json::Value::Bool(isolated);
     profile["needs_sync"] = serde_json::Value::Bool(true);
     crate::commands::profile_commands::save_profiles(app, profiles).await?;
+    if current && !isolated {
+        super::profile_activation::write_active_profile(
+            &runtime_root,
+            &game_identifier,
+            &profile_id,
+        )?;
+    }
     Ok(true)
 }
 

@@ -81,6 +81,20 @@ pub fn config_switch_needed(
         .any(|root| owners.get(&owner_slot(root)).map(String::as_str) != Some(profile_id))
 }
 
+pub fn active_config_owner(
+    app_data_dir: &Path,
+    game_path: &Path,
+    tree_root: &Path,
+    game_identifier: &str,
+) -> Option<String> {
+    let root = config_roots(game_path, tree_root, game_identifier)
+        .into_iter()
+        .find(|root| root.key == "bepinex")?;
+    read_owners(&app_data_dir.join(OWNERS_FILE_NAME))
+        .get(&owner_slot(&root))
+        .cloned()
+}
+
 /// Metadata and profile config backups changed by `apply_profile_configs`.
 /// Keep them in the same Apply rollback as the live game tree.
 pub fn config_transaction_targets(

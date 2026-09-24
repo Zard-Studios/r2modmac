@@ -1268,6 +1268,125 @@ pub async fn sync_profile_to_game(
         }));
     }
 
+    let active_marker = if !profile_isolated {
+        super::profile_activation::read_active_profile(runtime_game_path, &game_identifier)?
+    } else {
+        None
+    };
+    let active_profile_id = active_marker.clone().or_else(|| {
+        if profile_isolated {
+            None
+        } else {
+            crate::utils::config_backup::active_config_owner(
+                &app_data_dir,
+                game_path,
+                &bepinex_root,
+                &game_identifier,
+            )
+        }
+    });
+    let switching_from = active_profile_id
+        .as_deref()
+        .filter(|active| *active != profile_id);
+    // The old config-owner record tracks a config directory, not the exact
+    // plugin payload. It is useful for bootstrapping the profile that already
+    // owns the game, but not sufficient authority to delete another profile's
+    // files. Reapply that profile once to write the transactional marker.
+    if active_marker.is_none() && switching_from.is_some() {
+        return Err("This older game-local install has no verified active-profile marker. Apply the currently active profile once before switching; no game files were changed.".to_string());
+    }
+    let outgoing_profile = switching_from
+        .map(|active| {
+            profiles
+                .iter()
+                .find(|candidate| {
+                    candidate["id"].as_str() == Some(active)
+                        && candidate["gameIdentifier"].as_str() == Some(&game_identifier)
+                        && candidate["platform"].as_str().unwrap_or("windows") == profile_platform
+                })
+                .ok_or_else(|| {
+                    "The previously active profile cannot be verified; no game files were changed"
+                        .to_string()
+                })
+        })
+        .transpose()?;
+    let outgoing_manifests = if let Some(active) = switching_from {
+        load_owned_mod_manifests(&app, active, GAME_MANIFEST_SCOPE)?
+            .into_iter()
+            .filter(|entry| manifest_matches_target_root(&entry.manifest, runtime_game_path))
+            .filter(|entry| !key_is_bepinex_runtime_pack(&entry.manifest.mod_key))
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
+    if let Some(outgoing) = outgoing_profile {
+        if active_marker.is_none()
+            && outgoing_manifests
+                .iter()
+                .any(|entry| !manifest_files_exist(runtime_game_path, &entry.manifest.files))
+        {
+            return Err("The older config-owner record cannot be verified against the outgoing profile's files. Switching was stopped without removing anything.".to_string());
+        }
+        let owned_keys = outgoing_manifests
+            .iter()
+            .map(|entry| entry.manifest.mod_key.as_str())
+            .collect::<std::collections::HashSet<_>>();
+        let missing_inventory = outgoing["mods"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|entry| entry["enabled"].as_bool().unwrap_or(true))
+            .filter_map(|entry| entry["fullName"].as_str())
+            .map(&extract_mod_key)
+            .filter(|key| !key_is_bepinex_runtime_pack(key))
+            .any(|key| !owned_keys.contains(key.as_str()));
+        if missing_inventory {
+            return Err("The outgoing profile has no complete ownership inventory for this game. Switching was stopped before changing files; repair that profile's local inventory first.".to_string());
+        }
+    }
+    if !profile_isolated && active_profile_id.is_none() {
+        for candidate in profiles.iter().filter(|candidate| {
+            candidate["id"].as_str() != Some(&profile_id)
+                && candidate["gameIdentifier"].as_str() == Some(&game_identifier)
+                && candidate["platform"].as_str().unwrap_or("windows") == profile_platform
+        }) {
+            let Some(candidate_id) = candidate["id"].as_str() else {
+                continue;
+            };
+            if load_owned_mod_manifests(&app, candidate_id, GAME_MANIFEST_SCOPE)?
+                .iter()
+                .any(|entry| {
+                    manifest_matches_target_root(&entry.manifest, runtime_game_path)
+                        && manifest_files_exist(runtime_game_path, &entry.manifest.files)
+                })
+            {
+                return Err("Cannot safely identify the active profile in this older game-local installation. No files were changed; apply the previously active profile first to establish ownership.".to_string());
+            }
+        }
+    }
+    let shared_outgoing_keys = outgoing_profile
+        .map(|outgoing| {
+            let outgoing_mods = outgoing["mods"].as_array().cloned().unwrap_or_default();
+            profile["mods"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|incoming_mod| incoming_mod["enabled"].as_bool().unwrap_or(true))
+                .filter_map(|incoming_mod| {
+                    let identity = super::profile_activation::package_identity(incoming_mod)?;
+                    outgoing_mods
+                        .iter()
+                        .any(|outgoing_mod| {
+                            outgoing_mod["enabled"].as_bool().unwrap_or(true)
+                                && super::profile_activation::package_identity(outgoing_mod)
+                                    == Some(identity.clone())
+                        })
+                        .then(|| extract_mod_key(&identity.0))
+                })
+                .collect::<std::collections::HashSet<_>>()
+        })
+        .unwrap_or_default();
+
     let all_manifests = load_owned_mod_manifests(&app, &profile_id, bepinex_scope)?;
     let (stored_manifests, foreign_manifests): (Vec<_>, Vec<_>) = all_manifests
         .into_iter()
@@ -1428,6 +1547,23 @@ pub async fn sync_profile_to_game(
                 return false;
             }
 
+            // A folder with the same name/version is not proof of the same
+            // package when switching stores or profiles. The incoming profile
+            // must install its own payload; a shared identity is the only
+            // exception. Finalize then requires its own ownership manifest.
+            if switching_from.is_some()
+                && !key_is_bepinex_runtime_pack(pm_key)
+                && !shared_outgoing_keys.contains(*pm_key)
+            {
+                if !finalize {
+                    return true;
+                }
+                return !manifests_to_keep.iter().any(|entry| {
+                    entry.manifest.mod_key == **pm_key
+                        && manifest_files_exist(&bepinex_root, &entry.manifest.files)
+                });
+            }
+
             let desired_full = desired_full_by_key
                 .get(*pm_key)
                 .cloned()
@@ -1485,10 +1621,52 @@ pub async fn sync_profile_to_game(
     let mut removed = 0;
     if finalize {
         apply_configs();
-        let removed_by_manifest =
-            cleanup_owned_mod_manifests(&bepinex_root, &manifests_to_remove, &manifests_to_keep)?;
-        let stale_generated_removed =
-            cleanup_stale_generated_mod_artifacts(&bepinex_root, &profile_mod_full_names)?;
+        if switching_from.is_some() {
+            for entry in &outgoing_manifests {
+                if shared_outgoing_keys.contains(&entry.manifest.mod_key) {
+                    crate::utils::mod_manifest::transfer_shared_mod_manifest(
+                        &app,
+                        &profile_id,
+                        &bepinex_root,
+                        entry,
+                    )?;
+                }
+            }
+        }
+        let incoming_manifests = load_owned_mod_manifests(&app, &profile_id, bepinex_scope)?
+            .into_iter()
+            .filter(|entry| manifest_matches_target_root(&entry.manifest, &bepinex_root))
+            .filter(|entry| {
+                desired_full_by_key
+                    .get(&entry.manifest.mod_key)
+                    .is_some_and(|full| full == &entry.manifest.mod_full_name.to_lowercase())
+            })
+            .collect::<Vec<_>>();
+        if switching_from.is_some() {
+            crate::utils::mod_manifest::reconcile_switch_backups(
+                &outgoing_manifests,
+                &incoming_manifests,
+            )?;
+            removed += crate::utils::mod_manifest::deactivate_exact_owned_mod_manifests(
+                &bepinex_root,
+                &outgoing_manifests,
+                &incoming_manifests,
+            )?;
+        }
+        let removed_by_manifest = if switching_from.is_some() {
+            crate::utils::mod_manifest::deactivate_exact_owned_mod_manifests(
+                &bepinex_root,
+                &manifests_to_remove,
+                &incoming_manifests,
+            )?
+        } else {
+            cleanup_owned_mod_manifests(&bepinex_root, &manifests_to_remove, &manifests_to_keep)?
+        };
+        let stale_generated_removed = if switching_from.is_some() {
+            0
+        } else {
+            cleanup_stale_generated_mod_artifacts(&bepinex_root, &profile_mod_full_names)?
+        };
         removed += removed_by_manifest + stale_generated_removed;
         if removed_by_manifest > 0 || stale_generated_removed > 0 {
             log::debug!(
@@ -1496,7 +1674,7 @@ pub async fn sync_profile_to_game(
                 removed_by_manifest, stale_generated_removed
             );
         }
-        for folder_name in &to_remove {
+        for folder_name in to_remove.iter().filter(|_| switching_from.is_none()) {
             let folder_path = game_plugins.join(folder_name);
             if folder_path.exists() {
                 log::debug!("[sync_profile_to_game] Removing: {}", folder_name);
@@ -1565,8 +1743,9 @@ pub async fn sync_profile_to_game(
         "to_install": to_install_names,
         "already_installed": already_installed,
         "cached": cached,
-        "pending_removals": if finalize { 0 } else { to_remove.len() + manifests_to_remove.len() },
-        "needs_config_switch": !finalize && needs_config_switch
+        "pending_removals": if finalize { 0 } else { to_remove.len() + manifests_to_remove.len() + outgoing_manifests.len() },
+        "needs_config_switch": !finalize && needs_config_switch,
+        "needs_profile_activation": !finalize && !profile_isolated && active_marker.as_deref() != Some(profile_id.as_str())
     }))
 }
 
@@ -1613,40 +1792,103 @@ fn require_game_local_bepinex_tree(runtime_game_path: &std::path::Path) -> Resul
 mod tests {
     use super::{
         ensure_finalize_ready, flatten_return_of_modding_manifest_paths,
-        key_is_bepinex_runtime_pack, managed_install_root, manifest_files_exist,
+        key_is_bepinex_runtime_pack, managed_install_root,
         migrate_nested_return_of_modding_plugins, reconcile_return_of_modding_plugin_visibility,
         require_game_local_bepinex_tree, return_of_modding_mods_yaml,
         set_return_of_modding_plugin_enabled, windows_bepinex_runtime_is_installed,
     };
 
     #[test]
-    #[ignore = "release gate: game-local A→B→A still lacks active-profile and store-aware ownership"]
     fn game_local_switch_a_b_a_does_not_keep_outgoing_files_or_misidentify_store() {
-        use crate::utils::mod_manifest::cleanup_owned_mod_manifests;
+        use crate::utils::mod_manifest::{
+            deactivate_exact_owned_mod_manifests, ModOwnershipManifest, StoredModOwnershipManifest,
+        };
+
+        fn stored(
+            root: &std::path::Path,
+            profile: &str,
+            files: &[&str],
+        ) -> StoredModOwnershipManifest {
+            let dir = root.join("metadata").join(profile);
+            std::fs::create_dir_all(&dir).unwrap();
+            let manifest_path = dir.join("owned.json");
+            std::fs::write(&manifest_path, b"fixture").unwrap();
+            StoredModOwnershipManifest {
+                manifest_path,
+                backup_dir: dir.join("owned_backup"),
+                manifest: ModOwnershipManifest {
+                    mod_full_name: "author-Shared-1.0.0".into(),
+                    mod_key: "author-shared".into(),
+                    files: files.iter().map(|path| (*path).to_string()).collect(),
+                    ..Default::default()
+                },
+            }
+        }
 
         let root =
             std::env::temp_dir().join(format!("r2modmac-profile-switch-{}", uuid::Uuid::new_v4()));
         let plugins = root.join("BepInEx/plugins");
         std::fs::create_dir_all(&plugins).unwrap();
         let a_only = plugins.join("AOnly.dll");
+        let b_only = plugins.join("BOnly.dll");
         let shared = plugins.join("Shared.dll");
         std::fs::write(&a_only, b"Thunderstore A-only payload").unwrap();
         std::fs::write(&shared, b"Thunderstore shared 1.0.0").unwrap();
-        let a_manifest_files = vec![
-            "BepInEx/plugins/AOnly.dll".to_string(),
-            "BepInEx/plugins/Shared.dll".to_string(),
-        ];
-
-        // B has no prior manifests. Current Sync loads only B's records, so
-        // its finalization passes no outgoing A manifest to cleanup.
-        cleanup_owned_mod_manifests(&root, &[], &[]).unwrap();
-        std::fs::write(&shared, b"Hexium shared 1.0.0").unwrap();
+        let a = stored(
+            &root,
+            "A",
+            &["BepInEx/plugins/AOnly.dll", "BepInEx/plugins/Shared.dll"],
+        );
+        super::profile_activation::write_active_profile(&root, "valheim", "A").unwrap();
 
         let result = std::panic::catch_unwind(|| {
+            let a_package =
+                serde_json::json!({"fullName": "author-Shared-1.0.0", "source": "thunderstore"});
+            let b_package =
+                serde_json::json!({"fullName": "author-Shared-1.0.0", "source": "hexium"});
+            assert_ne!(
+                super::profile_activation::package_identity(&a_package),
+                super::profile_activation::package_identity(&b_package)
+            );
+
+            // A → B: the incoming store's download has finished under the
+            // Apply snapshot. Only A's recorded, non-shared paths are removed.
+            std::fs::write(&shared, b"Hexium shared 1.0.0").unwrap();
+            std::fs::write(&b_only, b"Hexium B-only payload").unwrap();
+            let b = stored(
+                &root,
+                "B",
+                &["BepInEx/plugins/BOnly.dll", "BepInEx/plugins/Shared.dll"],
+            );
+            deactivate_exact_owned_mod_manifests(&root, &[a.clone()], &[b.clone()]).unwrap();
+            super::profile_activation::write_active_profile(&root, "valheim", "B").unwrap();
             assert!(!a_only.exists(), "B still runs A's loose plugin");
-            assert!(
-                !manifest_files_exist(&root, &a_manifest_files),
-                "returning to A accepts B's same-version Hexium bytes as Thunderstore"
+            assert_eq!(std::fs::read(&shared).unwrap(), b"Hexium shared 1.0.0");
+            assert!(!a.manifest_path.exists());
+            assert_eq!(
+                super::profile_activation::read_active_profile(&root, "valheim").unwrap(),
+                Some("B".into())
+            );
+
+            // B → A: the same version number from Thunderstore requires A's
+            // bytes again, then B's exclusive plugin is removed.
+            std::fs::write(&a_only, b"Thunderstore A-only payload").unwrap();
+            std::fs::write(&shared, b"Thunderstore shared 1.0.0").unwrap();
+            let a_again = stored(
+                &root,
+                "A",
+                &["BepInEx/plugins/AOnly.dll", "BepInEx/plugins/Shared.dll"],
+            );
+            deactivate_exact_owned_mod_manifests(&root, &[b], &[a_again]).unwrap();
+            super::profile_activation::write_active_profile(&root, "valheim", "A").unwrap();
+            assert!(!b_only.exists(), "A still runs B's loose plugin");
+            assert_eq!(
+                std::fs::read(&shared).unwrap(),
+                b"Thunderstore shared 1.0.0"
+            );
+            assert_eq!(
+                super::profile_activation::read_active_profile(&root, "valheim").unwrap(),
+                Some("A".into())
             );
         });
         std::fs::remove_dir_all(&root).unwrap();

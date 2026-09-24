@@ -931,7 +931,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                         disabled={isRepairingRuntime || (runtimeHealth.status !== 'unconfigured' && !runtimeHealth.repairable && !runtimeHealth.missingComponents.includes('profile-location') && !runtimeHealth.missingComponents.includes('inventory-location'))}
                         className="flex-shrink-0 rounded-lg border border-amber-500/35 bg-amber-500/15 px-2.5 py-1.5 text-xs font-medium text-fg-warning disabled:opacity-50"
                     >
-                        {runtimeHealth.status === 'unconfigured' ? 'Settings' : isRepairingRuntime ? 'Repairing…' : runtimeHealth.missingComponents.includes('profile-location') ? 'Move files' : runtimeHealth.missingComponents.includes('inventory-location') ? 'Repair records' : 'Repair'}
+                        {runtimeHealth.status === 'unconfigured' ? 'Settings' : isRepairingRuntime ? 'Repairing…' : runtimeHealth.missingComponents.includes('profile-location') ? 'Move files' : 'Repair'}
                     </button>}
                 </div>
             )}

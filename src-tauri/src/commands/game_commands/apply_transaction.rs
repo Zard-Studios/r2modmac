@@ -4,6 +4,45 @@ use tauri::command;
 
 const APPLY_BACKUP_DIR: &str = "apply-transaction";
 const APPLY_MARKER: &str = "ready";
+const APPLY_TARGETS: &str = "targets.json";
+
+fn saved_transaction_targets(
+    backup_root: &std::path::Path,
+    current_targets: &[std::path::PathBuf],
+    app_data_dir: &std::path::Path,
+) -> Result<Vec<std::path::PathBuf>, String> {
+    let plan_path = backup_root.join(APPLY_TARGETS);
+    if !plan_path.is_file() {
+        // Older snapshots did not record their target list.
+        return Ok(current_targets.to_vec());
+    }
+    let targets: Vec<std::path::PathBuf> =
+        serde_json::from_slice(&fs::read(&plan_path).map_err(|error| error.to_string())?)
+            .map_err(|error| format!("Invalid Apply snapshot plan: {error}"))?;
+    if targets.first() != current_targets.first() {
+        return Err(
+            "Apply snapshot no longer matches this game path; refusing rollback".to_string(),
+        );
+    }
+    let game_root = current_targets
+        .first()
+        .and_then(|target| target.parent())
+        .ok_or_else(|| "Apply snapshot has no game root".to_string())?;
+    if targets.iter().any(|target| {
+        !target.is_absolute()
+            || target
+                .components()
+                .any(|component| component == std::path::Component::ParentDir)
+            || !(target.starts_with(game_root)
+                || target.starts_with(app_data_dir)
+                || current_targets.contains(target))
+            || target == game_root
+            || target == app_data_dir
+    }) {
+        return Err("Apply snapshot contains an unsafe target path; refusing rollback".to_string());
+    }
+    Ok(targets)
+}
 
 fn legacy_transaction_dir(app: &AppHandle, profile_id: &str) -> Result<std::path::PathBuf, String> {
     Ok(crate::utils::paths::app_data_dir(app)
@@ -141,7 +180,36 @@ async fn transaction_targets(
     .map(|name| runtime_root.join(name))
     .collect::<Vec<_>>();
     let tree_root = bepinex_install_root(app, profile_id, &runtime_root)?;
-    Ok(with_config_targets(targets, &tree_root))
+    let mut targets = with_config_targets(targets, &tree_root);
+    if tree_root == runtime_root {
+        let marker = super::profile_activation::marker_path(&runtime_root);
+        let active =
+            super::profile_activation::read_active_profile(&runtime_root, game_identifier)?
+                .or_else(|| {
+                    crate::utils::config_backup::active_config_owner(
+                        &app_data_dir,
+                        &game_root,
+                        &tree_root,
+                        game_identifier,
+                    )
+                });
+        targets.push(marker);
+        targets.push(
+            app_data_dir
+                .join("profiles")
+                .join(profile_id)
+                .join(".r2modmac/manifests/game"),
+        );
+        if let Some(outgoing) = active.filter(|active| active != profile_id) {
+            targets.push(
+                app_data_dir
+                    .join("profiles")
+                    .join(outgoing)
+                    .join(".r2modmac/manifests/game"),
+            );
+        }
+    }
+    Ok(targets)
 }
 
 fn backup_name(index: usize) -> String {
@@ -369,17 +437,28 @@ pub async fn begin_profile_apply_transaction(
     let legacy_backup_root = legacy_transaction_dir(&app, &profile_id)?;
     if legacy_backup_root.exists() {
         if legacy_backup_root.join(APPLY_MARKER).is_file() {
-            restore_snapshot(&legacy_backup_root, &targets)?;
+            let saved = saved_transaction_targets(
+                &legacy_backup_root,
+                &targets,
+                &crate::utils::paths::app_data_dir(&app).map_err(|error| error.to_string())?,
+            )?;
+            restore_snapshot(&legacy_backup_root, &saved)?;
         }
         fs::remove_dir_all(&legacy_backup_root).map_err(|error| error.to_string())?;
     }
     if backup_root.exists() {
         if backup_root.join(APPLY_MARKER).is_file() {
-            restore_snapshot(&backup_root, &targets)?;
+            let saved = saved_transaction_targets(
+                &backup_root,
+                &targets,
+                &crate::utils::paths::app_data_dir(&app).map_err(|error| error.to_string())?,
+            )?;
+            restore_snapshot(&backup_root, &saved)?;
         }
         fs::remove_dir_all(&backup_root).map_err(|error| error.to_string())?;
     }
     fs::create_dir_all(&backup_root).map_err(|error| error.to_string())?;
+    crate::utils::stable_json::write_file(&backup_root.join(APPLY_TARGETS), &targets)?;
 
     // Fast path: clone every target copy-on-write. When this works the snapshot
     // is metadata-only, so there is no point walking the tree to size it first —
@@ -480,7 +559,12 @@ pub async fn rollback_profile_apply_transaction(
                 game_identifier,
                 backup_root
             );
-            restore_snapshot(&backup_root, &targets)?;
+            let saved = saved_transaction_targets(
+                &backup_root,
+                &targets,
+                &crate::utils::paths::app_data_dir(&app).map_err(|error| error.to_string())?,
+            )?;
+            restore_snapshot(&backup_root, &saved)?;
             fs::remove_dir_all(&backup_root).map_err(|error| error.to_string())?;
             log::info!(
                 "[apply_transaction] Rollback complete for profile {}; game files are back at their pre-Apply state",
@@ -512,12 +596,32 @@ pub async fn commit_profile_apply_transaction(
         }
     );
     let targets = transaction_targets(&app, &profile_id, &game_identifier).await?;
-    for backup_root in [
-        transaction_dir(&targets, &profile_id)?,
-        legacy_transaction_dir(&app, &profile_id)?,
-    ] {
-        if backup_root.exists() {
-            fs::remove_dir_all(backup_root).map_err(|error| error.to_string())?;
+    let backup_root = transaction_dir(&targets, &profile_id)?;
+    let legacy_backup_root = legacy_transaction_dir(&app, &profile_id)?;
+    if let Some(runtime_root) = targets.first().and_then(|target| target.parent()) {
+        if targets.contains(&super::profile_activation::marker_path(runtime_root)) {
+            if !backup_root.join(APPLY_MARKER).is_file()
+                && !legacy_backup_root.join(APPLY_MARKER).is_file()
+            {
+                return Err(
+                    "Cannot record active profile without a completed Apply snapshot".to_string(),
+                );
+            }
+            super::profile_activation::write_active_profile(
+                runtime_root,
+                &game_identifier,
+                &profile_id,
+            )?;
+        }
+    }
+    if backup_root.exists() {
+        fs::remove_dir_all(&backup_root).map_err(|error| error.to_string())?;
+    }
+    if legacy_backup_root.exists() {
+        if let Err(error) = fs::remove_dir_all(&legacy_backup_root) {
+            // The completed game snapshot has already been committed. An old
+            // metadata-only snapshot must not turn success into a fake failure.
+            log::warn!("[apply_transaction] Could not remove legacy snapshot: {error}");
         }
     }
     Ok(true)
@@ -526,6 +630,27 @@ pub async fn commit_profile_apply_transaction(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rollback_keeps_original_targets_when_config_owner_changes() {
+        let root =
+            std::env::temp_dir().join(format!("r2modmac-target-plan-{}", uuid::Uuid::new_v4()));
+        let app_data = root.join("app");
+        let game = root.join("game");
+        let snapshot = root.join("snapshot");
+        fs::create_dir_all(&snapshot).unwrap();
+        let bepinex = game.join("BepInEx");
+        let outgoing = app_data.join("profiles/A/.r2modmac/configs/bepinex");
+        let incoming = app_data.join("profiles/B/.r2modmac/configs/bepinex");
+        let original = vec![bepinex.clone(), outgoing.clone(), incoming.clone()];
+        crate::utils::stable_json::write_file(&snapshot.join(APPLY_TARGETS), &original).unwrap();
+        let after_owner_change = vec![bepinex, incoming];
+        assert_eq!(
+            saved_transaction_targets(&snapshot, &after_owner_change, &app_data).unwrap(),
+            original
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn snapshot_restore_replaces_partial_apply_contents() {
