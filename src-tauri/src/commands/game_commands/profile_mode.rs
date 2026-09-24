@@ -266,6 +266,13 @@ fn migrate_tree(source_root: &Path, destination_root: &Path, name: &str) -> Resu
     Ok(())
 }
 
+fn game_local_layout_needs_reconciliation(profile_root: &Path, runtime_root: &Path) -> bool {
+    ["BepInEx", "BepInEx_DISABLED"].iter().any(|name| {
+        let game_tree = runtime_root.join(name);
+        game_tree.is_symlink() || (!game_tree.is_dir() && profile_root.join(name).is_dir())
+    })
+}
+
 /// Switch one profile without deleting its old BepInEx installation. Existing
 /// profiles with no override retain the setting under which they were created.
 #[command]
@@ -296,28 +303,8 @@ pub async fn set_profile_bepinex_isolation(
         .get("bepinexIsolation")
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(settings.profile_isolation);
-    if current == isolated {
-        if !isolated {
-            if let Some(game_path) =
-                get_game_path(app.clone(), game_identifier.clone(), Some(platform.clone())).await?
-            {
-                let runtime_root = if platform == "mac" {
-                    resolve_macos_runtime_root(Path::new(&game_path))
-                } else {
-                    Path::new(&game_path).to_path_buf()
-                };
-                if ["BepInEx", "BepInEx_DISABLED"]
-                    .iter()
-                    .any(|name| runtime_root.join(name).is_symlink())
-                {
-                    return Err("This profile is marked game-local, but BepInEx still points to a profile directory. No files were changed; local migration is required.".to_string());
-                }
-            }
-        }
+    if current == isolated && isolated {
         return Ok(true);
-    }
-    if is_game_running(app.clone(), game_identifier.clone(), Some(platform.clone())).await? {
-        return Err("Close the game before changing BepInEx storage mode".to_string());
     }
     let game_path = get_game_path(app.clone(), game_identifier.clone(), Some(platform.clone()))
         .await?
@@ -336,6 +323,14 @@ pub async fn set_profile_bepinex_isolation(
         .map_err(|error| error.to_string())?
         .join("profiles")
         .join(&profile_id);
+    let needs_reconciliation = !isolated
+        && game_local_layout_needs_reconciliation(&profile_root, &runtime_root);
+    if current == isolated && !needs_reconciliation {
+        return Ok(true);
+    }
+    if is_game_running(app.clone(), game_identifier.clone(), Some(platform.clone())).await? {
+        return Err("Close the game before changing BepInEx storage mode".to_string());
+    }
     if isolated && choose_bepinex_root(true, &profile_root, &runtime_root) == runtime_root {
         return Err(
             "This Wine bottle cannot access an isolated BepInEx tree; use game-local mode"
@@ -345,7 +340,10 @@ pub async fn set_profile_bepinex_isolation(
     // Wine may already have fallen back to the game-local tree even though an
     // older profile inherited the isolation flag. There is nothing to copy in
     // that case, and requiring a profile-side tree would make OFF impossible.
-    if !isolated && choose_bepinex_root(current, &profile_root, &runtime_root) == runtime_root {
+    if !isolated
+        && !needs_reconciliation
+        && choose_bepinex_root(current, &profile_root, &runtime_root) == runtime_root
+    {
         profile["bepinexIsolation"] = serde_json::Value::Bool(false);
         crate::commands::profile_commands::save_profiles(app, profiles).await?;
         return Ok(true);
@@ -372,6 +370,22 @@ pub async fn set_profile_bepinex_isolation(
             .map(|stored| stored.manifest)
             .collect::<Vec<_>>();
         preflight_local_bepinex_payload(&profile_root, &runtime_root, &enabled_mods, &manifests)?;
+        // Validate every tree before replacing either one. In particular, a
+        // disabled-tree symlink cannot be detached by migrate_tree; finding it
+        // only after moving the active tree would leave a half-migrated game.
+        for name in ["BepInEx", "BepInEx_DISABLED"] {
+            let source_tree = profile_root.join(name);
+            let game_tree = runtime_root.join(name);
+            if source_tree.is_symlink() {
+                return Err(format!("Refusing to copy through {}", source_tree.display()));
+            }
+            if source_tree.is_dir() {
+                ensure_no_symlinks(&source_tree)?;
+                if game_tree.is_symlink() && name != "BepInEx" {
+                    return Err(format!("Refusing to replace the symlink {}", game_tree.display()));
+                }
+            }
+        }
     }
     for name in ["BepInEx", "BepInEx_DISABLED"] {
         // A game-side link may belong to another profile. It is never a
@@ -423,6 +437,26 @@ mod tests {
             files: files.iter().map(|file| (*file).to_string()).collect(),
             ..Default::default()
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn game_local_reconciliation_detects_stale_link_without_switch_toggle() {
+        let root = std::env::temp_dir().join(format!(
+            "r2modmac-reconciliation-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let profile = root.join("profile");
+        let game = root.join("game");
+        fs::create_dir_all(profile.join("BepInEx")).unwrap();
+        fs::create_dir_all(&game).unwrap();
+        assert!(game_local_layout_needs_reconciliation(&profile, &game));
+        std::os::unix::fs::symlink(profile.join("BepInEx"), game.join("BepInEx")).unwrap();
+        assert!(game_local_layout_needs_reconciliation(&profile, &game));
+        fs::remove_file(game.join("BepInEx")).unwrap();
+        fs::create_dir_all(game.join("BepInEx")).unwrap();
+        assert!(!game_local_layout_needs_reconciliation(&profile, &game));
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

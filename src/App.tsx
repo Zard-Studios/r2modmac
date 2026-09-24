@@ -1800,13 +1800,30 @@ function App() {
       ? 'returnofmodding'
       : health?.runtime;
     if (health?.missingComponents.includes('profile-location')) {
-      await window.ipcRenderer.alert(
-        'Profile storage needs migration',
-        'BepInEx still points to files in the profile while this profile is marked game-local. ' +
-        'The BepInEx link was left untouched. A normal Repair would not safely resolve this mismatch; ' +
-        'do not reinstall the modpack until the local migration is available.'
-      );
-      return false;
+      setIsRepairingRuntime(true);
+      try {
+        // Reconcile the existing local payload even when the stored switch is
+        // already OFF. The backend checks the complete inventory before it
+        // replaces the profile link; this path never downloads a modpack.
+        await window.ipcRenderer.setProfileBepinexIsolation(profile.id, false);
+        updateProfile(profile.id, { bepinexIsolation: false, needs_sync: true });
+        const repaired = await refreshRuntimeHealth();
+        await window.ipcRenderer.alert(
+          repaired?.status === 'healthy' ? 'BepInEx moved to the game' : 'BepInEx needs attention',
+          repaired?.status === 'healthy'
+            ? 'The local BepInEx files are now in the game folder. Click “Apply to Game” before launching modded.'
+            : 'The local files were copied, but the runtime is not healthy yet. Do not launch modded until the remaining issue is resolved.'
+        );
+        return false;
+      } catch (error) {
+        await window.ipcRenderer.alert(
+          'BepInEx migration stopped',
+          `${String(error)}. No modpack was downloaded; check the local files before retrying.`
+        );
+        return false;
+      } finally {
+        setIsRepairingRuntime(false);
+      }
     }
     if (health?.status === 'healthy' || hasPendingRuntimeInstall(profile, runtime)) return true;
     if (!health || !health.repairable) {
