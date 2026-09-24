@@ -61,3 +61,6 @@ agent.md
 AGENTS.md
 CLAUDE.md
 .claude/
+
+# Private migration notes (local only)
+/docs/bepinex-game-local-migration.md
