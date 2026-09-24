@@ -1613,11 +1613,47 @@ fn require_game_local_bepinex_tree(runtime_game_path: &std::path::Path) -> Resul
 mod tests {
     use super::{
         ensure_finalize_ready, flatten_return_of_modding_manifest_paths,
-        key_is_bepinex_runtime_pack, managed_install_root,
+        key_is_bepinex_runtime_pack, managed_install_root, manifest_files_exist,
         migrate_nested_return_of_modding_plugins, reconcile_return_of_modding_plugin_visibility,
         require_game_local_bepinex_tree, return_of_modding_mods_yaml,
         set_return_of_modding_plugin_enabled, windows_bepinex_runtime_is_installed,
     };
+
+    #[test]
+    #[ignore = "release gate: game-local A→B→A still lacks active-profile and store-aware ownership"]
+    fn game_local_switch_a_b_a_does_not_keep_outgoing_files_or_misidentify_store() {
+        use crate::utils::mod_manifest::cleanup_owned_mod_manifests;
+
+        let root =
+            std::env::temp_dir().join(format!("r2modmac-profile-switch-{}", uuid::Uuid::new_v4()));
+        let plugins = root.join("BepInEx/plugins");
+        std::fs::create_dir_all(&plugins).unwrap();
+        let a_only = plugins.join("AOnly.dll");
+        let shared = plugins.join("Shared.dll");
+        std::fs::write(&a_only, b"Thunderstore A-only payload").unwrap();
+        std::fs::write(&shared, b"Thunderstore shared 1.0.0").unwrap();
+        let a_manifest_files = vec![
+            "BepInEx/plugins/AOnly.dll".to_string(),
+            "BepInEx/plugins/Shared.dll".to_string(),
+        ];
+
+        // B has no prior manifests. Current Sync loads only B's records, so
+        // its finalization passes no outgoing A manifest to cleanup.
+        cleanup_owned_mod_manifests(&root, &[], &[]).unwrap();
+        std::fs::write(&shared, b"Hexium shared 1.0.0").unwrap();
+
+        let result = std::panic::catch_unwind(|| {
+            assert!(!a_only.exists(), "B still runs A's loose plugin");
+            assert!(
+                !manifest_files_exist(&root, &a_manifest_files),
+                "returning to A accepts B's same-version Hexium bytes as Thunderstore"
+            );
+        });
+        std::fs::remove_dir_all(&root).unwrap();
+        if let Err(panic) = result {
+            std::panic::resume_unwind(panic);
+        }
+    }
 
     #[cfg(unix)]
     #[test]
