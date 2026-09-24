@@ -1424,6 +1424,15 @@ pub async fn sync_profile_to_game(
                 None => true,
             }
         });
+    // A previously applied profile must prove which runtime pack it owns.
+    // A healthy BepInEx tree alone cannot distinguish a pinned update from
+    // the old pack, and an earlier Apply may already have removed its stale
+    // manifest. Keep the legacy no-marker/no-manifest path non-disruptive.
+    let runtime_identity_required = active_marker.as_deref() == Some(profile_id.as_str())
+        || manifests_to_keep
+            .iter()
+            .chain(manifests_to_remove.iter())
+            .any(|entry| key_is_bepinex_runtime_pack(&entry.manifest.mod_key));
     let removed_manifest_keys = manifests_to_remove
         .iter()
         .map(|entry| entry.manifest.mod_key.clone())
@@ -1561,6 +1570,7 @@ pub async fn sync_profile_to_game(
                     bepinex_installed,
                     finalize,
                     incoming_manifest_present,
+                    runtime_identity_required,
                 );
             }
 
@@ -1788,14 +1798,21 @@ fn runtime_pack_install_needed(
     runtime_installed: bool,
     finalize: bool,
     incoming_manifest_present: bool,
+    runtime_identity_required: bool,
 ) -> bool {
     if switching_profiles {
         if same_package && runtime_installed {
             return false;
         }
-        return !finalize || !incoming_manifest_present;
+        return !runtime_installed || !finalize || !incoming_manifest_present;
     }
-    !runtime_installed
+    if !runtime_installed {
+        return true;
+    }
+    if runtime_identity_required {
+        return !incoming_manifest_present;
+    }
+    false
 }
 
 fn windows_bepinex_runtime_is_installed(game_path: &std::path::Path) -> bool {
@@ -2171,15 +2188,47 @@ mod tests {
     fn switching_store_or_version_installs_the_requested_runtime_pack() {
         // The old runtime is healthy, but it belongs to another store or
         // pinned version. Preflight must request the incoming package.
-        assert!(runtime_pack_install_needed(true, false, true, false, false));
+        assert!(runtime_pack_install_needed(
+            true, false, true, false, false, true
+        ));
         // Finalize only accepts the newly installed profile's own manifest.
-        assert!(runtime_pack_install_needed(true, false, true, true, false));
-        assert!(!runtime_pack_install_needed(true, false, true, true, true));
+        assert!(runtime_pack_install_needed(
+            true, false, true, true, false, true
+        ));
+        assert!(!runtime_pack_install_needed(
+            true, false, true, true, true, true
+        ));
         // Identical package identity can reuse the healthy runtime.
-        assert!(!runtime_pack_install_needed(true, true, true, false, false));
+        assert!(!runtime_pack_install_needed(
+            true, true, true, false, false, true
+        ));
         // A first Apply retains the existing healthy runtime as before.
         assert!(!runtime_pack_install_needed(
-            false, false, true, false, false
+            false, false, true, false, false, false
+        ));
+    }
+
+    #[test]
+    fn same_profile_runtime_update_repairs_missing_or_old_ownership() {
+        // The profile is active and the runtime is healthy, but its pinned
+        // pack changed. The old manifest may have been removed by an earlier
+        // Apply, so the absence of an exact manifest must request one install.
+        assert!(runtime_pack_install_needed(
+            false, false, true, false, false, true
+        ));
+        assert!(runtime_pack_install_needed(
+            false, false, true, true, false, true
+        ));
+        assert!(!runtime_pack_install_needed(
+            false, false, true, false, true, true
+        ));
+        assert!(!runtime_pack_install_needed(
+            false, false, true, true, true, true
+        ));
+        // A legacy install without a verified active marker or inventory is
+        // left alone rather than overwritten just because it has no manifest.
+        assert!(!runtime_pack_install_needed(
+            false, false, true, false, false, false
         ));
     }
 
