@@ -36,6 +36,14 @@ pub fn config_roots(game_path: &Path, tree_root: &Path, game_identifier: &str) -
         return Vec::new();
     }
 
+    // OWML has its own config layout above. Other non-BepInEx loaders do not
+    // own a BepInEx/config tree and must not acquire a phantom config owner.
+    if crate::models::loaders::resolve_loader(game_identifier, game_path)
+        != crate::models::loaders::PackageLoader::BepInEx
+    {
+        return Vec::new();
+    }
+
     let bepinex_dir =
         if tree_root.join("BepInEx").is_dir() || !tree_root.join("BepInEx_DISABLED").is_dir() {
             tree_root.join("BepInEx")
@@ -56,6 +64,51 @@ pub fn profile_backup_dir(app_data_dir: &Path, profile_id: &str) -> PathBuf {
         .join(profile_id)
         .join(".r2modmac")
         .join(BACKUP_DIR_NAME)
+}
+
+/// A profile switch can change live configs even when every mod is already
+/// installed. Preflight must report that work without touching either tree.
+pub fn config_switch_needed(
+    app_data_dir: &Path,
+    profile_id: &str,
+    game_path: &Path,
+    tree_root: &Path,
+    game_identifier: &str,
+) -> bool {
+    let owners = read_owners(&app_data_dir.join(OWNERS_FILE_NAME));
+    config_roots(game_path, tree_root, game_identifier)
+        .iter()
+        .any(|root| owners.get(&owner_slot(root)).map(String::as_str) != Some(profile_id))
+}
+
+/// Metadata and profile config backups changed by `apply_profile_configs`.
+/// Keep them in the same Apply rollback as the live game tree.
+pub fn config_transaction_targets(
+    app_data_dir: &Path,
+    profile_id: &str,
+    game_path: &Path,
+    tree_root: &Path,
+    game_identifier: &str,
+) -> Vec<PathBuf> {
+    let roots = config_roots(game_path, tree_root, game_identifier);
+    if roots.is_empty() {
+        return Vec::new();
+    }
+
+    let owners_path = app_data_dir.join(OWNERS_FILE_NAME);
+    let owners = read_owners(&owners_path);
+    let mut targets = vec![owners_path];
+    for root in roots {
+        targets.push(profile_backup_dir(app_data_dir, profile_id).join(&root.key));
+        if let Some(previous_id) = owners.get(&owner_slot(&root)) {
+            if previous_id != profile_id {
+                targets.push(profile_backup_dir(app_data_dir, previous_id).join(&root.key));
+            }
+        }
+    }
+    targets.sort();
+    targets.dedup();
+    targets
 }
 
 pub fn apply_profile_configs(
@@ -331,6 +384,37 @@ mod tests {
     fn write(path: &Path, content: &str) {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(path, content).unwrap();
+    }
+
+    #[test]
+    fn preflight_detects_config_switch_without_changing_live_files() {
+        let root = temp_dir("switch-preflight");
+        let app_data = root.join("app");
+        let game = root.join("game");
+        let live = game.join("BepInEx/config/Mod.cfg");
+        write(&live, "first profile");
+        apply_profile_configs(&app_data, "first", &game, &game, "valheim");
+
+        assert!(!config_switch_needed(
+            &app_data, "first", &game, &game, "valheim"
+        ));
+        assert!(config_switch_needed(
+            &app_data, "second", &game, &game, "valheim"
+        ));
+        assert_eq!(fs::read_to_string(&live).unwrap(), "first profile");
+        assert_eq!(
+            read_owners(&app_data.join(OWNERS_FILE_NAME))
+                .values()
+                .next()
+                .map(String::as_str),
+            Some("first")
+        );
+
+        let targets = config_transaction_targets(&app_data, "second", &game, &game, "valheim");
+        assert!(targets.contains(&app_data.join(OWNERS_FILE_NAME)));
+        assert!(targets.contains(&profile_backup_dir(&app_data, "first").join("bepinex")));
+        assert!(targets.contains(&profile_backup_dir(&app_data, "second").join("bepinex")));
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

@@ -419,14 +419,25 @@ pub async fn sync_profile_to_game(
         .join(&profile_id);
     let profile_plugins = profile_dir.join("BepInEx").join("plugins");
     let app_data_dir = crate::utils::paths::app_data_dir(&app).map_err(|e| e.to_string())?;
-
-    crate::utils::config_backup::apply_profile_configs(
+    let needs_config_switch = crate::utils::config_backup::config_switch_needed(
         &app_data_dir,
         &profile_id,
         game_path,
         &bepinex_root,
         &game_identifier,
     );
+
+    // Preflight runs before the Apply safety snapshot. Defer config writes
+    // until the finalize branch has proved that every package is available.
+    let apply_configs = || {
+        crate::utils::config_backup::apply_profile_configs(
+            &app_data_dir,
+            &profile_id,
+            game_path,
+            &bepinex_root,
+            &game_identifier,
+        );
+    };
 
     log::info!(
         "[sync_profile_to_game] Syncing profile {} to game {:?} (runtime root {:?}, BepInEx root {:?}, legacy_cache: {}, finalize: {})",
@@ -547,6 +558,7 @@ pub async fn sync_profile_to_game(
 
         let mut removed = 0;
         if finalize {
+            apply_configs();
             removed += cleanup_owned_mod_manifests(
                 &profile_dir,
                 &manifests_to_remove,
@@ -567,7 +579,8 @@ pub async fn sync_profile_to_game(
             "to_install": to_install,
             "already_installed": installed_keys.len(),
             "cached": 0,
-            "pending_removals": if finalize { 0 } else { manifests_to_remove.len() }
+            "pending_removals": if finalize { 0 } else { manifests_to_remove.len() },
+            "needs_config_switch": !finalize && needs_config_switch
         }));
     }
 
@@ -718,6 +731,9 @@ pub async fn sync_profile_to_game(
         ensure_finalize_ready(finalize, to_install.len())?;
 
         // Remove mods only after every desired payload has been installed.
+        if finalize {
+            apply_configs();
+        }
         let mut removed = 0;
         if finalize {
             for folder_name in &to_remove {
@@ -925,7 +941,8 @@ pub async fn sync_profile_to_game(
             "to_install": to_install,
             "already_installed": game_mod_folders.len(),
             "cached": cached,
-            "pending_removals": if finalize { 0 } else { to_remove.len() }
+            "pending_removals": if finalize { 0 } else { to_remove.len() },
+            "needs_config_switch": !finalize && needs_config_switch
         }));
     }
 
@@ -1028,6 +1045,7 @@ pub async fn sync_profile_to_game(
 
         let mut removed = 0;
         if finalize {
+            apply_configs();
             for folder_name in &to_remove {
                 let folder_path = mods_root.join(folder_name);
                 if folder_path.exists() {
@@ -1063,7 +1081,8 @@ pub async fn sync_profile_to_game(
             "to_install": to_install,
             "already_installed": game_mod_folders.len(),
             "cached": cached,
-            "pending_removals": if finalize { 0 } else { to_remove.len() }
+            "pending_removals": if finalize { 0 } else { to_remove.len() },
+            "needs_config_switch": !finalize && needs_config_switch
         }));
     }
 
@@ -1200,6 +1219,7 @@ pub async fn sync_profile_to_game(
         ensure_finalize_ready(finalize, to_install.len())?;
         let mut removed = 0;
         if finalize {
+            apply_configs();
             // A disabled plugin owns manifest.json even though its live file is
             // manifest.json.old. Restore that one marker before uninstall or a
             // version replacement so the ordinary ownership cleanup can remove
@@ -1243,7 +1263,8 @@ pub async fn sync_profile_to_game(
             "to_install": to_install,
             "already_installed": installed_manifest_keys.len() + installed_plugin_keys.len(),
             "cached": 0,
-            "pending_removals": if finalize { 0 } else { manifests_to_remove.len() }
+            "pending_removals": if finalize { 0 } else { manifests_to_remove.len() },
+            "needs_config_switch": !finalize && needs_config_switch
         }));
     }
 
@@ -1463,6 +1484,7 @@ pub async fn sync_profile_to_game(
     ensure_finalize_ready(finalize, to_install.len())?;
     let mut removed = 0;
     if finalize {
+        apply_configs();
         let removed_by_manifest =
             cleanup_owned_mod_manifests(&bepinex_root, &manifests_to_remove, &manifests_to_keep)?;
         let stale_generated_removed =
@@ -1543,7 +1565,8 @@ pub async fn sync_profile_to_game(
         "to_install": to_install_names,
         "already_installed": already_installed,
         "cached": cached,
-        "pending_removals": if finalize { 0 } else { to_remove.len() + manifests_to_remove.len() }
+        "pending_removals": if finalize { 0 } else { to_remove.len() + manifests_to_remove.len() },
+        "needs_config_switch": !finalize && needs_config_switch
     }))
 }
 

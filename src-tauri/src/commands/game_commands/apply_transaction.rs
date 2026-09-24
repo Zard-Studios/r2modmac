@@ -42,12 +42,36 @@ async fn transaction_targets(
     .await?
     .ok_or_else(|| "GAME_PATH_NOT_CONFIGURED".to_string())?;
     let game_root = std::path::PathBuf::from(game_path);
+    let app_data_dir = crate::utils::paths::app_data_dir(app).map_err(|error| error.to_string())?;
+    let with_config_targets = |mut targets: Vec<std::path::PathBuf>,
+                               tree_root: &std::path::Path| {
+        // An isolated BepInEx tree lives under the profile. Snapshotting the
+        // game-side link alone does not protect its live config directory.
+        for root in
+            crate::utils::config_backup::config_roots(&game_root, tree_root, game_identifier)
+        {
+            if !targets
+                .iter()
+                .any(|target| root.live_dir.starts_with(target))
+            {
+                targets.push(root.live_dir);
+            }
+        }
+        targets.extend(crate::utils::config_backup::config_transaction_targets(
+            &app_data_dir,
+            profile_id,
+            &game_root,
+            tree_root,
+            game_identifier,
+        ));
+        targets
+    };
 
     if is_outerwilds_identifier(game_identifier) || is_outerwilds_game_path(&game_root) {
-        return Ok(vec![
-            game_root.join("OWML"),
-            game_root.join("OWML_DISABLED"),
-        ]);
+        return Ok(with_config_targets(
+            vec![game_root.join("OWML"), game_root.join("OWML_DISABLED")],
+            &game_root,
+        ));
     }
 
     if is_balatro_identifier(game_identifier) || is_balatro_game_path(&game_root) {
@@ -58,7 +82,7 @@ async fn transaction_targets(
         if let Some(mods_dir) = get_balatro_mods_dir() {
             targets.push(mods_dir);
         }
-        return Ok(targets);
+        return Ok(with_config_targets(targets, &game_root));
     }
 
     // A shimloader apply writes nothing into the game but the runtime, so that
@@ -70,12 +94,15 @@ async fn transaction_targets(
         let Some(binaries_dir) =
             crate::models::loaders::shimloader_binaries_dir(&game_root, &data_folder)
         else {
-            return Ok(Vec::new());
+            return Ok(with_config_targets(Vec::new(), &game_root));
         };
-        return Ok(crate::models::loaders::SHIMLOADER_RUNTIME_FILES
-            .iter()
-            .map(|name| binaries_dir.join(name))
-            .collect());
+        return Ok(with_config_targets(
+            crate::models::loaders::SHIMLOADER_RUNTIME_FILES
+                .iter()
+                .map(|name| binaries_dir.join(name))
+                .collect(),
+            &game_root,
+        ));
     }
 
     if crate::models::loaders::uses_return_of_modding(game_identifier, &game_root) {
@@ -90,13 +117,13 @@ async fn transaction_targets(
             targets.push(game_root.join(name));
             targets.push(game_root.join(format!("{name}_DISABLED")));
         }
-        return Ok(targets);
+        return Ok(with_config_targets(targets, &game_root));
     }
 
     let runtime_root = if platform == "mac" {
         resolve_macos_runtime_root(&game_root)
     } else {
-        game_root
+        game_root.clone()
     };
     let targets = [
         "BepInEx",
@@ -113,7 +140,8 @@ async fn transaction_targets(
     .into_iter()
     .map(|name| runtime_root.join(name))
     .collect::<Vec<_>>();
-    Ok(targets)
+    let tree_root = bepinex_install_root(app, profile_id, &runtime_root)?;
+    Ok(with_config_targets(targets, &tree_root))
 }
 
 fn backup_name(index: usize) -> String {
@@ -524,6 +552,62 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 
+    #[test]
+    fn rollback_restores_config_owner_and_both_profile_backups() {
+        let root = std::env::temp_dir().join(format!(
+            "r2modmac-config-rollback-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let game_config = root.join("game/BepInEx/config");
+        let app_data = root.join("app");
+        let owners = app_data.join("config_owners.json");
+        let first_backup = app_data.join("profiles/first/.r2modmac/configs/bepinex");
+        let second_backup = app_data.join("profiles/second/.r2modmac/configs/bepinex");
+        fs::create_dir_all(&game_config).unwrap();
+        fs::create_dir_all(&first_backup).unwrap();
+        fs::create_dir_all(&second_backup).unwrap();
+        fs::write(game_config.join("mod.cfg"), b"first live").unwrap();
+        fs::write(&owners, b"first").unwrap();
+        fs::write(first_backup.join("mod.cfg"), b"first saved").unwrap();
+        fs::write(second_backup.join("mod.cfg"), b"second saved").unwrap();
+
+        let targets = vec![
+            game_config.clone(),
+            owners.clone(),
+            first_backup.clone(),
+            second_backup.clone(),
+        ];
+        let backup = root.join("snapshot");
+        for (index, target) in targets.iter().enumerate() {
+            copy_target(target, &backup.join(backup_name(index))).unwrap();
+        }
+
+        fs::write(game_config.join("mod.cfg"), b"second live").unwrap();
+        fs::write(&owners, b"second").unwrap();
+        fs::write(first_backup.join("mod.cfg"), b"first overwritten").unwrap();
+        fs::write(second_backup.join("mod.cfg"), b"second overwritten").unwrap();
+        restore_snapshot(&backup, &targets).unwrap();
+
+        assert_eq!(
+            fs::read(game_config.join("mod.cfg")).unwrap(),
+            b"first live"
+        );
+        assert_eq!(fs::read(owners).unwrap(), b"first");
+        assert_eq!(
+            fs::read(first_backup.join("mod.cfg")).unwrap(),
+            b"first saved"
+        );
+        assert_eq!(
+            fs::read(second_backup.join("mod.cfg")).unwrap(),
+            b"second saved"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
     #[cfg(unix)]
     #[test]
     fn snapshot_restore_preserves_profile_tree_behind_bepinex_link() {
@@ -542,17 +626,25 @@ mod tests {
         fs::create_dir_all(game_link.parent().unwrap()).unwrap();
         fs::create_dir_all(&backup).unwrap();
         fs::write(profile_tree.join("marker"), b"profile-data").unwrap();
+        fs::create_dir_all(profile_tree.join("config")).unwrap();
+        fs::write(profile_tree.join("config/mod.cfg"), b"old config").unwrap();
         std::os::unix::fs::symlink(&profile_tree, &game_link).unwrap();
         copy_target_with_progress(&game_link, &backup.join(backup_name(0)), &mut |_| {}).unwrap();
+        copy_target(&profile_tree.join("config"), &backup.join(backup_name(1))).unwrap();
 
         fs::remove_file(&game_link).unwrap();
         fs::create_dir_all(&game_link).unwrap();
         fs::write(game_link.join("partial"), b"failed install").unwrap();
-        restore_snapshot(&backup, &[game_link.clone()]).unwrap();
+        fs::write(profile_tree.join("config/mod.cfg"), b"new config").unwrap();
+        restore_snapshot(&backup, &[game_link.clone(), profile_tree.join("config")]).unwrap();
 
         assert!(game_link.is_symlink());
         assert_eq!(fs::read_link(&game_link).unwrap(), profile_tree);
         assert_eq!(fs::read(game_link.join("marker")).unwrap(), b"profile-data");
+        assert_eq!(
+            fs::read(game_link.join("config/mod.cfg")).unwrap(),
+            b"old config"
+        );
         assert!(!game_link.join("partial").exists());
         fs::remove_dir_all(root).unwrap();
     }

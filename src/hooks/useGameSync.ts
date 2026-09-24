@@ -256,7 +256,7 @@ export function useGameSync({
             const skippedVersionMismatch: string[] = [];
             const failedInstalls: string[] = [];
             let actuallyInstalled = 0;
-            const hasSyncWork = (syncResult.pending_removals ?? 0) > 0 || syncResult.to_install.length > 0;
+            const hasSyncWork = (syncResult.pending_removals ?? 0) > 0 || syncResult.to_install.length > 0 || !!syncResult.needs_config_switch;
             if (hasSyncWork) {
                 setProgressState({
                     isOpen: true,

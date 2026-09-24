@@ -89,6 +89,7 @@ export interface ProfileSyncResult {
     already_installed: number;
     cached: number;
     pending_removals: number;
+    needs_config_switch?: boolean;
 }
 
 export interface IElectronAPI {
