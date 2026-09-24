@@ -1314,7 +1314,12 @@ pub async fn sync_profile_to_game(
         load_owned_mod_manifests(&app, active, GAME_MANIFEST_SCOPE)?
             .into_iter()
             .filter(|entry| manifest_matches_target_root(&entry.manifest, runtime_game_path))
-            .filter(|entry| !key_is_bepinex_runtime_pack(&entry.manifest.mod_key))
+            .filter(|entry| {
+                !key_is_bepinex_runtime_pack(&entry.manifest.mod_key)
+                    || desired_key_set
+                        .iter()
+                        .any(|key| key_is_bepinex_runtime_pack(key))
+            })
             .collect::<Vec<_>>()
     } else {
         Vec::new()
@@ -1542,9 +1547,21 @@ pub async fn sync_profile_to_game(
     let mut to_install: Vec<String> = desired_key_set
         .iter()
         .filter(|pm_key| {
-            // Skip BepInExPack if BepInEx is already installed
-            if key_is_bepinex_runtime_pack(pm_key) && bepinex_installed {
-                return false;
+            // A healthy runtime only proves that *some* BepInEx is installed.
+            // On a profile switch the requested pack may be from another
+            // store or version, even when its files have identical names.
+            if key_is_bepinex_runtime_pack(pm_key) {
+                let incoming_manifest_present = manifests_to_keep.iter().any(|entry| {
+                    entry.manifest.mod_key == **pm_key
+                        && manifest_files_exist(&bepinex_root, &entry.manifest.files)
+                });
+                return runtime_pack_install_needed(
+                    switching_from.is_some(),
+                    shared_outgoing_keys.contains(*pm_key),
+                    bepinex_installed,
+                    finalize,
+                    incoming_manifest_present,
+                );
             }
 
             // A folder with the same name/version is not proof of the same
@@ -1765,6 +1782,22 @@ fn key_is_bepinex_runtime_pack(key: &str) -> bool {
     package == "bepinexpack" || package.starts_with("bepinexpack_")
 }
 
+fn runtime_pack_install_needed(
+    switching_profiles: bool,
+    same_package: bool,
+    runtime_installed: bool,
+    finalize: bool,
+    incoming_manifest_present: bool,
+) -> bool {
+    if switching_profiles {
+        if same_package && runtime_installed {
+            return false;
+        }
+        return !finalize || !incoming_manifest_present;
+    }
+    !runtime_installed
+}
+
 fn windows_bepinex_runtime_is_installed(game_path: &std::path::Path) -> bool {
     [
         game_path.join("BepInEx").join("core"),
@@ -1794,7 +1827,7 @@ mod tests {
         ensure_finalize_ready, flatten_return_of_modding_manifest_paths,
         key_is_bepinex_runtime_pack, managed_install_root,
         migrate_nested_return_of_modding_plugins, reconcile_return_of_modding_plugin_visibility,
-        require_game_local_bepinex_tree, return_of_modding_mods_yaml,
+        require_game_local_bepinex_tree, return_of_modding_mods_yaml, runtime_pack_install_needed,
         set_return_of_modding_plugin_enabled, windows_bepinex_runtime_is_installed,
     };
 
@@ -2132,6 +2165,22 @@ mod tests {
             "riskofthunder-ror2bepinexpack"
         ));
         assert!(!key_is_bepinex_runtime_pack("someone-bepinexconfigmanager"));
+    }
+
+    #[test]
+    fn switching_store_or_version_installs_the_requested_runtime_pack() {
+        // The old runtime is healthy, but it belongs to another store or
+        // pinned version. Preflight must request the incoming package.
+        assert!(runtime_pack_install_needed(true, false, true, false, false));
+        // Finalize only accepts the newly installed profile's own manifest.
+        assert!(runtime_pack_install_needed(true, false, true, true, false));
+        assert!(!runtime_pack_install_needed(true, false, true, true, true));
+        // Identical package identity can reuse the healthy runtime.
+        assert!(!runtime_pack_install_needed(true, true, true, false, false));
+        // A first Apply retains the existing healthy runtime as before.
+        assert!(!runtime_pack_install_needed(
+            false, false, true, false, false
+        ));
     }
 
     #[test]

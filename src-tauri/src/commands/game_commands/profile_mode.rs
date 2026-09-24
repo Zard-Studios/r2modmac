@@ -300,6 +300,31 @@ fn current_profile_manifest_names(profile: &serde_json::Value) -> HashSet<String
         .collect()
 }
 
+fn game_local_inventory_needs_reconciliation(
+    profile_id: &str,
+    active_profile_id: Option<&str>,
+    profile_manifests: &[StoredModOwnershipManifest],
+    game_manifests: &[StoredModOwnershipManifest],
+    game_root: &Path,
+) -> bool {
+    // An inactive profile can have a copied profile-side inventory and, during
+    // Apply, newly installed game-side manifests. Until activation completes,
+    // neither state means its old profile inventory needs migrating. In
+    // particular this check runs both before and after package installation.
+    if active_profile_id.is_some_and(|active| active != profile_id) {
+        return false;
+    }
+    // Once Apply has activated this game-local profile and written its own
+    // game inventory, a copied profile-side cache is historical data, not a
+    // migration request. The game inventory is authoritative from then on.
+    if !game_manifests.is_empty() && active_profile_id == Some(profile_id) {
+        return false;
+    }
+    profile_manifests
+        .iter()
+        .any(|profile| manifest_needs_game_scope(profile, game_manifests, game_root))
+}
+
 pub(super) fn game_local_manifest_mismatch(
     app: &AppHandle,
     profile_id: &str,
@@ -319,9 +344,24 @@ pub(super) fn game_local_manifest_mismatch(
         return Ok(false);
     }
     let game_manifests = load_owned_mod_manifests(app, profile_id, GAME_MANIFEST_SCOPE)?;
-    Ok(profile_manifests
-        .iter()
-        .any(|profile| manifest_needs_game_scope(profile, &game_manifests, game_root)))
+    // Duplication intentionally copies the profile-side inventory but drops
+    // every game-side ownership claim. Such a copy has never owned this game;
+    // its local inventory must not be mistaken for a failed migration while
+    // another profile is explicitly recorded as active.
+    let active_profile_id = profile["gameIdentifier"]
+        .as_str()
+        .map(|game_identifier| {
+            super::profile_activation::read_active_profile(game_root, game_identifier)
+        })
+        .transpose()?
+        .flatten();
+    Ok(game_local_inventory_needs_reconciliation(
+        profile_id,
+        active_profile_id.as_deref(),
+        &profile_manifests,
+        &game_manifests,
+        game_root,
+    ))
 }
 
 fn safe_inventory_path(relative: &Path) -> bool {
@@ -759,6 +799,68 @@ mod tests {
         assert!(current.contains("author-current-1.0.0"));
         assert!(current.contains("author-disabled-1.0.0"));
         assert!(!current.contains("author-removed-1.0.0"));
+    }
+
+    #[test]
+    fn duplicated_game_local_profile_does_not_claim_the_active_profiles_game() {
+        let root = std::env::temp_dir().join(format!(
+            "r2modmac-duplicate-mismatch-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let copied = StoredModOwnershipManifest {
+            manifest_path: root.join("profile/mod.json"),
+            backup_dir: root.join("profile/mod_backup"),
+            manifest: manifest("Author-Mod-1.0.0", &["BepInEx/plugins/mod.dll"]),
+        };
+        assert!(!game_local_inventory_needs_reconciliation(
+            "copy",
+            Some("original"),
+            &[copied.clone()],
+            &[],
+            &root,
+        ));
+        let installed_during_apply = StoredModOwnershipManifest {
+            manifest_path: root.join("game/new-runtime.json"),
+            backup_dir: root.join("game/new-runtime_backup"),
+            manifest: manifest("Author-NewRuntime-2.0.0", &["BepInEx/core/new.dll"]),
+        };
+        assert!(!game_local_inventory_needs_reconciliation(
+            "copy",
+            Some("original"),
+            &[copied.clone()],
+            &[installed_during_apply],
+            &root,
+        ));
+        assert!(game_local_inventory_needs_reconciliation(
+            "copy",
+            Some("copy"),
+            &[copied.clone()],
+            &[],
+            &root,
+        ));
+        assert!(game_local_inventory_needs_reconciliation(
+            "copy",
+            None,
+            &[copied],
+            &[],
+            &root,
+        ));
+        let game_manifest = StoredModOwnershipManifest {
+            manifest_path: root.join("game/mod.json"),
+            backup_dir: root.join("game/mod_backup"),
+            manifest: manifest("Author-NewVersion-2.0.0", &["BepInEx/plugins/new.dll"]),
+        };
+        assert!(!game_local_inventory_needs_reconciliation(
+            "copy",
+            Some("copy"),
+            &[StoredModOwnershipManifest {
+                manifest_path: root.join("profile/mod.json"),
+                backup_dir: root.join("profile/mod_backup"),
+                manifest: manifest("Author-Mod-1.0.0", &["BepInEx/plugins/mod.dll"]),
+            }],
+            &[game_manifest],
+            &root,
+        ));
     }
 
     #[test]
