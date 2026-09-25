@@ -147,6 +147,7 @@ export interface IElectronAPI {
     ): Promise<{ items: Package[]; total: number; }>;
     lookupPackagesByNames: (gameId: string, names: string[]) => Promise<{ found: Package[]; unknown: string[] }>;
     fetchPackageByName: (name: string, gameId?: string | null, source?: ModSource) => Promise<Package | null>;
+    fetchPackageVersions: (fullName: string, gameId: string, source: ModSource) => Promise<Package['versions']>;
     importProfile: (code: string) => Promise<any>;
     importProfileFromFile: (path: string) => Promise<any>;
     importProfileConfigs: (profileId: string, archivePath: string) => Promise<number>;

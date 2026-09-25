@@ -140,6 +140,8 @@ export const tauriAPI: IElectronAPI = {
         return await invoke('lookup_packages_by_names', { gameId, names });
     },
     fetchPackageByName: async (name: string, gameId?: string | null, source?: ModSource) => invoke<Package | null>('fetch_package_by_name', { name, gameId, source }),
+    fetchPackageVersions: async (fullName: string, gameId: string, source: ModSource) =>
+        invoke<Package['versions']>('fetch_package_versions', { fullName, gameId, source }),
     importProfile: async (code) => invoke<any>('import_profile', { code }),
     importProfileFromFile: async (path) => invoke<any>('import_profile_from_file', { path }),
     importProfileConfigs: async (profileId, archivePath) => invoke<number>('import_profile_configs', { profileId, archivePath }),

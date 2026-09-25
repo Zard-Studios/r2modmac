@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button } from '../ui';
 import { AppIcon } from '../ui/icons';
+import { SearchClearButton } from '../ui/SearchClearButton';
 
 import {
     DEFAULT_KEYBINDS,
@@ -159,7 +160,7 @@ export function KeybindsModal({ isOpen, keybinds, onChange, onClose }: KeybindsM
                     </div>
 
                     <div className="relative mt-5">
-                        <AppIcon name="search" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" />
+                        <SearchClearButton filled={!!search} onClear={() => setSearch('')} className="absolute inset-y-0 left-0 flex items-center pl-3" iconClassName="h-4 w-4" />
                         <input
                             value={search}
                             onChange={(event) => setSearch(event.target.value)}
@@ -167,16 +168,6 @@ export function KeybindsModal({ isOpen, keybinds, onChange, onClose }: KeybindsM
                             spellCheck={false}
                             className="h-10 w-full rounded-xl border border-gray-700 bg-gray-800 pl-10 pr-10 text-sm text-white placeholder-gray-500 outline-none transition-colors focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                         />
-                        {search && (
-                            <button
-                                type="button"
-                                onClick={() => setSearch('')}
-                                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg px-2 py-1 text-gray-500 hover:bg-gray-700 hover:text-white"
-                                aria-label="Clear action search"
-                            >
-                                ×
-                            </button>
-                        )}
                     </div>
                 </div>
 

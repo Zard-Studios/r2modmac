@@ -276,6 +276,30 @@ fn game_local_layout_needs_reconciliation(profile_root: &Path, runtime_root: &Pa
     })
 }
 
+fn metadata_only_game_local_repair_allowed(
+    profile_root: &Path,
+    runtime_root: &Path,
+    current: bool,
+    isolated: bool,
+    needs_layout_reconciliation: bool,
+    has_profile_manifests: bool,
+) -> bool {
+    let profile_tree_entry_exists = ["BepInEx", "BepInEx_DISABLED"]
+        .iter()
+        .any(|name| fs::symlink_metadata(profile_root.join(name)).is_ok());
+    let game_has_real_tree = ["BepInEx", "BepInEx_DISABLED"].iter().any(|name| {
+        let tree = runtime_root.join(name);
+        tree.is_dir() && !tree.is_symlink()
+    });
+
+    !isolated
+        && !current
+        && !needs_layout_reconciliation
+        && has_profile_manifests
+        && !profile_tree_entry_exists
+        && game_has_real_tree
+}
+
 fn manifest_needs_game_scope(
     profile: &StoredModOwnershipManifest,
     game_manifests: &[StoredModOwnershipManifest],
@@ -325,6 +349,46 @@ fn game_local_inventory_needs_reconciliation(
         .any(|profile| manifest_needs_game_scope(profile, game_manifests, game_root))
 }
 
+/// A copied profile can retain its old profile-scoped ownership records even
+/// though neither it nor the game has a BepInEx tree. There is no payload to
+/// migrate in that state: the ordinary game-local Sync must install it. Check
+/// directory entries, not `exists`, so a dangling link still blocks Sync.
+fn no_local_bepinex_payload_to_migrate(
+    profile_root: &Path,
+    game_root: &Path,
+    game_manifests: &[StoredModOwnershipManifest],
+    fresh_profile_install: bool,
+) -> bool {
+    let tree_absent = |root: &Path| {
+        ["BepInEx", "BepInEx_DISABLED"].iter().all(|name| {
+            matches!(
+                fs::symlink_metadata(root.join(name)),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound
+            )
+        })
+    };
+    game_root.is_dir()
+        && tree_absent(profile_root)
+        && ((game_manifests.is_empty() && tree_absent(game_root))
+            || (fresh_profile_install
+                && !game_manifests.is_empty()
+                && game_manifests.iter().all(|stored| {
+                    manifest_matches_target_root(&stored.manifest, game_root)
+                })))
+}
+
+fn fresh_profile_install(profile: &serde_json::Value) -> bool {
+    let Some(mods) = profile["mods"].as_array() else {
+        return false;
+    };
+    mods.iter().any(|item| item["enabled"].as_bool() != Some(false))
+        && mods.iter().filter(|item| item["enabled"].as_bool() != Some(false)).all(|item| {
+            item["pending_sync"].as_bool() == Some(true)
+                && item["pending_sync_kind"].as_str() == Some("add")
+                && item["sync_baseline"].is_null()
+        })
+}
+
 pub(super) fn game_local_manifest_mismatch(
     app: &AppHandle,
     profile_id: &str,
@@ -344,6 +408,18 @@ pub(super) fn game_local_manifest_mismatch(
         return Ok(false);
     }
     let game_manifests = load_owned_mod_manifests(app, profile_id, GAME_MANIFEST_SCOPE)?;
+    let profile_root = crate::utils::paths::app_data_dir(app)
+        .map_err(|error| error.to_string())?
+        .join("profiles")
+        .join(profile_id);
+    if no_local_bepinex_payload_to_migrate(
+        &profile_root,
+        game_root,
+        &game_manifests,
+        fresh_profile_install(profile),
+    ) {
+        return Ok(false);
+    }
     // Duplication intentionally copies the profile-side inventory but drops
     // every game-side ownership claim. Such a copy has never owned this game;
     // its local inventory must not be mistaken for a failed migration while
@@ -395,6 +471,7 @@ fn copy_manifests_to_game_scope(
     game_root: &Path,
     profile_manifests: &[StoredModOwnershipManifest],
     game_manifests: &[StoredModOwnershipManifest],
+    allow_game_local_payload_only: bool,
 ) -> Result<(), String> {
     if profile_manifests.is_empty() {
         return Ok(());
@@ -505,6 +582,7 @@ fn copy_manifests_to_game_scope(
                 ));
             }
             if matches!(path.components().next(), Some(Component::Normal(part)) if part == "BepInEx" || part == "BepInEx_DISABLED")
+                && !allow_game_local_payload_only
             {
                 let source_file = profile_root.join(path);
                 if !regular_inventory_file(profile_root, path)
@@ -628,6 +706,14 @@ pub async fn set_profile_bepinex_isolation(
             .iter()
             .any(|manifest| manifest_needs_game_scope(manifest, &game_manifests, &runtime_root));
     let needs_reconciliation = needs_layout_reconciliation || needs_manifest_reconciliation;
+    let metadata_only_reconciliation = metadata_only_game_local_repair_allowed(
+        &profile_root,
+        &runtime_root,
+        current,
+        isolated,
+        needs_layout_reconciliation,
+        !profile_manifests.is_empty(),
+    );
     if current == isolated && !needs_reconciliation {
         return Ok(true);
     }
@@ -660,13 +746,14 @@ pub async fn set_profile_bepinex_isolation(
         && !["BepInEx", "BepInEx_DISABLED"]
             .iter()
             .any(|name| source.join(name).is_dir())
+        && !metadata_only_reconciliation
     {
         return Err(
             "This profile has no local BepInEx files to migrate; its mode was not changed"
                 .to_string(),
         );
     }
-    if !isolated {
+    if !isolated && !metadata_only_reconciliation {
         let enabled_mods = enabled_profile_mod_names(profile)?;
         let enabled_to_preflight = if current || needs_layout_reconciliation {
             enabled_mods
@@ -755,6 +842,7 @@ pub async fn set_profile_bepinex_isolation(
             &runtime_root,
             &profile_manifests,
             &game_manifests,
+            metadata_only_reconciliation,
         )?;
         if current || needs_layout_reconciliation {
             crate::commands::mod_commands::point_game_doorstop_ini_at_tree(
@@ -780,12 +868,141 @@ pub async fn set_profile_bepinex_isolation(
 mod tests {
     use super::*;
 
+    #[test]
+    fn copied_inventory_without_any_bepinex_tree_can_sync_normally() {
+        let root = std::env::temp_dir().join(format!(
+            "r2modmac-empty-copied-inventory-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let profile = root.join("profile");
+        let game = root.join("game");
+        fs::create_dir_all(&profile).unwrap();
+        fs::create_dir_all(&game).unwrap();
+        assert!(no_local_bepinex_payload_to_migrate(&profile, &game, &[], false));
+
+        fs::create_dir(game.join("BepInEx")).unwrap();
+        assert!(!no_local_bepinex_payload_to_migrate(&profile, &game, &[], false));
+        fs::remove_dir(game.join("BepInEx")).unwrap();
+        fs::create_dir(profile.join("BepInEx_DISABLED")).unwrap();
+        assert!(!no_local_bepinex_payload_to_migrate(&profile, &game, &[], false));
+        fs::remove_dir(profile.join("BepInEx_DISABLED")).unwrap();
+
+        let game_manifests = vec![StoredModOwnershipManifest {
+            manifest_path: profile.join("game.json"),
+            backup_dir: profile.join("game_backup"),
+            manifest: manifest("Author-Mod-1.0.0", &["BepInEx/plugins/mod.dll"]),
+        }];
+        assert!(!no_local_bepinex_payload_to_migrate(
+            &profile,
+            &game,
+            &game_manifests,
+            false,
+        ));
+        fs::create_dir(game.join("BepInEx")).unwrap();
+        fs::write(game.join("BepInEx/plugins.dll"), b"installed").unwrap();
+        let mut installed = game_manifests.clone();
+        installed[0].manifest.files = vec!["BepInEx/plugins.dll".to_string()];
+        assert!(no_local_bepinex_payload_to_migrate(
+            &profile, &game, &installed, true
+        ));
+        assert!(!no_local_bepinex_payload_to_migrate(
+            &profile, &game, &installed, false
+        ));
+        fs::remove_dir_all(game.join("BepInEx")).unwrap();
+        fs::remove_dir(&game).unwrap();
+        assert!(!no_local_bepinex_payload_to_migrate(&profile, &game, &[], false));
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn only_a_completely_pending_new_profile_ignores_copied_inventory() {
+        let fresh = serde_json::json!({"mods": [
+            {"enabled": true, "pending_sync": true, "pending_sync_kind": "add", "sync_baseline": null},
+            {"enabled": true, "pending_sync": true, "pending_sync_kind": "add", "sync_baseline": null}
+        ]});
+        assert!(fresh_profile_install(&fresh));
+        let mut incomplete = fresh.clone();
+        incomplete["mods"][1]["pending_sync"] = serde_json::json!(false);
+        assert!(!fresh_profile_install(&incomplete));
+    }
+
     fn manifest(full_name: &str, files: &[&str]) -> ModOwnershipManifest {
         ModOwnershipManifest {
             mod_full_name: full_name.to_string(),
             files: files.iter().map(|file| (*file).to_string()).collect(),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn metadata_only_game_local_repair_requires_a_real_game_tree() {
+        let root = std::env::temp_dir().join(format!(
+            "r2modmac-metadata-only-repair-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let profile = root.join("profile");
+        let game = root.join("game");
+        fs::create_dir_all(game.join("BepInEx/plugins")).unwrap();
+
+        assert!(metadata_only_game_local_repair_allowed(
+            &profile, &game, false, false, false, true
+        ));
+        assert!(!metadata_only_game_local_repair_allowed(
+            &profile, &game, true, false, false, true
+        ));
+        assert!(!metadata_only_game_local_repair_allowed(
+            &profile, &game, false, true, false, true
+        ));
+        assert!(!metadata_only_game_local_repair_allowed(
+            &profile, &game, false, false, true, true
+        ));
+        assert!(!metadata_only_game_local_repair_allowed(
+            &profile, &game, false, false, false, false
+        ));
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn stale_profile_inventory_can_be_repaired_from_existing_game_files() {
+        let root = std::env::temp_dir().join(format!(
+            "r2modmac-game-local-inventory-repair-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let profile = root.join("profile");
+        let game = root.join("game");
+        let scope = profile.join(".r2modmac/manifests/profile");
+        fs::create_dir_all(&scope).unwrap();
+        fs::create_dir_all(game.join("BepInEx/plugins")).unwrap();
+        fs::write(game.join("BepInEx/plugins/mod.dll"), b"already installed").unwrap();
+
+        let mut owned = manifest("Author-Mod-1.0.0", &["BepInEx/plugins/mod.dll"]);
+        owned.target_root_hint = Some(profile.to_string_lossy().to_string());
+        let original = scope.join("mod.json");
+        crate::utils::stable_json::write_file(&original, &owned).unwrap();
+        let stored = StoredModOwnershipManifest {
+            manifest_path: original,
+            backup_dir: scope.join("mod_backup"),
+            manifest: owned,
+        };
+
+        assert!(
+            copy_manifests_to_game_scope(&profile, &game, &[stored.clone()], &[], false)
+                .unwrap_err()
+                .contains("differs from this profile")
+        );
+        copy_manifests_to_game_scope(&profile, &game, &[stored], &[], true).unwrap();
+
+        let copied_path = scope.parent().unwrap().join("game/mod.json");
+        assert!(copied_path.is_file());
+        let copied: ModOwnershipManifest =
+            serde_json::from_slice(&fs::read(&copied_path).unwrap()).unwrap();
+        assert!(manifest_matches_target_root(&copied, &game));
+        assert_eq!(
+            fs::read(game.join("BepInEx/plugins/mod.dll")).unwrap(),
+            b"already installed"
+        );
+        fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]
@@ -896,7 +1113,7 @@ mod tests {
         };
 
         assert!(manifest_needs_game_scope(&stored, &[], &game));
-        copy_manifests_to_game_scope(&profile, &game, &[stored.clone()], &[]).unwrap();
+        copy_manifests_to_game_scope(&profile, &game, &[stored.clone()], &[], false).unwrap();
         let copied_path = scope.parent().unwrap().join("game/mod.json");
         let copied: ModOwnershipManifest =
             serde_json::from_slice(&fs::read(&copied_path).unwrap()).unwrap();
@@ -929,8 +1146,14 @@ mod tests {
             &[copied_stored.clone()],
             &game
         ));
-        copy_manifests_to_game_scope(&profile, &game, &[stored.clone()], &[copied_stored.clone()])
-            .unwrap();
+        copy_manifests_to_game_scope(
+            &profile,
+            &game,
+            &[stored.clone()],
+            &[copied_stored.clone()],
+            false,
+        )
+        .unwrap();
 
         let mut conflicting = copied_stored.clone();
         conflicting.manifest.mod_full_name = "Other-Owner-9.0.0".to_string();
@@ -941,7 +1164,8 @@ mod tests {
             &profile,
             &game,
             &[stored.clone()],
-            &[conflicting.clone()]
+            &[conflicting.clone()],
+            false
         )
         .unwrap_err()
         .contains("conflicts"));
@@ -956,11 +1180,15 @@ mod tests {
         .unwrap();
 
         fs::write(game.join("BepInEx/plugins/mod.dll"), b"other profile").unwrap();
-        assert!(
-            copy_manifests_to_game_scope(&profile, &game, &[stored], &[copied_stored.clone()])
-                .unwrap_err()
-                .contains("differs")
-        );
+        assert!(copy_manifests_to_game_scope(
+            &profile,
+            &game,
+            &[stored],
+            &[copied_stored.clone()],
+            false
+        )
+        .unwrap_err()
+        .contains("differs"));
         fs::write(game.join("BepInEx/plugins/mod.dll"), b"mod").unwrap();
         crate::utils::mod_manifest::cleanup_owned_mod_manifests(&game, &[copied_stored], &[])
             .unwrap();

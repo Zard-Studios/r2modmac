@@ -5,6 +5,7 @@ import { useKeybindStore } from '../store/useKeybindStore';
 import { actionForEvent } from '../utils/keybinds';
 import { HoverMarquee } from './ui/HoverMarquee';
 import { AppIcon } from './ui/icons';
+import { SearchClearButton } from './ui/SearchClearButton';
 import {
     buildSections,
     findShortcutItem,
@@ -238,15 +239,11 @@ export function CommandPalette() {
                 onClick={(e) => e.stopPropagation()}
             >
                 <div className="flex shrink-0 items-center gap-3 border-b border-gray-800 px-5 py-4">
-                    <svg
-                        className={`h-5 w-5 shrink-0 transition-colors ${query ? 'text-blue-500' : 'text-gray-500'}`}
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth={2}
-                        viewBox="0 0 24 24"
-                    >
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                    </svg>
+                    <SearchClearButton
+                        filled={!!query}
+                        onClear={() => { setQuery(''); setHighlighted(0); }}
+                        className="flex shrink-0 items-center"
+                    />
                     {scope?.game && !scope.profile && (
                         <span className="flex shrink-0 items-center gap-2 rounded-lg border border-gray-700 bg-gray-800 py-1 pl-1 pr-2">
                             {scope.game.image && (

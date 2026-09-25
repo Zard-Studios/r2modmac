@@ -621,6 +621,7 @@ pub fn run() {
             commands::legacy_mod_commands::get_packages,
             commands::legacy_mod_commands::lookup_packages_by_names,
             commands::legacy_mod_commands::fetch_package_by_name,
+            commands::legacy_mod_commands::fetch_package_versions,
             commands::export_import::export_profile,
             commands::export_import::share_profile,
             commands::export_import::import_profile,

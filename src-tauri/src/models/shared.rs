@@ -63,6 +63,13 @@ pub struct Package {
     pub date_created: String,
     pub date_updated: String,
     pub uuid4: String,
+    /// Sum of downloads across the package's versions before catalogue truncation.
+    #[serde(default)]
+    pub total_downloads: i64,
+    /// Store-specific package identifiers are needed for on-demand version history.
+    /// The main catalogue cache intentionally keeps only each store's latest version.
+    #[serde(default)]
+    pub source_package_uuids: HashMap<ModSource, String>,
     #[serde(default)]
     pub rating_score: i64,
     #[serde(default)]

@@ -36,10 +36,13 @@ export interface Package {
     date_updated: string;
     uuid4: string;
     rating_score: number;
+    /** Sum of downloads across published versions, when provided by the catalogue. */
+    total_downloads?: number;
     is_pinned: boolean;
     is_deprecated: boolean;
     has_nsfw_content: boolean;
     categories: string[];
+    source_package_uuids?: Partial<Record<ModSource, string>>;
     versions: PackageVersion[];
 }
 

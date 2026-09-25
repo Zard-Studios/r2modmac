@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ModSource, PackageVersion, Package } from '../../types/thunderstore';
 import type { InstalledMod } from '../../types/profile';
 import DOMPurify from 'dompurify';
 import { LikeStat } from '../LikeStat';
+import { readScrollFades, ScrollFades } from '../ui/ScrollFades';
 import { marked } from 'marked';
 import { packageIdentityKey } from '../../utils/modVersioning';
 
@@ -88,6 +89,22 @@ function VersionSourcePicker({
 }) {
     const [isOpen, setIsOpen] = useState(false);
     const rootRef = useRef<HTMLDivElement>(null);
+    const scrollRef = useRef<HTMLDivElement>(null);
+    const [scrollFades, setScrollFades] = useState({ top: false, bottom: false });
+
+    const updateScrollFades = useCallback((element: HTMLDivElement) => {
+        const next = readScrollFades(element);
+        setScrollFades(current => current.top === next.top && current.bottom === next.bottom ? current : next);
+    }, []);
+
+    useLayoutEffect(() => {
+        if (!isOpen || !scrollRef.current) return;
+        const element = scrollRef.current;
+        updateScrollFades(element);
+        const resizeObserver = new ResizeObserver(() => updateScrollFades(element));
+        resizeObserver.observe(element);
+        return () => resizeObserver.disconnect();
+    }, [isOpen, versions.length, updateScrollFades]);
 
     useEffect(() => {
         if (!isOpen) return;
@@ -124,28 +141,39 @@ function VersionSourcePicker({
                 </svg>
             </button>
             {isOpen && (
-                <div className="absolute left-0 top-full z-30 mt-1 w-max min-w-full max-w-[min(22rem,calc(100vw-3rem))] overflow-hidden rounded-lg border border-gray-700 bg-gray-800 py-1 shadow-xl" role="listbox">
-                    {versions.map(version => {
-                        const active = versionChoiceKey(version) === versionChoiceKey(selected);
-                        return (
-                            <button
-                                type="button"
-                                key={versionChoiceKey(version)}
-                                onClick={() => {
-                                    onChange(version);
-                                    setIsOpen(false);
-                                }}
-                                className={`flex w-full items-center gap-2 whitespace-nowrap px-3 py-2 text-left text-sm transition-colors ${active ? 'bg-blue-500/15 text-fg-accent' : 'text-gray-200 hover:bg-gray-700'}`}
-                                role="option"
-                                aria-selected={active}
-                                title={sourceName(version.source)}
-                            >
-                                <StoreLogo source={version.source} />
-                                <span>v{version.version_number}</span>
-                                <span className="ml-auto pl-4 text-xs text-gray-500">{sourceName(version.source)}</span>
-                            </button>
-                        );
-                    })}
+                <div
+                    className="absolute left-0 top-full z-30 w-max min-w-full max-w-[min(22rem,calc(100vw-3rem))] overflow-hidden rounded-lg border border-gray-700 bg-gray-800 shadow-xl"
+                    role="listbox"
+                >
+                    <div
+                        ref={scrollRef}
+                        onScroll={event => updateScrollFades(event.currentTarget)}
+                        className="mod-version-scroll w-full overflow-y-auto overscroll-contain"
+                        style={{ maxHeight: 'min(22rem, 45dvh)' }}
+                    >
+                        {versions.map(version => {
+                            const active = versionChoiceKey(version) === versionChoiceKey(selected);
+                            return (
+                                <button
+                                    type="button"
+                                    key={versionChoiceKey(version)}
+                                    onClick={() => {
+                                        onChange(version);
+                                        setIsOpen(false);
+                                    }}
+                                    className={`flex w-full items-center gap-2 whitespace-nowrap px-3 py-2 text-left text-sm transition-colors ${active ? 'bg-blue-500/15 text-fg-accent' : 'text-gray-200 hover:bg-gray-700'}`}
+                                    role="option"
+                                    aria-selected={active}
+                                    title={sourceName(version.source)}
+                                >
+                                    <StoreLogo source={version.source} className="h-4 w-4 shrink-0" />
+                                    <span className="shrink-0">v{version.version_number}</span>
+                                    <span className="ml-auto pl-4 text-xs text-gray-500">{sourceName(version.source)}</span>
+                                </button>
+                            );
+                        })}
+                    </div>
+                    <ScrollFades {...scrollFades} surface="gray-800" />
                 </div>
             )}
         </div>
@@ -230,7 +258,9 @@ export function ModDetailModal({
     const isStoreSwitch = !!installedMod
         && installedMod.versionNumber === mod.version_number
         && installedSource !== selectedSource;
-    const isSelectedLatest = versionsList[0]?.version_number === mod.version_number;
+    const isSelectedLatest = versionsList.find(version =>
+        (version.source || 'thunderstore') === selectedSource
+    )?.version_number === mod.version_number;
 
     const [activeTab, setActiveTab] = useState<Tab>('description');
     const [readmeContent, setReadmeContent] = useState<string | null>(null);
@@ -343,6 +373,60 @@ export function ModDetailModal({
             cancelled = true;
         };
     }, [isOpen, gameId, pkg, isLocalMod]);
+
+    useEffect(() => {
+        if (!isOpen || gameId === 'outerwilds' || isLocalMod || pkg.versions.length === 0) return;
+
+        let cancelled = false;
+        const sources = Array.from(new Set(
+            pkg.versions
+                .map(version => version.source || 'thunderstore')
+                .filter((source): source is Exclude<ModSource, 'outerwilds'> => source !== 'outerwilds')
+        ));
+
+        const fetchVersionHistories = async () => {
+            const histories = await Promise.all(sources.map(async source => {
+                try {
+                    return await window.ipcRenderer.fetchPackageVersions(pkg.full_name, gameId, source);
+                } catch (error) {
+                    console.warn(`Failed to fetch ${source} version history for ${pkg.full_name}:`, error);
+                    return [];
+                }
+            }));
+            if (cancelled) return;
+
+            const versionsBySource = new Map<ModSource, PackageVersion[]>();
+            sources.forEach((source, index) => {
+                const seen = new Set<string>();
+                const versions: PackageVersion[] = [];
+                for (const version of [
+                    ...pkg.versions.filter(candidate => (candidate.source || 'thunderstore') === source),
+                    ...(histories[index] || []),
+                ]) {
+                    const key = `${source}:${version.version_number}`;
+                    if (seen.has(key)) continue;
+                    seen.add(key);
+                    versions.push({ ...version, source });
+                }
+                versionsBySource.set(source, versions);
+            });
+
+            const merged: PackageVersion[] = [];
+            const maximumHistoryLength = Math.max(0, ...Array.from(versionsBySource.values(), versions => versions.length));
+            for (let index = 0; index < maximumHistoryLength; index += 1) {
+                for (const source of sources) {
+                    const version = versionsBySource.get(source)?.[index];
+                    if (version) merged.push(version);
+                }
+            }
+            if (merged.length > 0) setVersionsList(merged);
+        };
+
+        void fetchVersionHistories();
+        return () => {
+            cancelled = true;
+        };
+    }, [isOpen, gameId, pkg.full_name, pkg.uuid4, isLocalMod]);
 
 
 
@@ -571,11 +655,11 @@ export function ModDetailModal({
                             <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-gray-500">
                                 {!isLocalMod && (
                                     <>
-                                        <span className="flex items-center gap-1.5" title={`${mod.downloads.toLocaleString()} downloads`}>
+                                        <span className="flex items-center gap-1.5" title={`${(pkg.total_downloads ?? mod.downloads).toLocaleString()} total package downloads`}>
                                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                                             </svg>
-                                            {mod.downloads.toLocaleString()}
+                                            {(pkg.total_downloads ?? mod.downloads).toLocaleString()}
                                         </span>
                                         <LikeStat
                                             count={pkg.rating_score}

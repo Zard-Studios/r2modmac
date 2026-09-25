@@ -10,6 +10,7 @@ import {
 
 import { Button } from '../ui';
 import { AppIcon } from '../ui/icons';
+import { SearchClearButton } from '../ui/SearchClearButton';
 import { Slider } from '../ui/Slider';
 import { ColorField } from '../ui/ColorPicker';
 import { Toggle } from '../ui/Toggle';
@@ -1144,13 +1145,16 @@ export function ThemeEditorModal({ isOpen, onClose }: ThemeEditorModalProps) {
                     {/* Left Sidebar */}
                     <div className="flex w-64 shrink-0 flex-col border-r border-gray-700 bg-gray-900/50">
                         <div className="p-3">
-                            <input
-                                type="text"
-                                value={searchQuery}
-                                onChange={(e) => setSearchQuery(e.target.value)}
-                                placeholder="Search themes..."
-                                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
-                            />
+                            <div className="relative">
+                                <SearchClearButton filled={!!searchQuery} onClear={() => setSearchQuery('')} className="absolute inset-y-0 left-0 flex items-center pl-2.5" iconClassName="h-3.5 w-3.5" />
+                                <input
+                                    type="text"
+                                    value={searchQuery}
+                                    onChange={(e) => setSearchQuery(e.target.value)}
+                                    placeholder="Search themes..."
+                                    className="w-full bg-gray-800 border border-gray-700 rounded-lg pl-8 pr-3 py-1.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
+                                />
+                            </div>
                         </div>
 
                         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-3 pr-2 scrollbar-thin">

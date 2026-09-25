@@ -15,6 +15,7 @@ function formatBytes(bytes: number): string {
 interface ModListItemProps {
     mod: PackageVersion;
     likesCount: number;
+    totalDownloads?: number;
     onInstall: () => void;
     onUninstall?: () => void;
     onClick?: () => void;
@@ -23,9 +24,10 @@ interface ModListItemProps {
     legacyInstallMode?: boolean;
 }
 
-export const ModListItem = memo(function ModListItem({ mod, likesCount, onInstall, onUninstall, onClick, installStatus, isBrowsing, legacyInstallMode = false }: ModListItemProps) {
+export const ModListItem = memo(function ModListItem({ mod, likesCount, totalDownloads, onInstall, onUninstall, onClick, installStatus, isBrowsing, legacyInstallMode = false }: ModListItemProps) {
     const installedLabel = legacyInstallMode ? 'Installed' : 'Added';
     const installLabel = legacyInstallMode ? 'Install' : 'Add';
+    const displayedDownloads = totalDownloads ?? mod.downloads;
 
     return (
         <div
@@ -83,9 +85,9 @@ export const ModListItem = memo(function ModListItem({ mod, likesCount, onInstal
 
             {/* Stats */}
             <div className={`mod-list-stats flex flex-col items-end gap-1 text-xs text-gray-500 font-medium justify-center flex-shrink-0 ${isBrowsing ? 'ml-auto mr-4' : 'w-24 mr-2'}`}>
-                <div className="flex items-center flex-row-reverse gap-1.5" title="Downloads">
+                <div className="flex items-center flex-row-reverse gap-1.5" title="Total package downloads">
                     <svg className="w-3.5 h-3.5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
-                    <span className="text-gray-400">{mod.downloads.toLocaleString()}</span>
+                    <span className="text-gray-400">{displayedDownloads.toLocaleString()}</span>
                 </div>
 
                 <LikeStat count={likesCount} className="flex-row-reverse gap-1.5 text-rose-400" iconClassName="w-3.5 h-3.5" />

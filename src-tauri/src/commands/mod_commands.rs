@@ -5071,6 +5071,11 @@ async fn install_mod_bytes(
                     "[install_mod] Moved the BepInEx tree into {:?}; the loader stays with the game",
                     bepinex_root
                 );
+            } else {
+                // An old isolated install can leave Doorstop aimed at a
+                // profile tree that no longer exists. Installing the pack in
+                // game-local mode must restore the loader's destination too.
+                point_game_doorstop_ini_at_tree(game_dir, game_dir)?;
             }
         } else {
             extract_regular_mod_to_root(
@@ -5950,7 +5955,7 @@ fn load_packages_from_disk(app: &AppHandle, game_id: &str) -> Option<GamePackage
             return None;
         }
     };
-    let cache_file = cache_dir.join(format!("{}_packages_v3.json.gz", game_id));
+    let cache_file = cache_dir.join(format!("{}_packages_v4.json.gz", game_id));
     if !cache_file.exists() {
         log::debug!(
             "[load_packages_from_disk] Cache file does not exist: {:?}",
@@ -6052,7 +6057,7 @@ fn save_packages_to_disk(
         .map_err(|e| format!("Failed to get cache dir: {}", e))?;
     std::fs::create_dir_all(&cache_dir)
         .map_err(|e| format!("Failed to create cache dir: {}", e))?;
-    let cache_file = cache_dir.join(format!("{}_packages_v3.json.gz", game_id));
+    let cache_file = cache_dir.join(format!("{}_packages_v4.json.gz", game_id));
     let file = std::fs::File::create(cache_file)
         .map_err(|e| format!("Failed to create cache file: {}", e))?;
     let mut encoder = flate2::write::GzEncoder::new(file, flate2::Compression::default());
@@ -6227,6 +6232,10 @@ fn merge_package_lists(
             .iter_mut()
             .find(|candidate| candidate.full_name.eq_ignore_ascii_case(&package.full_name))
         {
+            existing
+                .source_package_uuids
+                .extend(package.source_package_uuids.clone());
+            existing.total_downloads = existing.total_downloads.max(package.total_downloads);
             if package.date_updated > existing.date_updated {
                 existing.date_updated = package.date_updated.clone();
             }
@@ -6333,6 +6342,11 @@ async fn load_chunk(
 
         let source = source_for_catalogue_url(url);
         for package in &mut packages {
+            if !package.uuid4.is_empty() {
+                package
+                    .source_package_uuids
+                    .insert(source, package.uuid4.clone());
+            }
             for version in &mut package.versions {
                 version.source = source;
             }
@@ -6342,6 +6356,7 @@ async fn load_chunk(
 
         // Truncate versions to 1 (latest version) to keep memory usage extremely low
         for pkg in &mut packages {
+            pkg.total_downloads = pkg.versions.iter().map(|version| version.downloads).sum();
             if pkg.versions.len() > 1 {
                 pkg.versions.truncate(1);
             }
@@ -6599,11 +6614,13 @@ pub async fn fetch_packages(
                         date_created: first_release_date,
                         date_updated: latest_release_date,
                         uuid4: unique_name.to_string(),
+                        total_downloads: download_count as i64,
                         rating_score: download_count as i64,
                         is_pinned: is_required,
                         is_deprecated: false,
                         has_nsfw_content: false,
                         categories,
+                        source_package_uuids: Default::default(),
                         versions: versions_list,
                     });
                 }
@@ -6817,11 +6834,13 @@ pub async fn fetch_packages(
                 date_created: first_release_date,
                 date_updated: latest_release_date,
                 uuid4: unique_name.to_string(),
+                total_downloads: download_count as i64,
                 rating_score: download_count as i64,
                 is_pinned: is_required,
                 is_deprecated: false,
                 has_nsfw_content: false,
                 categories,
+                source_package_uuids: Default::default(),
                 versions: versions_list,
             });
         }
@@ -7380,8 +7399,8 @@ pub async fn get_packages(
 
             match sort_by.as_str() {
                 "downloads" => filtered.sort_by(|a, b| {
-                    let da = a.versions.first().map(|ver| ver.downloads).unwrap_or(0);
-                    let db = b.versions.first().map(|ver| ver.downloads).unwrap_or(0);
+                    let da = a.total_downloads;
+                    let db = b.total_downloads;
                     if is_asc {
                         da.cmp(&db)
                     } else {
@@ -7864,11 +7883,13 @@ pub async fn fetch_package_by_name(
             date_created: "".to_string(),
             date_updated: "".to_string(),
             uuid4: "".to_string(),
+            total_downloads: ver_downloads,
             rating_score: 0,
             is_pinned: false,
             is_deprecated: false,
             has_nsfw_content: false,
             categories: vec![],
+            source_package_uuids: Default::default(),
             versions: vec![version_struct],
         }
     } else {
@@ -7951,12 +7972,20 @@ pub async fn fetch_package_by_name(
             package_url: pkg_url,
             date_created: pkg_date_created,
             date_updated: pkg_date_updated,
-            uuid4: pkg_uuid,
+            uuid4: pkg_uuid.clone(),
+            total_downloads: val["total_downloads"].as_i64().unwrap_or(ver_downloads),
             rating_score: pkg_rating,
             is_pinned: pkg_pinned,
             is_deprecated: pkg_deprecated,
             has_nsfw_content: has_nsfw,
             categories,
+            source_package_uuids: {
+                let mut ids = std::collections::HashMap::new();
+                if !pkg_uuid.is_empty() {
+                    ids.insert(resolved_source, pkg_uuid.clone());
+                }
+                ids
+            },
             versions: vec![version_struct],
         }
     };
@@ -7987,10 +8016,213 @@ pub async fn fetch_package_by_name(
     Ok(Some(pkg))
 }
 
+fn package_version_detail_urls(
+    source: crate::models::shared::ModSource,
+    game_id: &str,
+    package_uuid: &str,
+) -> Result<Vec<String>, String> {
+    use crate::models::shared::ModSource;
+    if game_id.is_empty()
+        || !game_id
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+    {
+        return Err("Invalid community identifier for version history".to_string());
+    }
+    Ok(match source {
+        ModSource::Thunderstore => vec![format!(
+            "https://thunderstore.io/c/{game_id}/api/v1/package/{package_uuid}/"
+        )],
+        ModSource::Hexium => vec![
+            format!("https://{game_id}.hexium.gg/api/v1/package/{package_uuid}/"),
+            format!("https://hexium.gg/api/v1/package/{package_uuid}/"),
+        ],
+        ModSource::Outerwilds => return Err("Outer Wilds uses GitHub releases".to_string()),
+    })
+}
+
+/// Fetch the complete version history for one package only. The community
+/// catalogue intentionally retains one version per package to keep its memory
+/// footprint bounded; detail views use this command to load history on demand.
+#[tauri::command]
+pub async fn fetch_package_versions(
+    state: tauri::State<'_, AppState>,
+    full_name: String,
+    game_id: String,
+    source: crate::models::shared::ModSource,
+) -> Result<Vec<crate::models::shared::PackageVersion>, String> {
+    use crate::models::shared::ModSource;
+
+    if source == ModSource::Outerwilds {
+        return Err("Outer Wilds version history is provided by GitHub releases".to_string());
+    }
+
+    let normalized_name = full_name.replace('.', "-");
+    let mut name_parts = normalized_name.splitn(2, '-');
+    let owner = name_parts.next().unwrap_or_default();
+    let package_name = name_parts.next().unwrap_or_default();
+    let is_valid_name_part = |value: &str| {
+        !value.is_empty()
+            && value
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+    };
+    if !is_valid_name_part(owner) || !is_valid_name_part(package_name) {
+        return Err(format!(
+            "Invalid package name for version history: {full_name}"
+        ));
+    }
+
+    let cached_package = {
+        let packages = state.packages.read().await;
+        packages
+            .get(&game_id)
+            .and_then(|items| {
+                items
+                    .iter()
+                    .find(|package| package.full_name.eq_ignore_ascii_case(&normalized_name))
+            })
+            .cloned()
+    };
+
+    let mut package_uuid = cached_package.as_ref().and_then(|package| {
+        package
+            .source_package_uuids
+            .get(&source)
+            .filter(|uuid| !uuid.is_empty())
+            .cloned()
+            .or_else(|| {
+                (source == ModSource::Thunderstore
+                    && package
+                        .versions
+                        .iter()
+                        .any(|version| version.source == source)
+                    && !package.uuid4.is_empty())
+                .then(|| package.uuid4.clone())
+            })
+    });
+
+    let client = thunderstore_client();
+    if package_uuid.is_none() {
+        // Old on-disk catalogue caches predate source_package_uuids. Resolve
+        // the source-specific UUID from its package metadata before requesting
+        // the V1 detail endpoint.
+        let metadata_url = match source {
+            ModSource::Thunderstore => {
+                format!("https://thunderstore.io/api/experimental/package/{owner}/{package_name}/")
+            }
+            ModSource::Hexium => {
+                format!("https://hexium.gg/api/experimental/package/{owner}/{package_name}/")
+            }
+            ModSource::Outerwilds => unreachable!(),
+        };
+        let response =
+            client.get(&metadata_url).send().await.map_err(|error| {
+                format!("Failed to resolve {source:?} package metadata: {error}")
+            })?;
+        if !response.status().is_success() {
+            return Err(format!(
+                "{source:?} package metadata returned {}",
+                response.status()
+            ));
+        }
+        let metadata: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|error| format!("Invalid {source:?} package metadata: {error}"))?;
+        package_uuid = metadata["uuid4"]
+            .as_str()
+            .filter(|uuid| !uuid.is_empty())
+            .map(str::to_string);
+    }
+
+    let package_uuid = package_uuid.ok_or_else(|| {
+        format!("Could not resolve the {source:?} package ID for {normalized_name}")
+    })?;
+    if package_uuid.len() > 64
+        || !package_uuid
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() || byte == b'-')
+    {
+        return Err("Store returned an invalid package ID".to_string());
+    }
+
+    let detail_urls = package_version_detail_urls(source, &game_id, &package_uuid)?;
+
+    let mut last_error = String::new();
+    for detail_url in detail_urls {
+        let response = match client.get(&detail_url).send().await {
+            Ok(response) if response.status().is_success() => response,
+            Ok(response) => {
+                last_error = format!("{source:?} version history returned {}", response.status());
+                continue;
+            }
+            Err(error) => {
+                last_error = format!("Failed to fetch {source:?} version history: {error}");
+                continue;
+            }
+        };
+        let mut payload: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|error| format!("Invalid {source:?} version history: {error}"))?;
+        if let Some(enveloped_package) = payload.get("package").filter(|value| value.is_object()) {
+            payload = enveloped_package.clone();
+        }
+        let mut package: crate::models::shared::Package = serde_json::from_value(payload)
+            .map_err(|error| format!("Could not parse {source:?} version history: {error}"))?;
+        if !package.full_name.eq_ignore_ascii_case(&normalized_name) {
+            return Err(format!(
+                "{source:?} returned package {} while {normalized_name} was requested",
+                package.full_name
+            ));
+        }
+        if package.versions.is_empty() {
+            return Err(format!("{source:?} returned no package versions"));
+        }
+        for version in &mut package.versions {
+            version.source = source;
+        }
+        package
+            .versions
+            .sort_by(|left, right| compare_package_versions(right, left));
+        package.versions.dedup_by(|left, right| {
+            left.source == right.source && left.version_number == right.version_number
+        });
+        return Ok(package.versions);
+    }
+
+    Err(if last_error.is_empty() {
+        format!("Unable to fetch {source:?} version history for {normalized_name}")
+    } else {
+        last_error
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::io::{Cursor, Write};
+
+    #[test]
+    fn version_history_uses_community_scoped_thunderstore_endpoint() {
+        let urls = package_version_detail_urls(
+            crate::models::shared::ModSource::Thunderstore,
+            "repo",
+            "92086585-715c-427d-8c24-4c165ccca28f",
+        )
+        .unwrap();
+        assert_eq!(
+            urls,
+            vec!["https://thunderstore.io/c/repo/api/v1/package/92086585-715c-427d-8c24-4c165ccca28f/"]
+        );
+        assert!(package_version_detail_urls(
+            crate::models::shared::ModSource::Thunderstore,
+            "repo.attacker.example",
+            "uuid"
+        )
+        .is_err());
+    }
 
     fn catalogue_package(version: &str, source: crate::models::shared::ModSource) -> Package {
         let source_name = match source {
@@ -7998,7 +8230,7 @@ mod tests {
             crate::models::shared::ModSource::Hexium => "hexium",
             crate::models::shared::ModSource::Outerwilds => "outerwilds",
         };
-        serde_json::from_value(serde_json::json!({
+        let mut package: Package = serde_json::from_value(serde_json::json!({
             "name": "SharedMod",
             "full_name": "Author-SharedMod",
             "date_updated": "2026-09-22T00:00:00Z",
@@ -8012,7 +8244,11 @@ mod tests {
                 "source": source_name
             }]
         }))
-        .unwrap()
+        .unwrap();
+        package
+            .source_package_uuids
+            .insert(source, format!("{source_name}-package"));
+        package
     }
 
     #[test]
@@ -8035,6 +8271,20 @@ mod tests {
         assert_eq!(
             packages[0].versions[0].source,
             crate::models::shared::ModSource::Hexium
+        );
+        assert_eq!(
+            packages[0]
+                .source_package_uuids
+                .get(&crate::models::shared::ModSource::Thunderstore)
+                .map(String::as_str),
+            Some("thunderstore-package")
+        );
+        assert_eq!(
+            packages[0]
+                .source_package_uuids
+                .get(&crate::models::shared::ModSource::Hexium)
+                .map(String::as_str),
+            Some("hexium-package")
         );
     }
 
@@ -8215,11 +8465,13 @@ mod tests {
             date_created: "".to_string(),
             date_updated: "2026-06-19".to_string(),
             uuid4: "some-uuid".to_string(),
+            total_downloads: 0,
             rating_score: 10,
             is_pinned: false,
             is_deprecated: false,
             has_nsfw_content: false,
             categories: vec![],
+            source_package_uuids: Default::default(),
             versions: vec![],
         };
         let cache = GamePackagesCache {
@@ -9207,6 +9459,25 @@ mod game_ini_follows_tree_tests {
         );
         assert!(written.contains("enabled=true"));
 
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn game_local_runtime_repoints_an_old_isolated_doorstop_config() {
+        let root = world("back-to-game");
+        let game = root.join("game");
+        let profile = root.join("profiles/old");
+        fs::create_dir_all(&game).unwrap();
+        fs::write(game.join("doorstop_config.ini"), SHIPPED).unwrap();
+        point_game_doorstop_ini_at_tree(&game, &profile).unwrap();
+        point_game_doorstop_ini_at_tree(&game, &game).unwrap();
+
+        let written = fs::read_to_string(game.join("doorstop_config.ini")).unwrap();
+        let expected = game.join("BepInEx").to_string_lossy().replace('/', "\\");
+        assert!(written.contains(&format!(
+            "targetAssembly={expected}\\core\\BepInEx.Preloader.dll"
+        )));
+        assert!(!written.contains("profiles\\old"));
         fs::remove_dir_all(root).unwrap();
     }
 

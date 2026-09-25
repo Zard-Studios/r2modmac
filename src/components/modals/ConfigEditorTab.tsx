@@ -3,6 +3,7 @@ import { useAppStore } from '../../store/useAppStore';
 import { censorPath, uncensorPath } from '../../utils/pathCensorUtils';
 import { CensoredInput } from '../ui/PathCensor';
 import { Toggle } from '../ui/Toggle';
+import { SearchClearButton } from '../ui/SearchClearButton';
 import { revealInFileManagerLabel } from '../../utils/platformUtils';
 
 import type { ConfigFileInfo } from '../../tauriAdapter';
@@ -1604,9 +1605,7 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
                 {/* Search & Filter */}
                 <div className="p-2 border-b border-gray-700/80 flex-shrink-0 flex gap-1.5 items-center">
                     <div className="relative flex-1">
-                        <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-500 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                        </svg>
+                        <SearchClearButton filled={!!search} onClear={() => setSearch('')} className="absolute inset-y-0 left-0 flex items-center pl-2.5" iconClassName="h-3.5 w-3.5" />
                         <input
                             ref={searchInputRef}
                             type="text"
@@ -1615,16 +1614,6 @@ export function ConfigEditorTab({ profileId, gameIdentifier, platform, mods = []
                             placeholder={filterTarget === 'files' ? "Search files…" : filterTarget === 'settings' ? "Search settings…" : "Search files & settings…"}
                             className="w-full pl-8 pr-6 py-1.5 bg-gray-800/70 border border-gray-700/70 rounded-md text-[11px] text-white placeholder-gray-500 focus:outline-none focus:border-blue-500/70 focus:bg-gray-800"
                         />
-                        {search && (
-                            <button
-                                onClick={() => setSearch('')}
-                                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300"
-                            >
-                                <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                                </svg>
-                            </button>
-                        )}
                     </div>
                     {/* Filter Popover Button */}
                     <div className="relative" ref={filterPopoverRef}>

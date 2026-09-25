@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { GameSelector } from '../game/GameSelector';
+import { SearchClearButton } from '../ui/SearchClearButton';
 import type { Community, CommunityPlatformInfo } from '../../types/thunderstore';
 import type { Profile } from '../../types/profile';
 import { HoverMarquee } from '../ui';
@@ -301,11 +302,7 @@ export function DefaultGamePickerModal({
                         <div className="px-7 py-4 border-b border-gray-800 bg-gray-900/90 shrink-0 z-10">
                             <div className="flex items-stretch gap-3 min-w-0">
                                 <div className="relative flex-1 min-w-0">
-                                    <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-gray-500">
-                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                                        </svg>
-                                    </div>
+                                    <SearchClearButton filled={!!searchQuery} onClear={() => setSearchQuery('')} className="absolute inset-y-0 left-0 flex items-center pl-4" />
                                     <input
                                         className="w-full h-full min-h-[52px] bg-gray-800 border border-gray-700 pl-12 pr-24 py-3 rounded-xl text-base text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 transition-all shadow-lg"
                                         placeholder="Search for a game..."
@@ -518,6 +515,4 @@ export function DefaultGamePickerModal({
         </div>
     );
 }
-
-
 

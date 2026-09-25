@@ -395,6 +395,14 @@
   transition-delay: 0s !important;
 }
 
+/* Keep version rows edge-to-edge even when the menu is scrollable. */
+.mod-version-scroll {
+  scrollbar-width: none;
+}
+.mod-version-scroll::-webkit-scrollbar {
+  display: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
   :root.r2-theme-crossfade-a::after,
   :root.r2-theme-crossfade-b::after {

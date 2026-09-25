@@ -78,6 +78,14 @@ export const hasPendingRuntimeInstall = (
     });
 };
 
+/** These are local storage migrations, not loader installs, so a queued
+ * BepInExPack must never suppress their repair path. */
+export const requiresBepInExStorageRepair = (health: RuntimeHealth | null | undefined) =>
+    health?.runtime === 'bepinex'
+    && health.missingComponents.some(component =>
+        component === 'profile-location' || component === 'inventory-location'
+    );
+
 export const migratePendingSyncBaselines = (
     profile: Profile,
     inspection: ProfileSyncInspection,

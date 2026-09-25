@@ -5,9 +5,11 @@ import type { Profile, InstalledMod } from '../../types/profile';
 import type { RuntimeHealth } from '../../types/electron';
 import type { ProfileModUpdate } from '../../hooks/useModActions';
 import { Button, DialogLayer, HoverMarquee } from '../ui';
+import { readScrollFades, ScrollFades } from '../ui/ScrollFades';
+import { SearchClearButton } from '../ui/SearchClearButton';
 import { KeyboardShortcuts } from '../KeyboardShortcuts';
 import { compareVersions, hasNewerVersion, latestVersionNumber, parsePackageReference } from '../../utils/modVersioning';
-import { hasPendingRuntimeInstall, restoreInstalledMod } from '../../utils/profileSync';
+import { hasPendingRuntimeInstall, requiresBepInExStorageRepair, restoreInstalledMod } from '../../utils/profileSync';
 import { loaderDisplayName } from '../../utils/loaderPackages';
 import { getProfileAvatarGradient } from '../../utils/profileAvatar';
 import { runWithConcurrency } from '../../utils/concurrency';
@@ -387,6 +389,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
     }, [confirmBeforeApplyToGame, pendingEntries, onInstallToGame]);
     const pendingSyncCount = pendingEntries.length;
     const runtimeQueuedForSync = hasPendingRuntimeInstall(activeProfile, runtimeHealth?.runtime);
+    const storageRepairRequired = requiresBepInExStorageRepair(runtimeHealth);
     const pendingChangeCounts = useMemo(() => (
         pendingEntries.reduce<Record<string, number>>((result, entry) => {
             result[entry.kind] = (result[entry.kind] || 0) + 1;
@@ -475,10 +478,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
     });
     const updateScrollFades = (element: HTMLDivElement | null) => {
         if (!element) return;
-        const next = {
-            top: element.scrollTop > 1,
-            bottom: element.scrollTop + element.clientHeight < element.scrollHeight - 1,
-        };
+        const next = readScrollFades(element);
         setScrollFades(current => current.top === next.top && current.bottom === next.bottom ? current : next);
     };
     useEffect(() => {
@@ -868,11 +868,12 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
             <div className="profile-sidebar-motion-item [--sidebar-motion-order:1] px-4 pt-4 pb-2">
                 <div className="flex gap-2">
                     <div className="relative group flex-1 min-w-0">
-                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                            <svg className={`w-4 h-4 transition-colors duration-200 ${searchQuery ? 'text-blue-500' : 'text-gray-500 group-focus-within:text-blue-500'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                            </svg>
-                        </div>
+                        <SearchClearButton
+                            filled={!!searchQuery}
+                            onClear={() => { clearSelections(); setSearchQuery(''); }}
+                            className="absolute inset-y-0 left-0 flex items-center pl-3 group-focus-within:text-fg-accent"
+                            iconClassName="h-4 w-4"
+                        />
                         <input
                             ref={searchInputRef}
                             type="text"
@@ -903,7 +904,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                 </div>
             </div>
 
-            {runtimeHealth && !runtimeQueuedForSync && ['missing', 'incomplete', 'unconfigured', 'unsupported'].includes(runtimeHealth.status) && (
+            {runtimeHealth && (!runtimeQueuedForSync || storageRepairRequired) && ['missing', 'incomplete', 'unconfigured', 'unsupported'].includes(runtimeHealth.status) && (
                 <div className="profile-sidebar-motion-item [--sidebar-motion-order:2] mx-4 mb-2 flex items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2.5">
                     <svg className="h-4 w-4 flex-shrink-0 text-fg-warning" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
                         <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l6.518 11.597c.75 1.334-.213 2.98-1.742 2.98H3.48c-1.53 0-2.493-1.646-1.743-2.98L8.257 3.1zM11 14a1 1 0 10-2 0 1 1 0 002 0zm-1-6a1 1 0 00-1 1v3a1 1 0 102 0V9a1 1 0 00-1-1z" clipRule="evenodd" />
@@ -1352,8 +1353,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                 )}
                 </div>
                 </div>
-                <div aria-hidden="true" className={`pointer-events-none absolute inset-x-0 top-0 z-10 h-7 bg-gradient-to-b from-gray-900 via-gray-900/80 to-transparent transition-opacity duration-200 ease-out ${scrollFades.top ? 'opacity-100' : 'opacity-0'}`} />
-                <div aria-hidden="true" className={`pointer-events-none absolute inset-x-0 bottom-0 z-10 h-7 bg-gradient-to-t from-gray-900 via-gray-900/80 to-transparent transition-opacity duration-200 ease-out ${scrollFades.bottom ? 'opacity-100' : 'opacity-0'}`} />
+                <ScrollFades {...scrollFades} />
                 </div>
             </div>
 

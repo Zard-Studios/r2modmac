@@ -41,7 +41,7 @@ import type { ProfileModUpdate } from './hooks/useModActions';
 import { useProfileActions } from './hooks/useProfileActions';
 import { useGameSync } from './hooks/useGameSync';
 import { compareVersions, findPinnedVersionForSource, parsePackageReference } from './utils/modVersioning';
-import { getProfileModKey, hasPendingRuntimeInstall, migratePendingSyncBaselines, restoreInstalledMod } from './utils/profileSync';
+import { getProfileModKey, hasPendingRuntimeInstall, migratePendingSyncBaselines, requiresBepInExStorageRepair, restoreInstalledMod } from './utils/profileSync';
 import { isLoaderPackage, isRepairableLoaderPackage, isReturnOfModdingCommunity, loaderDisplayName, loaderPackageIdsForCommunity } from './utils/loaderPackages';
 import { isTextEntryTarget, shouldReleaseSearchFocus } from './utils/searchField';
 import { dialogStack } from './utils/dialogStack';
@@ -1786,7 +1786,7 @@ function App() {
     });
   }, [activeProfile, updateProfile]);
 
-  const repairProfileRuntime = useCallback(async (): Promise<boolean> => {
+  const repairProfileRuntime = useCallback(async (options?: { continueAfterStorageRepair?: boolean }): Promise<boolean> => {
     const profile = useProfileStore.getState().profiles.find(candidate => candidate.id === activeProfileId);
     if (!profile || isRepairingRuntime) return false;
     const community = profile.gameIdentifier || selectedCommunity;
@@ -1808,6 +1808,9 @@ function App() {
         await window.ipcRenderer.setProfileBepinexIsolation(profile.id, false);
         updateProfile(profile.id, { bepinexIsolation: false, needs_sync: true });
         const repaired = await refreshRuntimeHealth();
+        if (repaired?.status === 'healthy' && options?.continueAfterStorageRepair) {
+          return true;
+        }
         await window.ipcRenderer.alert(
           repaired?.status === 'healthy' ? 'BepInEx storage repaired' : 'BepInEx needs attention',
           repaired?.status === 'healthy'
@@ -2054,10 +2057,12 @@ function App() {
     }
 
     const health = await refreshRuntimeHealth();
-    if (health && (health.status === 'missing' || health.status === 'incomplete') && !hasPendingRuntimeInstall(original, health.runtime)) {
+    const storageRepairRequired = requiresBepInExStorageRepair(health);
+    if (health && (health.status === 'missing' || health.status === 'incomplete')
+      && (storageRepairRequired || !hasPendingRuntimeInstall(original, health.runtime))) {
       // Choosing Sync already authorizes the file changes. A second question
       // here only interrupts the operation; repair is a required first step.
-      if (!await repairProfileRuntime()) return;
+      if (!await repairProfileRuntime({ continueAfterStorageRepair: storageRepairRequired })) return;
     }
 
     const selected = new Set(ids);
@@ -2632,10 +2637,13 @@ function App() {
     try {
       if (isVanillaOverride === undefined) {
         const health = await refreshRuntimeHealth();
-        if (health && (health.status === 'missing' || health.status === 'incomplete') && !hasPendingRuntimeInstall(activeProfile, health.runtime)) {
+        const storageRepairRequired = requiresBepInExStorageRepair(health);
+        const currentProfile = useProfileStore.getState().profiles.find(profile => profile.id === activeProfileId) || activeProfile;
+        if (health && (health.status === 'missing' || health.status === 'incomplete')
+          && (storageRepairRequired || !hasPendingRuntimeInstall(currentProfile, health.runtime))) {
           // Apply is already the user's consent to synchronize this profile.
           // Repairing its required runtime is part of that one operation.
-          if (!await repairProfileRuntime()) return;
+          if (!await repairProfileRuntime({ continueAfterStorageRepair: storageRepairRequired })) return;
         }
       }
       // Confirming an apply is the pending-changes modal's job in the sidebar,

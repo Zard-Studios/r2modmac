@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import type { InstalledMod, Profile } from '../src/types/profile.ts';
 import { isLoaderPackage, isRepairableLoaderPackage, isReturnOfModdingCommunity, loaderDisplayName, loaderPackageIds, loaderPackageIdsForCommunity } from '../src/utils/loaderPackages.ts';
-import { hasPendingRuntimeInstall } from '../src/utils/profileSync.ts';
+import { hasPendingRuntimeInstall, requiresBepInExStorageRepair } from '../src/utils/profileSync.ts';
 
 const profileWith = (mod: InstalledMod): Profile => ({
     id: 'hades',
@@ -12,6 +12,33 @@ const profileWith = (mod: InstalledMod): Profile => ({
     mods: [mod],
     dateCreated: 1,
     lastUsed: 0,
+});
+
+test('game-local BepInEx inventory repairs stay required even with a loader queued', () => {
+    assert.equal(requiresBepInExStorageRepair({
+        runtime: 'bepinex',
+        status: 'incomplete',
+        missingComponents: ['inventory-location'],
+        repairable: false,
+    }), true);
+    assert.equal(requiresBepInExStorageRepair({
+        runtime: 'bepinex',
+        status: 'incomplete',
+        missingComponents: ['profile-location'],
+        repairable: false,
+    }), true);
+    assert.equal(requiresBepInExStorageRepair({
+        runtime: 'bepinex',
+        status: 'missing',
+        missingComponents: ['runtime'],
+        repairable: true,
+    }), false);
+    assert.equal(requiresBepInExStorageRepair({
+        runtime: 'owml',
+        status: 'incomplete',
+        missingComponents: ['inventory-location'],
+        repairable: false,
+    }), false);
 });
 
 test('the ReturnOfModding loader is more than one package', () => {
