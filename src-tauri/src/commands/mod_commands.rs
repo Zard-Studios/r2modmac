@@ -2739,7 +2739,8 @@ async fn download_newtonsoft_json_dll() -> Result<Vec<u8>, String> {
 
 async fn prepare_ror2_crossover_newtonsoft_compat(
     game_dir: &std::path::Path,
-    mod_name: &str,
+    tree_root: &std::path::Path,
+    required: bool,
     target_is_macos: bool,
 ) -> Result<Vec<RuntimeCompatAsset>, String> {
     if !should_install_ror2_crossover_newtonsoft_compat(game_dir, target_is_macos) {
@@ -2747,22 +2748,30 @@ async fn prepare_ror2_crossover_newtonsoft_compat(
     }
 
     let relative_path = std::path::PathBuf::from(ROR2_CROSSOVER_NEWTONSOFT_TARGET);
-    if game_dir.join(&relative_path).exists() {
+    if tree_root.join(&relative_path).is_file() {
         return Ok(Vec::new());
     }
 
     log::debug!(
-        "[install_mod] Risk of Rain 2 compatibility: installing Newtonsoft.Json {} for CrossOver/Wine runtime",
-        NEWTONSOFT_JSON_VERSION
+        "[ror2_wine_compat] Installing Newtonsoft.Json {} into {}",
+        NEWTONSOFT_JSON_VERSION,
+        tree_root.display()
     );
 
-    let compat_required = extract_mod_key(mod_name) == "levteam-macoshealthbarsfix";
-    let bytes = match download_newtonsoft_json_dll().await {
+    // Earlier builds put the helper in the game tree even when Doorstop pointed
+    // BepInEx at an isolated profile. Reuse that copy to repair existing installs.
+    let legacy_path = game_dir.join(&relative_path);
+    let bytes = match if tree_root != game_dir && legacy_path.is_file() {
+        fs::read(&legacy_path)
+            .map_err(|error| format!("Failed to read existing Newtonsoft.Json helper: {}", error))
+    } else {
+        download_newtonsoft_json_dll().await
+    } {
         Ok(bytes) => bytes,
-        Err(error) if compat_required => return Err(error),
+        Err(error) if required => return Err(error),
         Err(error) => {
             log::warn!(
-                "[install_mod] Risk of Rain 2 compatibility: could not install Newtonsoft.Json helper: {}",
+                "[ror2_wine_compat] Could not install Newtonsoft.Json helper: {}",
                 error
             );
             return Ok(Vec::new());
@@ -2773,6 +2782,16 @@ async fn prepare_ror2_crossover_newtonsoft_compat(
         bytes,
         label: "Newtonsoft.Json",
     }])
+}
+
+pub(crate) async fn ensure_ror2_wine_newtonsoft_compat(
+    game_dir: &std::path::Path,
+    tree_root: &std::path::Path,
+) -> Result<(), String> {
+    // A missing helper makes BepInEx start successfully while R2API plugins
+    // that reference Newtonsoft.Json fail at chainloader startup.
+    let assets = prepare_ror2_crossover_newtonsoft_compat(game_dir, tree_root, true, false).await?;
+    write_runtime_compat_assets(tree_root, &assets, false)
 }
 
 fn write_runtime_compat_assets(
@@ -4908,8 +4927,15 @@ async fn install_mod_bytes(
         archive_for_detect.len()
     );
     let mut macos_runtime_overlay_bytes: Option<Vec<u8>> = None;
-    let runtime_compat_assets =
-        prepare_ror2_crossover_newtonsoft_compat(game_dir, &mod_name, target_is_macos).await?;
+    let bepinex_root =
+        crate::commands::game_commands::bepinex_install_root(&app, &profile_id, game_dir)?;
+    let runtime_compat_assets = prepare_ror2_crossover_newtonsoft_compat(
+        game_dir,
+        &bepinex_root,
+        extract_mod_key(&mod_name) == "levteam-macoshealthbarsfix",
+        target_is_macos,
+    )
+    .await?;
 
     if is_bepinex_pack && target_is_macos {
         let version_number = extract_version_number_from_full_name(&mod_name);
@@ -4993,8 +5019,6 @@ async fn install_mod_bytes(
         // With isolation on the tree lives in the profile, so a mod is written
         // there and Doorstop is pointed at it on launch. The loader files stay
         // in the game, which is what the game loads.
-        let bepinex_root =
-            crate::commands::game_commands::bepinex_install_root(&app, &profile_id, game_dir)?;
         let isolated = bepinex_root != game_dir;
         if target_is_macos && !isolated && game_dir.join("BepInEx").is_symlink() {
             crate::commands::game_commands::detach_isolated_bepinex_link(game_dir)?;
@@ -5091,7 +5115,7 @@ async fn install_mod_bytes(
 
         if !runtime_compat_assets.is_empty() {
             write_runtime_compat_assets(
-                game_dir,
+                &bepinex_root,
                 &runtime_compat_assets,
                 install_into_disabled_runtime,
             )?;
@@ -8440,6 +8464,30 @@ mod tests {
         write_runtime_compat_assets(&dir, &[asset], false).unwrap();
         let written = fs::read(dir.join(ROR2_CROSSOVER_NEWTONSOFT_TARGET)).unwrap();
         assert_eq!(written, b"newtonsoft dll");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn repairs_isolated_ror2_newtonsoft_from_legacy_game_location() {
+        let dir = temp_dir("ror2-newtonsoft-isolated-repair");
+        let game = dir.join("Risk of Rain 2");
+        let profile = dir.join("profile");
+        let legacy = game.join(ROR2_CROSSOVER_NEWTONSOFT_TARGET);
+        fs::create_dir_all(legacy.parent().unwrap()).unwrap();
+        fs::write(&legacy, b"legacy helper").unwrap();
+
+        ensure_ror2_wine_newtonsoft_compat(&game, &profile)
+            .await
+            .unwrap();
+
+        let installed = profile.join(ROR2_CROSSOVER_NEWTONSOFT_TARGET);
+        assert_eq!(fs::read(&installed).unwrap(), b"legacy helper");
+        fs::write(&installed, b"profile helper").unwrap();
+        ensure_ror2_wine_newtonsoft_compat(&game, &profile)
+            .await
+            .unwrap();
+        assert_eq!(fs::read(&installed).unwrap(), b"profile helper");
         let _ = fs::remove_dir_all(dir);
     }
 

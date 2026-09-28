@@ -878,6 +878,14 @@ pub async fn install_to_game(
                     game_path, &tree_root,
                 )?;
             }
+            if crate::models::loaders::resolve_loader(&game_identifier, game_path)
+                == crate::models::loaders::PackageLoader::BepInEx
+            {
+                crate::commands::legacy_mod_commands::ensure_ror2_wine_newtonsoft_compat(
+                    game_path, &tree_root,
+                )
+                .await?;
+            }
         }
     }
 

@@ -164,6 +164,15 @@ async fn launch_game_with_mods_inner(
     }
 
     if is_windows_profile {
+        if crate::models::loaders::resolve_loader(&game_identifier, &game_path)
+            == crate::models::loaders::PackageLoader::BepInEx
+        {
+            let tree_root = bepinex_install_root(&app, &profile_id, &game_path)?;
+            crate::commands::legacy_mod_commands::ensure_ror2_wine_newtonsoft_compat(
+                &game_path, &tree_root,
+            )
+            .await?;
+        }
         let shimloader = shimloader_launch_for(&app, &game_identifier, &profile_id, &game_path);
         let enable_return_of_modding =
             crate::models::loaders::uses_return_of_modding(&game_identifier, &game_path);
