@@ -364,6 +364,33 @@ mod launch_diagnostics_tests {
         fs::remove_dir_all(root).unwrap();
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn portingkit_prefix_translates_the_selected_profile_to_a_wine_drive_path() {
+        use std::os::unix::fs::symlink;
+
+        let root = world();
+        let prefix = root.join("Applications/Porting Kit/Steam.app/Contents/SharedSupport/prefix");
+        let game = prefix.join("drive_c/Program Files (x86)/Steam/steamapps/common/Risk of Rain 2");
+        let profile = root.join("Library/Application Support/com.r2modmac/profiles/second");
+        fs::create_dir_all(prefix.join("drive_c")).unwrap();
+        fs::create_dir_all(prefix.join("dosdevices")).unwrap();
+        fs::create_dir_all(&game).unwrap();
+        fs::create_dir_all(profile.join("BepInEx/core")).unwrap();
+        symlink(&root, prefix.join("dosdevices/z:")).unwrap();
+        fs::write(game.join("doorstop_config.ini"), DOORSTOP_CONFIG).unwrap();
+
+        select_bepinex_profile_for_windows_launch(&game, &profile).unwrap();
+
+        let written = fs::read_to_string(game.join("doorstop_config.ini")).unwrap();
+        assert!(written.contains(
+            "targetAssembly=Z:\\Library\\Application Support\\com.r2modmac\\profiles\\second\\BepInEx\\core\\BepInEx.Preloader.dll"
+        ));
+        assert!(!written.contains("/Users/"));
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn launch_results_have_distinct_searchable_outcomes() {
         assert_eq!(launch_outcome(&Ok(())), "success");
