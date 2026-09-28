@@ -1562,7 +1562,11 @@ pub async fn sync_profile_to_game(
             if key_is_bepinex_runtime_pack(pm_key) {
                 let incoming_manifest_present = manifests_to_keep.iter().any(|entry| {
                     entry.manifest.mod_key == **pm_key
-                        && manifest_files_exist(&bepinex_root, &entry.manifest.files)
+                        && bepinex_runtime_pack_manifest_files_exist(
+                            runtime_game_path,
+                            &bepinex_root,
+                            &entry.manifest.files,
+                        )
                 });
                 return runtime_pack_install_needed(
                     switching_from.is_some(),
@@ -2314,6 +2318,63 @@ fn manifest_files_exist(target_root: &std::path::Path, files: &[String]) -> bool
         }
     }
     true
+}
+
+/// An isolated BepInEx runtime is split across two roots: Doorstop's loader
+/// files remain beside the game, while the BepInEx tree lives in the profile.
+/// Runtime-pack manifests contain both sets of relative paths, so validate
+/// each file against either root instead of incorrectly reporting the pack as
+/// missing when the profile tree is healthy.
+fn bepinex_runtime_pack_manifest_files_exist(
+    runtime_game_root: &std::path::Path,
+    bepinex_root: &std::path::Path,
+    files: &[String],
+) -> bool {
+    !files.is_empty()
+        && files
+            .iter()
+            .all(|file| runtime_game_root.join(file).exists() || bepinex_root.join(file).exists())
+}
+
+#[cfg(test)]
+mod split_runtime_manifest_tests {
+    use super::{bepinex_runtime_pack_manifest_files_exist, manifest_files_exist};
+    use std::fs;
+
+    #[test]
+    fn isolated_runtime_pack_can_span_game_and_profile_roots() {
+        let root = std::env::temp_dir().join(format!(
+            "r2modmac-split-runtime-manifest-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let game = root.join("game");
+        let profile = root.join("profile");
+        fs::create_dir_all(game.join("BepInEx/core")).unwrap();
+        fs::create_dir_all(profile.join("BepInEx/core")).unwrap();
+        fs::write(game.join("winhttp.dll"), b"loader").unwrap();
+        fs::write(game.join("doorstop_config.ini"), b"config").unwrap();
+        fs::write(
+            profile.join("BepInEx/core/BepInEx.Preloader.dll"),
+            b"preloader",
+        )
+        .unwrap();
+        let files = vec![
+            "winhttp.dll".to_string(),
+            "doorstop_config.ini".to_string(),
+            "BepInEx/core/BepInEx.Preloader.dll".to_string(),
+        ];
+
+        assert!(!manifest_files_exist(&profile, &files));
+        assert!(bepinex_runtime_pack_manifest_files_exist(
+            &game, &profile, &files
+        ));
+
+        fs::remove_file(game.join("winhttp.dll")).unwrap();
+        assert!(!bepinex_runtime_pack_manifest_files_exist(
+            &game, &profile, &files
+        ));
+        fs::remove_dir_all(root).unwrap();
+    }
 }
 
 fn convert_to_owml_unix_path(path: &std::path::Path) -> String {
