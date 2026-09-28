@@ -29,6 +29,18 @@ export function satisfiesMinimumVersion(installedVersion: string, requiredVersio
     return compareVersions(installedVersion, requiredVersion) >= 0;
 }
 
+export function cachedPackageSatisfiesRequirement(
+    installedCache: ReadonlySet<string>,
+    packageName: string,
+    requiredVersion: string,
+): boolean {
+    const prefix = `package:${packageName.toLowerCase()}@`;
+    return Array.from(installedCache).some(marker =>
+        marker.startsWith(prefix)
+        && satisfiesMinimumVersion(marker.slice(prefix.length), requiredVersion)
+    );
+}
+
 export function findPinnedVersion(pkg: Package, requestedVersion: string, label = pkg.full_name): PackageVersion {
     const version = pkg.versions.find(candidate => candidate.version_number === requestedVersion);
     if (!version) {

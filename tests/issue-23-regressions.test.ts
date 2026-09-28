@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+    cachedPackageSatisfiesRequirement,
     findPinnedVersion,
     latestVersionNumber,
     packageIdentityKey,
@@ -58,6 +59,23 @@ test('different BepInEx versions resolve to one package identity', () => {
     ].map(packageIdentityKey));
 
     assert.deepEqual([...identities], ['bbepis-bepinexpack']);
+});
+
+test('a newer cached BepInEx version satisfies an older transitive pin', () => {
+    const installedCache = new Set(['package:bbepis-bepinexpack@5.4.2122']);
+
+    assert.equal(
+        cachedPackageSatisfiesRequirement(installedCache, 'bbepis-BepInExPack', '5.4.9'),
+        true,
+    );
+    assert.equal(
+        cachedPackageSatisfiesRequirement(installedCache, 'bbepis-BepInExPack', '5.4.2123'),
+        false,
+    );
+    assert.equal(
+        cachedPackageSatisfiesRequirement(installedCache, 'another-BepInExPack', '5.4.9'),
+        false,
+    );
 });
 
 test('an unavailable dependency pin is rejected instead of silently using latest', () => {

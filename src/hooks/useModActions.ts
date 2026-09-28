@@ -1,7 +1,13 @@
 import type { Package, PackageVersion } from '../types/thunderstore';
 import type { InstalledMod } from '../types/profile';
 import { useProfileStore } from '../store/useProfileStore';
-import { compareVersions, findPinnedVersion, parsePackageReference, satisfiesMinimumVersion } from '../utils/modVersioning';
+import {
+    cachedPackageSatisfiesRequirement,
+    compareVersions,
+    findPinnedVersion,
+    parsePackageReference,
+    satisfiesMinimumVersion,
+} from '../utils/modVersioning';
 import { inferPendingSyncKind, snapshotInstalledMod } from '../utils/profileSync';
 import { runWithConcurrency } from '../utils/concurrency';
 
@@ -114,9 +120,15 @@ export function useModActions({
             entry.startsWith(packageMarkerPrefix) && entry !== packageMarker
         );
         if (conflictingMarker) {
+            const cachedVersion = conflictingMarker.slice(packageMarkerPrefix.length);
+            if (cachedPackageSatisfiesRequirement(
+                installedCache,
+                targetReference.packageName,
+                targetVersion,
+            )) return;
             throw new Error(
                 `Dependency conflict for ${targetReference.packageName}: ` +
-                `${conflictingMarker.slice(packageMarkerPrefix.length)} and ${targetVersion} are both required`
+                `${cachedVersion} and ${targetVersion} are both required`
             );
         }
         installedCache.add(packageMarker);
@@ -135,7 +147,11 @@ export function useModActions({
             // newer installed package already satisfies it. Re-installing the pin
             // here would silently downgrade that package.
             if (profileSatisfiesPackage(profileIdToUse, dependency.packageName, dependency.version)) continue;
-            if (installedCache.has(`package:${dependency.packageName.toLowerCase()}@${dependency.version}`)) continue;
+            if (cachedPackageSatisfiesRequirement(
+                installedCache,
+                dependency.packageName,
+                dependency.version,
+            )) continue;
             depsToInstall.push(dependency);
         }
 
