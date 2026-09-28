@@ -22,6 +22,7 @@ pub(crate) fn launch_macos_bepinex_wrapper(
     app: &AppHandle,
     game_path: &std::path::Path,
     executable_path: Option<&std::path::PathBuf>,
+    bepinex_root: Option<&std::path::Path>,
     context: &str,
 ) -> Result<bool, String> {
     let runtime_root = resolve_macos_runtime_root(game_path);
@@ -43,7 +44,12 @@ pub(crate) fn launch_macos_bepinex_wrapper(
         remove_r2modmac_debug_logs(&runtime_root);
     }
 
-    configure_macos_bepinex_script(&run_script, &runtime_root, write_debug_logs_to_game, None)?;
+    configure_macos_bepinex_script(
+        &run_script,
+        &runtime_root,
+        write_debug_logs_to_game,
+        bepinex_root,
+    )?;
     dequarantine_recursive(&runtime_root);
 
     log::info!(

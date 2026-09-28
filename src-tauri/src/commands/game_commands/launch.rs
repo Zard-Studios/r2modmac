@@ -168,6 +168,7 @@ async fn launch_game_with_mods_inner(
             == crate::models::loaders::PackageLoader::BepInEx
         {
             let tree_root = bepinex_install_root(&app, &profile_id, &game_path)?;
+            select_bepinex_profile_for_windows_launch(&game_path, &tree_root)?;
             crate::commands::legacy_mod_commands::ensure_ror2_wine_newtonsoft_compat(
                 &game_path, &tree_root,
             )
@@ -185,6 +186,17 @@ async fn launch_game_with_mods_inner(
     }
 
     launch_game_with_mods_for_macos(&app, &game_identifier, &profile_id, &game_path).await
+}
+
+/// Doorstop's config is stored beside the game, while isolated BepInEx trees
+/// live under their profiles. Apply writes this global pointer, but selecting
+/// another already-applied profile and pressing Play does not run Apply again.
+/// Retarget it at launch so the selected profile wins every time.
+fn select_bepinex_profile_for_windows_launch(
+    game_path: &std::path::Path,
+    tree_root: &std::path::Path,
+) -> Result<(), String> {
+    crate::commands::mod_commands::point_game_doorstop_ini_at_tree(game_path, tree_root)
 }
 
 #[command]
@@ -311,7 +323,46 @@ fn log_launch_result(
 
 #[cfg(test)]
 mod launch_diagnostics_tests {
-    use super::launch_outcome;
+    use super::{launch_outcome, select_bepinex_profile_for_windows_launch};
+    use std::fs;
+
+    const DOORSTOP_CONFIG: &str = "[UnityDoorstop]\nenabled=true\ntargetAssembly=BepInEx\\core\\BepInEx.Preloader.dll\ndllSearchPathOverride=\n";
+
+    fn world() -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "r2modmac-launch-profile-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    #[test]
+    fn launching_each_isolated_profile_retargets_doorstop_to_that_profile() {
+        let root = world();
+        let game = root.join("game");
+        let first = root.join("profiles/first");
+        let second = root.join("profiles/second");
+        fs::create_dir_all(&game).unwrap();
+        fs::create_dir_all(first.join("BepInEx/core")).unwrap();
+        fs::create_dir_all(second.join("BepInEx/core")).unwrap();
+        fs::write(game.join("doorstop_config.ini"), DOORSTOP_CONFIG).unwrap();
+
+        select_bepinex_profile_for_windows_launch(&game, &first).unwrap();
+        select_bepinex_profile_for_windows_launch(&game, &second).unwrap();
+
+        let written = fs::read_to_string(game.join("doorstop_config.ini")).unwrap();
+        let expected = second.join("BepInEx").to_string_lossy().replace('/', "\\");
+        assert!(written.contains(&format!(
+            "targetAssembly={expected}\\core\\BepInEx.Preloader.dll"
+        )));
+        assert!(!written.contains("profiles\\first"));
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn launch_results_have_distinct_searchable_outcomes() {

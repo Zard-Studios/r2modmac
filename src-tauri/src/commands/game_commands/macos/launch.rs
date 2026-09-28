@@ -242,10 +242,12 @@ pub(crate) async fn launch_game_with_mods_for_macos(
         return Ok(());
     }
 
+    let profile_bepinex_root = (tree_root != runtime_game_path).then(|| tree_root.join("BepInEx"));
     if launch_macos_bepinex_wrapper(
         app,
         &runtime_game_path,
         executable_path.as_ref(),
+        profile_bepinex_root.as_deref(),
         "launch_game_with_mods",
     )? {
         return Ok(());
@@ -437,6 +439,7 @@ pub(crate) async fn launch_game_vanilla_for_macos(
             app,
             &runtime_game_path,
             executable_path.as_ref(),
+            None,
             "launch_game_vanilla",
         )? {
             return Ok(());
