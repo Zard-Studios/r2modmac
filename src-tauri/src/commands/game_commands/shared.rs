@@ -568,6 +568,29 @@ pub(crate) fn choose_bepinex_root(
     profile_dir.to_path_buf()
 }
 
+/// `choose_bepinex_root`, after giving a Wine bottle the drive letter it needs
+/// to reach the profiles. Without this every bottle that only maps its own C:
+/// fell back to the game folder, and "isolated" profiles shared one tree.
+pub(crate) fn choose_bepinex_root_preparing_wine(
+    profile_isolation: bool,
+    profile_dir: &std::path::Path,
+    runtime_game_path: &std::path::Path,
+) -> std::path::PathBuf {
+    if profile_isolation {
+        if let (Some(prefix), Some(share_root)) = (
+            crate::models::shared::find_wine_prefix_root(runtime_game_path),
+            profile_dir.parent(),
+        ) {
+            if let Err(error) =
+                crate::commands::game_commands::ensure_wine_drive_for_path(&prefix, share_root)
+            {
+                log::warn!("[bepinex_install_root] Could not map the profiles into the Wine bottle: {error}");
+            }
+        }
+    }
+    choose_bepinex_root(profile_isolation, profile_dir, runtime_game_path)
+}
+
 /// The same choice, reading the setting for the caller.
 pub(crate) fn bepinex_install_root(
     app: &tauri::AppHandle,
@@ -590,7 +613,7 @@ pub(crate) fn bepinex_install_root(
                 .unwrap_or(settings.profile_isolation)
         })
         .unwrap_or(false);
-    let root = choose_bepinex_root(isolation, &profile_dir, runtime_game_path);
+    let root = choose_bepinex_root_preparing_wine(isolation, &profile_dir, runtime_game_path);
     if isolation && root == runtime_game_path {
         log::warn!(
             "[bepinex_install_root] Wine cannot address the isolated profile; using the game-local BepInEx tree for {}",
@@ -655,6 +678,37 @@ mod bepinex_root_choice_tests {
         std::os::unix::fs::symlink(prefix.join("drive_c"), prefix.join("dosdevices/c:")).unwrap();
 
         assert_eq!(choose_bepinex_root(true, &profile, &game), game);
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_bottle_without_a_drive_for_the_profile_gets_one_and_keeps_isolation() {
+        let root = std::env::temp_dir().join(format!("r2modmac-prepare-wine-{}", uuid::Uuid::new_v4()));
+        let prefix = root.join("Bottle");
+        let game = prefix.join("drive_c/Games/Lethal Company");
+        let profile = root.join("Profiles/lethal-company");
+        fs::create_dir_all(prefix.join("dosdevices")).unwrap();
+        fs::create_dir_all(&game).unwrap();
+        fs::create_dir_all(&profile).unwrap();
+        std::os::unix::fs::symlink(prefix.join("drive_c"), prefix.join("dosdevices/c:")).unwrap();
+
+        assert_eq!(choose_bepinex_root(true, &profile, &game), game);
+        assert_eq!(
+            super::choose_bepinex_root_preparing_wine(true, &profile, &game),
+            profile
+        );
+        // Off means off: a game-local profile never changes the bottle.
+        let other = root.join("Bottle2");
+        let other_game = other.join("drive_c/Games/X");
+        fs::create_dir_all(other.join("dosdevices")).unwrap();
+        fs::create_dir_all(&other_game).unwrap();
+        assert_eq!(
+            super::choose_bepinex_root_preparing_wine(false, &profile, &other_game),
+            other_game
+        );
+        assert_eq!(fs::read_dir(other.join("dosdevices")).unwrap().count(), 0);
 
         fs::remove_dir_all(root).unwrap();
     }

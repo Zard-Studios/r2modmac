@@ -10,7 +10,7 @@ use sha2::{Digest, Sha256};
 use tauri::{command, AppHandle};
 
 use super::{
-    choose_bepinex_root, detach_isolated_bepinex_link, get_game_path, is_game_running,
+    choose_bepinex_root, choose_bepinex_root_preparing_wine, detach_isolated_bepinex_link, get_game_path, is_game_running,
     resolve_macos_runtime_root, sync_isolated_bepinex_link,
 };
 use crate::utils::file_ops::copy_dir_recursive;
@@ -767,7 +767,9 @@ pub async fn set_profile_bepinex_isolation(
     if is_game_running(app.clone(), game_identifier.clone(), Some(platform.clone())).await? {
         return Err("Close the game before changing BepInEx storage mode".to_string());
     }
-    if isolated && choose_bepinex_root(true, &profile_root, &runtime_root) == runtime_root {
+    if isolated
+        && choose_bepinex_root_preparing_wine(true, &profile_root, &runtime_root) == runtime_root
+    {
         return Err(
             "This Wine bottle cannot access an isolated BepInEx tree; use game-local mode"
                 .to_string(),

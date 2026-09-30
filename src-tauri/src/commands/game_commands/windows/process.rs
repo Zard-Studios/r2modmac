@@ -48,6 +48,45 @@ pub(crate) fn map_native_path_to_wine_path(
     None
 }
 
+/// Give a Wine bottle a drive letter that reaches `share_root`, so a path
+/// beneath it can be written into a Windows-side config. This is what
+/// `winecfg` does to map a drive: one symlink in `dosdevices`. Nothing else in
+/// the bottle is touched, and an existing mapping is left as it is.
+///
+/// Returns the letter that was added, or `None` when nothing had to be done.
+pub(crate) fn ensure_wine_drive_for_path(
+    prefix_root: &std::path::Path,
+    share_root: &std::path::Path,
+) -> Result<Option<char>, String> {
+    if map_native_path_to_wine_path(prefix_root, share_root).is_some() {
+        return Ok(None);
+    }
+    let dosdevices = prefix_root.join("dosdevices");
+    if !dosdevices.is_dir() || !share_root.is_dir() {
+        return Ok(None);
+    }
+    let target = fs::canonicalize(share_root).map_err(|error| error.to_string())?;
+    let letter = ('d'..='y')
+        .rev()
+        .find(|letter| fs::symlink_metadata(dosdevices.join(format!("{letter}:"))).is_err())
+        .ok_or_else(|| "Every drive letter in this Wine bottle is already in use".to_string())?;
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&target, dosdevices.join(format!("{letter}:")))
+        .map_err(|error| format!("Could not map drive {letter}: in the Wine bottle: {error}"))?;
+    #[cfg(not(unix))]
+    return Ok(None);
+    if map_native_path_to_wine_path(prefix_root, share_root).is_none() {
+        return Err(format!("The Wine bottle still cannot reach {}", share_root.display()));
+    }
+    log::info!(
+        "[wine] Mapped drive {}: to {} in {}",
+        letter.to_ascii_uppercase(),
+        target.display(),
+        prefix_root.display()
+    );
+    Ok(Some(letter))
+}
+
 pub(crate) fn build_windows_process_match_patterns(
     executable_path: &std::path::Path,
 ) -> Vec<String> {
@@ -260,6 +299,58 @@ mod profile_path_translation_tests {
 
         assert!(map_native_path_to_wine_path(&prefix, &root.join("elsewhere")).is_none());
 
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_bottle_without_a_drive_for_the_share_gets_exactly_one_link() {
+        let root = std::env::temp_dir().join(format!("r2modmac-winmap-{}", uuid::Uuid::new_v4()));
+        let prefix = root.join("Bottle");
+        let share = root.join("data/profiles");
+        fs::create_dir_all(prefix.join("dosdevices")).unwrap();
+        fs::create_dir_all(prefix.join("drive_c")).unwrap();
+        fs::create_dir_all(share.join("abc/BepInEx")).unwrap();
+        std::os::unix::fs::symlink(prefix.join("drive_c"), prefix.join("dosdevices/c:")).unwrap();
+        // The newest letter is taken already, so the next free one is used.
+        let _ = std::os::unix::fs::symlink(root.join("nowhere"), prefix.join("dosdevices/y:"));
+
+        let before = fs::read_dir(prefix.join("dosdevices")).unwrap().count();
+        let added = ensure_wine_drive_for_path(&prefix, &share).unwrap();
+        assert!(added.is_some() || map_native_path_to_wine_path(&prefix, &share).is_some());
+        let mapped = map_native_path_to_wine_path(&prefix, &share.join("abc/BepInEx")).unwrap();
+        assert!(mapped.ends_with(":\\abc\\BepInEx"), "{mapped}");
+        assert!(!mapped.contains('/'));
+
+        // Already reachable: nothing more is added.
+        let after = fs::read_dir(prefix.join("dosdevices")).unwrap().count();
+        assert_eq!(ensure_wine_drive_for_path(&prefix, &share).unwrap(), None);
+        assert_eq!(fs::read_dir(prefix.join("dosdevices")).unwrap().count(), after);
+        assert!(after <= before + 1);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_existing_drive_that_reaches_the_share_is_left_alone() {
+        let root = std::env::temp_dir().join(format!("r2modmac-winmap-{}", uuid::Uuid::new_v4()));
+        let prefix = root.join("Bottle");
+        let share = root.join("data/profiles");
+        fs::create_dir_all(prefix.join("dosdevices")).unwrap();
+        fs::create_dir_all(&share).unwrap();
+        std::os::unix::fs::symlink(&root, prefix.join("dosdevices/z:")).unwrap();
+        assert_eq!(ensure_wine_drive_for_path(&prefix, &share).unwrap(), None);
+        assert_eq!(fs::read_dir(prefix.join("dosdevices")).unwrap().count(), 1);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_path_that_is_not_a_bottle_is_never_modified() {
+        let root = std::env::temp_dir().join(format!("r2modmac-winmap-{}", uuid::Uuid::new_v4()));
+        let share = root.join("profiles");
+        fs::create_dir_all(&share).unwrap();
+        assert_eq!(ensure_wine_drive_for_path(&root.join("no-bottle"), &share).unwrap(), None);
+        assert!(!root.join("no-bottle").exists());
         fs::remove_dir_all(root).unwrap();
     }
 }
