@@ -1008,6 +1008,75 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 
+    /// The data path of a mode switch, in both directions and repeated: what is
+    /// in the tree when the switch happens is what is in the tree afterwards,
+    /// so a mod updated in one mode is never replaced by an older copy.
+    #[cfg(unix)]
+    #[test]
+    fn switching_modes_back_and_forth_keeps_the_newest_files() {
+        let root = std::env::temp_dir().join(format!("r2modmac-roundtrip-{}", uuid::Uuid::new_v4()));
+        let profile = root.join("com.r2modmac/profiles/abc");
+        let game = root.join("game");
+        fs::create_dir_all(&profile).unwrap();
+        fs::create_dir_all(game.join("BepInEx/core")).unwrap();
+        fs::create_dir_all(game.join("BepInEx/plugins/ModA")).unwrap();
+        fs::create_dir_all(game.join("BepInEx/config")).unwrap();
+        fs::write(game.join("BepInEx/core/BepInEx.Preloader.dll"), b"preloader").unwrap();
+        fs::write(game.join("BepInEx/plugins/ModA/ModA.dll"), b"ModA 1.0.0").unwrap();
+        fs::write(game.join("BepInEx/config/ModA.cfg"), b"speed = 1").unwrap();
+        fs::write(
+            game.join("doorstop_config.ini"),
+            "[UnityDoorstop]\nenabled=true\ntargetAssembly=BepInEx/core/BepInEx.Preloader.dll\n",
+        )
+        .unwrap();
+        let read = |tree: &Path, file: &str| fs::read_to_string(tree.join(file)).unwrap();
+
+        // Game-local to isolated.
+        migrate_tree(&game, &profile, "BepInEx").unwrap();
+        fs::remove_dir_all(game.join("BepInEx")).unwrap();
+        crate::commands::mod_commands::point_game_doorstop_ini_at_tree(&game, &profile).unwrap();
+        sync_isolated_bepinex_link(&game, &profile, false).unwrap();
+        assert!(game.join("BepInEx").is_symlink());
+        assert_eq!(read(&game, "BepInEx/plugins/ModA/ModA.dll"), "ModA 1.0.0");
+        assert_eq!(read(&profile, "BepInEx/config/ModA.cfg"), "speed = 1");
+
+        // A mod is updated and a setting changed while isolated.
+        fs::write(profile.join("BepInEx/plugins/ModA/ModA.dll"), b"ModA 1.1.0").unwrap();
+        fs::write(profile.join("BepInEx/config/ModA.cfg"), b"speed = 2").unwrap();
+
+        // Isolated back to game-local.
+        migrate_tree(&profile, &game, "BepInEx").unwrap();
+        crate::commands::mod_commands::point_game_doorstop_ini_at_tree(&game, &game).unwrap();
+        assert!(!game.join("BepInEx").is_symlink());
+        assert!(game.join("BepInEx").is_dir());
+        assert_eq!(read(&game, "BepInEx/plugins/ModA/ModA.dll"), "ModA 1.1.0");
+        assert_eq!(read(&game, "BepInEx/config/ModA.cfg"), "speed = 2");
+        assert_eq!(read(&game, "BepInEx/core/BepInEx.Preloader.dll"), "preloader");
+        assert!(profile.join("BepInEx/plugins/ModA/ModA.dll").is_file(), "the copy in the profile is kept");
+        let ini = |tree: &Path| read(tree, "doorstop_config.ini").replace('\\', "/");
+        assert!(ini(&game).contains(game.to_str().unwrap()));
+
+        // Updated again while game-local, then isolated a second time.
+        fs::write(game.join("BepInEx/plugins/ModA/ModA.dll"), b"ModA 1.2.0").unwrap();
+        migrate_tree(&game, &profile, "BepInEx").unwrap();
+        fs::rename(game.join("BepInEx"), root.join("preserved")).unwrap();
+        crate::commands::mod_commands::point_game_doorstop_ini_at_tree(&game, &profile).unwrap();
+        sync_isolated_bepinex_link(&game, &profile, false).unwrap();
+        assert_eq!(read(&profile, "BepInEx/plugins/ModA/ModA.dll"), "ModA 1.2.0");
+        assert_eq!(read(&game, "BepInEx/plugins/ModA/ModA.dll"), "ModA 1.2.0");
+        assert!(ini(&game).contains(profile.to_str().unwrap()));
+
+        // The only tree that was replaced (the profile's older copy) was kept;
+        // leaving isolation only detaches the link.
+        let backups = fs::read_dir(&profile)
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| entry.file_name().to_string_lossy().contains("r2modmac-backup"))
+            .count();
+        assert_eq!(backups, 1);
+        fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn only_a_completely_pending_new_profile_ignores_copied_inventory() {
         let fresh = serde_json::json!({"mods": [
