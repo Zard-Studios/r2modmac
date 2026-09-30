@@ -722,6 +722,33 @@ fn apply_still_needed(
     already_needed || !files_were_this_profiles
 }
 
+/// Does the game's active-profile marker stop this profile from leaving
+/// isolation?
+///
+/// Only when the profile it names still exists and keeps its BepInEx files in
+/// the game folder: moving this profile's tree in would replace files that
+/// profile owns. A deleted profile owns nothing, and an isolated one keeps its
+/// files in its own folder, so a marker left behind by either is stale, and
+/// refusing over it left the user with no way to switch.
+fn active_marker_blocks_leaving_isolation(
+    active: &str,
+    profile_id: &str,
+    profiles: &[serde_json::Value],
+    default_isolation: bool,
+) -> bool {
+    if active == profile_id {
+        return false;
+    }
+    profiles
+        .iter()
+        .find(|profile| profile["id"].as_str() == Some(active))
+        .is_some_and(|profile| {
+            !profile["bepinexIsolation"]
+                .as_bool()
+                .unwrap_or(default_isolation)
+        })
+}
+
 /// What a mode switch did to the files, for the caller to record.
 #[derive(Debug)]
 enum ModeSwitchOutcome {
@@ -895,6 +922,7 @@ pub async fn set_profile_bepinex_isolation(
     isolated: bool,
 ) -> Result<bool, String> {
     let mut profiles = crate::commands::profile_commands::get_profiles(app.clone())?;
+    let all_profiles = profiles.clone();
     let profile = profiles
         .iter_mut()
         .find(|profile| {
@@ -936,7 +964,12 @@ pub async fn set_profile_bepinex_isolation(
         if let Some(active) =
             super::profile_activation::read_active_profile(&runtime_root, &game_identifier)?
         {
-            if active != profile_id {
+            if active_marker_blocks_leaving_isolation(
+                &active,
+                &profile_id,
+                &all_profiles,
+                settings.profile_isolation,
+            ) {
                 return Err("Another profile is recorded as active in this game. Select and apply that profile before changing this one's BepInEx storage mode.".to_string());
             }
         }
@@ -1218,6 +1251,25 @@ mod tests {
         // Pending work from elsewhere is never hidden by a migration.
         assert!(apply_still_needed(true, true, false, None, "a"));
         assert!(apply_still_needed(true, false, true, Some("a"), "a"));
+    }
+
+    #[test]
+    fn only_a_game_local_active_profile_blocks_leaving_isolation() {
+        let profiles = vec![
+            serde_json::json!({"id": "local", "bepinexIsolation": false}),
+            serde_json::json!({"id": "isolated", "bepinexIsolation": true}),
+            serde_json::json!({"id": "inherits"}),
+        ];
+        // Another profile that keeps its files in the game folder: blocked.
+        assert!(active_marker_blocks_leaving_isolation("local", "me", &profiles, true));
+        // A stale marker: an isolated profile, or one that was deleted.
+        assert!(!active_marker_blocks_leaving_isolation("isolated", "me", &profiles, false));
+        assert!(!active_marker_blocks_leaving_isolation("deleted", "me", &profiles, false));
+        // A profile with no setting of its own follows the global default.
+        assert!(active_marker_blocks_leaving_isolation("inherits", "me", &profiles, false));
+        assert!(!active_marker_blocks_leaving_isolation("inherits", "me", &profiles, true));
+        // This profile's own marker never blocks it.
+        assert!(!active_marker_blocks_leaving_isolation("me", "me", &profiles, false));
     }
 
     #[test]
