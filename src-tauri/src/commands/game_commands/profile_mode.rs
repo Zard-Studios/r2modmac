@@ -316,6 +316,32 @@ fn detach_foreign_profile_links(
     Ok(!links.is_empty())
 }
 
+/// A profile made isolated by the migration keeps its inventories where the
+/// game-local install wrote them (the `game` scope), because nothing copies
+/// them to the profile side. Leaving isolation must not refuse over that: for
+/// every enabled mod without a profile-side inventory, the game-side one that
+/// was written for this same game folder stands in. The files it lists are
+/// still checked against the profile's tree before anything moves.
+fn with_game_scope_fallback(
+    mut own: Vec<StoredModOwnershipManifest>,
+    game_manifests: &[StoredModOwnershipManifest],
+    current_mods: &HashSet<String>,
+    runtime_root: &Path,
+) -> Vec<StoredModOwnershipManifest> {
+    for stored in game_manifests {
+        let name = stored.manifest.mod_full_name.to_ascii_lowercase();
+        if current_mods.contains(&name)
+            && !own
+                .iter()
+                .any(|known| known.manifest.mod_full_name.eq_ignore_ascii_case(&name))
+            && manifest_matches_target_root(&stored.manifest, runtime_root)
+        {
+            own.push(stored.clone());
+        }
+    }
+    own
+}
+
 fn game_local_layout_needs_reconciliation(profile_root: &Path, runtime_root: &Path) -> bool {
     ["BepInEx", "BepInEx_DISABLED"].iter().any(|name| {
         let game_tree = runtime_root.join(name);
@@ -672,6 +698,7 @@ fn copy_manifests_to_game_scope(
 }
 
 /// What a mode switch did to the files, for the caller to record.
+#[derive(Debug)]
 enum ModeSwitchOutcome {
     Switched,
     /// The profile had nothing of its own: only a stale link was dropped.
@@ -893,20 +920,25 @@ pub async fn set_profile_bepinex_isolation(
         .join("profiles")
         .join(&profile_id);
     let current_mods = current_profile_manifest_names(profile);
-    let profile_manifests = if isolated {
-        Vec::new()
-    } else {
-        load_owned_mod_manifests(&app, &profile_id, PROFILE_MANIFEST_SCOPE)?
-            .into_iter()
-            .filter(|stored| {
-                current_mods.contains(&stored.manifest.mod_full_name.to_ascii_lowercase())
-            })
-            .collect()
-    };
     let game_manifests = if isolated {
         Vec::new()
     } else {
         load_owned_mod_manifests(&app, &profile_id, GAME_MANIFEST_SCOPE)?
+    };
+    let profile_manifests = if isolated {
+        Vec::new()
+    } else {
+        let own = load_owned_mod_manifests(&app, &profile_id, PROFILE_MANIFEST_SCOPE)?
+            .into_iter()
+            .filter(|stored| {
+                current_mods.contains(&stored.manifest.mod_full_name.to_ascii_lowercase())
+            })
+            .collect::<Vec<_>>();
+        if current {
+            with_game_scope_fallback(own, &game_manifests, &current_mods, &runtime_root)
+        } else {
+            own
+        }
     };
     let needs_layout_reconciliation =
         !isolated && game_local_layout_needs_reconciliation(&profile_root, &runtime_root);
@@ -1787,6 +1819,49 @@ mod mode_switch_end_to_end {
         assert!(error.is_err());
         assert_eq!(read(&game.join(FILES[1])), before, "the game tree is untouched");
         assert!(profile_root.join("BepInEx/plugins/other.dll").is_file());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn an_isolated_profile_whose_inventories_sit_on_the_game_side_can_leave_isolation() {
+        let root = world("mode-fallback");
+        let profile_root = root.join("com.r2modmac/profiles/abc");
+        let game = root.join("game");
+        fs::create_dir_all(&profile_root).unwrap();
+        install_game_tree(&game);
+        let profile = profile_json();
+        let mut game_side = stored(&root.join("inventory"));
+        game_side[0].manifest.target_root_hint =
+            Some(fs::canonicalize(&game).unwrap().to_string_lossy().to_string());
+        let names = std::collections::HashSet::from([MOD.to_ascii_lowercase()]);
+
+        // Isolate; the profile side has no inventory of its own.
+        switch(&profile, &profile_root, &game, "mac", false, true, &game_side).unwrap();
+        assert!(with_game_scope_fallback(Vec::new(), &[], &names, &game).is_empty());
+
+        // Without the fallback the switch back is refused, as it was.
+        let refused = switch(&profile, &profile_root, &game, "mac", true, false, &[]);
+        assert!(refused.unwrap_err().contains("inventory is missing or ambiguous"));
+
+        // With it, the switch completes and every file is back in the game.
+        let inventories = with_game_scope_fallback(Vec::new(), &game_side, &names, &game);
+        assert_eq!(inventories.len(), 1);
+        switch(&profile, &profile_root, &game, "mac", true, false, &inventories).unwrap();
+        assert!(!game.join("BepInEx").is_symlink());
+        for file in FILES {
+            assert_eq!(read(&game.join(file)), format!("{file} 1.0.0"));
+        }
+
+        // A profile-side inventory always wins, and another game's is ignored.
+        let mut own = stored(&root.join("own"));
+        own[0].manifest.files = vec![FILES[0].to_string()];
+        assert_eq!(
+            with_game_scope_fallback(own, &game_side, &names, &game)[0].manifest.files.len(),
+            1
+        );
+        let mut elsewhere = game_side.clone();
+        elsewhere[0].manifest.target_root_hint = Some("/somewhere/else".to_string());
+        assert!(with_game_scope_fallback(Vec::new(), &elsewhere, &names, &game).is_empty());
         fs::remove_dir_all(root).unwrap();
     }
 }
