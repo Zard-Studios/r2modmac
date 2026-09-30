@@ -1273,6 +1273,20 @@ pub async fn sync_profile_to_game(
     } else {
         None
     };
+    // Deleting a profile removes its runtime from the game, but the records
+    // naming it as the active one stay behind. A profile that no longer exists
+    // owns nothing, so there is nothing to verify or remove and it must not
+    // stop the next Apply.
+    let active_marker = active_marker.filter(|id| {
+        let exists = profile_id_exists(&profiles, id);
+        if !exists {
+            log::warn!(
+                "[sync_profile_to_game] Ignoring the active-profile marker of deleted profile {}",
+                id
+            );
+        }
+        exists
+    });
     let active_profile_id = active_marker.clone().or_else(|| {
         if profile_isolated {
             None
@@ -1285,6 +1299,8 @@ pub async fn sync_profile_to_game(
             )
         }
     });
+    let active_profile_id = active_profile_id
+        .filter(|id| id == &profile_id || profile_id_exists(&profiles, id));
     let switching_from = active_profile_id
         .as_deref()
         .filter(|active| *active != profile_id);
@@ -1791,6 +1807,12 @@ pub async fn sync_profile_to_game(
 /// Asking whether the key merely contains "bepinex" also caught the mods built
 /// around it — BepInEx_GUI and RoR2BepInExPack among them — so Apply left them
 /// out and then reported that the profile was fully applied.
+fn profile_id_exists(profiles: &[serde_json::Value], id: &str) -> bool {
+    profiles
+        .iter()
+        .any(|profile| profile["id"].as_str() == Some(id))
+}
+
 fn key_is_bepinex_runtime_pack(key: &str) -> bool {
     let package = key.split_once('-').map(|(_, name)| name).unwrap_or(key);
     package == "bepinexpack" || package.starts_with("bepinexpack_")
@@ -1844,6 +1866,16 @@ fn require_game_local_bepinex_tree(runtime_game_path: &std::path::Path) -> Resul
 
 #[cfg(test)]
 mod tests {
+    use super::profile_id_exists;
+
+    #[test]
+    fn a_deleted_profile_is_not_a_profile_to_verify() {
+        let profiles = vec![serde_json::json!({"id": "alive"})];
+        assert!(profile_id_exists(&profiles, "alive"));
+        assert!(!profile_id_exists(&profiles, "deleted"));
+        assert!(!profile_id_exists(&[], "alive"));
+    }
+
     use super::{
         ensure_finalize_ready, flatten_return_of_modding_manifest_paths,
         key_is_bepinex_runtime_pack, managed_install_root,
