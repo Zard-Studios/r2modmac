@@ -269,6 +269,53 @@ fn migrate_tree(source_root: &Path, destination_root: &Path, name: &str) -> Resu
     Ok(())
 }
 
+/// A new game-local profile can meet a game folder whose BepInEx is still a
+/// link into another profile's tree, left by an earlier isolated profile. This
+/// profile has nothing of its own to migrate, so the only way out is to drop
+/// that link. Only the link goes: the profile tree it points at is untouched,
+/// and a link that does not lead into the profiles directory is refused.
+fn detach_foreign_profile_links(
+    profile_root: &Path,
+    runtime_root: &Path,
+    profiles_dir: &Path,
+) -> Result<bool, String> {
+    let names = ["BepInEx", "BepInEx_DISABLED"];
+    if names
+        .iter()
+        .any(|name| fs::symlink_metadata(profile_root.join(name)).is_ok())
+    {
+        return Ok(false);
+    }
+    let mut links = Vec::new();
+    for name in names {
+        let game_tree = runtime_root.join(name);
+        if !game_tree.is_symlink() {
+            continue;
+        }
+        let target = fs::read_link(&game_tree).map_err(|error| error.to_string())?;
+        let target = if target.is_absolute() {
+            target
+        } else {
+            runtime_root.join(target)
+        };
+        if !target.starts_with(profiles_dir) {
+            return Err(format!(
+                "{} links outside the r2modmac profiles; remove it by hand if it is stale",
+                game_tree.display()
+            ));
+        }
+        links.push(game_tree);
+    }
+    for link in &links {
+        fs::remove_file(link).map_err(|error| error.to_string())?;
+        log::info!(
+            "[profile_mode] Detached stale BepInEx profile link {}",
+            link.display()
+        );
+    }
+    Ok(!links.is_empty())
+}
+
 fn game_local_layout_needs_reconciliation(profile_root: &Path, runtime_root: &Path) -> bool {
     ["BepInEx", "BepInEx_DISABLED"].iter().any(|name| {
         let game_tree = runtime_root.join(name);
@@ -748,6 +795,19 @@ pub async fn set_profile_bepinex_isolation(
             .any(|name| source.join(name).is_dir())
         && !metadata_only_reconciliation
     {
+        let profiles_dir = profile_root.parent().unwrap_or(&profile_root);
+        if profile_manifests.is_empty()
+            && detach_foreign_profile_links(&profile_root, &runtime_root, profiles_dir)?
+        {
+            crate::commands::mod_commands::point_game_doorstop_ini_at_tree(
+                &runtime_root,
+                &runtime_root,
+            )?;
+            profile["bepinexIsolation"] = serde_json::Value::Bool(false);
+            profile["needs_sync"] = serde_json::Value::Bool(true);
+            crate::commands::profile_commands::save_profiles(app, profiles).await?;
+            return Ok(true);
+        }
         return Err(
             "This profile has no local BepInEx files to migrate; its mode was not changed"
                 .to_string(),
@@ -912,6 +972,40 @@ mod tests {
         fs::remove_dir(&game).unwrap();
         assert!(!no_local_bepinex_payload_to_migrate(&profile, &game, &[], false));
         fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_fresh_game_local_profile_drops_only_the_stale_link() {
+        let root = std::env::temp_dir().join(format!("r2modmac-stale-link-{}", uuid::Uuid::new_v4()));
+        let profiles = root.join("profiles");
+        let other = profiles.join("other");
+        let fresh = profiles.join("fresh");
+        let game = root.join("game");
+        fs::create_dir_all(other.join("BepInEx/core")).unwrap();
+        fs::write(other.join("BepInEx/core/keep.dll"), b"x").unwrap();
+        fs::create_dir_all(&fresh).unwrap();
+        fs::create_dir_all(&game).unwrap();
+        std::os::unix::fs::symlink(other.join("BepInEx"), game.join("BepInEx")).unwrap();
+
+        assert!(detach_foreign_profile_links(&fresh, &game, &profiles).unwrap());
+        assert!(fs::symlink_metadata(game.join("BepInEx")).is_err());
+        assert!(other.join("BepInEx/core/keep.dll").is_file());
+        assert!(!detach_foreign_profile_links(&fresh, &game, &profiles).unwrap());
+
+        let outside = root.join("outside");
+        fs::create_dir_all(&outside).unwrap();
+        std::os::unix::fs::symlink(&outside, game.join("BepInEx")).unwrap();
+        assert!(detach_foreign_profile_links(&fresh, &game, &profiles).is_err());
+        assert!(game.join("BepInEx").is_symlink());
+
+        // A profile with a tree of its own goes through the normal migration.
+        fs::remove_file(game.join("BepInEx")).unwrap();
+        std::os::unix::fs::symlink(other.join("BepInEx"), game.join("BepInEx")).unwrap();
+        fs::create_dir_all(fresh.join("BepInEx")).unwrap();
+        assert!(!detach_foreign_profile_links(&fresh, &game, &profiles).unwrap());
+        assert!(game.join("BepInEx").is_symlink());
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
