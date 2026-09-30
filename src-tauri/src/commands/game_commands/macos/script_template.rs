@@ -255,4 +255,47 @@ mod bepinex_root_tests {
             assert!(!generated.contains("__RELATIVE_EXEC__"));
         }
     }
+
+    /// A variable that is defined but empty is not the same as one that is not
+    /// defined: a game that reads `SteamAppId` tries to parse the empty string
+    /// and fails, where the vanilla launch would leave it unset.
+    #[test]
+    fn unset_steam_variables_are_not_handed_to_the_game_as_empty() {
+        let generated = script(BepInExRoot::Game);
+        assert!(!generated.contains(r#"-e SteamAppId="${SteamAppId:-}""#));
+
+        let passthrough = generated
+            .lines()
+            .filter(|line| {
+                ["SteamAppId", "SteamGameId", "STEAMEMU_SETTINGS_DIR"]
+                    .iter()
+                    .any(|name| line.contains(&format!("${{{name}:+-e}}")))
+            })
+            .map(|line| line.trim().trim_end_matches('\\').trim().to_string())
+            .collect::<Vec<_>>();
+        assert!(passthrough.len() >= 21, "every arch call must use the conditional form");
+
+        let run = |env: &[(&str, &str)]| {
+            let mut command = std::process::Command::new("/bin/sh");
+            command
+                .arg("-c")
+                .arg(format!("printf '[%s]' {}", passthrough[..3].join(" ")))
+                .env_remove("SteamAppId")
+                .env_remove("SteamGameId")
+                .env_remove("STEAMEMU_SETTINGS_DIR");
+            for (key, value) in env {
+                command.env(key, value);
+            }
+            String::from_utf8(command.output().unwrap().stdout).unwrap()
+        };
+        assert_eq!(run(&[]), "[]", "no argument at all when unset");
+        assert_eq!(
+            run(&[
+                ("SteamAppId", "892970"),
+                ("SteamGameId", "892970"),
+                ("STEAMEMU_SETTINGS_DIR", "/a b/c"),
+            ]),
+            "[-e][SteamAppId=892970][-e][SteamGameId=892970][-e][STEAMEMU_SETTINGS_DIR=/a b/c]"
+        );
+    }
 }

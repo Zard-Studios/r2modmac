@@ -288,7 +288,7 @@ pub(crate) fn configure_macos_bepinex_script(
             && script.contains("export SteamGameId=")
             && script.contains("steamemu_macos_dir=\"$BASEDIR/MacOS\"")
             && script.contains("STEAMEMU_SETTINGS_DIR=\"$steamemu_config_dir\"")
-            && script.contains("-e SteamAppId=")
+            && script.contains("${SteamAppId:+-e}")
             // GOG + Steam-emu: ipcserver needs STEAM_PATH to self-locate steamclient.dylib
             && script.contains("export STEAM_PATH=\"$steamemu_macos_dir\"")
             && script.contains("export SteamPath=\"$steamemu_macos_dir\"")
