@@ -520,8 +520,11 @@ pub(crate) fn build_macos_process_match_patterns(executable_path: &std::path::Pa
     push_macos_path_process_patterns(&mut patterns, executable_path);
 
     // macOS app processes may expose only the CFBundleExecutable name in ps/pgrep.
+    // The name has to be the whole process name: unanchored, it also matched
+    // any command that merely mentioned the game (`grep Valheim ...`, an editor
+    // or a log viewer) and reported the game as running when it was not.
     if let Some(file_name) = executable_path.file_name().and_then(|value| value.to_str()) {
-        push_unique_pattern(&mut patterns, regex::escape(file_name));
+        push_unique_pattern(&mut patterns, format!("^{}$", regex::escape(file_name)));
     }
 
     patterns
@@ -536,6 +539,28 @@ pub(crate) fn build_macos_process_kill_patterns(executable_path: &std::path::Pat
 
 #[cfg(test)]
 mod tests {
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_command_that_only_mentions_the_game_does_not_look_like_the_game() {
+        let executable = std::path::Path::new(
+            "/Applications/Valheim_Steam.app/Contents/Game/valheim.app/Contents/MacOS/Valheim",
+        );
+        let patterns = build_macos_process_match_patterns(executable)
+            .iter()
+            .map(|pattern| regex::Regex::new(pattern).unwrap())
+            .collect::<Vec<_>>();
+        let matches = |text: &str| patterns.iter().any(|pattern| pattern.is_match(text));
+
+        assert!(matches("Valheim"), "the process name");
+        assert!(matches(
+            "/Applications/Valheim_Steam.app/Contents/Game/valheim.app/Contents/MacOS/Valheim"
+        ));
+        assert!(!matches("ugrep -a Valheim"));
+        assert!(!matches("tail -f /tmp/Valheim.log"));
+        assert!(!matches("Valheim Mod Manager"));
+        assert!(!matches("r2modmac"));
+    }
+
     use super::*;
 
     fn create_temp_dir(label: &str) -> std::path::PathBuf {
