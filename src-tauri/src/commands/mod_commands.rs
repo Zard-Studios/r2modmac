@@ -3877,11 +3877,16 @@ fn normalize_macos_bepinex_runtime_overlay_entry(
         .replace('\\', "/")
         .to_lowercase();
 
+    // The core travels with the loader. The official macOS loader starts
+    // BepInEx through `Doorstop.Entrypoint:Start`, which only 5.4.22 and later
+    // preloaders have; a Windows pack's older core beside it loads fine as a
+    // file and never runs, so the game starts with no mods and no error.
     if lower == "run_bepinex.sh"
         || lower == "libdoorstop.dylib"
         || lower == "doorstop_config.ini"
         || lower == "doorstop_libs"
         || lower.starts_with("doorstop_libs/")
+        || lower.starts_with("bepinex/core/")
     {
         Some(normalized)
     } else {
@@ -8680,6 +8685,45 @@ mod extraction_characterisation_tests {
         );
 
         fs::remove_dir_all(&root).ok();
+    }
+
+    /// The Skul case: a Windows-only pack (BepInEx 5.4.21 core, no macOS loader)
+    /// installed with the official macOS runtime laid over it. The loader comes
+    /// from the runtime, and so must the core it starts: the pack's older core
+    /// has no `Doorstop.Entrypoint:Start`, so the game launched with no mods.
+    #[test]
+    fn an_old_windows_pack_gets_the_official_core_with_the_official_loader() {
+        let root = temp_root("old-pack-official-core");
+        let pack = zip_fixture(&[
+            ("BepInExPack/BepInEx/core/BepInEx.Preloader.dll", b"preloader 5.4.21"),
+            ("BepInExPack/BepInEx/core/BepInEx.dll", b"core 5.4.21"),
+            ("BepInExPack/BepInEx/core/0Harmony.dll", b"harmony"),
+            ("BepInExPack/2020.3.34/mscorlib.dll", b"unstripped-corlib"),
+            ("BepInExPack/doorstop_config.ini", b"[UnityDoorstop]\nenabled=true\ndllSearchPathOverride=2020.3.34\n"),
+        ]);
+        let official = zip_fixture(&[
+            ("BepInEx/core/BepInEx.Preloader.dll", b"preloader 5.4.23.5 Doorstop"),
+            ("BepInEx/core/BepInEx.dll", b"core 5.4.23.5"),
+            ("BepInEx/plugins/ignored.dll", b"not a runtime file"),
+            ("libdoorstop.dylib", b"loader Doorstop.Entrypoint:Start"),
+            ("run_bepinex.sh", b"script"),
+        ]);
+
+        extract_bepinex_pack_to_root(&mut archive(&pack), &root, true, false).unwrap();
+        assert_eq!(fs::read(root.join("BepInEx/core/BepInEx.dll")).unwrap(), b"core 5.4.21");
+        extract_macos_bepinex_runtime_overlay_to_root(&mut archive(&official), &root, false).unwrap();
+
+        assert_eq!(
+            fs::read(root.join("BepInEx/core/BepInEx.Preloader.dll")).unwrap(),
+            b"preloader 5.4.23.5 Doorstop"
+        );
+        assert_eq!(fs::read(root.join("BepInEx/core/BepInEx.dll")).unwrap(), b"core 5.4.23.5");
+        // What the pack alone provides is kept, and the overlay adds no plugins.
+        assert_eq!(fs::read(root.join("BepInEx/core/0Harmony.dll")).unwrap(), b"harmony");
+        assert_eq!(fs::read(root.join("2020.3.34/mscorlib.dll")).unwrap(), b"unstripped-corlib");
+        assert!(!root.join("BepInEx/plugins/ignored.dll").exists());
+        assert!(root.join("libdoorstop.dylib").is_file());
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

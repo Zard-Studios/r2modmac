@@ -479,6 +479,7 @@ pub async fn check_profile_runtime_health(
         } else {
             has_complete_macos_bepinex_runtime_rooted(game_path, Some(&tree_root))
         } && macos_bepinex_core_is_bootstrappable(&bep_dir.join("core"))
+            && (vanilla || disabled || macos_preloader_matches_loader(&runtime_root, &bep_dir.join("core")))
             && (vanilla || isolated_bepinex_link_matches(&runtime_root, &tree_root));
         if complete {
             return Ok(health("bepinex", Vec::new()));
@@ -489,7 +490,11 @@ pub async fn check_profile_runtime_health(
         let mut missing = Vec::new();
         if !core_directory_has_payload(&bep_dir.join("core")) {
             missing.push("core".to_string());
-        } else if !macos_bepinex_core_is_bootstrappable(&bep_dir.join("core")) {
+        } else if !macos_bepinex_core_is_bootstrappable(&bep_dir.join("core"))
+            || (!vanilla
+                && !disabled
+                && !macos_preloader_matches_loader(&runtime_root, &bep_dir.join("core")))
+        {
             missing.push("preloader".to_string());
         }
         if !vanilla && !isolated_bepinex_link_matches(&runtime_root, &tree_root) {
