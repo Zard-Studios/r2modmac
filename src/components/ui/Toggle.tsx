@@ -15,11 +15,14 @@ export function Toggle({
     onChange,
     label,
     disabled = false,
+    busy = false,
 }: {
     value: boolean;
     onChange: (next: boolean) => void;
     label?: string;
     disabled?: boolean;
+    /** Work started by this switch is still running: show the wait cursor. */
+    busy?: boolean;
 }) {
     return (
         <button
@@ -27,10 +30,13 @@ export function Toggle({
             role="switch"
             onClick={() => onChange(!value)}
             disabled={disabled}
-            className={`relative w-11 h-6 rounded-full transition-colors duration-200 ease-in-out flex-shrink-0 focus:outline-none focus:ring-2 focus:ring-blue-500/50 disabled:cursor-not-allowed disabled:opacity-50 ${
+            className={`relative w-11 h-6 rounded-full transition-colors duration-200 ease-in-out flex-shrink-0 focus:outline-none focus:ring-2 focus:ring-blue-500/50 disabled:opacity-50 ${
+                busy ? 'cursor-wait' : 'disabled:cursor-not-allowed'
+            } ${
                 value ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'
             }`}
             aria-checked={value}
+            aria-busy={busy || undefined}
             aria-label={label}
         >
             <span

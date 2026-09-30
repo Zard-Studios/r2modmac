@@ -484,6 +484,7 @@ export function SettingsModal({ isOpen, onClose, selectedGame, activeProfile, on
                                         label="Isolate BepInEx in this profile"
                                         value={activeProfile.bepinexIsolation ?? inheritedIsolation}
                                         disabled={modeSaving || !gamePath}
+                                        busy={modeSaving}
                                         onChange={async (next) => {
                                             setModeSaving(true);
                                             try {
