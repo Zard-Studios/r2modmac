@@ -697,6 +697,31 @@ fn copy_manifests_to_game_scope(
     Ok(())
 }
 
+/// Does a completed mode switch still leave an Apply to do?
+///
+/// Not when the files that moved were this profile's own: leaving isolation
+/// always (the active marker is this profile's or absent), entering it when
+/// this profile is the one the game folder was applied for. Anything else moved
+/// a tree that may belong to another profile, which only an Apply can put
+/// right. A flag that was already set for other reasons (pending mods) is never
+/// cleared.
+fn apply_still_needed(
+    already_needed: bool,
+    current: bool,
+    isolated: bool,
+    active_marker: Option<&str>,
+    profile_id: &str,
+) -> bool {
+    let files_were_this_profiles = if current && !isolated {
+        true
+    } else if !current && isolated {
+        active_marker == Some(profile_id)
+    } else {
+        false
+    };
+    already_needed || !files_were_this_profiles
+}
+
 /// What a mode switch did to the files, for the caller to record.
 #[derive(Debug)]
 enum ModeSwitchOutcome {
@@ -862,6 +887,7 @@ fn switch_bepinex_tree_files(plan: &ModeSwitch<'_>) -> Result<ModeSwitchOutcome,
 
 /// Switch one profile without deleting its old BepInEx installation. Existing
 /// profiles with no override retain the setting under which they were created.
+/// Returns whether the profile still needs an Apply afterwards.
 #[command]
 pub async fn set_profile_bepinex_isolation(
     app: AppHandle,
@@ -998,8 +1024,22 @@ pub async fn set_profile_bepinex_isolation(
         crate::commands::profile_commands::save_profiles(app, profiles).await?;
         return Ok(true);
     }
+    let active_marker = if !current && isolated {
+        super::profile_activation::read_active_profile(&runtime_root, &game_identifier)
+            .ok()
+            .flatten()
+    } else {
+        None
+    };
+    let needs_apply = apply_still_needed(
+        profile["needs_sync"].as_bool().unwrap_or(false),
+        current,
+        isolated,
+        active_marker.as_deref(),
+        &profile_id,
+    );
     profile["bepinexIsolation"] = serde_json::Value::Bool(isolated);
-    profile["needs_sync"] = serde_json::Value::Bool(true);
+    profile["needs_sync"] = serde_json::Value::Bool(needs_apply);
     crate::commands::profile_commands::save_profiles(app, profiles).await?;
     if current && !isolated {
         super::profile_activation::write_active_profile(
@@ -1008,7 +1048,7 @@ pub async fn set_profile_bepinex_isolation(
             &profile_id,
         )?;
     }
-    Ok(true)
+    Ok(needs_apply)
 }
 
 #[cfg(test)]
@@ -1162,6 +1202,22 @@ mod tests {
             .count();
         assert_eq!(backups, 1);
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn only_a_switch_of_this_profiles_own_files_skips_the_apply() {
+        // Leaving isolation: the profile's own tree came back.
+        assert!(!apply_still_needed(false, true, false, None, "a"));
+        // Entering isolation: the game folder was applied for this profile.
+        assert!(!apply_still_needed(false, false, true, Some("a"), "a"));
+        // Entering it with another profile, or nobody, recorded as active.
+        assert!(apply_still_needed(false, false, true, Some("b"), "a"));
+        assert!(apply_still_needed(false, false, true, None, "a"));
+        // A reconcile of an already game-local profile keeps asking.
+        assert!(apply_still_needed(false, false, false, Some("a"), "a"));
+        // Pending work from elsewhere is never hidden by a migration.
+        assert!(apply_still_needed(true, true, false, None, "a"));
+        assert!(apply_still_needed(true, false, true, Some("a"), "a"));
     }
 
     #[test]

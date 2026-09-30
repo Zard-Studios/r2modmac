@@ -3650,8 +3650,10 @@ function App() {
       />
       <AppModals
         onSetBepinexIsolation={async (profileId, isolated) => {
-          await window.ipcRenderer.setProfileBepinexIsolation(profileId, isolated);
-          updateProfile(profileId, { bepinexIsolation: isolated, needs_sync: true });
+          // The answer says whether an Apply is still needed: a migration that
+          // moved this profile's own files leaves nothing to apply.
+          const needsApply = await window.ipcRenderer.setProfileBepinexIsolation(profileId, isolated);
+          updateProfile(profileId, { bepinexIsolation: isolated, needs_sync: needsApply });
           void refreshRuntimeHealth();
         }}
         selectedMod={selectedMod}
