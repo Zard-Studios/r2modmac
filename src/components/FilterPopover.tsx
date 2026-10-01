@@ -148,15 +148,21 @@ export function FilterPopover({ options, onChange, availableCategories, availabl
                             <div>
                                 <label className="block text-sm font-medium text-gray-400 mb-2">Source</label>
                                 <div className="flex bg-gray-900 rounded-lg p-1 border border-gray-700">
-                                    {ALL_PROVIDERS.map(provider => {
-                                        const active = (options.providers ?? ALL_PROVIDERS).includes(provider);
+                                    {ALL_PROVIDERS.map((provider, index) => {
+                                        const selected = options.providers ?? ALL_PROVIDERS;
+                                        const active = selected.includes(provider);
+                                        // Two lit buttons read as one piece: no rounded corners
+                                        // where they meet, so no notch between them.
+                                        const joined = selected.length === ALL_PROVIDERS.length
+                                            ? (index === 0 ? 'rounded-r-none' : 'rounded-l-none')
+                                            : '';
                                         return (
                                             <button
                                                 key={provider}
                                                 type="button"
                                                 aria-pressed={active}
                                                 onClick={() => handleToggleProvider(provider)}
-                                                className={`flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-md text-sm font-medium transition-colors ${active
+                                                className={`flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-md ${joined} text-sm font-medium transition-colors ${active
                                                     ? 'bg-gray-700 text-white shadow-sm'
                                                     : 'text-gray-500 hover:text-gray-300'
                                                     }`}
