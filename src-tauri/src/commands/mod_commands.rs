@@ -7293,6 +7293,64 @@ pub async fn fetch_packages(
     Ok(count)
 }
 
+/// The stores a package can be installed from: the store of each version it
+/// carries, plus any store it is merely known to publish under.
+fn package_providers(package: &crate::models::shared::Package) -> std::collections::HashSet<ModSource> {
+    package
+        .versions
+        .iter()
+        .map(|version| version.source)
+        .chain(package.source_package_uuids.keys().copied())
+        .collect()
+}
+
+/// Does a package belong in a list narrowed to these stores?
+///
+/// An empty list narrows nothing. A package published by several stores stays
+/// as long as one of them is wanted, and a store the filter has no switch for
+/// (Outer Wilds Mods) is never hidden by it.
+fn package_matches_providers(package: &crate::models::shared::Package, wanted: &[String]) -> bool {
+    if wanted.is_empty() {
+        return true;
+    }
+    let wants = |source: ModSource| {
+        let name = match source {
+            ModSource::Thunderstore => "thunderstore",
+            ModSource::Hexium => "hexium",
+            ModSource::Outerwilds => return true,
+        };
+        wanted.iter().any(|candidate| candidate.eq_ignore_ascii_case(name))
+    };
+    let providers = package_providers(package);
+    providers.is_empty() || providers.into_iter().any(wants)
+}
+
+/// The stores that actually have packages for a game, so the browse filter
+/// only offers a choice where there is one.
+#[command]
+pub async fn get_available_providers(
+    state: tauri::State<'_, AppState>,
+    game_id: String,
+) -> Result<Vec<String>, String> {
+    let packages_lock = state.packages.read().await;
+    let mut found = std::collections::HashSet::new();
+    if let Some(packages) = packages_lock.get(&game_id) {
+        for package in packages {
+            found.extend(package_providers(package));
+        }
+    }
+    let mut result: Vec<String> = found
+        .into_iter()
+        .filter_map(|source| match source {
+            ModSource::Thunderstore => Some("thunderstore".to_string()),
+            ModSource::Hexium => Some("hexium".to_string()),
+            ModSource::Outerwilds => None,
+        })
+        .collect();
+    result.sort();
+    Ok(result)
+}
+
 #[command]
 pub async fn get_available_categories(
     state: tauri::State<'_, AppState>,
@@ -7337,6 +7395,7 @@ pub async fn get_packages(
     categories: Option<Vec<String>>,
     mods: Option<bool>,
     modpacks: Option<bool>,
+    providers: Option<Vec<String>>,
 ) -> Result<PackageListResponse, String> {
     let packages_lock = state.packages.read().await;
 
@@ -7396,7 +7455,14 @@ pub async fn get_packages(
                     }
                 }
 
-                // 5. Category/Tag Filter
+                // 5. Provider Filter
+                if let Some(ref wanted) = providers {
+                    if !package_matches_providers(p, wanted) {
+                        return false;
+                    }
+                }
+
+                // 6. Category/Tag Filter
                 if let Some(ref filter_cats) = categories {
                     if !filter_cats.is_empty() {
                         let pkg_name = p.name.to_lowercase();
@@ -9793,5 +9859,91 @@ dll_search_path_override =\n";
         assert!(!inspect_windows_bepinex(&game, &game, false).blocks_modded_launch());
 
         fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod provider_filter_tests {
+    use super::*;
+    use crate::models::shared::{ModSource, Package, PackageVersion};
+
+    fn version(source: ModSource) -> PackageVersion {
+        PackageVersion {
+            name: "Mod".to_string(),
+            description: String::new(),
+            icon: String::new(),
+            version_number: "1.0.0".to_string(),
+            dependencies: Vec::new(),
+            download_url: String::new(),
+            downloads: 0,
+            file_size: 0,
+            website_url: String::new(),
+            uuid4: String::new(),
+            full_name: "Author-Mod-1.0.0".to_string(),
+            source,
+            date_created: String::new(),
+            is_active: true,
+        }
+    }
+
+    fn package(sources: &[ModSource], known_elsewhere: &[ModSource]) -> Package {
+        Package {
+            name: "Mod".to_string(),
+            full_name: "Author-Mod".to_string(),
+            owner: String::new(),
+            package_url: String::new(),
+            date_created: String::new(),
+            date_updated: String::new(),
+            uuid4: String::new(),
+            total_downloads: 0,
+            source_package_uuids: known_elsewhere
+                .iter()
+                .map(|source| (*source, "uuid".to_string()))
+                .collect(),
+            rating_score: 0,
+            is_pinned: false,
+            is_deprecated: false,
+            has_nsfw_content: false,
+            categories: Vec::new(),
+            versions: sources.iter().map(|source| version(*source)).collect(),
+        }
+    }
+
+    fn only(name: &str) -> Vec<String> {
+        vec![name.to_string()]
+    }
+
+    #[test]
+    fn a_store_filter_keeps_the_packages_that_store_publishes() {
+        let thunderstore = package(&[ModSource::Thunderstore], &[]);
+        let hexium = package(&[ModSource::Hexium], &[]);
+        assert!(package_matches_providers(&thunderstore, &only("thunderstore")));
+        assert!(!package_matches_providers(&thunderstore, &only("hexium")));
+        assert!(package_matches_providers(&hexium, &only("hexium")));
+        assert!(!package_matches_providers(&hexium, &only("thunderstore")));
+    }
+
+    #[test]
+    fn a_package_on_both_stores_stays_while_either_is_wanted() {
+        let both = package(&[ModSource::Thunderstore, ModSource::Hexium], &[]);
+        assert!(package_matches_providers(&both, &only("thunderstore")));
+        assert!(package_matches_providers(&both, &only("hexium")));
+        // A store only known through its package id counts too.
+        let known = package(&[ModSource::Thunderstore], &[ModSource::Hexium]);
+        assert!(package_matches_providers(&known, &only("hexium")));
+    }
+
+    #[test]
+    fn no_filter_and_unswitchable_stores_hide_nothing() {
+        let hexium = package(&[ModSource::Hexium], &[]);
+        assert!(package_matches_providers(&hexium, &[]));
+        assert!(package_matches_providers(
+            &hexium,
+            &["thunderstore".to_string(), "HEXIUM".to_string()]
+        ));
+        let outer_wilds = package(&[ModSource::Outerwilds], &[]);
+        assert!(package_matches_providers(&outer_wilds, &only("hexium")));
+        let bare = package(&[], &[]);
+        assert!(package_matches_providers(&bare, &only("hexium")));
     }
 }

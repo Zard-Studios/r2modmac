@@ -132,6 +132,7 @@ export interface IElectronAPI {
     resolveCommunityPlatforms: (games: { identifier: string; name: string }[]) => Promise<Record<string, CommunityPlatformInfo>>;
     fetchPackages: (gameId: string) => Promise<number>;
     getAvailableCategories: (gameId: string) => Promise<string[]>;
+    getAvailableProviders: (gameId: string) => Promise<string[]>;
     getPackages(
         gameId: string,
         page: number,
@@ -143,7 +144,8 @@ export interface IElectronAPI {
         sortDirection?: string,
         categories?: string[],
         mods?: boolean,
-        modpacks?: boolean
+        modpacks?: boolean,
+        providers?: string[]
     ): Promise<{ items: Package[]; total: number; }>;
     lookupPackagesByNames: (gameId: string, names: string[]) => Promise<{ found: Package[]; unknown: string[] }>;
     fetchPackageByName: (name: string, gameId?: string | null, source?: ModSource) => Promise<Package | null>;

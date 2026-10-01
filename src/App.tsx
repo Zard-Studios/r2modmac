@@ -3,6 +3,7 @@ import { Button } from './components/ui'
 import { Layout } from './components/Layout'
 import type { FilterOptions } from './components/FilterPopover'
 import { FilterPopover } from './components/FilterPopover'
+import { ALL_PROVIDERS } from './utils/storeProviders'
 import { GameSelectionScreen } from './components/screens/GameSelectionScreen'
 import { SearchBar } from './components/SearchBar'
 import { VirtualizedModGrid } from './components/VirtualizedModGrid'
@@ -299,9 +300,11 @@ function App() {
     mods: false,
     modpacks: false,
     categories: [],
+    providers: ALL_PROVIDERS,
   })
   const PAGE_SIZE = 50 
   const [availableCategories, setAvailableCategories] = useState<string[]>([])
+  const [availableProviders, setAvailableProviders] = useState<string[]>([])
   const [profilePackageIndex, setProfilePackageIndex] = useState<Record<string, Package>>({})
   const [isSidebarOpen, setIsSidebarOpen] = useState(true)
 
@@ -744,7 +747,8 @@ function App() {
           filterOptions.sortDirection,
           filterOptions.categories,
           filterOptions.mods,
-          filterOptions.modpacks
+          filterOptions.modpacks,
+          filterOptions.providers
         ),
         20_000,
         'Package query'
@@ -758,6 +762,12 @@ function App() {
       }
       setTotalPackages(response.total);
       setCurrentPage(pageNum);
+      if (reset) {
+        // Asked after the list so a store that loads late still shows up.
+        window.ipcRenderer.getAvailableProviders(communityId)
+          .then(providers => { if (!isStaleRequest()) setAvailableProviders(providers) })
+          .catch(() => { if (!isStaleRequest()) setAvailableProviders([]) })
+      }
     } catch (err) {
       if (isStaleRequest()) return;
       console.error('Failed to load packages', err)
@@ -3445,6 +3455,7 @@ function App() {
               options={filterOptions}
               onChange={setFilterOptions}
               availableCategories={availableCategories}
+              availableProviders={availableProviders}
             />
             <div className="min-w-48 max-w-80 flex-1 basis-48">
               <SearchBar value={searchQuery} onChange={setSearchQuery} />

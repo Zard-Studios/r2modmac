@@ -109,6 +109,9 @@ export const tauriAPI: IElectronAPI = {
     async getAvailableCategories(gameId: string): Promise<string[]> {
         return await invoke('get_available_categories', { gameId });
     },
+    async getAvailableProviders(gameId: string): Promise<string[]> {
+        return await invoke('get_available_providers', { gameId });
+    },
     async getPackages(
         gameId: string,
         page: number,
@@ -120,7 +123,8 @@ export const tauriAPI: IElectronAPI = {
         sortDirection?: string,
         categories?: string[],
         mods?: boolean,
-        modpacks?: boolean
+        modpacks?: boolean,
+        providers?: string[]
     ): Promise<{ items: Package[], total: number }> {
         return await invoke<{ items: Package[], total: number }>('get_packages', {
             gameId,
@@ -133,7 +137,8 @@ export const tauriAPI: IElectronAPI = {
             sortDirection,
             categories,
             mods,
-            modpacks
+            modpacks,
+            providers
         });
     },
     async lookupPackagesByNames(gameId: string, names: string[]) {

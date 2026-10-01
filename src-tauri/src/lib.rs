@@ -618,6 +618,7 @@ pub fn run() {
             commands::legacy_mod_commands::copy_mod_from_cache,
             commands::legacy_mod_commands::fetch_packages,
             commands::legacy_mod_commands::get_available_categories,
+            commands::legacy_mod_commands::get_available_providers,
             commands::legacy_mod_commands::get_packages,
             commands::legacy_mod_commands::lookup_packages_by_names,
             commands::legacy_mod_commands::fetch_package_by_name,

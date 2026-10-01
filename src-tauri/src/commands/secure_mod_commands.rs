@@ -12,7 +12,7 @@ use tauri::{AppHandle, Emitter};
 
 pub use super::legacy_mod_commands::{
     cancel_custom_mod_import, copy_mod_from_cache, delete_local_mod_payload, fetch_package_by_name,
-    fetch_packages, get_available_categories, get_packages, import_custom_mod,
+    fetch_packages, get_available_categories, get_available_providers, get_packages, import_custom_mod,
     import_embedded_custom_mod, inspect_custom_mod, install_local_mod, lookup_packages_by_names,
     open_mod_folder, refresh_local_mod_metadata, remove_mod, toggle_mod,
 };

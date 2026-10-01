@@ -1,4 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
+import { StoreLogo } from './ui/StoreLogo';
+import { ALL_PROVIDERS, isProviderFilterActive, sourceName, toggleProvider } from '../utils/storeProviders';
+import type { FilterProvider } from '../utils/storeProviders';
 
 export interface FilterOptions {
     sort: string;
@@ -8,18 +11,23 @@ export interface FilterOptions {
     mods: boolean;
     modpacks: boolean;
     categories: string[];
+    /** Stores whose packages are listed. Both are on by default. */
+    providers: FilterProvider[];
 }
 
 interface FilterPopoverProps {
     options: FilterOptions;
     onChange: (options: FilterOptions) => void;
     availableCategories: string[];
+    /** Stores that have packages for this game; the choice only shows when there are two. */
+    availableProviders?: string[];
 }
 
 // Special tags that filter by boolean fields, not categories
 const SPECIAL_TAGS = ['Mods', 'Modpacks', 'NSFW', 'Deprecated'];
 
-export function FilterPopover({ options, onChange, availableCategories }: FilterPopoverProps) {
+export function FilterPopover({ options, onChange, availableCategories, availableProviders = [] }: FilterPopoverProps) {
+    const providerChoice = ALL_PROVIDERS.every(provider => availableProviders.includes(provider));
     const [isOpen, setIsOpen] = useState(false);
     const popoverRef = useRef<HTMLDivElement>(null);
 
@@ -46,6 +54,12 @@ export function FilterPopover({ options, onChange, availableCategories }: Filter
         }
     };
 
+    const handleToggleProvider = (provider: FilterProvider) => {
+        const current = options.providers ?? ALL_PROVIDERS;
+        const next = toggleProvider(current, provider);
+        if (next !== current) updateOption('providers', next);
+    };
+
     const toggleSpecialTag = (tag: string) => {
         if (tag === 'NSFW') {
             updateOption('nsfw', !options.nsfw);
@@ -66,7 +80,7 @@ export function FilterPopover({ options, onChange, availableCategories }: Filter
         return false;
     };
 
-    const activeFilterCount = (options.nsfw ? 1 : 0) + (options.deprecated ? 1 : 0) + (options.mods ? 1 : 0) + (options.modpacks ? 1 : 0) + (options.categories?.length || 0);
+    const activeFilterCount = (options.nsfw ? 1 : 0) + (options.deprecated ? 1 : 0) + (options.mods ? 1 : 0) + (options.modpacks ? 1 : 0) + (options.categories?.length || 0) + (providerChoice && isProviderFilterActive(options.providers ?? ALL_PROVIDERS) ? 1 : 0);
 
     return (
         <div className="relative" ref={popoverRef}>
@@ -129,6 +143,33 @@ export function FilterPopover({ options, onChange, availableCategories }: Filter
                             </div>
                         </div>
 
+                        {/* Source: which stores the list draws from */}
+                        {providerChoice && (
+                            <div>
+                                <label className="block text-sm font-medium text-gray-400 mb-2">Source</label>
+                                <div className="flex bg-gray-900 rounded-lg p-1 border border-gray-700">
+                                    {ALL_PROVIDERS.map(provider => {
+                                        const active = (options.providers ?? ALL_PROVIDERS).includes(provider);
+                                        return (
+                                            <button
+                                                key={provider}
+                                                type="button"
+                                                aria-pressed={active}
+                                                onClick={() => handleToggleProvider(provider)}
+                                                className={`flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-md text-sm font-medium transition-colors ${active
+                                                    ? 'bg-gray-700 text-white shadow-sm'
+                                                    : 'text-gray-500 hover:text-gray-300'
+                                                    }`}
+                                            >
+                                                <StoreLogo source={provider} className={`h-4 w-4 shrink-0 ${active ? '' : 'opacity-50'}`} />
+                                                {sourceName(provider)}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        )}
+
                         {/* Tags Section */}
                         <div className="pt-4 border-t border-gray-700">
                             <label className="block text-sm font-medium text-gray-400 mb-3">Filter Tags</label>
@@ -184,13 +225,15 @@ export function FilterPopover({ options, onChange, availableCategories }: Filter
                                         </button>
                                     ))}
                                     <button
-                                        onClick={() => {
-                                            updateOption('categories', []);
-                                            updateOption('nsfw', false);
-                                            updateOption('deprecated', false);
-                                            updateOption('mods', false);
-                                            updateOption('modpacks', false);
-                                        }}
+                                        onClick={() => onChange({
+                                            ...options,
+                                            categories: [],
+                                            nsfw: false,
+                                            deprecated: false,
+                                            mods: false,
+                                            modpacks: false,
+                                            providers: ALL_PROVIDERS,
+                                        })}
                                         className="text-sm text-gray-400 hover:text-white transition-colors"
                                     >
                                         Clear all
