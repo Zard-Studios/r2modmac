@@ -37,6 +37,18 @@ maybe_retry_x64_after_arm64_failure() {{
         return 1
     fi
 
+    # A crash with the native Apple Silicon shim in place, even after BepInEx
+    # started: later launches use Rosetta, until r2modmac installs a newer shim.
+    case "$failed_status" in
+        132|133|134|138|139)
+            if [ -n "${{apple_silicon_shim:-}}" ] && [ "${{DOORSTOP_TARGET_ASSEMBLY:-}}" = "$apple_silicon_shim" ] \
+                && [ -n "${{force_x64_state_file:-}}" ] && [ -n "${{force_x64_state_key:-}}" ]; then
+                printf '%s\n' "$force_x64_state_key" > "$force_x64_state_file" 2>/dev/null || true
+                log_bootstrap "${{failed_mode}}_apple_silicon_shim_crash_force_x64_state_written status=${{failed_status}} key=${{force_x64_state_key}}"
+            fi
+            ;;
+    esac
+
     arm64_preloader_crash=false
     latest_preloader_log=""
     retry_executable_dir=""

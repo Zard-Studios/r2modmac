@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Doorstop's entry point for native Apple Silicon (see ../README.md). Compiled against MonoMod 22.1.29.1, the
+       version BepInEx 5.4.23 ships; the game's own copy is used at runtime, so nothing is copied into the build. -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <AssemblyName>AppleSiliconMods</AssemblyName>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <GenerateDependencyFile>false</GenerateDependencyFile>
+    <DebugType>none</DebugType>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="MonoMod.RuntimeDetour" Version="22.1.29.1" ExcludeAssets="runtime" PrivateAssets="all" />
+  </ItemGroup>
+</Project>

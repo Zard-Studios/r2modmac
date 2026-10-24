@@ -245,6 +245,35 @@ mod bepinex_root_tests {
         assert!(generated.contains("$BASEDIR/doorstop_libs"));
     }
 
+    /// Native arm64 games get an optional shim (beside the game) that lets
+    /// Harmony write code under Apple Silicon's W^X before BepInEx starts.
+    #[test]
+    fn an_apple_silicon_shim_beside_the_game_runs_first_only_on_native_arm64() {
+        let generated = script(BepInExRoot::Game);
+        assert!(generated.contains(r#"apple_silicon_shim="$BASEDIR/apple_silicon/AppleSiliconMods.dll""#));
+        assert!(generated.contains(r#"if [ "$arch" = "arm64" ] && [ -f "$apple_silicon_shim" ]; then"#));
+        assert!(generated.contains(r#"export DOORSTOP_TARGET_ASSEMBLY="$apple_silicon_shim""#));
+        let shim = generated.find("apple_silicon_shim=").unwrap();
+        let arch_chosen = generated.find("selected_runtime_arch=").unwrap();
+        assert!(shim > arch_chosen, "the shim must be chosen after the runtime arch is final");
+    }
+
+    /// A native crash with the shim in place (even after BepInEx started)
+    /// pins the game to Rosetta, so it doesn't crash on every launch.
+    #[test]
+    fn a_crash_with_the_apple_silicon_shim_pins_the_game_to_rosetta() {
+        let generated = script(BepInExRoot::Game);
+        let pin = generated
+            .find("_apple_silicon_shim_crash_force_x64_state_written")
+            .expect("the crash pin is written");
+        let crash_signals = generated[..pin].rfind("132|133|134|138|139)").unwrap();
+        let shim_check = generated[crash_signals..pin]
+            .find(r#"[ "${DOORSTOP_TARGET_ASSEMBLY:-}" = "$apple_silicon_shim" ]"#);
+        assert!(shim_check.is_some(), "only a launch that used the shim is pinned");
+        let started_check = generated.find(r#"if [ "$bepinex_started" = true ] && [ "$arm64_preloader_crash" != true ]; then"#).unwrap();
+        assert!(pin < started_check, "the pin comes before the BepInEx-started early return");
+    }
+
     #[test]
     fn no_placeholder_survives_into_the_written_script() {
         for generated in [

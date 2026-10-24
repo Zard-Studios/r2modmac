@@ -379,6 +379,9 @@ pub(crate) fn configure_macos_bepinex_script(
     let has_legacy_bepinex_bootstrap_log = script
         .contains("bootstrap_log=\"$BASEDIR/BepInEx/r2modmac_bootstrap.log\"")
         || script.contains("mkdir -p \"$BASEDIR/BepInEx\"");
+    let has_apple_silicon_shim =
+        script.contains("apple_silicon_shim=\"$BASEDIR/apple_silicon/AppleSiliconMods.dll\"")
+            && script.contains("_apple_silicon_shim_crash_force_x64_state_written");
     let has_incompatible_verbose_doorstop = script.contains("libdoorstop_r2modmac_verbose.dylib")
         || script.contains("doorstop_diagnostic_loader=official_verbose_4.5.0");
     let steam_launch_pos = script.find("for a in \"$@\"").unwrap_or(usize::MAX);
@@ -415,6 +418,7 @@ pub(crate) fn configure_macos_bepinex_script(
         || !preserves_steam_dyld_hooks
         || !steam_launch_exec_deferred
         || !has_expected_debug_log_setting
+        || !has_apple_silicon_shim
         || has_unexpanded_template_braces
         || has_legacy_bepinex_bootstrap_log
         || has_incompatible_verbose_doorstop;
@@ -686,6 +690,25 @@ mod configured_script_tests {
         assert!(!stale_loader.exists());
         assert!(!written.contains("libdoorstop_r2modmac_verbose.dylib"));
         assert!(written.contains("root_doorstop_dylib=\"$BASEDIR/libdoorstop.dylib\""));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_script_from_before_the_apple_silicon_shim_is_regenerated() {
+        let root = world("apple-silicon-shim");
+        let script = root.join("run_bepinex.sh");
+
+        configure_macos_bepinex_script(&script, &root, false, None).unwrap();
+        let shim_block = std::fs::read_to_string(&script).unwrap();
+        let start = shim_block.find("# Native Apple Silicon: an optional shim").unwrap();
+        let end = shim_block[start..].find("\nfi\n").unwrap() + start + 4;
+        let before_shim = format!("{}{}", &shim_block[..start], &shim_block[end..]);
+        std::fs::write(&script, &before_shim).unwrap();
+
+        configure_macos_bepinex_script(&script, &root, false, None).unwrap();
+
+        let written = std::fs::read_to_string(&script).unwrap();
+        assert!(written.contains(r#"apple_silicon_shim="$BASEDIR/apple_silicon/AppleSiliconMods.dll""#));
         std::fs::remove_dir_all(root).unwrap();
     }
 

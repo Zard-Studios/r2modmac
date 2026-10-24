@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Only to compile against: STRAFTAT's own ComputerysModdingUtilities.dll (same name, version 0.0.0.0, no strong
+       name) is what the marker binds to at runtime. Never shipped. -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <AssemblyName>ComputerysModdingUtilities</AssemblyName>
+    <AssemblyVersion>0.0.0.0</AssemblyVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <GenerateDependencyFile>false</GenerateDependencyFile>
+    <DebugType>none</DebugType>
+  </PropertyGroup>
+</Project>

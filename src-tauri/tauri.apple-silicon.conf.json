@@ -1,0 +1,11 @@
+{
+  "bundle": {
+    "resources": {
+      "../tools/apple-silicon/dist/AppleSiliconMods.dll": "apple-silicon/AppleSiliconMods.dll",
+      "../tools/apple-silicon/dist/libjitwrite.dylib": "apple-silicon/libjitwrite.dylib",
+      "../tools/apple-silicon/dist/AppleSiliconMods.Straftat.dll": "apple-silicon/AppleSiliconMods.Straftat.dll",
+      "../tools/apple-silicon/dist/libdoorstop.dylib": "apple-silicon/libdoorstop.dylib",
+      "../tools/apple-silicon/dist/LICENSE-UnityDoorstop.txt": "apple-silicon/LICENSE-UnityDoorstop.txt"
+    }
+  }
+}

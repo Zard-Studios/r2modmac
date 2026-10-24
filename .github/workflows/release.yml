@@ -130,9 +130,20 @@ jobs:
         if: matrix.settings.platform == 'macos-latest'
         run: brew install create-dmg
 
+      - name: Setup .NET (macOS)
+        if: matrix.settings.platform == 'macos-latest'
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      # Native Apple Silicon for BepInEx 5 games (tools/apple-silicon), bundled into the app.
+      - name: Build Apple Silicon add-on (macOS)
+        if: matrix.settings.platform == 'macos-latest'
+        run: tools/apple-silicon/build.sh
+
       - name: Build Tauri app (macOS)
         if: matrix.settings.platform == 'macos-latest'
-        run: npm run tauri build -- --target ${{ matrix.settings.rust-target }} --bundles app
+        run: npm run tauri build -- --target ${{ matrix.settings.rust-target }} --bundles app --config src-tauri/tauri.apple-silicon.conf.json
 
       - name: Build Tauri app (Windows)
         if: matrix.settings.platform == 'windows-latest'

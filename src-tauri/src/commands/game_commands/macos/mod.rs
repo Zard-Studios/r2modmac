@@ -1,3 +1,4 @@
+mod apple_silicon;
 mod discovery;
 mod launch;
 mod runtime;
@@ -16,6 +17,7 @@ mod wine;
 
 use super::*;
 
+pub(crate) use self::apple_silicon::*;
 pub(crate) use self::discovery::*;
 pub(crate) use self::launch::*;
 pub(crate) use self::runtime::*;

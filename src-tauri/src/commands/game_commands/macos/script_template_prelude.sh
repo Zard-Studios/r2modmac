@@ -614,6 +614,15 @@ fi
 
 log_bootstrap "selected_runtime_arch=$arch doorstop_dylib=$doorstop_dylib"
 
+# Native Apple Silicon: an optional shim beside the game lets Harmony write code
+# under W^X (pthread_jit_write_protect_np), then starts BepInEx's own entry point
+# from DOORSTOP_INVOKE_DLL_PATH. If it crashes, the x64 retry above takes over.
+apple_silicon_shim="$BASEDIR/apple_silicon/AppleSiliconMods.dll"
+if [ "$arch" = "arm64" ] && [ -f "$apple_silicon_shim" ]; then
+    export DOORSTOP_TARGET_ASSEMBLY="$apple_silicon_shim"
+    log_bootstrap "apple_silicon_shim=$apple_silicon_shim"
+fi
+
 # r2modmac: keep vanilla launch arch independent from Doorstop arch decisions.
 # On Apple Silicon, prefer native arm64 for vanilla when the game binary supports it.
 vanilla_exec_arch="$arch"

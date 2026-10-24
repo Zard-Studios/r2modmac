@@ -542,6 +542,7 @@ pub async fn repair_profile_runtime_link(
     game_identifier: String,
     platform: Option<String>,
 ) -> Result<RuntimeHealth, String> {
+    take_away_unusable_native_apple_silicon_for_profile(&app, &profile_id, &game_identifier).await;
     let health = check_profile_runtime_health(
         app.clone(),
         profile_id.clone(),
@@ -574,6 +575,46 @@ pub async fn repair_profile_runtime_link(
         profile_id
     );
     check_profile_runtime_health(app, profile_id, game_identifier, platform).await
+}
+
+/// A native Apple Silicon shim beside a game whose BepInEx it can't start
+/// keeps the runtime unhealthy however often the loader is reinstalled, so
+/// Repair takes it away first (see apple_silicon.rs). Best effort.
+async fn take_away_unusable_native_apple_silicon_for_profile(
+    app: &AppHandle,
+    profile_id: &str,
+    game_identifier: &str,
+) {
+    use tauri::Manager;
+    let Ok(Some(game_path)) =
+        get_game_path(app.clone(), game_identifier.to_string(), Some("mac".to_string())).await
+    else {
+        return;
+    };
+    let runtime_root = resolve_macos_runtime_root(std::path::Path::new(&game_path));
+    let Ok(tree_root) = bepinex_install_root(app, profile_id, &runtime_root) else {
+        return;
+    };
+    let resources = app
+        .path()
+        .resource_dir()
+        .ok()
+        .map(|dir| dir.join(APPLE_SILICON_RESOURCE_DIR));
+    match take_away_unusable_native_apple_silicon(
+        &runtime_root,
+        &tree_root.join("BepInEx").join("core"),
+        resources.as_deref(),
+    ) {
+        Ok(true) => log::info!(
+            "[runtime_health] Took away a native Apple Silicon shim this BepInEx can't use from {:?}",
+            runtime_root
+        ),
+        Ok(false) => {}
+        Err(error) => log::warn!(
+            "[runtime_health] Couldn't take away the native Apple Silicon shim: {}",
+            error
+        ),
+    }
 }
 
 #[cfg(test)]

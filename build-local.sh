@@ -242,8 +242,12 @@ build_macos_target() {
 
   log "Building macOS $asset_arch"
   rustup target add "$rust_target"
+  local apple_silicon_config=()
+  if [[ "${R2MODMAC_SKIP_APPLE_SILICON:-0}" != "1" ]]; then
+    apple_silicon_config=(--config "src-tauri/tauri.apple-silicon.conf.json")
+  fi
   npm run tauri build -- --target "$rust_target" --bundles app \
-    --config "$SKIP_BEFORE_MACOS" -- --locked
+    --config "$SKIP_BEFORE_MACOS" ${apple_silicon_config[@]+"${apple_silicon_config[@]}"} -- --locked
 
   local app_path="$ROOT_DIR/src-tauri/target/$rust_target/release/bundle/macos/r2modmac.app"
   [[ -d "$app_path" ]] || die "macOS app bundle was not produced at $app_path"
@@ -280,6 +284,15 @@ build_macos_target() {
 
 build_macos() {
   [[ "$(uname -s)" == "Darwin" ]] || die "macOS artifacts must be built on macOS."
+  # Native Apple Silicon for BepInEx 5 games (tools/apple-silicon): built once,
+  # bundled into both macOS apps. R2MODMAC_SKIP_APPLE_SILICON=1 builds without it.
+  if [[ "${R2MODMAC_SKIP_APPLE_SILICON:-0}" != "1" ]]; then
+    require dotnet
+    require clang
+    timed "Apple Silicon add-on" "$ROOT_DIR/tools/apple-silicon/build.sh"
+  else
+    warn "Building macOS apps without the Apple Silicon add-on (R2MODMAC_SKIP_APPLE_SILICON=1)."
+  fi
   timed "macOS aarch64" build_macos_target "aarch64-apple-darwin" "aarch64"
   timed "macOS x86_64"  build_macos_target "x86_64-apple-darwin" "x86_64"
 }

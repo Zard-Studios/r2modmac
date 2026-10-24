@@ -303,6 +303,8 @@ pub(crate) async fn launch_game_with_mods_for_macos(
         },
     )?;
 
+    prepare_native_apple_silicon_for_launch(app, &runtime_game_path, &tree_root, executable_path.as_ref());
+
     let dist = infer_distribution_from_game_path(app, game_path, false);
     if dist == "steam" && !use_direct_launch {
         if !settings.write_debug_logs_to_game {
@@ -376,6 +378,43 @@ pub(crate) async fn launch_game_with_mods_for_macos(
     }
 
     Err("run_bepinex.sh not found and no .app bundle found either".to_string())
+}
+
+/// Puts the native Apple Silicon files beside the game when it can use them (see
+/// apple_silicon.rs). Best effort: a problem here never stops the launch, which
+/// then runs under Rosetta as before.
+fn prepare_native_apple_silicon_for_launch(
+    app: &AppHandle,
+    runtime_game_path: &std::path::Path,
+    tree_root: &std::path::Path,
+    executable_path: Option<&std::path::PathBuf>,
+) {
+    use tauri::Manager;
+    let resources = app
+        .path()
+        .resource_dir()
+        .ok()
+        .map(|dir| dir.join(APPLE_SILICON_RESOURCE_DIR));
+    let core_dir = tree_root.join("BepInEx").join("core");
+    let host_is_apple_silicon = is_apple_silicon_host();
+    let game_has_arm64 = host_is_apple_silicon
+        && executable_path.is_some_and(|path| macho_file_supports_arm64(path));
+    match prepare_native_apple_silicon(&NativeAppleSiliconTarget {
+        resources: resources.as_deref(),
+        runtime_root: runtime_game_path,
+        core_dir: &core_dir,
+        host_is_apple_silicon,
+        game_has_arm64,
+    }) {
+        Ok(NativeAppleSilicon::NotApplicable(reason)) => {
+            log::info!("[launch_game_with_mods] Native Apple Silicon not used: {}", reason)
+        }
+        Ok(outcome) => log::info!("[launch_game_with_mods] Native Apple Silicon: {:?}", outcome),
+        Err(error) => log::warn!(
+            "[launch_game_with_mods] Couldn't set up native Apple Silicon, launching as before: {}",
+            error
+        ),
+    }
 }
 
 pub(crate) async fn launch_game_vanilla_for_macos(

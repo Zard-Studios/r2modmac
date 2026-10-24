@@ -76,6 +76,8 @@ These are the loaders currently handled by r2modmac. Other Thunderstore communit
 
 If a loader is missing from this list, please [open an issue](https://github.com/Zard-Studios/r2modmac/issues) before relying on it.
 
+On Apple Silicon, BepInEx 5 games normally run under Rosetta even when the game itself is universal. [`tools/apple-silicon`](tools/apple-silicon/README.md) (experimental) lets them run natively with mods; macOS release builds set it up by themselves at launch.
+
 
 ## 🛠️ Technologies Used
 
