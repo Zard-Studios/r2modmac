@@ -18,7 +18,6 @@ const SHIM_FILES: [&str; 3] = [
     "AppleSiliconMods.Straftat.dll",
 ];
 const LOADER: &str = "libdoorstop.dylib";
-const FORCE_X64_STATE: &str = ".r2modmac_force_x64_state";
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum NativeAppleSilicon {
@@ -49,9 +48,17 @@ fn file_contains(path: &std::path::Path, needle: &[u8]) -> bool {
         .unwrap_or(false)
 }
 
+pub(crate) const CPU_TYPE_ARM64: u32 = 0x0100_000c;
+pub(crate) const CPU_TYPE_X86_64: u32 = 0x0100_0007;
+
 /// Whether a Mach-O file (thin or universal) has an arm64 slice.
 pub(crate) fn mach_o_bytes_have_arm64(bytes: &[u8]) -> bool {
-    const CPU_TYPE_ARM64: u32 = 0x0100_000c;
+    mach_o_bytes_have_arch(bytes, CPU_TYPE_ARM64)
+}
+
+/// Whether a Mach-O file (thin or universal) has a slice for this CPU type.
+/// Only the header is read, so a file's first KiB is enough.
+pub(crate) fn mach_o_bytes_have_arch(bytes: &[u8], cpu_type: u32) -> bool {
     let be = |at: usize| bytes.get(at..at + 4).map(|b| u32::from_be_bytes([b[0], b[1], b[2], b[3]]));
     let le = |at: usize| bytes.get(at..at + 4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]));
     match be(0) {
@@ -59,10 +66,10 @@ pub(crate) fn mach_o_bytes_have_arm64(bytes: &[u8]) -> bool {
         Some(magic @ (0xcafe_babe | 0xcafe_babf)) => {
             let entry = if magic == 0xcafe_babf { 32 } else { 20 };
             let count = be(4).unwrap_or(0).min(16) as usize;
-            (0..count).any(|i| be(8 + i * entry) == Some(CPU_TYPE_ARM64))
+            (0..count).any(|i| be(8 + i * entry) == Some(cpu_type))
         }
         // Thin 64-bit, little-endian.
-        _ => le(0) == Some(0xfeed_facf) && le(4) == Some(CPU_TYPE_ARM64),
+        _ => le(0) == Some(0xfeed_facf) && le(4) == Some(cpu_type),
     }
 }
 
@@ -71,7 +78,7 @@ pub(crate) fn mach_o_bytes_have_arm64(bytes: &[u8]) -> bool {
 /// have Doorstop 4's `Doorstop.Entrypoint.Start`. 5.4.21 already reads
 /// `DOORSTOP_INVOKE_DLL_PATH`, so that alone doesn't tell them apart; the
 /// `Doorstop` namespace does, as in `macos_preloader_matches_loader`.
-fn bepinex_can_use_shim(core_dir: &std::path::Path) -> Result<(), &'static str> {
+pub(crate) fn bepinex_can_use_shim(core_dir: &std::path::Path) -> Result<(), &'static str> {
     let preloader = core_dir.join("BepInEx.Preloader.dll");
     if !preloader.is_file() {
         return Err("the game doesn't use BepInEx 5");
@@ -83,6 +90,11 @@ fn bepinex_can_use_shim(core_dir: &std::path::Path) -> Result<(), &'static str> 
         return Err("its BepInEx is older than 5.4.22");
     }
     Ok(())
+}
+
+/// Whether this build of r2modmac carries every file the shim needs.
+pub(crate) fn resources_carry_shim(resources: Option<&std::path::Path>) -> bool {
+    resources.is_some_and(|dir| SHIM_FILES.iter().chain([&LOADER]).all(|name| dir.join(name).is_file()))
 }
 
 fn copy_if_different(from: &std::path::Path, to: &std::path::Path) -> Result<bool, String> {
@@ -170,10 +182,7 @@ pub(crate) fn prepare_native_apple_silicon(
     // both get a native try. Pins written with this shim are kept: it didn't
     // help there (the launcher pins a game whose native launch crashed).
     if first_install || shim_updated {
-        let pin = target.runtime_root.join(FORCE_X64_STATE);
-        if pin.exists() {
-            fs::remove_file(&pin).map_err(|e| format!("Couldn't remove {}: {}", pin.display(), e))?;
-        }
+        remove_all_architecture_pins(target.runtime_root)?;
     }
 
     Ok(if changed { NativeAppleSilicon::Installed } else { NativeAppleSilicon::Unchanged })
@@ -261,6 +270,15 @@ mod tests {
     }
 
     #[test]
+    fn reads_x86_64_slices_the_same_way() {
+        assert!(mach_o_bytes_have_arch(&UNIVERSAL, CPU_TYPE_X86_64));
+        assert!(mach_o_bytes_have_arch(&X86_64_ONLY, CPU_TYPE_X86_64));
+        assert!(!mach_o_bytes_have_arch(&ARM64_ONLY, CPU_TYPE_X86_64));
+        assert!(!mach_o_bytes_have_arch(b"MZ not a mach-o", CPU_TYPE_X86_64));
+        assert!(!mach_o_bytes_have_arch(&[], CPU_TYPE_X86_64));
+    }
+
+    #[test]
     fn puts_the_shim_and_a_universal_loader_beside_a_bepinex_5_game() {
         let world = World::new("install");
         assert_eq!(world.prepare(true, true, true), NativeAppleSilicon::Installed);
@@ -301,6 +319,30 @@ mod tests {
         fs::write(world.resources().join("AppleSiliconMods.dll"), b"newer shim").unwrap();
         assert_eq!(world.prepare(true, true, true), NativeAppleSilicon::Installed);
         assert!(!pin.exists(), "a newer shim gets a native try again");
+    }
+
+    #[test]
+    fn a_new_shim_clears_every_profiles_pin_too() {
+        let world = World::new("profile-pins");
+        let whole_game = world.game().join(".r2modmac_force_x64_state");
+        let one = world.game().join(".r2modmac_force_x64_state.7e774110-c505");
+        let two = world.game().join(".r2modmac_force_x64_state.03b85b8d-9cbd");
+        let unrelated = world.game().join(".r2modmac_force_x64_state_notes.txt");
+        for file in [&whole_game, &one, &two, &unrelated] {
+            fs::write(file, "Game.app|1").unwrap();
+        }
+
+        world.prepare(true, true, true);
+
+        for pin in [&whole_game, &one, &two] {
+            assert!(!pin.exists(), "{} is a pin and goes", pin.display());
+        }
+        assert!(unrelated.exists(), "only pins go: {}", unrelated.display());
+
+        // With the same shim in place, pins written since are kept.
+        fs::write(&one, "Game.app|1").unwrap();
+        world.prepare(true, true, true);
+        assert!(one.exists());
     }
 
     #[test]

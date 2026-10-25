@@ -147,3 +147,39 @@ test('a pending steam update lands in the same dialog as one already downloading
     assert.equal(waiting.title, 'Pending Steam update');
     assert.equal(waiting.pointsAtSteam, true);
 });
+
+// The architecture guard puts a code before its sentence (see
+// `macos/architecture.rs`); the player should get a headline and the sentence.
+test('a missing Rosetta is titled as such and loses its code', () => {
+    const issue = describeLaunchIssue(
+        'ARCH_ROSETTA_MISSING: This game needs Rosetta, which isn\'t installed on this Mac. Install Rosetta from Apple, or use Apple Silicon if the game supports it.',
+    );
+    assert.equal(issue.title, 'Rosetta Is Required');
+    assert.equal(
+        issue.message,
+        "This game needs Rosetta, which isn't installed on this Mac. Install Rosetta from Apple, or use Apple Silicon if the game supports it.",
+    );
+    assert.equal(issue.pointsAtSteam, false);
+});
+
+test('a choice the game cannot run is titled by the choice, not as a generic failure', () => {
+    for (const code of ['ARCH_NATIVE_UNAVAILABLE', 'ARCH_ROSETTA_UNAVAILABLE']) {
+        const issue = describeLaunchIssue(
+            `${code}: This game has no Intel version. Switch Architecture to Automatic in this profile's Settings.`,
+        );
+        assert.equal(issue.title, 'Architecture Not Available', code);
+        assert.ok(!issue.message.includes('ARCH_'), code);
+        assert.match(issue.message, /Switch Architecture to Automatic/);
+    }
+    assert.equal(
+        describeLaunchIssue("ARCH_NO_USABLE_ARCH: This game can't run with mods on this Mac. x y").title,
+        "Game Can't Run With Mods Here",
+    );
+});
+
+test('a sentence that only mentions an update after the code is still an architecture issue', () => {
+    assert.equal(
+        describeLaunchIssue('ARCH_NATIVE_UNAVAILABLE: Needs an update. Switch Architecture to Automatic.').title,
+        'Architecture Not Available',
+    );
+});

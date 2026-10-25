@@ -83,6 +83,30 @@ export interface RuntimeHealth {
     repairable: boolean;
 }
 
+export interface ArchitectureOptionStatus {
+    available: boolean;
+    /** Plain-language reason when it isn't, ready to show. */
+    reason: string | null;
+}
+
+/** What `get_profile_architecture_status` answers (see macos/architecture.rs). */
+export interface ArchitectureStatus {
+    /** False hides the setting: not Apple Silicon, not BepInEx, or nothing to choose from. */
+    applicable: boolean;
+    hostAppleSilicon: boolean;
+    rosettaInstalled: boolean;
+    gameHasArm64: boolean;
+    gameHasX64: boolean;
+    native: ArchitectureOptionStatus;
+    rosetta: ArchitectureOptionStatus;
+    shimHint: string | null;
+    autoWouldUse: 'native' | 'rosetta' | 'unavailable';
+    /** Epoch seconds of the crash that moved this profile to Rosetta. */
+    pinned: { since: number } | null;
+    mode: 'auto' | 'native' | 'rosetta';
+    effective: 'native' | 'rosetta' | 'unavailable';
+}
+
 export interface ProfileSyncResult {
     removed: number;
     to_install: string[];
@@ -182,6 +206,8 @@ export interface IElectronAPI {
     checkProfileRuntimeHealth: (profileId: string, gameIdentifier: string, platform?: 'windows' | 'mac') => Promise<RuntimeHealth>;
     getGameLoader: (gameIdentifier: string, platform?: 'windows' | 'mac') => Promise<string>;
     repairProfileRuntimeLink: (profileId: string, gameIdentifier: string, platform?: 'windows' | 'mac') => Promise<RuntimeHealth>;
+    getProfileArchitectureStatus: (gameIdentifier: string, profileId: string, mode?: 'auto' | 'native' | 'rosetta') => Promise<ArchitectureStatus>;
+    clearProfileArchitecturePin: (gameIdentifier: string, profileId: string) => Promise<void>;
     inspectProfileSyncState: (profileId: string, gameIdentifier: string, platform?: 'windows' | 'mac') => Promise<ProfileSyncInspection>;
     beginProfileApplyTransaction: (profileId: string, gameIdentifier: string) => Promise<boolean>;
     rollbackProfileApplyTransaction: (profileId: string, gameIdentifier: string) => Promise<boolean>;

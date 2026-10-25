@@ -38,6 +38,7 @@ mod macos;
 pub(crate) mod owml_patcher;
 pub(crate) mod paths;
 mod process;
+pub(crate) mod profile_architecture;
 pub(crate) mod profile_mode;
 mod profile_activation;
 pub(crate) mod runtime_health;

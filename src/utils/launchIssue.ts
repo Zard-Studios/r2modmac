@@ -32,6 +32,23 @@ export function describeLaunchIssue(raw: string): LaunchIssue {
     const message = raw.trim() || 'The game could not be started.';
     const lower = message.toLowerCase();
 
+    // The architecture guard names its case with a code before the sentence
+    // (see macos/architecture.rs); the player only needs the sentence.
+    const architecture = message.match(/^(ARCH_[A-Z_]+):\s*([\s\S]*)$/);
+    if (architecture) {
+        const titles: Record<string, string> = {
+            ARCH_ROSETTA_MISSING: 'Rosetta Is Required',
+            ARCH_NATIVE_UNAVAILABLE: 'Architecture Not Available',
+            ARCH_ROSETTA_UNAVAILABLE: 'Architecture Not Available',
+            ARCH_NO_USABLE_ARCH: "Game Can't Run With Mods Here",
+        };
+        return {
+            title: titles[architecture[1]] ?? 'Architecture Not Available',
+            message: architecture[2].trim(),
+            pointsAtSteam: false,
+        };
+    }
+
     // Ordered most specific first: a cloud-conflict message also contains the
     // word "prompt", and a files message can mention "update".
     if (lower.includes('cloud')) {

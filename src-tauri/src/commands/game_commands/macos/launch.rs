@@ -304,6 +304,7 @@ pub(crate) async fn launch_game_with_mods_for_macos(
     )?;
 
     prepare_native_apple_silicon_for_launch(app, &runtime_game_path, &tree_root, executable_path.as_ref());
+    apply_profile_architecture_for_launch(app, profile_id, &runtime_game_path, &tree_root)?;
 
     let dist = infer_distribution_from_game_path(app, game_path, false);
     if dist == "steam" && !use_direct_launch {
@@ -415,6 +416,39 @@ fn prepare_native_apple_silicon_for_launch(
             error
         ),
     }
+}
+
+/// The profile's architecture choice for this launch (see architecture.rs): a
+/// game that can't run the way it is set to stops here with a message, instead
+/// of crashing; otherwise the launcher gets the answer in a file beside the game.
+fn apply_profile_architecture_for_launch(
+    app: &AppHandle,
+    profile_id: &str,
+    runtime_game_path: &std::path::Path,
+    tree_root: &std::path::Path,
+) -> Result<(), String> {
+    let resources = bundled_apple_silicon_resources(app);
+    let mode = get_profile_architecture(app, profile_id);
+    let profile_key = sanitize_profile_key(profile_id);
+    let facts = gather_facts(resources.as_deref(), runtime_game_path, tree_root, &profile_key);
+    let decision = resolve_launch(mode, &facts)?;
+    log::info!(
+        "[launch_game_with_mods] Architecture: mode={} decision={:?} pinned={}",
+        mode.as_str(),
+        decision,
+        facts.pinned_since.is_some()
+    );
+    if facts.host_apple_silicon {
+        // A launch that isn't ours to steer gets the neutral answer, so a
+        // choice written for another profile never lingers.
+        let written = if decision.is_some() { mode } else { ArchitectureMode::Auto };
+        if let Err(error) =
+            write_launch_override(runtime_game_path, written, &profile_key, facts.rosetta_installed)
+        {
+            log::warn!("[launch_game_with_mods] Couldn't write the architecture choice: {}", error);
+        }
+    }
+    Ok(())
 }
 
 pub(crate) async fn launch_game_vanilla_for_macos(

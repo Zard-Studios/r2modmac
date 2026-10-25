@@ -382,6 +382,7 @@ pub(crate) fn configure_macos_bepinex_script(
     let has_apple_silicon_shim =
         script.contains("apple_silicon_shim=\"$BASEDIR/apple_silicon/AppleSiliconMods.dll\"")
             && script.contains("_apple_silicon_shim_crash_force_x64_state_written");
+    let has_architecture_override = script.contains("r2_arch_file=\"$BASEDIR/.r2modmac_launch_arch\"");
     let has_incompatible_verbose_doorstop = script.contains("libdoorstop_r2modmac_verbose.dylib")
         || script.contains("doorstop_diagnostic_loader=official_verbose_4.5.0");
     let steam_launch_pos = script.find("for a in \"$@\"").unwrap_or(usize::MAX);
@@ -419,6 +420,7 @@ pub(crate) fn configure_macos_bepinex_script(
         || !steam_launch_exec_deferred
         || !has_expected_debug_log_setting
         || !has_apple_silicon_shim
+        || !has_architecture_override
         || has_unexpanded_template_braces
         || has_legacy_bepinex_bootstrap_log
         || has_incompatible_verbose_doorstop;
@@ -690,6 +692,34 @@ mod configured_script_tests {
         assert!(!stale_loader.exists());
         assert!(!written.contains("libdoorstop_r2modmac_verbose.dylib"));
         assert!(written.contains("root_doorstop_dylib=\"$BASEDIR/libdoorstop.dylib\""));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_script_from_before_the_architecture_override_is_regenerated() {
+        let root = world("architecture-override");
+        let script = root.join("run_bepinex.sh");
+
+        configure_macos_bepinex_script(&script, &root, false, None).unwrap();
+        let current = std::fs::read_to_string(&script).unwrap();
+        let start = current.find("r2_arch_mode=auto").unwrap();
+        let end = current.find("force_x64_state_file=").unwrap();
+        let before_override = format!(
+            "{}{}",
+            &current[..start],
+            current[end..].replacen(
+                "force_x64_state_file=\"$BASEDIR/.r2modmac_force_x64_state${r2_arch_profile:+.$r2_arch_profile}\"",
+                "force_x64_state_file=\"$BASEDIR/.r2modmac_force_x64_state\"",
+                1
+            )
+        );
+        assert!(!before_override.contains(".r2modmac_launch_arch"));
+        std::fs::write(&script, &before_override).unwrap();
+
+        configure_macos_bepinex_script(&script, &root, false, None).unwrap();
+
+        let written = std::fs::read_to_string(&script).unwrap();
+        assert!(written.contains(r#"r2_arch_file="$BASEDIR/.r2modmac_launch_arch""#));
         std::fs::remove_dir_all(root).unwrap();
     }
 

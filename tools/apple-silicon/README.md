@@ -47,9 +47,33 @@ the app (`src-tauri/tauri.apple-silicon.conf.json`). Before each modded launch, 
 It removes an earlier shim (and the Doorstop 4 loader it put there) if the game's BepInEx changes to one it can't
 start; Repair does the same, so a runtime it left unhealthy can be repaired. If the game crashes natively with the
 shim in place (SIGABRT, SIGSEGV, SIGBUS, SIGILL, SIGTRAP), even after BepInEx started, the launcher pins it to Rosetta.
-r2modmac clears a Rosetta pin when it puts the shim there for the first time, or a newer shim (the pin may have come
-from what it fixes); otherwise the pin stays. Dev builds (`tauri dev`, plain `tauri build`) don't carry the
+The pin is a file per profile beside the game (`.r2modmac_force_x64_state.<profile id>`), so one profile's mods don't
+move the others. r2modmac clears every pin when it puts the shim there for the first time, or a newer shim (a pin may
+have come from what it fixes); otherwise the pin stays. Dev builds (`tauri dev`, plain `tauri build`) don't carry the
 files, so nothing changes there. Anything that goes wrong is logged, and the launch goes on under Rosetta.
+
+## Architecture per profile (`macos/architecture.rs`)
+
+Each profile has an **Architecture** setting, under *Advanced* in the profile's Settings (macOS, Apple Silicon, BepInEx
+games with a native Mac build only):
+
+- **Automatic** (the default; the profile has no `architecture` field): native when the game and its loader allow it,
+  Rosetta after a native crash (the pin above).
+- **Apple Silicon**: always native. No retry, no pin; a crash is a crash, so it can be tried on mods that crash under
+  Automatic.
+- **Intel (Rosetta)**: always Rosetta.
+
+The section stays closed and says nothing until a profile is off the default: it opens by itself when a mode is chosen
+or a crash pinned the profile, with the reason and a "Try Apple Silicon again" button. Options a game can't do are
+disabled with the reason (no Apple Silicon or Intel build, Rosetta missing, no loader for that architecture).
+
+`run_bepinex.sh` is shared by every profile of a game, so before each launch r2modmac writes
+`<game>/.r2modmac_launch_arch` (`mode`, `profile`, `rosetta`); the launcher reads it before picking the architecture.
+Without the file (a launch started from Steam alone, an older launcher) everything is automatic, as before.
+
+**Without Rosetta** (Apple is removing it) Automatic never picks or retries Intel and ignores a pin, and a game with no
+Apple Silicon build stops with "Rosetta Is Required" instead of crashing. `R2MODMAC_ASSUME_NO_ROSETTA=1` makes r2modmac
+behave as if Rosetta weren't installed, to try that on a Mac that has it.
 
 ## By hand (builds without it)
 

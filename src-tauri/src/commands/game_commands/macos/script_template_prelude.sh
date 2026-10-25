@@ -477,7 +477,36 @@ app_path_lower=$(printf "%s" "$app_path" | tr '[:upper:]' '[:lower:]')
 codesign_state_file="$BASEDIR/.r2modmac_codesign_state"
 app_exec_mtime=$(stat -f %m "$executable_path" 2>/dev/null || stat -f %m "$app_path" 2>/dev/null || printf 0)
 codesign_state_key="$app_path|$app_exec_mtime"
-force_x64_state_file="$BASEDIR/.r2modmac_force_x64_state"
+# r2modmac hands every launch its architecture choice (per profile) in this
+# small file. Missing or odd values mean automatic, which is also what a launch
+# started without r2modmac gets.
+r2_arch_mode=auto
+r2_arch_profile=""
+r2_arch_rosetta=1
+r2_arch_file="$BASEDIR/.r2modmac_launch_arch"
+if [ -f "$r2_arch_file" ]; then
+    while IFS='=' read -r r2_arch_key r2_arch_value; do
+        case "$r2_arch_key" in
+            mode)
+                case "$r2_arch_value" in
+                    auto|native|rosetta) r2_arch_mode="$r2_arch_value" ;;
+                esac
+                ;;
+            profile)
+                case "$r2_arch_value" in
+                    *[!A-Za-z0-9_-]*) ;;
+                    *) r2_arch_profile="$r2_arch_value" ;;
+                esac
+                ;;
+            rosetta)
+                if [ "$r2_arch_value" = "0" ]; then
+                    r2_arch_rosetta=0
+                fi
+                ;;
+        esac
+    done < "$r2_arch_file"
+fi
+force_x64_state_file="$BASEDIR/.r2modmac_force_x64_state${{r2_arch_profile:+.$r2_arch_profile}}"
 force_x64_state_key="$codesign_state_key"
 force_x64_persisted=false
 if [ -f "$force_x64_state_file" ]; then
@@ -544,6 +573,12 @@ can_retry_x64=false
 if echo "$executable_type" | grep -q "x86_64" && echo "$root_doorstop_type" | grep -q "x86_64"; then
     can_retry_x64=true
 fi
+# Automatic goes back to Rosetta after a native crash. Apple Silicon chosen by
+# hand doesn't, and neither does a Mac without Rosetta: no retry, no crash pin.
+if [ "$r2_arch_rosetta" = "0" ] || [ "$r2_arch_mode" = "native" ]; then
+    can_retry_x64=false
+    force_x64_persisted=false
+fi
 
 case $executable_type in
     *arm64*)
@@ -570,6 +605,16 @@ if [ "$launch_entry_uses_wrapper" = "1" ] && [ "$native_macos_arch" = "arm64" ];
     arch="x64"
     log_bootstrap "forcing_x64_for_wrapper_game launch_entry=$launch_entry_path"
 fi
+
+# The profile's own choice. r2modmac has already checked that it can run.
+if [ "$r2_arch_mode" = "rosetta" ]; then
+    arch="x64"
+elif [ "$r2_arch_mode" = "native" ] && [ "$launch_entry_uses_wrapper" != "1" ] \
+    && [ "$native_macos_arch" = "arm64" ] && echo "$executable_type" | grep -q "arm64" \
+    && [ -f "$root_doorstop_dylib" ] && echo "$root_doorstop_type" | grep -q "arm64"; then
+    arch="arm64"
+fi
+log_bootstrap "arch_override mode=$r2_arch_mode profile=$r2_arch_profile rosetta=$r2_arch_rosetta arch=$arch"
 
 if [ "$arch" = "arm64" ] && [ "$can_retry_x64" = true ] && [ "$force_x64_persisted" = true ]; then
     arch="x64"

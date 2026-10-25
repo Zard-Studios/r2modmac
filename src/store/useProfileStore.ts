@@ -73,6 +73,10 @@ const normalizeProfile = (profile: Profile): Profile => {
         : (profile.launchMode === 'steam' || profile.launchMode === 'direct'
             ? profile.launchMode
             : 'auto');
+    // Automatic is "absent", so only an explicit choice is kept.
+    const architecture = profile.architecture === 'native' || profile.architecture === 'rosetta'
+        ? profile.architecture
+        : undefined;
     const dateCreated = typeof profile.dateCreated === 'number' ? profile.dateCreated : Date.now();
     const lastUsed = typeof profile.lastUsed === 'number' && profile.lastUsed > dateCreated
         ? profile.lastUsed
@@ -85,6 +89,7 @@ const normalizeProfile = (profile: Profile): Profile => {
         platform,
         distribution,
         launchMode,
+        architecture,
         dateCreated,
         lastUsed,
     };

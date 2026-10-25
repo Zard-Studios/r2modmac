@@ -5,7 +5,8 @@ import { AppIcon } from '../ui/icons';
 import type { Profile, ProfilePlatform } from '../../types/profile';
 import { ConfigEditorTab } from './ConfigEditorTab';
 import { PathCensor, CensoredInput } from '../ui/PathCensor';
-import { openFolderLabel, runningOnWindows } from '../../utils/platformUtils';
+import { openFolderLabel, runningOnMacOS, runningOnWindows } from '../../utils/platformUtils';
+import { ProfileAdvancedSection } from './ProfileAdvancedSection';
 
 
 type SettingsTab = 'settings' | 'config-editor';
@@ -459,44 +460,50 @@ export function SettingsModal({ isOpen, onClose, selectedGame, activeProfile, on
                             )}
 
                             {activeProfile && gameLoader?.key === loaderKey && gameLoader.loader === 'bepinex' && (
-                                <div className="mb-6 flex items-center justify-between gap-4 border-t border-gray-700 pt-5">
-                                    <div className="flex min-w-0 items-center gap-1.5">
-                                        <span className="text-sm font-medium text-gray-200">Isolate BepInEx in this profile</span>
-                                        <span className="group relative shrink-0">
-                                            <button
-                                                type="button"
-                                                aria-label="About BepInEx isolation"
-                                                aria-describedby="bepinex-isolation-help"
-                                                className="flex h-6 w-6 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-gray-700 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-                                            >
-                                                <AppIcon name="help" className="h-4 w-4" />
-                                            </button>
-                                            <span
-                                                id="bepinex-isolation-help"
-                                                role="tooltip"
-                                                className="pointer-events-none invisible absolute bottom-full left-0 z-20 mb-2 w-56 rounded-lg border border-gray-600 bg-gray-800 p-3 text-left text-xs leading-relaxed text-gray-200 opacity-0 shadow-lg transition-opacity group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100"
-                                            >
-                                                On stores this profile&apos;s BepInEx files separately. Off keeps them in the game folder. Changing modes backs up the previous files; apply the profile afterward.
+                                <ProfileAdvancedSection
+                                    profile={activeProfile}
+                                    isOpen={isOpen}
+                                    showArchitecture={runningOnMacOS() && activeProfilePlatform === 'mac'}
+                                >
+                                    <div className="flex items-center justify-between gap-4">
+                                        <div className="flex min-w-0 items-center gap-1.5">
+                                            <span className="text-sm font-medium text-gray-200">Isolate BepInEx in this profile</span>
+                                            <span className="group relative shrink-0">
+                                                <button
+                                                    type="button"
+                                                    aria-label="About BepInEx isolation"
+                                                    aria-describedby="bepinex-isolation-help"
+                                                    className="flex h-6 w-6 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-gray-700 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                                                >
+                                                    <AppIcon name="help" className="h-4 w-4" />
+                                                </button>
+                                                <span
+                                                    id="bepinex-isolation-help"
+                                                    role="tooltip"
+                                                    className="pointer-events-none invisible absolute bottom-full left-0 z-20 mb-2 w-56 rounded-lg border border-gray-600 bg-gray-800 p-3 text-left text-xs leading-relaxed text-gray-200 opacity-0 shadow-lg transition-opacity group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100"
+                                                >
+                                                    On stores this profile&apos;s BepInEx files separately. Off keeps them in the game folder. Changing modes backs up the previous files; apply the profile afterward.
+                                                </span>
                                             </span>
-                                        </span>
+                                        </div>
+                                        <Toggle
+                                            label="Isolate BepInEx in this profile"
+                                            value={activeProfile.bepinexIsolation ?? inheritedIsolation}
+                                            disabled={modeSaving || !gamePath}
+                                            busy={modeSaving}
+                                            onChange={async (next) => {
+                                                setModeSaving(true);
+                                                try {
+                                                    await onSetBepinexIsolation(activeProfile.id, next);
+                                                } catch (error) {
+                                                    await window.ipcRenderer.alert('Could not change BepInEx mode', String(error));
+                                                } finally {
+                                                    setModeSaving(false);
+                                                }
+                                            }}
+                                        />
                                     </div>
-                                    <Toggle
-                                        label="Isolate BepInEx in this profile"
-                                        value={activeProfile.bepinexIsolation ?? inheritedIsolation}
-                                        disabled={modeSaving || !gamePath}
-                                        busy={modeSaving}
-                                        onChange={async (next) => {
-                                            setModeSaving(true);
-                                            try {
-                                                await onSetBepinexIsolation(activeProfile.id, next);
-                                            } catch (error) {
-                                                await window.ipcRenderer.alert('Could not change BepInEx mode', String(error));
-                                            } finally {
-                                                setModeSaving(false);
-                                            }
-                                        }}
-                                    />
-                                </div>
+                                </ProfileAdvancedSection>
                             )}
 
                             <div className="flex justify-end gap-3">

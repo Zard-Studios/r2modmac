@@ -1,6 +1,8 @@
 export type ProfilePlatform = 'windows' | 'mac';
 export type ProfileDistribution = 'steam' | 'manual';
 export type ProfileLaunchMode = 'auto' | 'steam' | 'direct';
+/** Which architecture modded BepInEx games run in on Apple Silicon; absent means automatic. */
+export type ProfileArchitecture = 'auto' | 'native' | 'rosetta';
 export type InstalledModSource = 'thunderstore' | 'hexium' | 'outerwilds' | 'local';
 export type PendingSyncKind = 'add' | 'update' | 'enable' | 'disable';
 export type PendingSyncStatus = 'queued' | 'syncing' | 'ready' | 'failed';
@@ -94,6 +96,8 @@ export interface Profile {
     platform?: ProfilePlatform;
     distribution?: ProfileDistribution;
     launchMode?: ProfileLaunchMode;
+    /** macOS only; absent is `auto`, so an old profile needs no migration. */
+    architecture?: ProfileArchitecture;
     /** Older profiles inherit the setting they were created with. */
     bepinexIsolation?: boolean;
     modFolders?: ModFolder[];

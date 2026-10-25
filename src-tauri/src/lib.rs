@@ -600,6 +600,8 @@ pub fn run() {
             commands::game_commands::launch::stop_game,
             commands::game_commands::sync::sync_profile_to_game,
             commands::game_commands::profile_mode::set_profile_bepinex_isolation,
+            commands::game_commands::profile_architecture::get_profile_architecture_status,
+            commands::game_commands::profile_architecture::clear_profile_architecture_pin,
             commands::game_commands::sync_state::inspect_profile_sync_state,
             commands::mod_commands::install_mod,
             commands::mod_commands::begin_mod_operations,

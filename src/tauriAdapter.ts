@@ -216,6 +216,10 @@ export const tauriAPI: IElectronAPI = {
         invoke('get_game_loader', { gameIdentifier, platform }),
     repairProfileRuntimeLink: async (profileId, gameIdentifier, platform?) =>
         invoke('repair_profile_runtime_link', { profileId, gameIdentifier, platform }),
+    getProfileArchitectureStatus: async (gameIdentifier, profileId, mode?) =>
+        invoke('get_profile_architecture_status', { gameIdentifier, profileId, mode }),
+    clearProfileArchitecturePin: async (gameIdentifier, profileId) =>
+        invoke('clear_profile_architecture_pin', { gameIdentifier, profileId }),
     inspectProfileSyncState: async (profileId, gameIdentifier, platform?) =>
         invoke('inspect_profile_sync_state', { profileId, gameIdentifier, platform }),
     beginProfileApplyTransaction: async (profileId, gameIdentifier) =>

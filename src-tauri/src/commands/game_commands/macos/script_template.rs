@@ -258,6 +258,35 @@ mod bepinex_root_tests {
         assert!(shim > arch_chosen, "the shim must be chosen after the runtime arch is final");
     }
 
+    /// Each profile's architecture choice reaches the launcher through a small
+    /// file beside the game: it picks the pin, can switch off every fallback
+    /// and, when asked, sets the architecture itself.
+    #[test]
+    fn the_launcher_reads_the_profiles_architecture_choice() {
+        let generated = script(BepInExRoot::Game);
+        assert!(generated.contains(r#"r2_arch_file="$BASEDIR/.r2modmac_launch_arch""#));
+        // The pin is per profile, and the profile id is checked before it is used in a path.
+        assert!(generated.contains(
+            r#"force_x64_state_file="$BASEDIR/.r2modmac_force_x64_state${r2_arch_profile:+.$r2_arch_profile}""#
+        ));
+        assert!(generated.contains("*[!A-Za-z0-9_-]*) ;;"));
+        // Native by choice, or no Rosetta: no retry and no pin.
+        let retry_gate = generated
+            .find(r#"if [ "$r2_arch_rosetta" = "0" ] || [ "$r2_arch_mode" = "native" ]; then"#)
+            .expect("the retry is switched off");
+        let can_retry = generated.find("can_retry_x64=true").unwrap();
+        assert!(can_retry < retry_gate, "after can_retry_x64 is computed");
+        assert!(generated[retry_gate..].contains("can_retry_x64=false"));
+        // The forced architectures come after the wrapper rule and before the pin is read.
+        let wrapper = generated.find("forcing_x64_for_wrapper_game").unwrap();
+        let rosetta = generated.find(r#"if [ "$r2_arch_mode" = "rosetta" ]; then"#).unwrap();
+        let persisted_pin = generated.find("forcing_x64_due_persisted_state").unwrap();
+        assert!(wrapper < rosetta && rosetta < persisted_pin);
+        assert!(generated.contains(r#"arch="x64""#));
+        assert!(generated.contains(r#"[ "$r2_arch_mode" = "native" ] && [ "$launch_entry_uses_wrapper" != "1" ]"#));
+        assert!(generated.contains("arch_override mode="));
+    }
+
     /// A native crash with the shim in place (even after BepInEx started)
     /// pins the game to Rosetta, so it doesn't crash on every launch.
     #[test]
