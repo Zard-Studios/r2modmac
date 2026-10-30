@@ -158,7 +158,11 @@ pub(crate) fn macos_preloader_matches_loader(
     }
     let mut loaders = vec![runtime_root.join("libdoorstop.dylib")];
     if let Ok(entries) = std::fs::read_dir(runtime_root.join("doorstop_libs")) {
-        loaders.extend(entries.filter_map(|entry| entry.ok()).map(|entry| entry.path()));
+        loaders.extend(
+            entries
+                .filter_map(|entry| entry.ok())
+                .map(|entry| entry.path()),
+        );
     }
     let loader_is_current = loaders
         .iter()
@@ -335,7 +339,8 @@ mod preloader_loader_match_tests {
     use std::fs;
 
     fn game(loader: &[u8], preloader: Option<&[u8]>) -> std::path::PathBuf {
-        let root = std::env::temp_dir().join(format!("r2modmac-loader-match-{}", uuid::Uuid::new_v4()));
+        let root =
+            std::env::temp_dir().join(format!("r2modmac-loader-match-{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(root.join("BepInEx/core")).unwrap();
         fs::write(root.join("libdoorstop.dylib"), loader).unwrap();
         if let Some(bytes) = preloader {
@@ -349,30 +354,52 @@ mod preloader_loader_match_tests {
     #[test]
     fn a_current_loader_needs_a_preloader_that_has_the_entry_point() {
         let old = game(CURRENT_LOADER, Some(b"BepInEx.Preloader.Entrypoint only"));
-        assert!(!macos_preloader_matches_loader(&old, &old.join("BepInEx/core")));
+        assert!(!macos_preloader_matches_loader(
+            &old,
+            &old.join("BepInEx/core")
+        ));
         let new = game(CURRENT_LOADER, Some(b"xx Doorstop xx Start"));
-        assert!(macos_preloader_matches_loader(&new, &new.join("BepInEx/core")));
+        assert!(macos_preloader_matches_loader(
+            &new,
+            &new.join("BepInEx/core")
+        ));
         fs::remove_dir_all(old).unwrap();
         fs::remove_dir_all(new).unwrap();
     }
 
     #[test]
     fn an_older_loader_keeps_working_with_an_older_preloader() {
-        let root = game(b"doorstop 3 loader", Some(b"BepInEx.Preloader.Entrypoint only"));
-        assert!(macos_preloader_matches_loader(&root, &root.join("BepInEx/core")));
+        let root = game(
+            b"doorstop 3 loader",
+            Some(b"BepInEx.Preloader.Entrypoint only"),
+        );
+        assert!(macos_preloader_matches_loader(
+            &root,
+            &root.join("BepInEx/core")
+        ));
         fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
     fn a_tree_without_a_bepinex5_preloader_is_not_judged() {
         let root = game(CURRENT_LOADER, None);
-        assert!(macos_preloader_matches_loader(&root, &root.join("BepInEx/core")));
+        assert!(macos_preloader_matches_loader(
+            &root,
+            &root.join("BepInEx/core")
+        ));
         // The loader may also live in doorstop_libs.
         fs::create_dir_all(root.join("doorstop_libs")).unwrap();
-        fs::write(root.join("doorstop_libs/libdoorstop_x64.dylib"), CURRENT_LOADER).unwrap();
+        fs::write(
+            root.join("doorstop_libs/libdoorstop_x64.dylib"),
+            CURRENT_LOADER,
+        )
+        .unwrap();
         fs::write(root.join("BepInEx/core/BepInEx.Preloader.dll"), b"old").unwrap();
         fs::remove_file(root.join("libdoorstop.dylib")).unwrap();
-        assert!(!macos_preloader_matches_loader(&root, &root.join("BepInEx/core")));
+        assert!(!macos_preloader_matches_loader(
+            &root,
+            &root.join("BepInEx/core")
+        ));
         fs::remove_dir_all(root).unwrap();
     }
 }

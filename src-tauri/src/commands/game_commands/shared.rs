@@ -557,7 +557,7 @@ pub(crate) fn choose_bepinex_root(
     // the host-side health check but is meaningless to the Windows process,
     // which then starts without BepInEx. Keep the traditional game-local tree
     // for bottles that cannot address the profile instead.
-    if let Some(prefix) = crate::models::shared::find_wine_prefix_root(runtime_game_path) {
+    if let Some(prefix) = crate::commands::game_commands::wine_prefix_for_game(runtime_game_path) {
         if crate::commands::game_commands::map_native_path_to_wine_path(&prefix, profile_dir)
             .is_none()
         {
@@ -578,7 +578,7 @@ pub(crate) fn choose_bepinex_root_preparing_wine(
 ) -> std::path::PathBuf {
     if profile_isolation {
         if let (Some(prefix), Some(share_root)) = (
-            crate::models::shared::find_wine_prefix_root(runtime_game_path),
+            crate::commands::game_commands::wine_prefix_for_game(runtime_game_path),
             profile_dir.parent(),
         ) {
             if let Err(error) =
@@ -591,13 +591,40 @@ pub(crate) fn choose_bepinex_root_preparing_wine(
     choose_bepinex_root(profile_isolation, profile_dir, runtime_game_path)
 }
 
+/// Whether a profile keeps its BepInEx tree in the profile.
+///
+/// An explicit `bepinexIsolation` wins. A profile saved before that field
+/// existed used to inherit the global `profile_isolation`, which read as true
+/// for every settings file older than the field: upgraders got an isolation
+/// they never chose and could not see, and their game started vanilla
+/// (issue #45). Such a profile now counts as isolated only when its tree is
+/// really in the profile and not in the game; otherwise it is off.
+pub(crate) fn profile_uses_bepinex_isolation(
+    profile: &serde_json::Value,
+    profile_dir: &std::path::Path,
+    runtime_game_path: &std::path::Path,
+) -> bool {
+    if let Some(explicit) = profile
+        .get("bepinexIsolation")
+        .and_then(serde_json::Value::as_bool)
+    {
+        return explicit;
+    }
+    let real_tree = |root: &std::path::Path| {
+        ["BepInEx", "BepInEx_DISABLED"].iter().any(|name| {
+            let tree = root.join(name);
+            tree.is_dir() && !tree.is_symlink() && tree.join("core").is_dir()
+        })
+    };
+    real_tree(profile_dir) && !real_tree(runtime_game_path)
+}
+
 /// The same choice, reading the setting for the caller.
 pub(crate) fn bepinex_install_root(
     app: &tauri::AppHandle,
     profile_id: &str,
     runtime_game_path: &std::path::Path,
 ) -> Result<std::path::PathBuf, String> {
-    let settings = crate::models::shared::load_settings_impl(app);
     let profile_dir = crate::utils::paths::app_data_dir(app)
         .map_err(|error| error.to_string())?
         .join("profiles")
@@ -606,12 +633,7 @@ pub(crate) fn bepinex_install_root(
     let isolation = profiles
         .iter()
         .find(|profile| profile.get("id").and_then(serde_json::Value::as_str) == Some(profile_id))
-        .map(|profile| {
-            profile
-                .get("bepinexIsolation")
-                .and_then(serde_json::Value::as_bool)
-                .unwrap_or(settings.profile_isolation)
-        })
+        .map(|profile| profile_uses_bepinex_isolation(profile, &profile_dir, runtime_game_path))
         .unwrap_or(false);
     let root = choose_bepinex_root_preparing_wine(isolation, &profile_dir, runtime_game_path);
     if isolation && root == runtime_game_path {
@@ -628,6 +650,41 @@ mod bepinex_root_choice_tests {
     use super::choose_bepinex_root;
     use std::fs;
     use std::path::Path;
+
+    #[test]
+    fn a_profile_without_a_choice_is_isolated_only_when_its_tree_is_in_the_profile() {
+        use super::profile_uses_bepinex_isolation as uses;
+        let root =
+            std::env::temp_dir().join(format!("r2modmac-legacy-mode-{}", uuid::Uuid::new_v4()));
+        let game = root.join("game");
+        let profile = root.join("profile");
+        fs::create_dir_all(&game).unwrap();
+        fs::create_dir_all(&profile).unwrap();
+        let unset = serde_json::json!({"id": "p"});
+
+        // Nothing anywhere: isolation is off (issue #45).
+        assert!(!uses(&unset, &profile, &game));
+        // The game runs its own tree, whatever the profile cache holds.
+        fs::create_dir_all(game.join("BepInEx/core")).unwrap();
+        fs::create_dir_all(profile.join("BepInEx/core")).unwrap();
+        assert!(!uses(&unset, &profile, &game));
+        // A profile isolated before the field existed keeps working.
+        fs::remove_dir_all(game.join("BepInEx")).unwrap();
+        assert!(uses(&unset, &profile, &game));
+        // An explicit choice always wins.
+        assert!(!uses(
+            &serde_json::json!({"bepinexIsolation": false}),
+            &profile,
+            &game
+        ));
+        assert!(uses(
+            &serde_json::json!({"bepinexIsolation": true}),
+            &root.join("x"),
+            &game
+        ));
+
+        fs::remove_dir_all(root).unwrap();
+    }
 
     const GAME: &str = "/Users/x/Library/Application Support/Steam/steamapps/common/Muck";
     const PROFILE: &str = "/Users/x/Library/Application Support/com.r2modmac/profiles/abc";
@@ -685,7 +742,8 @@ mod bepinex_root_choice_tests {
     #[cfg(unix)]
     #[test]
     fn a_bottle_without_a_drive_for_the_profile_gets_one_and_keeps_isolation() {
-        let root = std::env::temp_dir().join(format!("r2modmac-prepare-wine-{}", uuid::Uuid::new_v4()));
+        let root =
+            std::env::temp_dir().join(format!("r2modmac-prepare-wine-{}", uuid::Uuid::new_v4()));
         let prefix = root.join("Bottle");
         let game = prefix.join("drive_c/Games/Lethal Company");
         let profile = root.join("Profiles/lethal-company");

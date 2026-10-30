@@ -21,10 +21,12 @@ pub async fn get_game_loader(
     if is_outerwilds_identifier(&game_identifier) {
         return Ok("owml".to_string());
     }
-    Ok(crate::models::loaders::loader_for_community(&game_identifier)
-        .unwrap_or(crate::models::loaders::PackageLoader::BepInEx)
-        .runtime_name()
-        .to_string())
+    Ok(
+        crate::models::loaders::loader_for_community(&game_identifier)
+            .unwrap_or(crate::models::loaders::PackageLoader::BepInEx)
+            .runtime_name()
+            .to_string(),
+    )
 }
 
 #[derive(Serialize)]
@@ -321,10 +323,21 @@ pub(crate) fn inspect_windows_bepinex(
     } else {
         "doorstop_config.ini"
     };
-    if !crate::commands::legacy_mod_commands::doorstop_config_has_loadable_target(
-        &game_path.join(config),
-        &bep_dir.join("core"),
-    ) {
+    // A vanilla profile's disabled tree is never launched into, so only the
+    // live tree has to be reachable from the game.
+    let config_ok = if disabled {
+        crate::commands::legacy_mod_commands::doorstop_config_has_loadable_target(
+            &game_path.join(config),
+            &bep_dir.join("core"),
+        )
+    } else {
+        crate::commands::legacy_mod_commands::doorstop_config_reaches_tree(
+            &game_path.join(config),
+            game_path,
+            &bep_dir,
+        )
+    };
+    if !config_ok {
         missing.push("doorstop-config".to_string());
     }
     health("bepinex", missing)
@@ -479,7 +492,9 @@ pub async fn check_profile_runtime_health(
         } else {
             has_complete_macos_bepinex_runtime_rooted(game_path, Some(&tree_root))
         } && macos_bepinex_core_is_bootstrappable(&bep_dir.join("core"))
-            && (vanilla || disabled || macos_preloader_matches_loader(&runtime_root, &bep_dir.join("core")))
+            && (vanilla
+                || disabled
+                || macos_preloader_matches_loader(&runtime_root, &bep_dir.join("core")))
             && (vanilla || isolated_bepinex_link_matches(&runtime_root, &tree_root));
         if complete {
             return Ok(health("bepinex", Vec::new()));
@@ -586,8 +601,12 @@ async fn take_away_unusable_native_apple_silicon_for_profile(
     game_identifier: &str,
 ) {
     use tauri::Manager;
-    let Ok(Some(game_path)) =
-        get_game_path(app.clone(), game_identifier.to_string(), Some("mac".to_string())).await
+    let Ok(Some(game_path)) = get_game_path(
+        app.clone(),
+        game_identifier.to_string(),
+        Some("mac".to_string()),
+    )
+    .await
     else {
         return;
     };
@@ -698,6 +717,37 @@ mod tests {
         assert_eq!(
             inspect_windows_bepinex(&game, &game, false).status,
             "missing"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_isolated_tree_the_wine_bottle_cannot_reach_is_not_healthy() {
+        let root = test_dir("windows-isolated-wine");
+        let prefix = root.join("Bottle");
+        let game = prefix.join("drive_c/Games/Lethal Company");
+        let profile = root.join("profiles/abc");
+        fs::create_dir_all(prefix.join("dosdevices")).unwrap();
+        fs::create_dir_all(profile.join("BepInEx/core")).unwrap();
+        fs::create_dir_all(&game).unwrap();
+        std::os::unix::fs::symlink(prefix.join("drive_c"), prefix.join("dosdevices/c:")).unwrap();
+        fs::write(profile.join("BepInEx/core/BepInEx.Preloader.dll"), b"").unwrap();
+        fs::write(game.join("winhttp.dll"), b"").unwrap();
+        fs::write(
+            game.join("doorstop_config.ini"),
+            b"enabled=true\ntargetAssembly=Z:\\profiles\\abc\\BepInEx\\core\\BepInEx.Preloader.dll\n",
+        )
+        .unwrap();
+
+        // Only C: is mapped: the host files are all there, the game sees none.
+        let result = inspect_windows_bepinex(&game, &profile, false);
+        assert_eq!(result.missing_components, vec!["doorstop-config"]);
+
+        std::os::unix::fs::symlink(&root, prefix.join("dosdevices/z:")).unwrap();
+        assert_eq!(
+            inspect_windows_bepinex(&game, &profile, false).status,
+            "healthy"
         );
         fs::remove_dir_all(root).unwrap();
     }

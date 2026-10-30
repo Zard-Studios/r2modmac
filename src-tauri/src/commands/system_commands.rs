@@ -156,7 +156,8 @@ async fn fetch_community_images_live() -> Result<std::collections::HashMap<Strin
 
     // Ensure Mewgenics has a cover even if live scrape fails
     images.entry("mewgenics".to_string()).or_insert_with(|| {
-        "https://gcdn.thunderstore.io/live/community/mewgenics/mewgenics-cover-360x480.webp".to_string()
+        "https://gcdn.thunderstore.io/live/community/mewgenics/mewgenics-cover-360x480.webp"
+            .to_string()
     });
 
     Ok(images)
@@ -245,9 +246,7 @@ fn extract_cover_from_community_page(html: &str, community_id: &str) -> Option<S
         }
     }
 
-    let re =
-        regex::Regex::new(r#"https://(?:gcdn|ccdn)\.thunderstore\.io/[^"'\\\s<>]+"#)
-            .ok()?;
+    let re = regex::Regex::new(r#"https://(?:gcdn|ccdn)\.thunderstore\.io/[^"'\\\s<>]+"#).ok()?;
 
     let mut fallback = None;
     for m in re.find_iter(html) {
@@ -465,10 +464,9 @@ fn extract_community_images_from_html(html: &str) -> Result<HashMap<String, Stri
     // can drift independently from the community identifier.
     let re_community_link = regex::Regex::new(r#"<a[^>]+href=["']/c/([^/"']+)/["'][^>]*>"#)
         .map_err(|e| e.to_string())?;
-    let re_img_src = regex::Regex::new(
-        r#"src=["'](https://(?:gcdn|ccdn)\.thunderstore\.io/[^"']+)["']"#,
-    )
-    .map_err(|e| e.to_string())?;
+    let re_img_src =
+        regex::Regex::new(r#"src=["'](https://(?:gcdn|ccdn)\.thunderstore\.io/[^"']+)["']"#)
+            .map_err(|e| e.to_string())?;
 
     for cap in re_community_link.captures_iter(html) {
         let (Some(link), Some(community_id)) = (cap.get(0), cap.get(1)) else {
@@ -1366,6 +1364,16 @@ pub async fn alert_dialog(app: AppHandle, title: String, message: String) -> Res
         .blocking_show();
 
     Ok(())
+}
+
+/// Write a failure the frontend caught into `r2modmac.log`.
+///
+/// The webview console never reaches the log file, so an Apply or a runtime
+/// repair that failed and rolled back left only "Rolling back profile …" in
+/// the log, with nothing saying why (issue #45).
+#[command]
+pub fn log_frontend_error(context: String, message: String) {
+    log::error!("[frontend] {context}: {message}");
 }
 
 #[command]

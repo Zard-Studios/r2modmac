@@ -10,8 +10,8 @@ use sha2::{Digest, Sha256};
 use tauri::{command, AppHandle};
 
 use super::{
-    choose_bepinex_root, choose_bepinex_root_preparing_wine, detach_isolated_bepinex_link, get_game_path, is_game_running,
-    resolve_macos_runtime_root, sync_isolated_bepinex_link,
+    choose_bepinex_root, choose_bepinex_root_preparing_wine, detach_isolated_bepinex_link,
+    get_game_path, is_game_running, resolve_macos_runtime_root, sync_isolated_bepinex_link,
 };
 use crate::utils::file_ops::copy_dir_recursive;
 use crate::utils::mod_manifest::{
@@ -33,25 +33,33 @@ fn file_digest(path: &Path) -> Result<[u8; 32], String> {
     Ok(digest.finalize().into())
 }
 
-/// Check that an isolated profile can be reconstructed entirely from local
-/// files before changing any game-side path. This is deliberately strict:
-/// old/incomplete ownership metadata needs a recovery path, not a download
-/// hidden inside a storage-mode toggle.
+/// Check what of an isolated profile can be rebuilt from local files before
+/// changing any game-side path, and return the mods that cannot.
+///
+/// A mod whose inventory is missing, or whose files are no longer in the
+/// profile, used to fail the whole switch. The user was then stuck with an
+/// isolation they could not leave, and the game kept starting vanilla
+/// (issue #45). Those mods are now left out of the migration and reinstalled
+/// by the next Apply; nothing is downloaded inside the toggle itself. Unsafe
+/// paths and symlinks still stop the switch.
 fn preflight_local_bepinex_payload(
     profile_root: &Path,
     game_root: &Path,
     enabled_mods: &[String],
     manifests: &[ModOwnershipManifest],
-) -> Result<(), String> {
-    for full_name in enabled_mods {
+) -> Result<Vec<String>, String> {
+    let mut incomplete = Vec::new();
+    'mods: for full_name in enabled_mods {
         let matching = manifests
             .iter()
             .filter(|manifest| manifest.mod_full_name.eq_ignore_ascii_case(full_name))
             .collect::<Vec<_>>();
         if matching.len() != 1 || matching[0].files.is_empty() {
-            return Err(format!(
-                "Cannot migrate {full_name} offline: its local file inventory is missing or ambiguous"
-            ));
+            log::warn!(
+                "[profile_mode] {full_name} has no usable local file inventory; the next Apply reinstalls it"
+            );
+            incomplete.push(full_name.clone());
+            continue;
         }
         for relative in &matching[0].files {
             let path = Path::new(relative);
@@ -77,12 +85,17 @@ fn preflight_local_bepinex_payload(
             let mut current = source_root.to_path_buf();
             for component in path.components() {
                 current.push(component);
-                let metadata = fs::symlink_metadata(&current).map_err(|error| {
-                    format!(
-                        "Cannot migrate {full_name} offline: missing {} ({error})",
-                        current.display()
-                    )
-                })?;
+                let metadata = match fs::symlink_metadata(&current) {
+                    Ok(metadata) => metadata,
+                    Err(error) => {
+                        log::warn!(
+                            "[profile_mode] {full_name} is missing {} ({error}); the next Apply reinstalls it",
+                            current.display()
+                        );
+                        incomplete.push(full_name.clone());
+                        continue 'mods;
+                    }
+                };
                 if metadata.file_type().is_symlink() {
                     return Err(format!(
                         "Cannot migrate {full_name}: inventory traverses symlink {}",
@@ -98,7 +111,7 @@ fn preflight_local_bepinex_payload(
             }
         }
     }
-    Ok(())
+    Ok(incomplete)
 }
 
 fn enabled_profile_mod_names(profile: &serde_json::Value) -> Result<Vec<String>, String> {
@@ -445,21 +458,25 @@ fn no_local_bepinex_payload_to_migrate(
         && ((game_manifests.is_empty() && tree_absent(game_root))
             || (fresh_profile_install
                 && !game_manifests.is_empty()
-                && game_manifests.iter().all(|stored| {
-                    manifest_matches_target_root(&stored.manifest, game_root)
-                })))
+                && game_manifests
+                    .iter()
+                    .all(|stored| manifest_matches_target_root(&stored.manifest, game_root))))
 }
 
 fn fresh_profile_install(profile: &serde_json::Value) -> bool {
     let Some(mods) = profile["mods"].as_array() else {
         return false;
     };
-    mods.iter().any(|item| item["enabled"].as_bool() != Some(false))
-        && mods.iter().filter(|item| item["enabled"].as_bool() != Some(false)).all(|item| {
-            item["pending_sync"].as_bool() == Some(true)
-                && item["pending_sync_kind"].as_str() == Some("add")
-                && item["sync_baseline"].is_null()
-        })
+    mods.iter()
+        .any(|item| item["enabled"].as_bool() != Some(false))
+        && mods
+            .iter()
+            .filter(|item| item["enabled"].as_bool() != Some(false))
+            .all(|item| {
+                item["pending_sync"].as_bool() == Some(true)
+                    && item["pending_sync_kind"].as_str() == Some("add")
+                    && item["sync_baseline"].is_null()
+            })
 }
 
 pub(super) fn game_local_manifest_mismatch(
@@ -752,7 +769,9 @@ fn active_marker_blocks_leaving_isolation(
 /// What a mode switch did to the files, for the caller to record.
 #[derive(Debug)]
 enum ModeSwitchOutcome {
-    Switched,
+    /// Files moved. `reinstall` names the mods whose files were not there to
+    /// move; the profile needs an Apply to bring them back.
+    Switched { reinstall: Vec<String> },
     /// The profile had nothing of its own: only a stale link was dropped.
     StaleLinksDropped,
 }
@@ -811,6 +830,7 @@ fn switch_bepinex_tree_files(plan: &ModeSwitch<'_>) -> Result<ModeSwitchOutcome,
                 .to_string(),
         );
     }
+    let mut reinstall = Vec::new();
     if !isolated && !metadata_only_reconciliation {
         let enabled_mods = enabled_profile_mod_names(plan.profile)?;
         let enabled_to_preflight = if current || needs_layout_reconciliation {
@@ -829,7 +849,7 @@ fn switch_bepinex_tree_files(plan: &ModeSwitch<'_>) -> Result<ModeSwitchOutcome,
             .iter()
             .map(|stored| stored.manifest.clone())
             .collect::<Vec<_>>();
-        preflight_local_bepinex_payload(
+        reinstall = preflight_local_bepinex_payload(
             profile_root,
             runtime_root,
             &enabled_to_preflight,
@@ -887,18 +907,26 @@ fn switch_bepinex_tree_files(plan: &ModeSwitch<'_>) -> Result<ModeSwitchOutcome,
         }
     }
     if isolated {
-        crate::commands::mod_commands::point_game_doorstop_ini_at_tree(
-            runtime_root,
-            profile_root,
-        )?;
+        crate::commands::mod_commands::point_game_doorstop_ini_at_tree(runtime_root, profile_root)?;
         if platform == "mac" && profile_root.join("BepInEx").is_dir() {
             sync_isolated_bepinex_link(runtime_root, profile_root, false)?;
         }
     } else {
+        // A mod left behind must not be recorded as installed in the game, or
+        // the next Apply would skip it.
+        let migrated = profile_manifests
+            .iter()
+            .filter(|stored| {
+                !reinstall
+                    .iter()
+                    .any(|name| stored.manifest.mod_full_name.eq_ignore_ascii_case(name))
+            })
+            .cloned()
+            .collect::<Vec<_>>();
         copy_manifests_to_game_scope(
             profile_root,
             runtime_root,
-            profile_manifests,
+            &migrated,
             game_manifests,
             metadata_only_reconciliation,
         )?;
@@ -909,7 +937,63 @@ fn switch_bepinex_tree_files(plan: &ModeSwitch<'_>) -> Result<ModeSwitchOutcome,
             )?;
         }
     }
-    Ok(ModeSwitchOutcome::Switched)
+    Ok(ModeSwitchOutcome::Switched { reinstall })
+}
+
+/// The storage mode Apply and Play use for a profile, so the settings switch
+/// shows the same answer for a profile that has no explicit choice.
+#[command]
+pub async fn get_profile_bepinex_isolation(
+    app: AppHandle,
+    profile_id: String,
+) -> Result<bool, String> {
+    let profiles = crate::commands::profile_commands::get_profiles(app.clone())?;
+    let profile = profiles
+        .iter()
+        .find(|profile| {
+            profile.get("id").and_then(serde_json::Value::as_str) == Some(profile_id.as_str())
+        })
+        .ok_or_else(|| "Profile not found".to_string())?;
+    if let Some(explicit) = profile
+        .get("bepinexIsolation")
+        .and_then(serde_json::Value::as_bool)
+    {
+        return Ok(explicit);
+    }
+    let Some(game_identifier) = profile
+        .get("gameIdentifier")
+        .and_then(serde_json::Value::as_str)
+    else {
+        return Ok(false);
+    };
+    let platform = profile
+        .get("platform")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("windows")
+        .to_string();
+    let Some(game_path) = get_game_path(
+        app.clone(),
+        game_identifier.to_string(),
+        Some(platform.clone()),
+    )
+    .await?
+    else {
+        return Ok(false);
+    };
+    let runtime_root = if platform == "mac" {
+        resolve_macos_runtime_root(Path::new(&game_path))
+    } else {
+        Path::new(&game_path).to_path_buf()
+    };
+    let profile_dir = crate::utils::paths::app_data_dir(&app)
+        .map_err(|error| error.to_string())?
+        .join("profiles")
+        .join(&profile_id);
+    Ok(super::profile_uses_bepinex_isolation(
+        profile,
+        &profile_dir,
+        &runtime_root,
+    ))
 }
 
 /// Switch one profile without deleting its old BepInEx installation. Existing
@@ -939,14 +1023,9 @@ pub async fn set_profile_bepinex_isolation(
         .and_then(serde_json::Value::as_str)
         .unwrap_or("windows")
         .to_string();
-    let settings = crate::models::shared::load_settings_impl(&app);
-    let current = profile
-        .get("bepinexIsolation")
-        .and_then(serde_json::Value::as_bool)
-        .unwrap_or(settings.profile_isolation);
-    if current == isolated && isolated {
-        return Ok(true);
-    }
+    let profiles_dir = crate::utils::paths::app_data_dir(&app)
+        .map_err(|error| error.to_string())?
+        .join("profiles");
     let game_path = get_game_path(app.clone(), game_identifier.clone(), Some(platform.clone()))
         .await?
         .ok_or_else(|| "Set the game directory before changing BepInEx storage mode".to_string())?;
@@ -960,24 +1039,33 @@ pub async fn set_profile_bepinex_isolation(
     {
         return Err("BepInEx isolation is only available for BepInEx games".to_string());
     }
+    let current = super::profile_uses_bepinex_isolation(
+        profile,
+        &profiles_dir.join(&profile_id),
+        &runtime_root,
+    );
     if current && !isolated {
         if let Some(active) =
             super::profile_activation::read_active_profile(&runtime_root, &game_identifier)?
         {
+            // The active profile's inherited mode is read from its files,
+            // the same way this profile's is.
+            let active_default = super::profile_uses_bepinex_isolation(
+                &serde_json::Value::Null,
+                &profiles_dir.join(&active),
+                &runtime_root,
+            );
             if active_marker_blocks_leaving_isolation(
                 &active,
                 &profile_id,
                 &all_profiles,
-                settings.profile_isolation,
+                active_default,
             ) {
                 return Err("Another profile is recorded as active in this game. Select and apply that profile before changing this one's BepInEx storage mode.".to_string());
             }
         }
     }
-    let profile_root = crate::utils::paths::app_data_dir(&app)
-        .map_err(|error| error.to_string())?
-        .join("profiles")
-        .join(&profile_id);
+    let profile_root = profiles_dir.join(&profile_id);
     let current_mods = current_profile_manifest_names(profile);
     let game_manifests = if isolated {
         Vec::new()
@@ -1051,12 +1139,15 @@ pub async fn set_profile_bepinex_isolation(
         needs_layout_reconciliation,
         metadata_only_reconciliation,
     };
-    if let ModeSwitchOutcome::StaleLinksDropped = switch_bepinex_tree_files(&plan)? {
-        profile["bepinexIsolation"] = serde_json::Value::Bool(false);
-        profile["needs_sync"] = serde_json::Value::Bool(true);
-        crate::commands::profile_commands::save_profiles(app, profiles).await?;
-        return Ok(true);
-    }
+    let reinstall = match switch_bepinex_tree_files(&plan)? {
+        ModeSwitchOutcome::StaleLinksDropped => {
+            profile["bepinexIsolation"] = serde_json::Value::Bool(false);
+            profile["needs_sync"] = serde_json::Value::Bool(true);
+            crate::commands::profile_commands::save_profiles(app, profiles).await?;
+            return Ok(true);
+        }
+        ModeSwitchOutcome::Switched { reinstall } => reinstall,
+    };
     let active_marker = if !current && isolated {
         super::profile_activation::read_active_profile(&runtime_root, &game_identifier)
             .ok()
@@ -1064,13 +1155,14 @@ pub async fn set_profile_bepinex_isolation(
     } else {
         None
     };
-    let needs_apply = apply_still_needed(
-        profile["needs_sync"].as_bool().unwrap_or(false),
-        current,
-        isolated,
-        active_marker.as_deref(),
-        &profile_id,
-    );
+    let needs_apply = !reinstall.is_empty()
+        || apply_still_needed(
+            profile["needs_sync"].as_bool().unwrap_or(false),
+            current,
+            isolated,
+            active_marker.as_deref(),
+            &profile_id,
+        );
     profile["bepinexIsolation"] = serde_json::Value::Bool(isolated);
     profile["needs_sync"] = serde_json::Value::Bool(needs_apply);
     crate::commands::profile_commands::save_profiles(app, profiles).await?;
@@ -1098,13 +1190,28 @@ mod tests {
         let game = root.join("game");
         fs::create_dir_all(&profile).unwrap();
         fs::create_dir_all(&game).unwrap();
-        assert!(no_local_bepinex_payload_to_migrate(&profile, &game, &[], false));
+        assert!(no_local_bepinex_payload_to_migrate(
+            &profile,
+            &game,
+            &[],
+            false
+        ));
 
         fs::create_dir(game.join("BepInEx")).unwrap();
-        assert!(!no_local_bepinex_payload_to_migrate(&profile, &game, &[], false));
+        assert!(!no_local_bepinex_payload_to_migrate(
+            &profile,
+            &game,
+            &[],
+            false
+        ));
         fs::remove_dir(game.join("BepInEx")).unwrap();
         fs::create_dir(profile.join("BepInEx_DISABLED")).unwrap();
-        assert!(!no_local_bepinex_payload_to_migrate(&profile, &game, &[], false));
+        assert!(!no_local_bepinex_payload_to_migrate(
+            &profile,
+            &game,
+            &[],
+            false
+        ));
         fs::remove_dir(profile.join("BepInEx_DISABLED")).unwrap();
 
         let game_manifests = vec![StoredModOwnershipManifest {
@@ -1130,14 +1237,20 @@ mod tests {
         ));
         fs::remove_dir_all(game.join("BepInEx")).unwrap();
         fs::remove_dir(&game).unwrap();
-        assert!(!no_local_bepinex_payload_to_migrate(&profile, &game, &[], false));
+        assert!(!no_local_bepinex_payload_to_migrate(
+            &profile,
+            &game,
+            &[],
+            false
+        ));
         fs::remove_dir_all(&root).unwrap();
     }
 
     #[cfg(unix)]
     #[test]
     fn a_fresh_game_local_profile_drops_only_the_stale_link() {
-        let root = std::env::temp_dir().join(format!("r2modmac-stale-link-{}", uuid::Uuid::new_v4()));
+        let root =
+            std::env::temp_dir().join(format!("r2modmac-stale-link-{}", uuid::Uuid::new_v4()));
         let profiles = root.join("profiles");
         let other = profiles.join("other");
         let fresh = profiles.join("fresh");
@@ -1174,14 +1287,19 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn switching_modes_back_and_forth_keeps_the_newest_files() {
-        let root = std::env::temp_dir().join(format!("r2modmac-roundtrip-{}", uuid::Uuid::new_v4()));
+        let root =
+            std::env::temp_dir().join(format!("r2modmac-roundtrip-{}", uuid::Uuid::new_v4()));
         let profile = root.join("com.r2modmac/profiles/abc");
         let game = root.join("game");
         fs::create_dir_all(&profile).unwrap();
         fs::create_dir_all(game.join("BepInEx/core")).unwrap();
         fs::create_dir_all(game.join("BepInEx/plugins/ModA")).unwrap();
         fs::create_dir_all(game.join("BepInEx/config")).unwrap();
-        fs::write(game.join("BepInEx/core/BepInEx.Preloader.dll"), b"preloader").unwrap();
+        fs::write(
+            game.join("BepInEx/core/BepInEx.Preloader.dll"),
+            b"preloader",
+        )
+        .unwrap();
         fs::write(game.join("BepInEx/plugins/ModA/ModA.dll"), b"ModA 1.0.0").unwrap();
         fs::write(game.join("BepInEx/config/ModA.cfg"), b"speed = 1").unwrap();
         fs::write(
@@ -1211,10 +1329,16 @@ mod tests {
         assert!(game.join("BepInEx").is_dir());
         assert_eq!(read(&game, "BepInEx/plugins/ModA/ModA.dll"), "ModA 1.1.0");
         assert_eq!(read(&game, "BepInEx/config/ModA.cfg"), "speed = 2");
-        assert_eq!(read(&game, "BepInEx/core/BepInEx.Preloader.dll"), "preloader");
-        assert!(profile.join("BepInEx/plugins/ModA/ModA.dll").is_file(), "the copy in the profile is kept");
+        assert_eq!(
+            read(&game, "BepInEx/core/BepInEx.Preloader.dll"),
+            "preloader"
+        );
+        assert!(
+            profile.join("BepInEx/plugins/ModA/ModA.dll").is_file(),
+            "the copy in the profile is kept"
+        );
         let ini = |tree: &Path| read(tree, "doorstop_config.ini").replace('\\', "/");
-        assert!(ini(&game).contains(game.to_str().unwrap()));
+        assert!(ini(&game).contains("=BepInEx/core/BepInEx.Preloader.dll"));
 
         // Updated again while game-local, then isolated a second time.
         fs::write(game.join("BepInEx/plugins/ModA/ModA.dll"), b"ModA 1.2.0").unwrap();
@@ -1222,7 +1346,10 @@ mod tests {
         fs::rename(game.join("BepInEx"), root.join("preserved")).unwrap();
         crate::commands::mod_commands::point_game_doorstop_ini_at_tree(&game, &profile).unwrap();
         sync_isolated_bepinex_link(&game, &profile, false).unwrap();
-        assert_eq!(read(&profile, "BepInEx/plugins/ModA/ModA.dll"), "ModA 1.2.0");
+        assert_eq!(
+            read(&profile, "BepInEx/plugins/ModA/ModA.dll"),
+            "ModA 1.2.0"
+        );
         assert_eq!(read(&game, "BepInEx/plugins/ModA/ModA.dll"), "ModA 1.2.0");
         assert!(ini(&game).contains(profile.to_str().unwrap()));
 
@@ -1231,7 +1358,12 @@ mod tests {
         let backups = fs::read_dir(&profile)
             .unwrap()
             .filter_map(|entry| entry.ok())
-            .filter(|entry| entry.file_name().to_string_lossy().contains("r2modmac-backup"))
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .contains("r2modmac-backup")
+            })
             .count();
         assert_eq!(backups, 1);
         fs::remove_dir_all(root).unwrap();
@@ -1261,15 +1393,27 @@ mod tests {
             serde_json::json!({"id": "inherits"}),
         ];
         // Another profile that keeps its files in the game folder: blocked.
-        assert!(active_marker_blocks_leaving_isolation("local", "me", &profiles, true));
+        assert!(active_marker_blocks_leaving_isolation(
+            "local", "me", &profiles, true
+        ));
         // A stale marker: an isolated profile, or one that was deleted.
-        assert!(!active_marker_blocks_leaving_isolation("isolated", "me", &profiles, false));
-        assert!(!active_marker_blocks_leaving_isolation("deleted", "me", &profiles, false));
+        assert!(!active_marker_blocks_leaving_isolation(
+            "isolated", "me", &profiles, false
+        ));
+        assert!(!active_marker_blocks_leaving_isolation(
+            "deleted", "me", &profiles, false
+        ));
         // A profile with no setting of its own follows the global default.
-        assert!(active_marker_blocks_leaving_isolation("inherits", "me", &profiles, false));
-        assert!(!active_marker_blocks_leaving_isolation("inherits", "me", &profiles, true));
+        assert!(active_marker_blocks_leaving_isolation(
+            "inherits", "me", &profiles, false
+        ));
+        assert!(!active_marker_blocks_leaving_isolation(
+            "inherits", "me", &profiles, true
+        ));
         // This profile's own marker never blocks it.
-        assert!(!active_marker_blocks_leaving_isolation("me", "me", &profiles, false));
+        assert!(!active_marker_blocks_leaving_isolation(
+            "me", "me", &profiles, false
+        ));
     }
 
     #[test]
@@ -1593,25 +1737,33 @@ mod tests {
             "Author-Mod-1.0.0",
             &["BepInEx/plugins/mod.dll", "run_bepinex.sh"],
         )];
-        assert!(preflight_local_bepinex_payload(&profile, &game, &mods, &inventory).is_ok());
-
-        fs::remove_file(profile.join("BepInEx/plugins/mod.dll")).unwrap();
         assert!(
             preflight_local_bepinex_payload(&profile, &game, &mods, &inventory)
-                .unwrap_err()
-                .contains("missing")
+                .unwrap()
+                .is_empty()
+        );
+
+        // A missing file leaves that mod for the next Apply instead of
+        // stopping the switch (issue #45).
+        fs::remove_file(profile.join("BepInEx/plugins/mod.dll")).unwrap();
+        assert_eq!(
+            preflight_local_bepinex_payload(&profile, &game, &mods, &inventory).unwrap(),
+            mods
         );
         fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
-    fn offline_preflight_rejects_missing_inventory_and_path_traversal() {
+    fn offline_preflight_defers_missing_inventory_and_rejects_path_traversal() {
         let root = std::env::temp_dir().join(format!(
             "r2modmac-profile-preflight-{}",
             uuid::Uuid::new_v4()
         ));
         let mods = vec!["Author-Mod-1.0.0".to_string()];
-        assert!(preflight_local_bepinex_payload(&root, &root, &mods, &[]).is_err());
+        assert_eq!(
+            preflight_local_bepinex_payload(&root, &root, &mods, &[]).unwrap(),
+            mods
+        );
         let unsafe_inventory = vec![manifest("Author-Mod-1.0.0", &["../outside.dll"])];
         assert!(
             preflight_local_bepinex_payload(&root, &root, &mods, &unsafe_inventory)
@@ -1804,7 +1956,8 @@ mod mode_switch_end_to_end {
         isolated: bool,
         manifests: &[StoredModOwnershipManifest],
     ) -> Result<ModeSwitchOutcome, String> {
-        let layout = !isolated && game_local_layout_needs_reconciliation(profile_root, runtime_root);
+        let layout =
+            !isolated && game_local_layout_needs_reconciliation(profile_root, runtime_root);
         switch_bepinex_tree_files(&ModeSwitch {
             profile,
             profile_root,
@@ -1833,24 +1986,52 @@ mod mode_switch_end_to_end {
         let profile = profile_json();
         let manifests = stored(&root.join("inventory"));
 
-        let outcome = switch(&profile, &profile_root, &game, "mac", false, true, &manifests).unwrap();
-        assert!(matches!(outcome, ModeSwitchOutcome::Switched));
-        assert!(game.join("BepInEx").is_symlink(), "the game reaches the profile tree through a link");
+        let outcome = switch(
+            &profile,
+            &profile_root,
+            &game,
+            "mac",
+            false,
+            true,
+            &manifests,
+        )
+        .unwrap();
+        assert!(matches!(outcome, ModeSwitchOutcome::Switched { .. }));
+        assert!(
+            game.join("BepInEx").is_symlink(),
+            "the game reaches the profile tree through a link"
+        );
         for file in FILES {
             assert_eq!(read(&profile_root.join(file)), format!("{file} 1.0.0"));
             assert_eq!(read(&game.join(file)), format!("{file} 1.0.0"));
         }
-        assert!(read(&game.join("doorstop_config.ini")).replace('\\', "/").contains("profiles/abc"));
+        assert!(read(&game.join("doorstop_config.ini"))
+            .replace('\\', "/")
+            .contains("profiles/abc"));
 
         // The mod is updated while isolated, then the profile leaves isolation.
         fs::write(profile_root.join(FILES[1]), b"ModA 1.1.0").unwrap();
-        let outcome = switch(&profile, &profile_root, &game, "mac", true, false, &manifests).unwrap();
-        assert!(matches!(outcome, ModeSwitchOutcome::Switched));
+        let outcome = switch(
+            &profile,
+            &profile_root,
+            &game,
+            "mac",
+            true,
+            false,
+            &manifests,
+        )
+        .unwrap();
+        assert!(matches!(outcome, ModeSwitchOutcome::Switched { .. }));
         assert!(!game.join("BepInEx").is_symlink());
         assert_eq!(read(&game.join(FILES[1])), "ModA 1.1.0");
         assert_eq!(read(&game.join(FILES[0])), format!("{} 1.0.0", FILES[0]));
-        assert!(!read(&game.join("doorstop_config.ini")).replace('\\', "/").contains("profiles/abc"));
-        assert!(profile_root.join(FILES[1]).is_file(), "the profile copy is kept");
+        assert!(!read(&game.join("doorstop_config.ini"))
+            .replace('\\', "/")
+            .contains("profiles/abc"));
+        assert!(
+            profile_root.join(FILES[1]).is_file(),
+            "the profile copy is kept"
+        );
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -1872,23 +2053,50 @@ mod mode_switch_end_to_end {
             profile_root,
             "the bottle is given a drive for the profiles"
         );
-        let outcome = switch(&profile, &profile_root, &game, "windows", false, true, &manifests).unwrap();
-        assert!(matches!(outcome, ModeSwitchOutcome::Switched));
-        assert!(!game.join("BepInEx").is_symlink(), "Wine has no use for a macOS link");
+        let outcome = switch(
+            &profile,
+            &profile_root,
+            &game,
+            "windows",
+            false,
+            true,
+            &manifests,
+        )
+        .unwrap();
+        assert!(matches!(outcome, ModeSwitchOutcome::Switched { .. }));
+        assert!(
+            !game.join("BepInEx").is_symlink(),
+            "Wine has no use for a macOS link"
+        );
         for file in FILES {
             assert_eq!(read(&profile_root.join(file)), format!("{file} 1.0.0"));
         }
         let ini = read(&game.join("doorstop_config.ini"));
-        assert!(ini.contains(":\\abc\\BepInEx\\core\\BepInEx.Preloader.dll"), "{ini}");
+        assert!(
+            ini.contains(":\\abc\\BepInEx\\core\\BepInEx.Preloader.dll"),
+            "{ini}"
+        );
         assert!(!ini.contains('/'), "{ini}");
 
-        let outcome = switch(&profile, &profile_root, &game, "windows", true, false, &manifests).unwrap();
-        assert!(matches!(outcome, ModeSwitchOutcome::Switched));
+        let outcome = switch(
+            &profile,
+            &profile_root,
+            &game,
+            "windows",
+            true,
+            false,
+            &manifests,
+        )
+        .unwrap();
+        assert!(matches!(outcome, ModeSwitchOutcome::Switched { .. }));
         for file in FILES {
             assert_eq!(read(&game.join(file)), format!("{file} 1.0.0"));
         }
         let ini = read(&game.join("doorstop_config.ini"));
-        assert!(ini.contains("C:\\Games\\Game\\BepInEx\\core\\BepInEx.Preloader.dll"), "{ini}");
+        assert!(
+            ini.contains("=BepInEx\\core\\BepInEx.Preloader.dll"),
+            "{ini}"
+        );
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -1905,7 +2113,16 @@ mod mode_switch_end_to_end {
         fs::create_dir_all(&game).unwrap();
         std::os::unix::fs::symlink(other.join("BepInEx"), game.join("BepInEx")).unwrap();
 
-        let outcome = switch(&serde_json::json!({"mods": []}), &fresh, &game, "mac", false, false, &[]).unwrap();
+        let outcome = switch(
+            &serde_json::json!({"mods": []}),
+            &fresh,
+            &game,
+            "mac",
+            false,
+            false,
+            &[],
+        )
+        .unwrap();
         assert!(matches!(outcome, ModeSwitchOutcome::StaleLinksDropped));
         assert!(fs::symlink_metadata(game.join("BepInEx")).is_err());
         assert_eq!(read(&other.join("BepInEx/plugins/keep.dll")), "keep");
@@ -1913,20 +2130,50 @@ mod mode_switch_end_to_end {
     }
 
     #[test]
-    fn a_switch_that_cannot_be_completed_changes_nothing() {
-        let root = world("mode-refuse");
+    fn a_mod_missing_from_the_profile_is_left_for_the_next_apply() {
+        let root = world("mode-incomplete");
         let profile_root = root.join("com.r2modmac/profiles/abc");
         let game = root.join("game");
         fs::create_dir_all(profile_root.join("BepInEx/plugins")).unwrap();
         fs::create_dir_all(&game).unwrap();
         install_game_tree(&game);
-        // The profile's tree lacks a file its inventory claims to own.
+        // The profile's tree lacks a file its inventory claims to own. This
+        // used to refuse the switch, leaving the user stuck in isolation (#45).
         fs::write(profile_root.join("BepInEx/plugins/other.dll"), b"x").unwrap();
         let before = read(&game.join(FILES[1]));
-        let error = switch(&profile_json(), &profile_root, &game, "mac", true, false, &stored(&root.join("inv")));
-        assert!(error.is_err());
-        assert_eq!(read(&game.join(FILES[1])), before, "the game tree is untouched");
+        let outcome = switch(
+            &profile_json(),
+            &profile_root,
+            &game,
+            "mac",
+            true,
+            false,
+            &stored(&root.join("inv")),
+        )
+        .unwrap();
+        match outcome {
+            ModeSwitchOutcome::Switched { reinstall } => {
+                assert_eq!(reinstall, vec![MOD.to_string()])
+            }
+            other => panic!("unexpected outcome {other:?}"),
+        }
+        assert_eq!(read(&game.join("BepInEx/plugins/other.dll")), "x");
         assert!(profile_root.join("BepInEx/plugins/other.dll").is_file());
+        // The game's previous tree is kept aside, not deleted.
+        let backup = fs::read_dir(&game)
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .find(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("BepInEx.r2modmac-backup-")
+            })
+            .expect("backup of the game tree");
+        assert_eq!(
+            read(&backup.path().join(&FILES[1]["BepInEx/".len()..])),
+            before
+        );
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -1939,22 +2186,44 @@ mod mode_switch_end_to_end {
         install_game_tree(&game);
         let profile = profile_json();
         let mut game_side = stored(&root.join("inventory"));
-        game_side[0].manifest.target_root_hint =
-            Some(fs::canonicalize(&game).unwrap().to_string_lossy().to_string());
+        game_side[0].manifest.target_root_hint = Some(
+            fs::canonicalize(&game)
+                .unwrap()
+                .to_string_lossy()
+                .to_string(),
+        );
         let names = std::collections::HashSet::from([MOD.to_ascii_lowercase()]);
 
         // Isolate; the profile side has no inventory of its own.
-        switch(&profile, &profile_root, &game, "mac", false, true, &game_side).unwrap();
+        switch(
+            &profile,
+            &profile_root,
+            &game,
+            "mac",
+            false,
+            true,
+            &game_side,
+        )
+        .unwrap();
         assert!(with_game_scope_fallback(Vec::new(), &[], &names, &game).is_empty());
 
-        // Without the fallback the switch back is refused, as it was.
-        let refused = switch(&profile, &profile_root, &game, "mac", true, false, &[]);
-        assert!(refused.unwrap_err().contains("inventory is missing or ambiguous"));
-
-        // With it, the switch completes and every file is back in the game.
+        // With the fallback the switch completes and every file is back in
+        // the game, with nothing left for an Apply to reinstall.
         let inventories = with_game_scope_fallback(Vec::new(), &game_side, &names, &game);
         assert_eq!(inventories.len(), 1);
-        switch(&profile, &profile_root, &game, "mac", true, false, &inventories).unwrap();
+        let outcome = switch(
+            &profile,
+            &profile_root,
+            &game,
+            "mac",
+            true,
+            false,
+            &inventories,
+        )
+        .unwrap();
+        assert!(
+            matches!(outcome, ModeSwitchOutcome::Switched { ref reinstall } if reinstall.is_empty())
+        );
         assert!(!game.join("BepInEx").is_symlink());
         for file in FILES {
             assert_eq!(read(&game.join(file)), format!("{file} 1.0.0"));
@@ -1964,7 +2233,10 @@ mod mode_switch_end_to_end {
         let mut own = stored(&root.join("own"));
         own[0].manifest.files = vec![FILES[0].to_string()];
         assert_eq!(
-            with_game_scope_fallback(own, &game_side, &names, &game)[0].manifest.files.len(),
+            with_game_scope_fallback(own, &game_side, &names, &game)[0]
+                .manifest
+                .files
+                .len(),
             1
         );
         let mut elsewhere = game_side.clone();

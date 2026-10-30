@@ -202,7 +202,11 @@ fn write_plist_string(info_plist: &std::path::Path, key: &str, value: &str) -> R
 /// reads, which is also where `winecfg` keeps it.
 fn with_native_dll_overrides(content: &str, dlls: &[String], now: u64) -> Option<String> {
     const HEADER: &str = "[software\\\\wine\\\\dlloverrides]";
-    let newline = if content.contains("\r\n") { "\r\n" } else { "\n" };
+    let newline = if content.contains("\r\n") {
+        "\r\n"
+    } else {
+        "\n"
+    };
     let mut lines: Vec<String> = content.lines().map(str::to_string).collect();
     let header = lines
         .iter()
@@ -234,11 +238,17 @@ fn with_native_dll_overrides(content: &str, dlls: &[String], now: u64) -> Option
     for dll in dlls {
         let key = format!("\"{}\"=", dll.to_ascii_lowercase());
         let wanted = format!("\"{}\"=\"native,builtin\"", dll);
-        match (header + 1..section_end)
-            .find(|&index| lines[index].trim_start().to_ascii_lowercase().starts_with(&key))
-        {
+        match (header + 1..section_end).find(|&index| {
+            lines[index]
+                .trim_start()
+                .to_ascii_lowercase()
+                .starts_with(&key)
+        }) {
             Some(index) => {
-                let value = lines[index].split_once('=').map(|(_, value)| value).unwrap_or("");
+                let value = lines[index]
+                    .split_once('=')
+                    .map(|(_, value)| value)
+                    .unwrap_or("");
                 if !value.trim().trim_matches('"').starts_with("native") {
                     lines[index] = wanted;
                     changed = true;
@@ -268,7 +278,11 @@ pub(crate) fn ensure_native_dll_overrides(
 ) -> Result<bool, String> {
     let dlls = overrides
         .split(';')
-        .filter_map(|entry| entry.split_once('=').map(|(name, _)| name.trim().to_string()))
+        .filter_map(|entry| {
+            entry
+                .split_once('=')
+                .map(|(name, _)| name.trim().to_string())
+        })
         .filter(|name| !name.is_empty())
         .collect::<Vec<_>>();
     let user_reg = prefix_root.join("user.reg");
@@ -313,7 +327,9 @@ fn wrapper_settings_sidecar(info_plist: &std::path::Path) -> std::path::PathBuf 
     info_plist.with_file_name("Info.plist.r2modmac-original.json")
 }
 
-fn original_wrapper_settings(info_plist: &std::path::Path) -> Result<WrapperLaunchSettings, String> {
+fn original_wrapper_settings(
+    info_plist: &std::path::Path,
+) -> Result<WrapperLaunchSettings, String> {
     let sidecar = wrapper_settings_sidecar(info_plist);
     if let Some(saved) = std::fs::read(&sidecar)
         .ok()
@@ -800,10 +816,14 @@ mod wine_registry_and_wrapper_tests {
     fn a_bottle_without_overrides_gets_the_section_and_keeps_the_rest() {
         let updated = with_native_dll_overrides(REG, &dlls(&["winhttp"]), 42).unwrap();
         assert!(updated.starts_with(REG.trim_end()));
-        assert!(updated.contains("[Software\\\\Wine\\\\DllOverrides] 42\n\"winhttp\"=\"native,builtin\"\n"));
+        assert!(updated
+            .contains("[Software\\\\Wine\\\\DllOverrides] 42\n\"winhttp\"=\"native,builtin\"\n"));
         assert!(updated.contains("\"LogPixels\"=dword:00000060"));
         // Applying it again changes nothing.
-        assert_eq!(with_native_dll_overrides(&updated, &dlls(&["winhttp"]), 43), None);
+        assert_eq!(
+            with_native_dll_overrides(&updated, &dlls(&["winhttp"]), 43),
+            None
+        );
     }
 
     #[test]
@@ -819,14 +839,19 @@ mod wine_registry_and_wrapper_tests {
         assert!(updated.contains("[Software\\\\Other] 2\n\"x\"=\"y\""));
         // A native-first value the user chose is left alone.
         let native = "[Software\\\\Wine\\\\DllOverrides] 1\n\"winhttp\"=\"native\"\n";
-        assert_eq!(with_native_dll_overrides(native, &dlls(&["winhttp"]), 9), None);
+        assert_eq!(
+            with_native_dll_overrides(native, &dlls(&["winhttp"]), 9),
+            None
+        );
     }
 
     #[test]
     fn windows_line_endings_are_kept() {
         let reg = "WINE REGISTRY Version 2\r\n\r\n[Software\\\\Wine\\\\DllOverrides] 1\r\n";
         let updated = with_native_dll_overrides(reg, &dlls(&["winhttp"]), 9).unwrap();
-        assert!(updated.contains("[Software\\\\Wine\\\\DllOverrides] 1\r\n\"winhttp\"=\"native,builtin\"\r\n"));
+        assert!(updated.contains(
+            "[Software\\\\Wine\\\\DllOverrides] 1\r\n\"winhttp\"=\"native,builtin\"\r\n"
+        ));
         assert!(!updated.replace("\r\n", "").contains('\n'));
     }
 
@@ -834,12 +859,20 @@ mod wine_registry_and_wrapper_tests {
     fn the_registry_file_is_changed_once_with_a_backup() {
         let root = std::env::temp_dir().join(format!("r2modmac-userreg-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&root).unwrap();
-        assert!(!ensure_native_dll_overrides(&root, "winhttp=n,b").unwrap(), "no user.reg, nothing to do");
+        assert!(
+            !ensure_native_dll_overrides(&root, "winhttp=n,b").unwrap(),
+            "no user.reg, nothing to do"
+        );
         std::fs::write(root.join("user.reg"), REG).unwrap();
         assert!(ensure_native_dll_overrides(&root, "winhttp=n,b").unwrap());
         assert!(!ensure_native_dll_overrides(&root, "winhttp=n,b").unwrap());
-        assert_eq!(std::fs::read_to_string(root.join("user.reg.r2modmac-backup")).unwrap(), REG);
-        assert!(std::fs::read_to_string(root.join("user.reg")).unwrap().contains("\"winhttp\"=\"native,builtin\""));
+        assert_eq!(
+            std::fs::read_to_string(root.join("user.reg.r2modmac-backup")).unwrap(),
+            REG
+        );
+        assert!(std::fs::read_to_string(root.join("user.reg"))
+            .unwrap()
+            .contains("\"winhttp\"=\"native,builtin\""));
         assert!(!root.join("user.reg.r2modmac-staging").exists());
         std::fs::remove_dir_all(root).unwrap();
     }
@@ -856,7 +889,12 @@ mod wine_registry_and_wrapper_tests {
             .status()
             .unwrap()
             .success());
-        write_plist_string(&plist, "Program Name and Path", "/Program Files (x86)/Steam/steam.exe").unwrap();
+        write_plist_string(
+            &plist,
+            "Program Name and Path",
+            "/Program Files (x86)/Steam/steam.exe",
+        )
+        .unwrap();
         write_plist_string(&plist, "Program Flags", "").unwrap();
 
         // First launch saves the originals and writes its own values.

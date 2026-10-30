@@ -303,7 +303,12 @@ pub(crate) async fn launch_game_with_mods_for_macos(
         },
     )?;
 
-    prepare_native_apple_silicon_for_launch(app, &runtime_game_path, &tree_root, executable_path.as_ref());
+    prepare_native_apple_silicon_for_launch(
+        app,
+        &runtime_game_path,
+        &tree_root,
+        executable_path.as_ref(),
+    );
     apply_profile_architecture_for_launch(app, profile_id, &runtime_game_path, &tree_root)?;
 
     let dist = infer_distribution_from_game_path(app, game_path, false);
@@ -408,9 +413,15 @@ fn prepare_native_apple_silicon_for_launch(
         game_has_arm64,
     }) {
         Ok(NativeAppleSilicon::NotApplicable(reason)) => {
-            log::info!("[launch_game_with_mods] Native Apple Silicon not used: {}", reason)
+            log::info!(
+                "[launch_game_with_mods] Native Apple Silicon not used: {}",
+                reason
+            )
         }
-        Ok(outcome) => log::info!("[launch_game_with_mods] Native Apple Silicon: {:?}", outcome),
+        Ok(outcome) => log::info!(
+            "[launch_game_with_mods] Native Apple Silicon: {:?}",
+            outcome
+        ),
         Err(error) => log::warn!(
             "[launch_game_with_mods] Couldn't set up native Apple Silicon, launching as before: {}",
             error
@@ -430,7 +441,12 @@ fn apply_profile_architecture_for_launch(
     let resources = bundled_apple_silicon_resources(app);
     let mode = get_profile_architecture(app, profile_id);
     let profile_key = sanitize_profile_key(profile_id);
-    let facts = gather_facts(resources.as_deref(), runtime_game_path, tree_root, &profile_key);
+    let facts = gather_facts(
+        resources.as_deref(),
+        runtime_game_path,
+        tree_root,
+        &profile_key,
+    );
     let decision = resolve_launch(mode, &facts)?;
     log::info!(
         "[launch_game_with_mods] Architecture: mode={} decision={:?} pinned={}",
@@ -441,11 +457,21 @@ fn apply_profile_architecture_for_launch(
     if facts.host_apple_silicon {
         // A launch that isn't ours to steer gets the neutral answer, so a
         // choice written for another profile never lingers.
-        let written = if decision.is_some() { mode } else { ArchitectureMode::Auto };
-        if let Err(error) =
-            write_launch_override(runtime_game_path, written, &profile_key, facts.rosetta_installed)
-        {
-            log::warn!("[launch_game_with_mods] Couldn't write the architecture choice: {}", error);
+        let written = if decision.is_some() {
+            mode
+        } else {
+            ArchitectureMode::Auto
+        };
+        if let Err(error) = write_launch_override(
+            runtime_game_path,
+            written,
+            &profile_key,
+            facts.rosetta_installed,
+        ) {
+            log::warn!(
+                "[launch_game_with_mods] Couldn't write the architecture choice: {}",
+                error
+            );
         }
     }
     Ok(())

@@ -58,7 +58,11 @@ export function SettingsModal({ isOpen, onClose, selectedGame, activeProfile, on
     const loadSettings = async () => {
         try {
             const settings = await window.ipcRenderer.getSettings();
-            setInheritedIsolation(settings.profile_isolation ?? false);
+            // A profile with no explicit mode uses whatever Apply and Play use
+            // for it, which is read from its files, not the old global switch.
+            setInheritedIsolation(activeProfile && activeProfile.bepinexIsolation === undefined
+                ? await window.ipcRenderer.getProfileBepinexIsolation(activeProfile.id).catch(() => false)
+                : false);
             if (activeProfilePlatform === 'mac') {
                 setSteamPath(settings.mac_steam_path || getLegacyMacSteamPath(settings.steam_path) || defaultMacSteamPath);
             } else {

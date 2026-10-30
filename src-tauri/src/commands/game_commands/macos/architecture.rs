@@ -88,11 +88,17 @@ pub(crate) struct ArchitectureOption {
 
 impl ArchitectureOption {
     fn yes() -> Self {
-        Self { available: true, reason: None }
+        Self {
+            available: true,
+            reason: None,
+        }
     }
 
     fn no(reason: &str) -> Self {
-        Self { available: false, reason: Some(reason.to_string()) }
+        Self {
+            available: false,
+            reason: Some(reason.to_string()),
+        }
     }
 }
 
@@ -137,7 +143,10 @@ pub(crate) fn rosetta_installed() -> bool {
     std::path::Path::new(ROSETTA_RUNTIME).exists()
 }
 
-pub(crate) fn compute_status(mode: ArchitectureMode, facts: &ArchitectureFacts) -> ArchitectureStatus {
+pub(crate) fn compute_status(
+    mode: ArchitectureMode,
+    facts: &ArchitectureFacts,
+) -> ArchitectureStatus {
     let applicable = facts.host_apple_silicon
         && facts.bepinex_present
         && !facts.wrapper_entry
@@ -186,8 +195,9 @@ pub(crate) fn compute_status(mode: ArchitectureMode, facts: &ArchitectureFacts) 
         _ => LaunchArch::Unavailable,
     };
 
-    let shim_hint = (native.available && !facts.shim_usable)
-        .then(|| "These mods use an older BepInEx, so Apple Silicon may be less stable.".to_string());
+    let shim_hint = (native.available && !facts.shim_usable).then(|| {
+        "These mods use an older BepInEx, so Apple Silicon may be less stable.".to_string()
+    });
 
     ArchitectureStatus {
         applicable,
@@ -268,7 +278,13 @@ pub(crate) fn resolve_launch(
 pub(crate) fn sanitize_profile_key(profile_id: &str) -> String {
     profile_id
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect()
 }
 
@@ -323,8 +339,9 @@ pub(crate) fn pin_since(
             )
     };
     let matches = content.lines().any(|line| {
-        line.rsplit_once('|')
-            .is_some_and(|(recorded, time)| time.trim() == mtime.to_string() && same_bundle(recorded))
+        line.rsplit_once('|').is_some_and(|(recorded, time)| {
+            time.trim() == mtime.to_string() && same_bundle(recorded)
+        })
     });
     matches.then(|| file_mtime_secs(&pin).unwrap_or(0))
 }
@@ -347,11 +364,15 @@ pub(crate) fn remove_all_architecture_pins(runtime_root: &std::path::Path) -> Re
 
 /// "Try Apple Silicon again": forgets this profile's pin, and the whole-game
 /// one an older launcher wrote (a launch started from Steam alone still reads it).
-pub(crate) fn clear_architecture_pin(runtime_root: &std::path::Path, profile_key: &str) -> Result<(), String> {
+pub(crate) fn clear_architecture_pin(
+    runtime_root: &std::path::Path,
+    profile_key: &str,
+) -> Result<(), String> {
     for name in [pin_file_name(profile_key), PIN_FILE_PREFIX.to_string()] {
         let path = runtime_root.join(name);
         if path.is_file() {
-            fs::remove_file(&path).map_err(|e| format!("Couldn't remove {}: {}", path.display(), e))?;
+            fs::remove_file(&path)
+                .map_err(|e| format!("Couldn't remove {}: {}", path.display(), e))?;
         }
     }
     Ok(())
@@ -408,7 +429,8 @@ pub(crate) fn gather_facts(
     profile_key: &str,
 ) -> ArchitectureFacts {
     let executable = find_macos_executable_path(runtime_root);
-    let (game_has_arm64, game_has_x64) = executable.as_deref().map(slices).unwrap_or((false, false));
+    let (game_has_arm64, game_has_x64) =
+        executable.as_deref().map(slices).unwrap_or((false, false));
     let core_dir = tree_root.join("BepInEx").join("core");
     let root_loader = runtime_root.join("libdoorstop.dylib");
     let (root_loader_arm64, root_loader_x64) = slices(&root_loader);
@@ -430,7 +452,10 @@ pub(crate) fn gather_facts(
         game_has_x64,
         native_loader_ok: root_loader_arm64 || (shim_usable && resources_carry_shim(resources)),
         x64_loader_ok: root_loader_x64
-            || runtime_root.join("doorstop_libs").join("libdoorstop_x64.dylib").is_file(),
+            || runtime_root
+                .join("doorstop_libs")
+                .join("libdoorstop_x64.dylib")
+                .is_file(),
         shim_usable,
         pinned_since: executable
             .as_deref()
@@ -484,9 +509,18 @@ mod tests {
     fn the_mode_defaults_to_automatic() {
         assert_eq!(ArchitectureMode::parse(None), ArchitectureMode::Auto);
         assert_eq!(ArchitectureMode::parse(Some("")), ArchitectureMode::Auto);
-        assert_eq!(ArchitectureMode::parse(Some("nonsense")), ArchitectureMode::Auto);
-        assert_eq!(ArchitectureMode::parse(Some("native")), ArchitectureMode::Native);
-        assert_eq!(ArchitectureMode::parse(Some("rosetta")), ArchitectureMode::Rosetta);
+        assert_eq!(
+            ArchitectureMode::parse(Some("nonsense")),
+            ArchitectureMode::Auto
+        );
+        assert_eq!(
+            ArchitectureMode::parse(Some("native")),
+            ArchitectureMode::Native
+        );
+        assert_eq!(
+            ArchitectureMode::parse(Some("rosetta")),
+            ArchitectureMode::Rosetta
+        );
         assert_eq!(ArchitectureMode::Rosetta.as_str(), "rosetta");
     }
 
@@ -501,12 +535,26 @@ mod tests {
 
     #[test]
     fn a_crash_pin_moves_automatic_to_rosetta_and_only_automatic() {
-        let facts = ArchitectureFacts { pinned_since: Some(1_700_000_000), ..universal() };
+        let facts = ArchitectureFacts {
+            pinned_since: Some(1_700_000_000),
+            ..universal()
+        };
         let auto = status(ArchitectureMode::Auto, &facts);
         assert_eq!(auto.effective, LaunchArch::Rosetta);
-        assert_eq!(auto.pinned, Some(ArchitecturePin { since: 1_700_000_000 }));
-        assert_eq!(status(ArchitectureMode::Native, &facts).effective, LaunchArch::Native);
-        assert_eq!(status(ArchitectureMode::Rosetta, &facts).effective, LaunchArch::Rosetta);
+        assert_eq!(
+            auto.pinned,
+            Some(ArchitecturePin {
+                since: 1_700_000_000
+            })
+        );
+        assert_eq!(
+            status(ArchitectureMode::Native, &facts).effective,
+            LaunchArch::Native
+        );
+        assert_eq!(
+            status(ArchitectureMode::Rosetta, &facts).effective,
+            LaunchArch::Rosetta
+        );
     }
 
     #[test]
@@ -518,16 +566,28 @@ mod tests {
         };
         let s = status(ArchitectureMode::Auto, &facts);
         assert_eq!(s.effective, LaunchArch::Native);
-        assert_eq!(s.rosetta.reason.as_deref(), Some("Rosetta isn't installed on this Mac."));
-        assert_eq!(resolve_launch(ArchitectureMode::Auto, &facts), Ok(Some(LaunchArch::Native)));
+        assert_eq!(
+            s.rosetta.reason.as_deref(),
+            Some("Rosetta isn't installed on this Mac.")
+        );
+        assert_eq!(
+            resolve_launch(ArchitectureMode::Auto, &facts),
+            Ok(Some(LaunchArch::Native))
+        );
     }
 
     #[test]
     fn an_intel_only_game_runs_under_rosetta_and_has_no_native_option() {
-        let facts = ArchitectureFacts { game_has_arm64: false, ..universal() };
+        let facts = ArchitectureFacts {
+            game_has_arm64: false,
+            ..universal()
+        };
         let s = status(ArchitectureMode::Auto, &facts);
         assert_eq!(s.effective, LaunchArch::Rosetta);
-        assert_eq!(s.native.reason.as_deref(), Some("This game has no Apple Silicon version."));
+        assert_eq!(
+            s.native.reason.as_deref(),
+            Some("This game has no Apple Silicon version.")
+        );
         assert!(s.applicable);
     }
 
@@ -540,7 +600,10 @@ mod tests {
         };
         for mode in [ArchitectureMode::Auto, ArchitectureMode::Rosetta] {
             let error = resolve_launch(mode, &facts).unwrap_err();
-            assert!(error.starts_with("ARCH_ROSETTA_MISSING"), "{mode:?}: {error}");
+            assert!(
+                error.starts_with("ARCH_ROSETTA_MISSING"),
+                "{mode:?}: {error}"
+            );
         }
         let error = resolve_launch(ArchitectureMode::Native, &facts).unwrap_err();
         assert!(error.starts_with("ARCH_NATIVE_UNAVAILABLE"), "{error}");
@@ -548,22 +611,34 @@ mod tests {
 
     #[test]
     fn an_apple_silicon_only_game_has_no_rosetta_option() {
-        let facts = ArchitectureFacts { game_has_x64: false, ..universal() };
+        let facts = ArchitectureFacts {
+            game_has_x64: false,
+            ..universal()
+        };
         let s = status(ArchitectureMode::Auto, &facts);
         assert_eq!(s.effective, LaunchArch::Native);
-        assert_eq!(s.rosetta.reason.as_deref(), Some("This game has no Intel version."));
+        assert_eq!(
+            s.rosetta.reason.as_deref(),
+            Some("This game has no Intel version.")
+        );
         let error = resolve_launch(ArchitectureMode::Rosetta, &facts).unwrap_err();
         assert!(error.starts_with("ARCH_ROSETTA_UNAVAILABLE"), "{error}");
     }
 
     #[test]
     fn a_missing_loader_slice_closes_that_option() {
-        let no_arm_loader = ArchitectureFacts { native_loader_ok: false, ..universal() };
+        let no_arm_loader = ArchitectureFacts {
+            native_loader_ok: false,
+            ..universal()
+        };
         let s = status(ArchitectureMode::Auto, &no_arm_loader);
         assert!(!s.native.available);
         assert_eq!(s.effective, LaunchArch::Rosetta);
 
-        let no_x64_loader = ArchitectureFacts { x64_loader_ok: false, ..universal() };
+        let no_x64_loader = ArchitectureFacts {
+            x64_loader_ok: false,
+            ..universal()
+        };
         let s = status(ArchitectureMode::Auto, &no_x64_loader);
         assert!(!s.rosetta.available);
         assert_eq!(s.effective, LaunchArch::Native);
@@ -571,7 +646,10 @@ mod tests {
 
     #[test]
     fn an_older_bepinex_only_adds_a_hint() {
-        let facts = ArchitectureFacts { shim_usable: false, ..universal() };
+        let facts = ArchitectureFacts {
+            shim_usable: false,
+            ..universal()
+        };
         let s = status(ArchitectureMode::Auto, &facts);
         assert!(s.native.available);
         assert!(s.shim_hint.is_some());
@@ -579,13 +657,22 @@ mod tests {
 
     #[test]
     fn nothing_is_asked_where_the_choice_does_not_exist() {
-        let intel_mac = ArchitectureFacts { host_apple_silicon: false, ..universal() };
+        let intel_mac = ArchitectureFacts {
+            host_apple_silicon: false,
+            ..universal()
+        };
         assert!(!status(ArchitectureMode::Auto, &intel_mac).applicable);
         assert_eq!(resolve_launch(ArchitectureMode::Auto, &intel_mac), Ok(None));
 
-        let no_bepinex = ArchitectureFacts { bepinex_present: false, ..universal() };
+        let no_bepinex = ArchitectureFacts {
+            bepinex_present: false,
+            ..universal()
+        };
         assert!(!status(ArchitectureMode::Auto, &no_bepinex).applicable);
-        assert_eq!(resolve_launch(ArchitectureMode::Native, &no_bepinex), Ok(None));
+        assert_eq!(
+            resolve_launch(ArchitectureMode::Native, &no_bepinex),
+            Ok(None)
+        );
 
         let thirty_two_bit = ArchitectureFacts {
             game_has_arm64: false,
@@ -593,15 +680,24 @@ mod tests {
             ..universal()
         };
         assert!(!status(ArchitectureMode::Auto, &thirty_two_bit).applicable);
-        assert_eq!(resolve_launch(ArchitectureMode::Auto, &thirty_two_bit), Ok(None));
+        assert_eq!(
+            resolve_launch(ArchitectureMode::Auto, &thirty_two_bit),
+            Ok(None)
+        );
     }
 
     #[test]
     fn a_launcher_wrapped_game_only_needs_rosetta_to_exist() {
-        let wrapped = ArchitectureFacts { wrapper_entry: true, ..universal() };
+        let wrapped = ArchitectureFacts {
+            wrapper_entry: true,
+            ..universal()
+        };
         assert!(!status(ArchitectureMode::Auto, &wrapped).applicable);
         assert_eq!(resolve_launch(ArchitectureMode::Auto, &wrapped), Ok(None));
-        let no_rosetta = ArchitectureFacts { rosetta_installed: false, ..wrapped };
+        let no_rosetta = ArchitectureFacts {
+            rosetta_installed: false,
+            ..wrapped
+        };
         assert!(resolve_launch(ArchitectureMode::Auto, &no_rosetta)
             .unwrap_err()
             .starts_with("ARCH_ROSETTA_MISSING"));
@@ -657,7 +753,11 @@ mod tests {
     }
 
     fn pin_line(app: &std::path::Path, executable: &std::path::Path) -> String {
-        format!("{}|{}\n", app.display(), file_mtime_secs(executable).unwrap())
+        format!(
+            "{}|{}\n",
+            app.display(),
+            file_mtime_secs(executable).unwrap()
+        )
     }
 
     #[test]
@@ -680,11 +780,27 @@ mod tests {
         fs::write(root.join(pin_file_name("one")), pin_line(&app, &executable)).unwrap();
 
         assert!(pin_since(&root, "one", &executable).is_some());
-        assert_eq!(pin_since(&root, "two", &executable), None, "another profile isn't pinned");
-        assert_eq!(pin_since(&root, "", &executable), None, "nor is the whole game");
+        assert_eq!(
+            pin_since(&root, "two", &executable),
+            None,
+            "another profile isn't pinned"
+        );
+        assert_eq!(
+            pin_since(&root, "", &executable),
+            None,
+            "nor is the whole game"
+        );
 
-        fs::write(root.join(pin_file_name("one")), format!("{}|1\n", app.display())).unwrap();
-        assert_eq!(pin_since(&root, "one", &executable), None, "a game update makes the pin stale");
+        fs::write(
+            root.join(pin_file_name("one")),
+            format!("{}|1\n", app.display()),
+        )
+        .unwrap();
+        assert_eq!(
+            pin_since(&root, "one", &executable),
+            None,
+            "a game update makes the pin stale"
+        );
 
         fs::write(root.join(pin_file_name("one")), "nonsense").unwrap();
         assert_eq!(pin_since(&root, "one", &executable), None);
@@ -706,13 +822,20 @@ mod tests {
         let root = temp_root("clear");
         let (app, executable) = game_bundle(&root);
         let line = pin_line(&app, &executable);
-        for name in [pin_file_name(""), pin_file_name("one"), pin_file_name("two")] {
+        for name in [
+            pin_file_name(""),
+            pin_file_name("one"),
+            pin_file_name("two"),
+        ] {
             fs::write(root.join(name), &line).unwrap();
         }
         clear_architecture_pin(&root, "one").unwrap();
         assert!(!root.join(pin_file_name("one")).exists());
         assert!(!root.join(pin_file_name("")).exists());
-        assert!(root.join(pin_file_name("two")).exists(), "another profile's pin stays");
+        assert!(
+            root.join(pin_file_name("two")).exists(),
+            "another profile's pin stays"
+        );
 
         remove_all_architecture_pins(&root).unwrap();
         assert!(!root.join(pin_file_name("two")).exists());

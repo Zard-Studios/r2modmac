@@ -213,12 +213,13 @@ pub struct Settings {
     /// rather than dropped on the next save.
     #[serde(default)]
     pub keybinds: BTreeMap<String, String>,
-    /// Keep each profile's BepInEx tree in the profile instead of the game.
+    /// The old global BepInEx isolation switch.
     ///
-    /// Legacy fallback for profiles created before per-profile storage mode.
-    /// New profiles choose game-local storage explicitly; existing profiles
-    /// keep their previous location until the user changes that profile.
-    #[serde(default = "default_true")]
+    /// No longer read: each profile stores its own mode, and one saved before
+    /// that is isolated only when its tree is really in the profile. A missing
+    /// key used to read as true, which turned isolation on for every upgrade
+    /// (issue #45). Kept so older files still parse and round-trip.
+    #[serde(default)]
     pub profile_isolation: bool,
 }
 
@@ -827,12 +828,12 @@ mod settings_stable_order_tests {
     }
 
     #[test]
-    fn profile_isolation_defaults_off_but_preserves_legacy_settings() {
+    fn profile_isolation_defaults_off_even_for_older_settings() {
         assert!(!Settings::default().profile_isolation);
-        // Existing settings without the field retain their prior fallback.
+        // A settings file older than the field no longer turns it on (#45).
         let older: Settings =
             serde_json::from_str(r#"{"steam_path":null,"game_paths":{}}"#).unwrap();
-        assert!(older.profile_isolation);
+        assert!(!older.profile_isolation);
         // An explicit choice stays authoritative.
         let opted_out: Settings =
             serde_json::from_str(r#"{"steam_path":null,"profile_isolation":false}"#).unwrap();

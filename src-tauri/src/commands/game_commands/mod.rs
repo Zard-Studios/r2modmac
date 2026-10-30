@@ -38,9 +38,9 @@ mod macos;
 pub(crate) mod owml_patcher;
 pub(crate) mod paths;
 mod process;
+mod profile_activation;
 pub(crate) mod profile_architecture;
 pub(crate) mod profile_mode;
-mod profile_activation;
 pub(crate) mod runtime_health;
 mod shared;
 mod steam;
@@ -58,6 +58,7 @@ pub(super) use self::macos::*;
 pub(super) use self::process::*;
 #[allow(unused_imports)]
 pub(super) use self::shared::*;
+pub(crate) use self::steam::wine_prefix_for_game;
 #[allow(unused_imports)]
 pub(super) use self::steam::*;
 pub(crate) use self::windows::process::{ensure_wine_drive_for_path, map_native_path_to_wine_path};

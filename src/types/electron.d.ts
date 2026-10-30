@@ -121,6 +121,7 @@ export interface IElectronAPI {
     getProfiles: () => Promise<Profile[]>;
     saveProfiles: (profiles: Profile[]) => Promise<boolean>;
     setProfileBepinexIsolation: (profileId: string, isolated: boolean) => Promise<boolean>;
+    getProfileBepinexIsolation: (profileId: string) => Promise<boolean>;
     selectFolder: () => Promise<string | null>;
     getUsername: () => Promise<string>;
     selectFile: (filters?: { name: string; extensions: string[] }[]) => Promise<string | null>;
@@ -196,6 +197,7 @@ export interface IElectronAPI {
     toggleMod: (profileId: string, modName: string, enabled: boolean, gameIdentifier?: string, platform?: 'windows' | 'mac') => Promise<void>;
     confirm: (title: string, message: string) => Promise<boolean>;
     alert: (title: string, message: string) => Promise<void>;
+    logError: (context: string, message: string) => Promise<void>;
     readImage: (path: string) => Promise<string | null>;
     installToGame: (gameIdentifier: string, profileId: string, disabledMods: string[], isVanillaOverride?: boolean) => Promise<void>;
     fetchTextContent: (url: string) => Promise<string>;

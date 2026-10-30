@@ -76,7 +76,10 @@ pub(crate) fn ensure_wine_drive_for_path(
     #[cfg(not(unix))]
     return Ok(None);
     if map_native_path_to_wine_path(prefix_root, share_root).is_none() {
-        return Err(format!("The Wine bottle still cannot reach {}", share_root.display()));
+        return Err(format!(
+            "The Wine bottle still cannot reach {}",
+            share_root.display()
+        ));
     }
     log::info!(
         "[wine] Mapped drive {}: to {} in {}",
@@ -325,7 +328,10 @@ mod profile_path_translation_tests {
         // Already reachable: nothing more is added.
         let after = fs::read_dir(prefix.join("dosdevices")).unwrap().count();
         assert_eq!(ensure_wine_drive_for_path(&prefix, &share).unwrap(), None);
-        assert_eq!(fs::read_dir(prefix.join("dosdevices")).unwrap().count(), after);
+        assert_eq!(
+            fs::read_dir(prefix.join("dosdevices")).unwrap().count(),
+            after
+        );
         assert!(after <= before + 1);
         fs::remove_dir_all(root).unwrap();
     }
@@ -349,7 +355,10 @@ mod profile_path_translation_tests {
         let root = std::env::temp_dir().join(format!("r2modmac-winmap-{}", uuid::Uuid::new_v4()));
         let share = root.join("profiles");
         fs::create_dir_all(&share).unwrap();
-        assert_eq!(ensure_wine_drive_for_path(&root.join("no-bottle"), &share).unwrap(), None);
+        assert_eq!(
+            ensure_wine_drive_for_path(&root.join("no-bottle"), &share).unwrap(),
+            None
+        );
         assert!(!root.join("no-bottle").exists());
         fs::remove_dir_all(root).unwrap();
     }

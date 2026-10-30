@@ -59,8 +59,16 @@ pub(crate) fn mach_o_bytes_have_arm64(bytes: &[u8]) -> bool {
 /// Whether a Mach-O file (thin or universal) has a slice for this CPU type.
 /// Only the header is read, so a file's first KiB is enough.
 pub(crate) fn mach_o_bytes_have_arch(bytes: &[u8], cpu_type: u32) -> bool {
-    let be = |at: usize| bytes.get(at..at + 4).map(|b| u32::from_be_bytes([b[0], b[1], b[2], b[3]]));
-    let le = |at: usize| bytes.get(at..at + 4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]));
+    let be = |at: usize| {
+        bytes
+            .get(at..at + 4)
+            .map(|b| u32::from_be_bytes([b[0], b[1], b[2], b[3]]))
+    };
+    let le = |at: usize| {
+        bytes
+            .get(at..at + 4)
+            .map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+    };
     match be(0) {
         // Universal: big-endian header, then one entry per slice (20 or 32 bytes).
         Some(magic @ (0xcafe_babe | 0xcafe_babf)) => {
@@ -94,7 +102,12 @@ pub(crate) fn bepinex_can_use_shim(core_dir: &std::path::Path) -> Result<(), &'s
 
 /// Whether this build of r2modmac carries every file the shim needs.
 pub(crate) fn resources_carry_shim(resources: Option<&std::path::Path>) -> bool {
-    resources.is_some_and(|dir| SHIM_FILES.iter().chain([&LOADER]).all(|name| dir.join(name).is_file()))
+    resources.is_some_and(|dir| {
+        SHIM_FILES
+            .iter()
+            .chain([&LOADER])
+            .all(|name| dir.join(name).is_file())
+    })
 }
 
 fn copy_if_different(from: &std::path::Path, to: &std::path::Path) -> Result<bool, String> {
@@ -137,21 +150,31 @@ pub(crate) fn prepare_native_apple_silicon(
     let shim_dir = target.runtime_root.join(APPLE_SILICON_SHIM_DIR);
 
     if !target.host_is_apple_silicon {
-        return Ok(NativeAppleSilicon::NotApplicable("this Mac isn't Apple Silicon"));
+        return Ok(NativeAppleSilicon::NotApplicable(
+            "this Mac isn't Apple Silicon",
+        ));
     }
     if !target.game_has_arm64 {
-        return Ok(NativeAppleSilicon::NotApplicable("the game has no arm64 build"));
+        return Ok(NativeAppleSilicon::NotApplicable(
+            "the game has no arm64 build",
+        ));
     }
     if let Err(reason) = bepinex_can_use_shim(target.core_dir) {
-        if take_away_unusable_native_apple_silicon(target.runtime_root, target.core_dir, target.resources)? {
+        if take_away_unusable_native_apple_silicon(
+            target.runtime_root,
+            target.core_dir,
+            target.resources,
+        )? {
             return Ok(NativeAppleSilicon::Removed);
         }
         return Ok(NativeAppleSilicon::NotApplicable(reason));
     }
-    let Some(resources) = target
-        .resources
-        .filter(|dir| SHIM_FILES.iter().chain([&LOADER]).all(|name| dir.join(name).is_file()))
-    else {
+    let Some(resources) = target.resources.filter(|dir| {
+        SHIM_FILES
+            .iter()
+            .chain([&LOADER])
+            .all(|name| dir.join(name).is_file())
+    }) else {
         return Ok(NativeAppleSilicon::NotApplicable(
             "this build of r2modmac doesn't carry the Apple Silicon files",
         ));
@@ -185,7 +208,11 @@ pub(crate) fn prepare_native_apple_silicon(
         remove_all_architecture_pins(target.runtime_root)?;
     }
 
-    Ok(if changed { NativeAppleSilicon::Installed } else { NativeAppleSilicon::Unchanged })
+    Ok(if changed {
+        NativeAppleSilicon::Installed
+    } else {
+        NativeAppleSilicon::Unchanged
+    })
 }
 
 #[cfg(test)]
@@ -195,9 +222,15 @@ mod tests {
     const UNIVERSAL: [u8; 48] = {
         let mut b = [0u8; 48];
         // FAT_MAGIC, 2 slices: x86_64 (0x01000007) and arm64 (0x0100000c)
-        b[0] = 0xca; b[1] = 0xfe; b[2] = 0xba; b[3] = 0xbe; b[7] = 2;
-        b[8] = 0x01; b[11] = 0x07;
-        b[28] = 0x01; b[31] = 0x0c;
+        b[0] = 0xca;
+        b[1] = 0xfe;
+        b[2] = 0xba;
+        b[3] = 0xbe;
+        b[7] = 2;
+        b[8] = 0x01;
+        b[11] = 0x07;
+        b[28] = 0x01;
+        b[31] = 0x0c;
         b
     };
     const X86_64_ONLY: [u8; 8] = [0xcf, 0xfa, 0xed, 0xfe, 0x07, 0x00, 0x00, 0x01];
@@ -226,10 +259,18 @@ mod tests {
             fs::write(resources.join("libdoorstop.dylib"), UNIVERSAL).unwrap();
             let core = root.join("Game/BepInEx/core");
             fs::create_dir_all(&core).unwrap();
-            fs::write(core.join("BepInEx.Preloader.dll"), b"..get_DOORSTOP_INVOKE_DLL_PATH..Doorstop..Entrypoint..Start..").unwrap();
+            fs::write(
+                core.join("BepInEx.Preloader.dll"),
+                b"..get_DOORSTOP_INVOKE_DLL_PATH..Doorstop..Entrypoint..Start..",
+            )
+            .unwrap();
             fs::write(core.join("MonoMod.RuntimeDetour.dll"), b"monomod").unwrap();
             fs::create_dir_all(root.join("Game/doorstop_libs")).unwrap();
-            fs::write(root.join("Game/doorstop_libs/libdoorstop_x64.dylib"), X86_64_ONLY).unwrap();
+            fs::write(
+                root.join("Game/doorstop_libs/libdoorstop_x64.dylib"),
+                X86_64_ONLY,
+            )
+            .unwrap();
             World { root }
         }
         fn game(&self) -> std::path::PathBuf {
@@ -281,14 +322,32 @@ mod tests {
     #[test]
     fn puts_the_shim_and_a_universal_loader_beside_a_bepinex_5_game() {
         let world = World::new("install");
-        assert_eq!(world.prepare(true, true, true), NativeAppleSilicon::Installed);
-        assert_eq!(fs::read(world.game().join("apple_silicon/AppleSiliconMods.dll")).unwrap(), b"shim");
-        assert!(world.game().join("apple_silicon/libjitwrite.dylib").is_file());
-        assert_eq!(fs::read(world.game().join("libdoorstop.dylib")).unwrap(), UNIVERSAL);
+        assert_eq!(
+            world.prepare(true, true, true),
+            NativeAppleSilicon::Installed
+        );
+        assert_eq!(
+            fs::read(world.game().join("apple_silicon/AppleSiliconMods.dll")).unwrap(),
+            b"shim"
+        );
+        assert!(world
+            .game()
+            .join("apple_silicon/libjitwrite.dylib")
+            .is_file());
+        assert_eq!(
+            fs::read(world.game().join("libdoorstop.dylib")).unwrap(),
+            UNIVERSAL
+        );
         // The pack's own x86_64 loader is left alone.
-        assert_eq!(fs::read(world.game().join("doorstop_libs/libdoorstop_x64.dylib")).unwrap(), X86_64_ONLY);
+        assert_eq!(
+            fs::read(world.game().join("doorstop_libs/libdoorstop_x64.dylib")).unwrap(),
+            X86_64_ONLY
+        );
 
-        assert_eq!(world.prepare(true, true, true), NativeAppleSilicon::Unchanged);
+        assert_eq!(
+            world.prepare(true, true, true),
+            NativeAppleSilicon::Unchanged
+        );
     }
 
     #[test]
@@ -296,12 +355,18 @@ mod tests {
         let world = World::new("loader");
         fs::write(world.game().join("libdoorstop.dylib"), ARM64_ONLY).unwrap();
         world.prepare(true, true, true);
-        assert_eq!(fs::read(world.game().join("libdoorstop.dylib")).unwrap(), ARM64_ONLY);
+        assert_eq!(
+            fs::read(world.game().join("libdoorstop.dylib")).unwrap(),
+            ARM64_ONLY
+        );
 
         let world = World::new("loader-x64");
         fs::write(world.game().join("libdoorstop.dylib"), X86_64_ONLY).unwrap();
         world.prepare(true, true, true);
-        assert_eq!(fs::read(world.game().join("libdoorstop.dylib")).unwrap(), UNIVERSAL);
+        assert_eq!(
+            fs::read(world.game().join("libdoorstop.dylib")).unwrap(),
+            UNIVERSAL
+        );
     }
 
     #[test]
@@ -310,14 +375,27 @@ mod tests {
         let pin = world.game().join(".r2modmac_force_x64_state");
         fs::write(&pin, "Game.app|1").unwrap();
         world.prepare(true, true, true);
-        assert!(!pin.exists(), "a pin from before the shim came from the crash it fixes");
+        assert!(
+            !pin.exists(),
+            "a pin from before the shim came from the crash it fixes"
+        );
 
         fs::write(&pin, "Game.app|1").unwrap();
         world.prepare(true, true, true);
-        assert!(pin.exists(), "a pin written with the shim in place means native didn't work");
+        assert!(
+            pin.exists(),
+            "a pin written with the shim in place means native didn't work"
+        );
 
-        fs::write(world.resources().join("AppleSiliconMods.dll"), b"newer shim").unwrap();
-        assert_eq!(world.prepare(true, true, true), NativeAppleSilicon::Installed);
+        fs::write(
+            world.resources().join("AppleSiliconMods.dll"),
+            b"newer shim",
+        )
+        .unwrap();
+        assert_eq!(
+            world.prepare(true, true, true),
+            NativeAppleSilicon::Installed
+        );
         assert!(!pin.exists(), "a newer shim gets a native try again");
     }
 
@@ -358,7 +436,9 @@ mod tests {
         );
         assert_eq!(
             world.prepare(true, true, false),
-            NativeAppleSilicon::NotApplicable("this build of r2modmac doesn't carry the Apple Silicon files")
+            NativeAppleSilicon::NotApplicable(
+                "this build of r2modmac doesn't carry the Apple Silicon files"
+            )
         );
         assert!(!world.game().join("apple_silicon").exists());
         assert!(!world.game().join("libdoorstop.dylib").exists());
@@ -368,14 +448,22 @@ mod tests {
     fn leaves_other_mod_loaders_alone() {
         let world = World::new("bepinex6");
         fs::remove_file(world.core().join("BepInEx.Preloader.dll")).unwrap();
-        fs::write(world.core().join("BepInEx.Unity.Mono.Preloader.dll"), b"bepinex 6").unwrap();
+        fs::write(
+            world.core().join("BepInEx.Unity.Mono.Preloader.dll"),
+            b"bepinex 6",
+        )
+        .unwrap();
         assert_eq!(
             world.prepare(true, true, true),
             NativeAppleSilicon::NotApplicable("the game doesn't use BepInEx 5")
         );
 
         let world = World::new("old-bepinex");
-        fs::write(world.core().join("BepInEx.Preloader.dll"), b"5.4.21..get_DOORSTOP_INVOKE_DLL_PATH..Main..").unwrap();
+        fs::write(
+            world.core().join("BepInEx.Preloader.dll"),
+            b"5.4.21..get_DOORSTOP_INVOKE_DLL_PATH..Main..",
+        )
+        .unwrap();
         assert_eq!(
             world.prepare(true, true, true),
             NativeAppleSilicon::NotApplicable("its BepInEx is older than 5.4.22")
@@ -386,12 +474,19 @@ mod tests {
     fn takes_a_shim_away_when_the_game_moves_to_a_bepinex_it_cant_start() {
         let world = World::new("remove");
         world.prepare(true, true, true);
-        fs::write(world.core().join("BepInEx.Preloader.dll"), b"5.4.21..get_DOORSTOP_INVOKE_DLL_PATH..Main..").unwrap();
+        fs::write(
+            world.core().join("BepInEx.Preloader.dll"),
+            b"5.4.21..get_DOORSTOP_INVOKE_DLL_PATH..Main..",
+        )
+        .unwrap();
         assert_eq!(world.prepare(true, true, true), NativeAppleSilicon::Removed);
         assert!(!world.game().join("apple_silicon").exists());
         // Our Doorstop 4 loader goes too: the older BepInEx needs the pack's own.
         assert!(!world.game().join("libdoorstop.dylib").exists());
-        assert_eq!(fs::read(world.game().join("doorstop_libs/libdoorstop_x64.dylib")).unwrap(), X86_64_ONLY);
+        assert_eq!(
+            fs::read(world.game().join("doorstop_libs/libdoorstop_x64.dylib")).unwrap(),
+            X86_64_ONLY
+        );
     }
 
     #[test]
@@ -399,8 +494,15 @@ mod tests {
         let world = World::new("remove-foreign-loader");
         world.prepare(true, true, true);
         fs::write(world.game().join("libdoorstop.dylib"), ARM64_ONLY).unwrap();
-        fs::write(world.core().join("BepInEx.Preloader.dll"), b"5.4.21..get_DOORSTOP_INVOKE_DLL_PATH..Main..").unwrap();
+        fs::write(
+            world.core().join("BepInEx.Preloader.dll"),
+            b"5.4.21..get_DOORSTOP_INVOKE_DLL_PATH..Main..",
+        )
+        .unwrap();
         assert_eq!(world.prepare(true, true, true), NativeAppleSilicon::Removed);
-        assert_eq!(fs::read(world.game().join("libdoorstop.dylib")).unwrap(), ARM64_ONLY);
+        assert_eq!(
+            fs::read(world.game().join("libdoorstop.dylib")).unwrap(),
+            ARM64_ONLY
+        );
     }
 }

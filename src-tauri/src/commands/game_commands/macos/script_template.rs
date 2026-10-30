@@ -250,12 +250,18 @@ mod bepinex_root_tests {
     #[test]
     fn an_apple_silicon_shim_beside_the_game_runs_first_only_on_native_arm64() {
         let generated = script(BepInExRoot::Game);
-        assert!(generated.contains(r#"apple_silicon_shim="$BASEDIR/apple_silicon/AppleSiliconMods.dll""#));
-        assert!(generated.contains(r#"if [ "$arch" = "arm64" ] && [ -f "$apple_silicon_shim" ]; then"#));
+        assert!(generated
+            .contains(r#"apple_silicon_shim="$BASEDIR/apple_silicon/AppleSiliconMods.dll""#));
+        assert!(
+            generated.contains(r#"if [ "$arch" = "arm64" ] && [ -f "$apple_silicon_shim" ]; then"#)
+        );
         assert!(generated.contains(r#"export DOORSTOP_TARGET_ASSEMBLY="$apple_silicon_shim""#));
         let shim = generated.find("apple_silicon_shim=").unwrap();
         let arch_chosen = generated.find("selected_runtime_arch=").unwrap();
-        assert!(shim > arch_chosen, "the shim must be chosen after the runtime arch is final");
+        assert!(
+            shim > arch_chosen,
+            "the shim must be chosen after the runtime arch is final"
+        );
     }
 
     /// Each profile's architecture choice reaches the launcher through a small
@@ -279,11 +285,15 @@ mod bepinex_root_tests {
         assert!(generated[retry_gate..].contains("can_retry_x64=false"));
         // The forced architectures come after the wrapper rule and before the pin is read.
         let wrapper = generated.find("forcing_x64_for_wrapper_game").unwrap();
-        let rosetta = generated.find(r#"if [ "$r2_arch_mode" = "rosetta" ]; then"#).unwrap();
+        let rosetta = generated
+            .find(r#"if [ "$r2_arch_mode" = "rosetta" ]; then"#)
+            .unwrap();
         let persisted_pin = generated.find("forcing_x64_due_persisted_state").unwrap();
         assert!(wrapper < rosetta && rosetta < persisted_pin);
         assert!(generated.contains(r#"arch="x64""#));
-        assert!(generated.contains(r#"[ "$r2_arch_mode" = "native" ] && [ "$launch_entry_uses_wrapper" != "1" ]"#));
+        assert!(generated.contains(
+            r#"[ "$r2_arch_mode" = "native" ] && [ "$launch_entry_uses_wrapper" != "1" ]"#
+        ));
         assert!(generated.contains("arch_override mode="));
     }
 
@@ -298,9 +308,19 @@ mod bepinex_root_tests {
         let crash_signals = generated[..pin].rfind("132|133|134|138|139)").unwrap();
         let shim_check = generated[crash_signals..pin]
             .find(r#"[ "${DOORSTOP_TARGET_ASSEMBLY:-}" = "$apple_silicon_shim" ]"#);
-        assert!(shim_check.is_some(), "only a launch that used the shim is pinned");
-        let started_check = generated.find(r#"if [ "$bepinex_started" = true ] && [ "$arm64_preloader_crash" != true ]; then"#).unwrap();
-        assert!(pin < started_check, "the pin comes before the BepInEx-started early return");
+        assert!(
+            shim_check.is_some(),
+            "only a launch that used the shim is pinned"
+        );
+        let started_check = generated
+            .find(
+                r#"if [ "$bepinex_started" = true ] && [ "$arm64_preloader_crash" != true ]; then"#,
+            )
+            .unwrap();
+        assert!(
+            pin < started_check,
+            "the pin comes before the BepInEx-started early return"
+        );
     }
 
     #[test]
@@ -331,7 +351,10 @@ mod bepinex_root_tests {
             })
             .map(|line| line.trim().trim_end_matches('\\').trim().to_string())
             .collect::<Vec<_>>();
-        assert!(passthrough.len() >= 21, "every arch call must use the conditional form");
+        assert!(
+            passthrough.len() >= 21,
+            "every arch call must use the conditional form"
+        );
 
         let run = |env: &[(&str, &str)]| {
             let mut command = std::process::Command::new("/bin/sh");

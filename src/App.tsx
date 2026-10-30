@@ -1976,11 +1976,16 @@ function App() {
       return true;
     } catch (error: any) {
       setProgressState(previous => ({ ...previous, isOpen: false }));
+      await window.ipcRenderer.logError(
+        `runtime repair failed for profile ${profile.id} (${community})`,
+        String(error?.message || error || 'unknown error')
+      );
       if (repairTransactionStarted) {
         try {
           await window.ipcRenderer.rollbackProfileApplyTransaction(profile.id, community);
         } catch (rollbackError) {
           console.error('Failed to roll back runtime repair', rollbackError);
+          await window.ipcRenderer.logError('runtime repair rollback failed', String(rollbackError));
         }
       }
       updateProfile(profile.id, {

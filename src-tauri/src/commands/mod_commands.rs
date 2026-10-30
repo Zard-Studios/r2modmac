@@ -2437,6 +2437,99 @@ pub(crate) fn doorstop_config_has_loadable_target(
     enabled && target_exists
 }
 
+/// The path written in `doorstop_config.ini`, followed back to the host file
+/// the game will really open.
+///
+/// Under Wine it goes through a drive letter; a bottle with no drive for the
+/// tree, one that leads elsewhere, or a path with no drive at all starts the
+/// game with no mods while the host-side files all look fine. A relative path
+/// is resolved against the game folder, as Doorstop does.
+pub(crate) fn doorstop_target_seen_by_game(
+    game_dir: &std::path::Path,
+    written: &str,
+) -> Option<std::path::PathBuf> {
+    let written = written.trim();
+    let mut chars = written.chars();
+    let has_drive =
+        chars.next().is_some_and(|c| c.is_ascii_alphabetic()) && chars.next() == Some(':');
+    if cfg!(windows) && has_drive {
+        return Some(std::path::PathBuf::from(written));
+    }
+    if has_drive {
+        if let Some(prefix) = crate::commands::game_commands::wine_prefix_for_game(game_dir) {
+            return crate::models::shared::map_wine_path_to_native_path(&prefix, written);
+        }
+        // A game outside any bottle is reached through Wine's default `Z:`,
+        // the host root.
+        if !written[..1].eq_ignore_ascii_case("z") {
+            return None;
+        }
+        let mut path = std::path::PathBuf::from("/");
+        path.extend(
+            written[2..]
+                .split(['\\', '/'])
+                .filter(|part| !part.is_empty()),
+        );
+        return Some(path);
+    }
+    if written.starts_with(['\\', '/']) {
+        // No drive: Wine reads it on the game's current drive, which is never
+        // the host root the path was taken from.
+        return None;
+    }
+    let mut path = game_dir.to_path_buf();
+    path.extend(written.split(['\\', '/']).filter(|part| !part.is_empty()));
+    Some(path)
+}
+
+/// A host path outside the game and outside any bottle, spelled the way a
+/// Windows game reads it: through Wine's `Z:` drive, or as-is on Windows.
+pub(crate) fn host_path_for_doorstop(path: &std::path::Path) -> String {
+    let native = path.to_string_lossy().to_string();
+    if cfg!(windows) {
+        native
+    } else {
+        format!("Z:{}", native.replace('/', "\\"))
+    }
+}
+
+/// `doorstop_config_has_loadable_target`, and the game can reach that target.
+pub(crate) fn doorstop_config_reaches_tree(
+    config_path: &std::path::Path,
+    game_dir: &std::path::Path,
+    bep_dir: &std::path::Path,
+) -> bool {
+    let core_dir = bep_dir.join("core");
+    if !doorstop_config_has_loadable_target(config_path, &core_dir) {
+        return false;
+    }
+    let Some(target) = fs::read_to_string(config_path)
+        .ok()
+        .and_then(|content| extract_ini_value(&content, &["targetAssembly", "target_assembly"]))
+    else {
+        return false;
+    };
+    let Some(entry_point) = target
+        .rsplit(['/', '\\'])
+        .find(|component| !component.trim().is_empty())
+    else {
+        return false;
+    };
+    let expected = core_dir.join(entry_point);
+    // Every Windows-profile launch rewrites the ini for the chosen tree, so
+    // judge the path that launch will write, not whatever is there now.
+    let Some(tree_root) = bep_dir.parent() else {
+        return false;
+    };
+    let Ok(root) = doorstop_root_for_game(game_dir, tree_root) else {
+        return false;
+    };
+    let written = format!("{root}\\core\\{entry_point}");
+    doorstop_target_seen_by_game(game_dir, &written).is_some_and(|seen| {
+        seen.is_file() && fs::canonicalize(&seen).ok() == fs::canonicalize(&expected).ok()
+    })
+}
+
 pub(crate) fn normalize_macos_doorstop_config_file(path: &std::path::Path) -> Result<(), String> {
     if !path.exists() {
         return Ok(());
@@ -3933,6 +4026,34 @@ pub(crate) async fn download_official_macos_bepinex_runtime(
     }
 }
 
+/// The BepInEx folder of `tree_root`, spelled the way the game at `game_dir`
+/// will read it from `doorstop_config.ini`.
+pub(crate) fn doorstop_root_for_game(
+    game_dir: &std::path::Path,
+    tree_root: &std::path::Path,
+) -> Result<String, String> {
+    let bepinex = tree_root.join("BepInEx");
+    // A tree beside the game is written relative to it, as the pack ships
+    // it: Doorstop resolves that against the game folder, whatever drive the
+    // bottle reaches the folder through.
+    let local = fs::canonicalize(tree_root).ok() == fs::canonicalize(game_dir).ok()
+        || tree_root == game_dir;
+    Ok(if local {
+        "BepInEx".to_string()
+    } else if let Some(prefix) = crate::commands::game_commands::wine_prefix_for_game(game_dir) {
+        crate::commands::game_commands::map_native_path_to_wine_path(&prefix, &bepinex).ok_or_else(
+            || {
+                format!(
+                    "The Wine bottle cannot address the isolated BepInEx profile at {}",
+                    bepinex.display()
+                )
+            },
+        )?
+    } else {
+        host_path_for_doorstop(&bepinex)
+    })
+}
+
 /// Rewrite the game's `doorstop_config.ini` so it finds a tree that moved.
 ///
 /// Only the Windows loader reads this file; on macOS the generated script
@@ -3947,19 +4068,7 @@ pub(crate) fn point_game_doorstop_ini_at_tree(
         return Ok(());
     }
 
-    let bepinex = tree_root.join("BepInEx");
-    let written_path =
-        if let Some(prefix) = crate::models::shared::find_wine_prefix_root(game_dir) {
-            crate::commands::game_commands::map_native_path_to_wine_path(&prefix, &bepinex)
-                .ok_or_else(|| {
-                    format!(
-                        "The Wine bottle cannot address the isolated BepInEx profile at {}",
-                        bepinex.display()
-                    )
-                })?
-        } else {
-            bepinex.to_string_lossy().to_string()
-        };
+    let written_path = doorstop_root_for_game(game_dir, tree_root)?;
 
     let content = fs::read_to_string(&ini).map_err(|error| error.to_string())?;
     let updated = point_doorstop_ini_at_root(&content, &written_path);
@@ -7658,7 +7767,9 @@ pub async fn fetch_packages(
 
 /// The stores a package can be installed from: the store of each version it
 /// carries, plus any store it is merely known to publish under.
-fn package_providers(package: &crate::models::shared::Package) -> std::collections::HashSet<ModSource> {
+fn package_providers(
+    package: &crate::models::shared::Package,
+) -> std::collections::HashSet<ModSource> {
     package
         .versions
         .iter()
@@ -7682,7 +7793,9 @@ fn package_matches_providers(package: &crate::models::shared::Package, wanted: &
             ModSource::Hexium => "hexium",
             ModSource::Outerwilds => return true,
         };
-        wanted.iter().any(|candidate| candidate.eq_ignore_ascii_case(name))
+        wanted
+            .iter()
+            .any(|candidate| candidate.eq_ignore_ascii_case(name))
     };
     let providers = package_providers(package);
     providers.is_empty() || providers.into_iter().any(wants)
@@ -9124,14 +9237,23 @@ mod extraction_characterisation_tests {
     fn an_old_windows_pack_gets_the_official_core_with_the_official_loader() {
         let root = temp_root("old-pack-official-core");
         let pack = zip_fixture(&[
-            ("BepInExPack/BepInEx/core/BepInEx.Preloader.dll", b"preloader 5.4.21"),
+            (
+                "BepInExPack/BepInEx/core/BepInEx.Preloader.dll",
+                b"preloader 5.4.21",
+            ),
             ("BepInExPack/BepInEx/core/BepInEx.dll", b"core 5.4.21"),
             ("BepInExPack/BepInEx/core/0Harmony.dll", b"harmony"),
             ("BepInExPack/2020.3.34/mscorlib.dll", b"unstripped-corlib"),
-            ("BepInExPack/doorstop_config.ini", b"[UnityDoorstop]\nenabled=true\ndllSearchPathOverride=2020.3.34\n"),
+            (
+                "BepInExPack/doorstop_config.ini",
+                b"[UnityDoorstop]\nenabled=true\ndllSearchPathOverride=2020.3.34\n",
+            ),
         ]);
         let official = zip_fixture(&[
-            ("BepInEx/core/BepInEx.Preloader.dll", b"preloader 5.4.23.5 Doorstop"),
+            (
+                "BepInEx/core/BepInEx.Preloader.dll",
+                b"preloader 5.4.23.5 Doorstop",
+            ),
             ("BepInEx/core/BepInEx.dll", b"core 5.4.23.5"),
             ("BepInEx/plugins/ignored.dll", b"not a runtime file"),
             ("libdoorstop.dylib", b"loader Doorstop.Entrypoint:Start"),
@@ -9139,17 +9261,30 @@ mod extraction_characterisation_tests {
         ]);
 
         extract_bepinex_pack_to_root(&mut archive(&pack), &root, true, false).unwrap();
-        assert_eq!(fs::read(root.join("BepInEx/core/BepInEx.dll")).unwrap(), b"core 5.4.21");
-        extract_macos_bepinex_runtime_overlay_to_root(&mut archive(&official), &root, false).unwrap();
+        assert_eq!(
+            fs::read(root.join("BepInEx/core/BepInEx.dll")).unwrap(),
+            b"core 5.4.21"
+        );
+        extract_macos_bepinex_runtime_overlay_to_root(&mut archive(&official), &root, false)
+            .unwrap();
 
         assert_eq!(
             fs::read(root.join("BepInEx/core/BepInEx.Preloader.dll")).unwrap(),
             b"preloader 5.4.23.5 Doorstop"
         );
-        assert_eq!(fs::read(root.join("BepInEx/core/BepInEx.dll")).unwrap(), b"core 5.4.23.5");
+        assert_eq!(
+            fs::read(root.join("BepInEx/core/BepInEx.dll")).unwrap(),
+            b"core 5.4.23.5"
+        );
         // What the pack alone provides is kept, and the overlay adds no plugins.
-        assert_eq!(fs::read(root.join("BepInEx/core/0Harmony.dll")).unwrap(), b"harmony");
-        assert_eq!(fs::read(root.join("2020.3.34/mscorlib.dll")).unwrap(), b"unstripped-corlib");
+        assert_eq!(
+            fs::read(root.join("BepInEx/core/0Harmony.dll")).unwrap(),
+            b"harmony"
+        );
+        assert_eq!(
+            fs::read(root.join("2020.3.34/mscorlib.dll")).unwrap(),
+            b"unstripped-corlib"
+        );
         assert!(!root.join("BepInEx/plugins/ignored.dll").exists());
         assert!(root.join("libdoorstop.dylib").is_file());
         fs::remove_dir_all(root).unwrap();
@@ -9971,7 +10106,7 @@ mod game_ini_follows_tree_tests {
         point_game_doorstop_ini_at_tree(&game, &profile).unwrap();
 
         let written = fs::read_to_string(game.join("doorstop_config.ini")).unwrap();
-        let expected = profile.join("BepInEx").to_string_lossy().replace('/', "\\");
+        let expected = host_path_for_doorstop(&profile.join("BepInEx"));
         assert!(
             written.contains(&format!(
                 "targetAssembly={expected}\\core\\BepInEx.Preloader.dll"
@@ -9980,6 +10115,41 @@ mod game_ini_follows_tree_tests {
         );
         assert!(written.contains("enabled=true"));
 
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_game_outside_the_bottle_gets_a_path_wine_can_open() {
+        // Issue #45: a Steam library kept in the macOS home, outside the bottle.
+        let root = world("outside-bottle");
+        let game = root.join("WindowsSteam/steamapps/common/Lethal Company");
+        let core = game.join("BepInEx/core");
+        fs::create_dir_all(&core).unwrap();
+        fs::write(core.join("BepInEx.Preloader.dll"), b"dll").unwrap();
+        let driveless = format!(
+            "[General]\nenabled = true\ntarget_assembly={}\\core\\BepInEx.Preloader.dll\n[UnityMono]\ndll_search_path_override={}\\core\n",
+            game.join("BepInEx").to_string_lossy().replace('/', "\\"),
+            game.join("BepInEx").to_string_lossy().replace('/', "\\"),
+        );
+        let ini = game.join("doorstop_config.ini");
+        fs::write(&ini, driveless).unwrap();
+
+        point_game_doorstop_ini_at_tree(&game, &game).unwrap();
+
+        let written = fs::read_to_string(&ini).unwrap();
+        assert!(
+            written.contains("target_assembly=BepInEx\\core\\BepInEx.Preloader.dll"),
+            "{written}"
+        );
+        assert!(
+            written.contains("dll_search_path_override=BepInEx\\core"),
+            "{written}"
+        );
+        assert!(doorstop_config_reaches_tree(
+            &ini,
+            &game,
+            &game.join("BepInEx")
+        ));
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -9994,10 +10164,10 @@ mod game_ini_follows_tree_tests {
         point_game_doorstop_ini_at_tree(&game, &game).unwrap();
 
         let written = fs::read_to_string(game.join("doorstop_config.ini")).unwrap();
-        let expected = game.join("BepInEx").to_string_lossy().replace('/', "\\");
-        assert!(written.contains(&format!(
-            "targetAssembly={expected}\\core\\BepInEx.Preloader.dll"
-        )));
+        assert!(
+            written.contains("targetAssembly=BepInEx\\core\\BepInEx.Preloader.dll"),
+            "{written}"
+        );
         assert!(!written.contains("profiles\\old"));
         fs::remove_dir_all(root).unwrap();
     }
@@ -10047,7 +10217,7 @@ mod game_ini_follows_tree_tests {
 
         let written = fs::read_to_string(game.join("doorstop_config.ini")).unwrap();
         assert!(written.contains("dllSearchPathOverride=2020.3.34"));
-        let expected = profile.join("BepInEx").to_string_lossy().replace('/', "\\");
+        let expected = host_path_for_doorstop(&profile.join("BepInEx"));
         assert!(written.contains(&format!(
             "targetAssembly={expected}\\core\\BepInEx.Preloader.dll"
         )));
@@ -10280,7 +10450,10 @@ mod provider_filter_tests {
     fn a_store_filter_keeps_the_packages_that_store_publishes() {
         let thunderstore = package(&[ModSource::Thunderstore], &[]);
         let hexium = package(&[ModSource::Hexium], &[]);
-        assert!(package_matches_providers(&thunderstore, &only("thunderstore")));
+        assert!(package_matches_providers(
+            &thunderstore,
+            &only("thunderstore")
+        ));
         assert!(!package_matches_providers(&thunderstore, &only("hexium")));
         assert!(package_matches_providers(&hexium, &only("hexium")));
         assert!(!package_matches_providers(&hexium, &only("thunderstore")));

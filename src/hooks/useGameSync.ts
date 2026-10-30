@@ -742,6 +742,10 @@ export function useGameSync({
 
             } catch (e: any) {
             console.error('Sync to game failed:', e);
+            await window.ipcRenderer.logError(
+                `apply failed for profile ${activeProfile.id} (${community})`,
+                String(e?.message || e || 'unknown error')
+            );
             setProgressState(prev => ({ ...prev, isOpen: false }));
             // Stopping is not failing. The rollback restores the snapshot taken
             // before the Apply began, so running it on a user-initiated stop

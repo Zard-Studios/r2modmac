@@ -47,6 +47,7 @@ export const tauriAPI: IElectronAPI = {
     getProfiles: () => invoke<Profile[]>('get_profiles'),
     saveProfiles: (profiles) => invoke('save_profiles', { profiles }),
     setProfileBepinexIsolation: (profileId, isolated) => invoke('set_profile_bepinex_isolation', { profileId, isolated }),
+    getProfileBepinexIsolation: (profileId) => invoke('get_profile_bepinex_isolation', { profileId }),
 
     // Placeholder implementations for now
     selectFolder: async () => invoke<string | null>('select_folder'),
@@ -190,6 +191,9 @@ export const tauriAPI: IElectronAPI = {
     },
     alert: async (title: string, message: string) => {
         return await invoke('alert_dialog', { title, message });
+    },
+    logError: async (context: string, message: string) => {
+        await invoke('log_frontend_error', { context, message }).catch(() => undefined);
     },
     readImage: async (path: string) => {
         return await invoke('read_image', { path });

@@ -780,8 +780,14 @@ future_svg = "#22c55e"
         );
         let options = summary.options.expect("expected theme options");
         assert_eq!(options.adapt_svg, Some(false));
-        assert_eq!(summary.icons.get("version").map(String::as_str), Some("#8b5cf6"));
-        assert_eq!(summary.icons.get("future_svg").map(String::as_str), Some("#22c55e"));
+        assert_eq!(
+            summary.icons.get("version").map(String::as_str),
+            Some("#8b5cf6")
+        );
+        assert_eq!(
+            summary.icons.get("future_svg").map(String::as_str),
+            Some("#22c55e")
+        );
     }
 
     #[test]

@@ -356,7 +356,8 @@ mod launch_diagnostics_tests {
         select_bepinex_profile_for_windows_launch(&game, &second).unwrap();
 
         let written = fs::read_to_string(game.join("doorstop_config.ini")).unwrap();
-        let expected = second.join("BepInEx").to_string_lossy().replace('/', "\\");
+        let expected =
+            crate::commands::legacy_mod_commands::host_path_for_doorstop(&second.join("BepInEx"));
         assert!(written.contains(&format!(
             "targetAssembly={expected}\\core\\BepInEx.Preloader.dll"
         )));

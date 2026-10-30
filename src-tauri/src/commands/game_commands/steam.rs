@@ -123,6 +123,34 @@ fn direct_launch_is_viable(game_path: &std::path::Path) -> bool {
     }
 }
 
+/// The Wine prefix a Windows game runs in.
+///
+/// Usually the one around the game folder, possibly behind a symlink. A game in
+/// a Steam library outside any bottle (issue #25) runs in the bottle of the
+/// Steam client that lists that library, which is the one whose drives decide
+/// how the game sees host paths (issue #45).
+pub(crate) fn wine_prefix_for_game(game_path: &std::path::Path) -> Option<std::path::PathBuf> {
+    wine_prefix_for_game_with_roots(game_path, discover_windows_steam_roots)
+}
+
+fn wine_prefix_for_game_with_roots(
+    game_path: &std::path::Path,
+    steam_roots: impl FnOnce() -> Vec<std::path::PathBuf>,
+) -> Option<std::path::PathBuf> {
+    let canonical_game = canonicalize_or_original(game_path);
+    find_wine_prefix_root(game_path)
+        .or_else(|| find_wine_prefix_root(&canonical_game))
+        .or_else(
+            || match plan_windows_launch(&steam_roots(), &canonical_game) {
+                WindowsLaunchPlan::ViaSteam(target) => find_wine_prefix_root(&target.client_root)
+                    .or_else(|| {
+                        find_wine_prefix_root(&canonicalize_or_original(&target.client_root))
+                    }),
+                _ => None,
+            },
+        )
+}
+
 /// Decides how to launch a Windows game, given the Steam installs we know about.
 ///
 /// Kept free of `AppHandle` so the whole decision — including the layout from
@@ -635,6 +663,41 @@ mod issue_25_launch_routing_tests {
         assert_eq!(target.app_id, "1966720");
         assert_eq!(canonical(&target.client_root), canonical(&client_root));
         assert_eq!(canonical(&target.library_root), canonical(&library));
+    }
+
+    /// Issue #45: in that layout Doorstop's paths must be spelled through the
+    /// client's bottle, the one the game runs in, not through no bottle at all.
+    #[test]
+    fn a_game_outside_the_bottle_runs_in_the_bottle_of_its_steam() {
+        let world = World::new("issue45-prefix");
+        let bottle = world.crossover_bottle("Steam");
+        let client_root = world.steam_client(&bottle);
+        let library = world.library(&world.home.join("WindowsSteam"));
+        let game_path = world.install_game(&library, "1966720", "Lethal Company", 4);
+        world.list_libraries_in_vdf(&client_root, &[&client_root, &library]);
+
+        let prefix = wine_prefix_for_game_with_roots(&game_path, || {
+            discover_windows_steam_roots_in_home(&world.home)
+        });
+
+        assert_eq!(prefix.map(|p| canonical(&p)), Some(canonical(&bottle)));
+    }
+
+    #[test]
+    fn a_game_reached_through_a_symlink_into_the_bottle_finds_it() {
+        let world = World::new("issue45-symlink");
+        let bottle = world.crossover_bottle("Steam");
+        let client_root = world.steam_client(&bottle);
+        let game_path = world.install_game(&client_root, "1966720", "Lethal Company", 4);
+        let link = world.home.join("WindowsSteam");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&client_root, &link).unwrap();
+        #[cfg(unix)]
+        {
+            let through_link = link.join(game_path.strip_prefix(&client_root).unwrap());
+            let prefix = wine_prefix_for_game_with_roots(&through_link, Vec::new);
+            assert_eq!(prefix.map(|p| canonical(&p)), Some(canonical(&bottle)));
+        }
     }
 
     /// Same layout, but the client never wrote the library into its `.vdf`

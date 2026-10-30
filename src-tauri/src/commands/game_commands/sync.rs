@@ -1628,8 +1628,8 @@ pub async fn sync_profile_to_game(
             )
         }
     });
-    let active_profile_id = active_profile_id
-        .filter(|id| id == &profile_id || profile_id_exists(&profiles, id));
+    let active_profile_id =
+        active_profile_id.filter(|id| id == &profile_id || profile_id_exists(&profiles, id));
     let switching_from = active_profile_id
         .as_deref()
         .filter(|active| *active != profile_id);
