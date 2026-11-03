@@ -492,7 +492,7 @@ fn macos_wineskin_activation_command(bundle_path: &std::path::Path) -> std::proc
 /// Serialize argv for Sikarugir's single `Program Flags` string using the
 /// quoting rules consumed by CommandLineToArgvW. Paths inside Steam prefixes
 /// commonly contain spaces, parentheses, and trailing backslashes.
-fn serialize_windows_arguments(arguments: &[String]) -> String {
+pub(crate) fn serialize_windows_arguments(arguments: &[String]) -> String {
     arguments
         .iter()
         .map(|argument| quote_windows_argument(argument))

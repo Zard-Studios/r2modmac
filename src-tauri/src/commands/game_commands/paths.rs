@@ -43,6 +43,46 @@ pub(crate) fn resolve_game_runtime_path(
         .unwrap_or_else(|| install_path.to_path_buf())
 }
 
+/// The first install in these clients' libraries whose folder matches the
+/// game and that `accept` takes.
+fn find_game_in_steam_roots(
+    steam_roots: &[std::path::PathBuf],
+    game_identifier: &str,
+    accept: impl Fn(&std::path::Path) -> bool,
+) -> Option<String> {
+    let normalized_id = normalize_for_matching(game_identifier);
+    for base_steam in steam_roots {
+        for lib_folder in get_steam_library_folders(base_steam) {
+            let common_path = lib_folder.join("steamapps").join("common");
+            let Ok(entries) = fs::read_dir(&common_path) else {
+                continue;
+            };
+            for entry in entries.filter_map(|e| e.ok()) {
+                let folder_name = entry.file_name().to_string_lossy().to_string();
+                let normalized_folder = normalize_for_matching(&folder_name);
+
+                // Check for match (exact or high similarity)
+                if normalized_folder == normalized_id
+                    || normalized_folder.contains(&normalized_id)
+                    || normalized_id.contains(&normalized_folder)
+                {
+                    let game_path = resolve_game_runtime_path(game_identifier, &entry.path());
+                    if !accept(&game_path) {
+                        continue;
+                    }
+                    log::debug!(
+                        "[get_game_path] Found match: {} -> {}",
+                        folder_name,
+                        game_path.display()
+                    );
+                    return Some(game_path.to_string_lossy().to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
 #[command]
 pub async fn get_game_path(
     app: AppHandle,
@@ -85,8 +125,16 @@ pub async fn get_game_path(
     }
 
     let steam_paths_to_check = get_steam_roots_for_platform(&app, is_windows_profile);
+    // A Windows profile can also find its game in the macOS client's own
+    // libraries, as the Windows build NotProton runs. Bottles are searched
+    // first, so a game that is in one keeps launching from it.
+    let notproton_roots = if is_windows_profile {
+        notproton_steam_roots()
+    } else {
+        Vec::new()
+    };
 
-    if steam_paths_to_check.is_empty() {
+    if steam_paths_to_check.is_empty() && notproton_roots.is_empty() {
         if is_windows_profile {
             // A Windows profile means a compatibility prefix only when the host
             // is not Windows itself; on Windows the prefix wording is nonsense.
@@ -107,44 +155,19 @@ pub async fn get_game_path(
         normalized_id
     );
 
-    // Scan all Steam library folders
-    for base_steam in steam_paths_to_check {
-        for lib_folder in get_steam_library_folders(&base_steam) {
-            let common_path = lib_folder.join("steamapps").join("common");
-            if !common_path.exists() {
-                continue;
-            }
-
-            if let Ok(entries) = fs::read_dir(&common_path) {
-                for entry in entries.filter_map(|e| e.ok()) {
-                    let folder_name = entry.file_name().to_string_lossy().to_string();
-                    let normalized_folder = normalize_for_matching(&folder_name);
-
-                    // Check for match (exact or high similarity)
-                    if normalized_folder == normalized_id
-                        || normalized_folder.contains(&normalized_id)
-                        || normalized_id.contains(&normalized_folder)
-                    {
-                        let game_path = resolve_game_runtime_path(&game_identifier, &entry.path())
-                            .to_string_lossy()
-                            .to_string();
-                        log::debug!(
-                            "[get_game_path] Found match: {} -> {}",
-                            folder_name,
-                            game_path
-                        );
-                        if settings.game_paths.get(&cache_key) != Some(&game_path) {
-                            let mut updated_settings = settings.clone();
-                            updated_settings
-                                .game_paths
-                                .insert(cache_key.clone(), game_path.clone());
-                            let _ = save_settings_impl(&app, &updated_settings);
-                        }
-                        return Ok(Some(game_path));
-                    }
-                }
-            }
+    let found = find_game_in_steam_roots(&steam_paths_to_check, &game_identifier, |_| true)
+        .or_else(|| {
+            find_game_in_steam_roots(&notproton_roots, &game_identifier, is_windows_build_dir)
+        });
+    if let Some(game_path) = found {
+        if settings.game_paths.get(&cache_key) != Some(&game_path) {
+            let mut updated_settings = settings.clone();
+            updated_settings
+                .game_paths
+                .insert(cache_key.clone(), game_path.clone());
+            let _ = save_settings_impl(&app, &updated_settings);
         }
+        return Ok(Some(game_path));
     }
 
     log::debug!("[get_game_path] No match found for: {}", game_identifier);
@@ -307,6 +330,99 @@ mod manual_game_path_tests {
 
         assert_eq!(resolve_game_runtime_path("hades-ii", &install), ship);
 
+        fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod notproton_game_path_tests {
+    use super::{find_game_in_steam_roots, is_windows_build_dir};
+    use std::fs;
+
+    fn world() -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "r2modmac-notproton-paths-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    fn client(root: &std::path::Path, name: &str) -> std::path::PathBuf {
+        let steam = root.join(name);
+        fs::create_dir_all(steam.join("steamapps/common")).unwrap();
+        steam
+    }
+
+    fn game(steam: &std::path::Path, dir: &str, files: &[&str]) -> std::path::PathBuf {
+        let game = steam.join("steamapps/common").join(dir);
+        fs::create_dir_all(&game).unwrap();
+        for file in files {
+            if file.ends_with(".app") {
+                fs::create_dir_all(game.join(file)).unwrap();
+            } else {
+                fs::write(game.join(file), b"").unwrap();
+            }
+        }
+        game
+    }
+
+    #[test]
+    fn a_game_in_a_bottle_wins_over_the_notproton_copy() {
+        let root = world();
+        let bottle = client(&root, "bottle/drive_c/Program Files (x86)/Steam");
+        let mac = client(&root, "mac");
+        let in_bottle = game(&bottle, "Lethal Company", &["Lethal Company.exe"]);
+        game(&mac, "Lethal Company", &["Lethal Company.exe"]);
+
+        let found = find_game_in_steam_roots(&[bottle], "LethalCompany", |_| true)
+            .or_else(|| find_game_in_steam_roots(&[mac], "LethalCompany", is_windows_build_dir));
+        assert_eq!(found, Some(in_bottle.to_string_lossy().to_string()));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_macos_library_offers_only_the_windows_build() {
+        let root = world();
+        let mac = client(&root, "mac");
+        game(
+            &mac,
+            "Risk of Rain 2",
+            &["Risk of Rain 2.app", "Risk of Rain 2.exe"],
+        );
+        let windows = game(&mac, "Lethal Company", &["Lethal Company.exe"]);
+
+        assert_eq!(
+            find_game_in_steam_roots(
+                std::slice::from_ref(&mac),
+                "RiskofRain2",
+                is_windows_build_dir
+            ),
+            None
+        );
+        assert_eq!(
+            find_game_in_steam_roots(&[mac], "LethalCompany", is_windows_build_dir),
+            Some(windows.to_string_lossy().to_string())
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_rejected_match_does_not_hide_a_later_one() {
+        let root = world();
+        let mac = client(&root, "mac");
+        let other = client(&root, "other");
+        game(&mac, "Lethal Company", &["Lethal Company.app"]);
+        let windows = game(&other, "Lethal Company", &["Lethal Company.exe"]);
+
+        assert_eq!(
+            find_game_in_steam_roots(&[mac, other], "LethalCompany", is_windows_build_dir),
+            Some(windows.to_string_lossy().to_string())
+        );
         fs::remove_dir_all(root).unwrap();
     }
 }

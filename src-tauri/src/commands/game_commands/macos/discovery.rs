@@ -350,6 +350,12 @@ pub(crate) fn macos_executable_supports_x86_64(
 pub(crate) fn validate_macos_bepinex_support(game_path: &std::path::Path) -> Result<(), String> {
     let Some(app_bundle) = find_macos_app_bundle(game_path) else {
         if find_pe_game_executable_path(game_path).is_some() {
+            if notproton_game_for_path(game_path).is_some() {
+                return Err(
+                    "This is the Windows build that Steam runs through NotProton. Mod it from a Windows profile instead of a macOS one."
+                        .to_string(),
+                );
+            }
             return Err(
                 "This looks like a non-native compatibility build. Use a compatibility-tool profile instead of native macOS BepInEx."
                     .to_string(),

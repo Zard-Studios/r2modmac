@@ -918,7 +918,29 @@ pub(crate) fn launch_windows_game(
         steam_roots
     );
 
-    match plan_windows_launch(&steam_roots, game_path) {
+    let plan = plan_windows_launch(&steam_roots, game_path);
+
+    // No bottle's Steam owns the game, but the macOS client may: a Windows
+    // build it runs through NotProton.
+    #[cfg(target_os = "macos")]
+    if !matches!(plan, WindowsLaunchPlan::ViaSteam(_)) {
+        if let Some(game) = notproton_game_for_path(game_path) {
+            log::info!(
+                "[launch_windows_game] {:?} is app {} of the macOS Steam client, run through NotProton",
+                game_path,
+                game.app_id
+            );
+            return launch_notproton_game(
+                app,
+                game_path,
+                &game,
+                shimloader,
+                enable_return_of_modding,
+            );
+        }
+    }
+
+    match plan {
         WindowsLaunchPlan::ViaSteam(target) => {
             launch_windows_steam_game(
                 game_path,

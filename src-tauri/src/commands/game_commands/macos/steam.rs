@@ -29,12 +29,28 @@ pub(crate) fn macos_steam_binary_candidates() -> Vec<std::path::PathBuf> {
 }
 
 pub(crate) fn dispatch_macos_steam_run_url(app_id: &str) -> Result<std::process::Child, String> {
-    let steam_url = format!("steam://run/{}", app_id);
+    dispatch_macos_steam_url(&macos_steam_run_url(app_id, &[]))
+}
 
+/// `steam://run/<appid>`, with the arguments Steam hands the game after
+/// `%command%` when there are any. Steam reads them as one command line, so
+/// each is quoted the way the Windows game will split them again.
+pub(crate) fn macos_steam_run_url(app_id: &str, arguments: &[String]) -> String {
+    if arguments.is_empty() {
+        return format!("steam://run/{}", app_id);
+    }
+    format!(
+        "steam://run/{}//{}/",
+        app_id,
+        urlencoding::encode(&serialize_windows_arguments(arguments))
+    )
+}
+
+fn dispatch_macos_steam_url(steam_url: &str) -> Result<std::process::Child, String> {
     #[cfg(target_os = "macos")]
     {
         if let Ok(child) = std::process::Command::new("/usr/bin/open")
-            .arg(&steam_url)
+            .arg(steam_url)
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .spawn()
@@ -44,7 +60,7 @@ pub(crate) fn dispatch_macos_steam_run_url(app_id: &str) -> Result<std::process:
 
         if let Ok(child) = std::process::Command::new("/usr/bin/open")
             .args(["-b", "com.valvesoftware.steam"])
-            .arg(&steam_url)
+            .arg(steam_url)
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .spawn()
@@ -57,7 +73,7 @@ pub(crate) fn dispatch_macos_steam_run_url(app_id: &str) -> Result<std::process:
                 continue;
             }
             if let Ok(child) = std::process::Command::new(&steam_binary)
-                .arg(&steam_url)
+                .arg(steam_url)
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
                 .spawn()
@@ -68,7 +84,7 @@ pub(crate) fn dispatch_macos_steam_run_url(app_id: &str) -> Result<std::process:
     }
 
     std::process::Command::new("/usr/bin/open")
-        .arg(&steam_url)
+        .arg(steam_url)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .spawn()
@@ -376,8 +392,93 @@ pub(crate) fn launch_via_steam_for_game_path(
     Ok(())
 }
 
+/// Asks the macOS client to run `app_id` and waits for the game, as
+/// [`launch_via_steam_for_game_path`] does for a native game. The game is
+/// recognised by `is_started`, since a game Steam runs under a compatibility
+/// tool is not the macOS executable that function looks for.
+#[cfg(target_os = "macos")]
+pub(crate) fn launch_via_macos_steam_and_observe(
+    app: &AppHandle,
+    app_id: &str,
+    arguments: &[String],
+    is_started: impl Fn() -> bool,
+) -> Result<(), String> {
+    let console_offsets = collect_macos_console_log_offsets(app);
+    let steam_was_running = ensure_macos_steam_running_for_launch(app);
+    let steam_url = macos_steam_run_url(app_id, arguments);
+    let child = dispatch_macos_steam_url(&steam_url)?;
+    log::info!(
+        "[launch_via_macos_steam_and_observe] dispatched app_id={} pid={} steam_was_running={}",
+        app_id,
+        child.id(),
+        steam_was_running
+    );
+
+    let observe_timeout_ms = if steam_was_running {
+        MACOS_LAUNCH_OBSERVE_TIMEOUT_MS
+    } else {
+        MACOS_COLD_STEAM_LAUNCH_OBSERVE_TIMEOUT_MS
+    };
+    let observed = observe_macos_steam_launch(
+        app_id,
+        observe_timeout_ms,
+        &console_offsets,
+        is_started,
+        || {
+            match dispatch_macos_steam_url(&steam_url) {
+            Ok(retry_child) => log::warn!(
+                "[launch_via_macos_steam_and_observe] observed LaunchApp failure for app_id={}; retrying once pid={}",
+                app_id,
+                retry_child.id()
+            ),
+            Err(error) => log::error!(
+                "[launch_via_macos_steam_and_observe] retry failed for app_id={} error={}",
+                app_id,
+                error
+            ),
+        }
+        },
+        crate::commands::game_commands::launch_cancel::launch_cancelled,
+    );
+
+    if let Err(error) = &observed {
+        if error == crate::commands::game_commands::launch_cancel::LAUNCH_CANCELLED_MESSAGE
+            && crate::commands::game_commands::launch_cancel::cancelled_launch_should_close_steam(
+                steam_was_running,
+            )
+        {
+            crate::commands::game_commands::launch_cancel::shut_down_steam_after_cancel();
+        }
+    }
+    observed
+}
+
 #[cfg(all(test, target_os = "macos"))]
 mod tests {
+
+    #[test]
+    fn a_run_url_without_arguments_is_the_plain_one() {
+        assert_eq!(macos_steam_run_url("1966720", &[]), "steam://run/1966720");
+    }
+
+    #[test]
+    fn run_url_arguments_survive_spaces_and_backslashes() {
+        let url = macos_steam_run_url(
+            "1145350",
+            &[
+                "--rom_modding_root_folder".to_string(),
+                "Z:\\Steam\\steamapps\\common\\Hades II\\Ship".to_string(),
+            ],
+        );
+        let encoded = url
+            .strip_prefix("steam://run/1145350//")
+            .and_then(|rest| rest.strip_suffix('/'))
+            .expect("the arguments form");
+        assert_eq!(
+            urlencoding::decode(encoded).unwrap(),
+            "--rom_modding_root_folder \"Z:\\Steam\\steamapps\\common\\Hades II\\Ship\""
+        );
+    }
     use super::*;
 
     /// The Muck launch from the log: Steam is asked to run the game, and the
