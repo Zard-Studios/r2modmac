@@ -169,6 +169,8 @@ pub struct Settings {
     pub install_in_parallel: bool,
     #[serde(default)]
     pub confirm_before_apply_to_game: bool,
+    #[serde(default = "default_true")]
+    pub manage_dependencies_on_toggle: bool,
     #[serde(default = "default_false")]
     pub write_debug_logs_to_game: bool,
     #[serde(default = "default_mod_view_mode")]
@@ -236,6 +238,7 @@ impl Settings {
             ask_version_before_install: false,
             install_in_parallel: true,
             confirm_before_apply_to_game: false,
+            manage_dependencies_on_toggle: true,
             write_debug_logs_to_game: false,
             default_mod_view_mode: default_mod_view_mode(),
             show_deprecated_warnings: true,

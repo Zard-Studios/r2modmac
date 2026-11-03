@@ -18,6 +18,7 @@ export interface AppSettings {
     ask_version_before_install?: boolean;
     install_in_parallel?: boolean;
     confirm_before_apply_to_game?: boolean;
+    manage_dependencies_on_toggle?: boolean;
     write_debug_logs_to_game?: boolean;
     verbose_logging?: boolean;
     default_mod_view_mode?: 'grid' | 'list';

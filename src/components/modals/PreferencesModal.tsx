@@ -45,6 +45,7 @@ export interface PreferencesSettings {
     ask_version_before_install: boolean;
     install_in_parallel: boolean;
     confirm_before_apply_to_game: boolean;
+    manage_dependencies_on_toggle: boolean;
     write_debug_logs_to_game: boolean;
     verbose_logging: boolean;
     default_mod_view_mode: 'grid' | 'list';
@@ -65,6 +66,7 @@ export type PreferencesTarget =
     | 'ask-version'
     | 'parallel-downloads'
     | 'confirm-apply'
+    | 'manage-dependencies'
     | 'debug-logs'
     | 'verbose-logs'
     | 'open-logs'
@@ -142,6 +144,7 @@ export default function PreferencesModal({
     const [askVersionBeforeInstall, setAskVersionBeforeInstall] = useState(settings.ask_version_before_install);
     const [installInParallel, setInstallInParallel] = useState(settings.install_in_parallel);
     const [confirmBeforeApply, setConfirmBeforeApply] = useState(settings.confirm_before_apply_to_game);
+    const [manageDependencies, setManageDependencies] = useState(settings.manage_dependencies_on_toggle);
     const [writeDebugLogsToGame, setWriteDebugLogsToGame] = useState(settings.write_debug_logs_to_game);
     const [verboseLogging, setVerboseLogging] = useState(settings.verbose_logging);
     const [logsExpanded, setLogsExpanded] = useState(() => storedLogsExpanded(
@@ -183,6 +186,7 @@ export default function PreferencesModal({
             setAskVersionBeforeInstall(settings.ask_version_before_install);
             setInstallInParallel(settings.install_in_parallel);
             setConfirmBeforeApply(settings.confirm_before_apply_to_game);
+            setManageDependencies(settings.manage_dependencies_on_toggle);
             setWriteDebugLogsToGame(settings.write_debug_logs_to_game ?? false);
             setVerboseLogging(settings.verbose_logging ?? false);
             const targetsLogs = initialPanel === 'debug-logs'
@@ -244,6 +248,7 @@ export default function PreferencesModal({
             ask_version_before_install: askVersionBeforeInstall,
             install_in_parallel: installInParallel,
             confirm_before_apply_to_game: confirmBeforeApply,
+            manage_dependencies_on_toggle: manageDependencies,
             write_debug_logs_to_game: writeDebugLogsToGame,
             verbose_logging: verboseLogging,
             default_mod_view_mode: defaultModViewMode,
@@ -538,6 +543,17 @@ export default function PreferencesModal({
                                     </div>
                                 </div>
                                 <Toggle value={confirmBeforeApply} onChange={setConfirmBeforeApply} />
+                            </div>
+
+                            <div id="preference-manage-dependencies" className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-surface-hover">
+                                <div className="flex items-center gap-4">
+                                    <RowIcon kind="apply" />
+                                    <div>
+                                        <p className="text-[15px] font-medium text-white">Manage dependencies when toggling</p>
+                                        <p className="text-[13px] text-gray-400 mt-0.5 leading-snug">Ask to disable dependencies no other mod needs, and to enable a mod's disabled dependencies.</p>
+                                    </div>
+                                </div>
+                                <Toggle value={manageDependencies} onChange={setManageDependencies} />
                             </div>
 
                             <div id="preference-debug-logs">

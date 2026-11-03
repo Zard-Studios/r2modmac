@@ -42,6 +42,7 @@ import type { ProfileModUpdate } from './hooks/useModActions';
 import { useProfileActions } from './hooks/useProfileActions';
 import { useGameSync } from './hooks/useGameSync';
 import { compareVersions, findPinnedVersionForSource, parsePackageReference } from './utils/modVersioning';
+import { planDependencyToggle } from './utils/dependencyToggle'
 import { getProfileModKey, hasPendingRuntimeInstall, migratePendingSyncBaselines, requiresBepInExStorageRepair, restoreInstalledMod } from './utils/profileSync';
 import { isGameBepInExPack, isLoaderPackage, isRepairableLoaderPackage, isReturnOfModdingCommunity, loaderDisplayName, loaderPackageIdsForCommunity } from './utils/loaderPackages';
 import { isTextEntryTarget, shouldReleaseSearchFocus } from './utils/searchField';
@@ -364,6 +365,7 @@ function App() {
   const [askVersionBeforeInstall, setAskVersionBeforeInstall] = useState(false)
   const [installInParallel, setInstallInParallel] = useState(true)
   const [confirmBeforeApplyToGame, setConfirmBeforeApplyToGame] = useState(false)
+  const [manageDependenciesOnToggle, setManageDependenciesOnToggle] = useState(true)
   // Confirmations run through the app's own modal: a native OS dialog ignores
   // the chosen theme and looks like a different program on every platform.
   const [confirmRequest, setConfirmRequest] = useState<(ConfirmRequest & { resolve: (confirmed: boolean) => void }) | null>(null)
@@ -870,6 +872,7 @@ function App() {
       setAskVersionBeforeInstall(s.ask_version_before_install ?? false);
       setInstallInParallel(s.install_in_parallel ?? true);
       setConfirmBeforeApplyToGame(!!s.confirm_before_apply_to_game);
+      setManageDependenciesOnToggle(s.manage_dependencies_on_toggle ?? true);
       setWriteDebugLogsToGame(s.write_debug_logs_to_game ?? false);
       setVerboseLogging(s.verbose_logging ?? false);
       // Apply the persisted level immediately so early-session logs honour it.
@@ -1621,6 +1624,14 @@ function App() {
         group: 'Settings',
         icon: 'apply',
         run: () => openPreferencesAt('confirm-apply'),
+      },
+      {
+        id: 'settings:manage-dependencies',
+        title: 'Manage dependencies when toggling',
+        subtitle: 'Install behavior',
+        group: 'Settings',
+        icon: 'apply',
+        run: () => openPreferencesAt('manage-dependencies'),
       },
       {
         id: 'settings:debug-logs',
@@ -2751,6 +2762,7 @@ function App() {
     setAskVersionBeforeInstall(newSettings.ask_version_before_install);
     setInstallInParallel(newSettings.install_in_parallel);
     setConfirmBeforeApplyToGame(newSettings.confirm_before_apply_to_game);
+    setManageDependenciesOnToggle(newSettings.manage_dependencies_on_toggle);
     setWriteDebugLogsToGame(newSettings.write_debug_logs_to_game);
     setVerboseLogging(newSettings.verbose_logging);
     if (!newSettings.verbose_logging) setVerboseLogsWarningBytes(null);
@@ -2770,6 +2782,7 @@ function App() {
       ask_version_before_install: newSettings.ask_version_before_install,
       install_in_parallel: newSettings.install_in_parallel,
       confirm_before_apply_to_game: newSettings.confirm_before_apply_to_game,
+      manage_dependencies_on_toggle: newSettings.manage_dependencies_on_toggle,
       write_debug_logs_to_game: newSettings.write_debug_logs_to_game,
       verbose_logging: newSettings.verbose_logging,
       default_mod_view_mode: newSettings.default_mod_view_mode,
@@ -3327,6 +3340,30 @@ function App() {
       />
     );
 
+    const handleToggleModWithDependencies = async (profileId: string, modUuid: string) => {
+      const profile = useProfileStore.getState().profiles.find(p => p.id === profileId)
+      const target = profile?.mods.find(m => m.uuid4 === modUuid)
+      let followers: InstalledMod[] = []
+      if (profile && target && manageDependenciesOnToggle) {
+        followers = planDependencyToggle(profile.mods, target, profilePackageIndex)
+        if (followers.length > 0) {
+          const enabling = !target.enabled
+          const names = followers.map(dep => `• ${dep.displayName ?? dep.fullName}`).join('\n')
+          const confirmed = await requestConfirm({
+            title: enabling ? 'Enable dependencies?' : 'Disable unused dependencies?',
+            message: enabling
+              ? `${target.displayName ?? target.fullName} depends on mods that are currently disabled:\n${names}\n\nEnable them too?`
+              : `No other enabled mod needs these dependencies of ${target.displayName ?? target.fullName}:\n${names}\n\nDisable them too?`,
+            confirmLabel: enabling ? 'Enable all' : 'Disable all',
+            cancelLabel: enabling ? 'Only this mod' : 'Keep them',
+          })
+          if (!confirmed) followers = []
+        }
+      }
+      await toggleMod(profileId, modUuid, legacyInstallMode)
+      for (const dep of followers) await toggleMod(profileId, dep.uuid4, legacyInstallMode)
+    }
+
     const sidebar = (
       <ProfileSidebar
         key={activeProfile?.id || 'no-profile'}
@@ -3338,7 +3375,7 @@ function App() {
         showDeprecatedWarnings={showDeprecatedWarnings}
         installInParallel={installInParallel}
         onSelectProfile={handleSelectProfile}
-        onToggleMod={(profileId, modUuid) => toggleMod(profileId, modUuid, legacyInstallMode)}
+        onToggleMod={handleToggleModWithDependencies}
         onViewModDetails={(pkg) => setSelectedMod(pkg)}
         onOpenModFolder={async (profileId, modName) => {
           const activeProfilePlatform = activeProfile?.platform;
@@ -3736,6 +3773,7 @@ function App() {
           ask_version_before_install: askVersionBeforeInstall,
           install_in_parallel: installInParallel,
           confirm_before_apply_to_game: confirmBeforeApplyToGame,
+          manage_dependencies_on_toggle: manageDependenciesOnToggle,
           write_debug_logs_to_game: writeDebugLogsToGame,
           verbose_logging: verboseLogging,
           default_mod_view_mode: defaultModViewMode,
