@@ -43,6 +43,7 @@ import { useProfileActions } from './hooks/useProfileActions';
 import { useGameSync } from './hooks/useGameSync';
 import { compareVersions, findPinnedVersionForSource, parsePackageReference } from './utils/modVersioning';
 import { planDependencyToggle } from './utils/dependencyToggle'
+import { DependencyToggleModal, type DependencyToggleMod } from './components/modals/DependencyToggleModal'
 import { getProfileModKey, hasPendingRuntimeInstall, migratePendingSyncBaselines, requiresBepInExStorageRepair, restoreInstalledMod } from './utils/profileSync';
 import { isGameBepInExPack, isLoaderPackage, isRepairableLoaderPackage, isReturnOfModdingCommunity, loaderDisplayName, loaderPackageIdsForCommunity } from './utils/loaderPackages';
 import { isTextEntryTarget, shouldReleaseSearchFocus } from './utils/searchField';
@@ -372,6 +373,30 @@ function App() {
   const requestConfirm = useCallback((request: ConfirmRequest) => new Promise<boolean>(resolve => {
     setConfirmRequest({ ...request, resolve });
   }), [])
+  const [dependencyChoice, setDependencyChoice] = useState<{
+    enabling: boolean
+    mod: DependencyToggleMod
+    dependencies: DependencyToggleMod[]
+    resolve: (choice: 'cancel' | 'mod-only' | 'with-dependencies') => void
+  } | null>(null)
+  const requestDependencyChoice = useCallback((request: { enabling: boolean; mod: DependencyToggleMod; dependencies: DependencyToggleMod[] }) =>
+    new Promise<'cancel' | 'mod-only' | 'with-dependencies'>(resolve => {
+      setDependencyChoice({ ...request, resolve });
+    }), [])
+  const resolveDependencyChoice = useCallback((choice: 'cancel' | 'mod-only' | 'with-dependencies') => {
+    setDependencyChoice(current => {
+      current?.resolve(choice);
+      return null;
+    });
+  }, [])
+  const describeInstalledMod = (mod: InstalledMod): DependencyToggleMod => {
+    const reference = parsePackageReference(mod.fullName);
+    return {
+      name: mod.displayName ?? reference.packageName.split('-').slice(1).join('-'),
+      version: mod.versionNumber ?? reference.version,
+      icon: mod.iconUrl,
+    };
+  };
   const resolveConfirm = useCallback((confirmed: boolean) => {
     setConfirmRequest(current => {
       current?.resolve(confirmed);
@@ -3347,17 +3372,13 @@ function App() {
       if (profile && target && manageDependenciesOnToggle) {
         followers = planDependencyToggle(profile.mods, target, profilePackageIndex)
         if (followers.length > 0) {
-          const enabling = !target.enabled
-          const names = followers.map(dep => `• ${dep.displayName ?? dep.fullName}`).join('\n')
-          const confirmed = await requestConfirm({
-            title: enabling ? 'Enable dependencies?' : 'Disable unused dependencies?',
-            message: enabling
-              ? `${target.displayName ?? target.fullName} depends on mods that are currently disabled:\n${names}\n\nEnable them too?`
-              : `No other enabled mod needs these dependencies of ${target.displayName ?? target.fullName}:\n${names}\n\nDisable them too?`,
-            confirmLabel: enabling ? 'Enable all' : 'Disable all',
-            cancelLabel: enabling ? 'Only this mod' : 'Keep them',
+          const choice = await requestDependencyChoice({
+            enabling: !target.enabled,
+            mod: describeInstalledMod(target),
+            dependencies: followers.map(describeInstalledMod),
           })
-          if (!confirmed) followers = []
+          if (choice === 'cancel') return
+          if (choice === 'mod-only') followers = []
         }
       }
       await toggleMod(profileId, modUuid, legacyInstallMode)
@@ -3717,6 +3738,15 @@ function App() {
 
       {/* Modals */}
       <ConfirmModal request={confirmRequest} onResolve={resolveConfirm} />
+      <DependencyToggleModal
+        isOpen={dependencyChoice !== null}
+        enabling={dependencyChoice?.enabling ?? false}
+        mod={dependencyChoice?.mod ?? { name: '' }}
+        dependencies={dependencyChoice?.dependencies ?? []}
+        onCancel={() => resolveDependencyChoice('cancel')}
+        onModOnly={() => resolveDependencyChoice('mod-only')}
+        onWithDependencies={() => resolveDependencyChoice('with-dependencies')}
+      />
       <LaunchIssueModal issue={launchIssue} onClose={() => setLaunchIssue(null)} />
       <UpdateAllModal
         isOpen={pendingProfileUpdates.length > 0 && !selectedMod}

@@ -1,6 +1,8 @@
 import { useState } from 'react';
 
 import { AppIcon, type IconName } from '../ui/icons';
+import { DependencyToggleModal } from './DependencyToggleModal';
+import { UninstallModal } from './UninstallModal';
 import { CrossOverGuideModal } from './CrossOverGuideModal';
 import { LaunchIssueModal } from './LaunchIssueModal';
 import { MacOSGuideModal } from './MacOSGuideModal';
@@ -13,6 +15,9 @@ type PreviewId =
     | 'update-unavailable'
     | 'download'
     | 'verbose-logs'
+    | 'dependencies-disable'
+    | 'dependencies-enable'
+    | 'uninstall-dependencies'
     | 'steam-cloud'
     | 'launch-failure'
     | 'wine-guide'
@@ -30,10 +35,27 @@ const PREVIEWS: readonly {
     { id: 'update-unavailable', title: 'Update unavailable', description: 'Release found, but without an asset for this system.', group: 'Updates', icon: 'update', tone: 'text-gray-400' },
     { id: 'download', title: 'Download progress', description: 'Transfer speed, progress and cancellation state.', group: 'Operations', icon: 'install', tone: 'text-fg-accent' },
     { id: 'verbose-logs', title: 'Verbose log warning', description: 'The 5 MB troubleshooting-log reminder.', group: 'Warnings', icon: 'warning', tone: 'text-fg-warning' },
+    { id: 'dependencies-disable', title: 'Disable unused dependencies', description: 'Asked when a mod is turned off and its dependencies are no longer needed.', group: 'Dependencies', icon: 'apply', tone: 'text-fg-warning' },
+    { id: 'dependencies-enable', title: 'Enable dependencies', description: 'Asked when a mod is turned on while its dependencies are disabled.', group: 'Dependencies', icon: 'apply', tone: 'text-fg-success' },
+    { id: 'uninstall-dependencies', title: 'Uninstall with dependencies', description: 'Removing a mod that has installed dependencies.', group: 'Dependencies', icon: 'warning', tone: 'text-fg-danger' },
     { id: 'steam-cloud', title: 'Steam Cloud conflict', description: 'A Steam-side launch blocker.', group: 'Launch issues', icon: 'warning', tone: 'text-fg-warning' },
     { id: 'launch-failure', title: 'Generic launch failure', description: 'Fallback error presentation.', group: 'Launch issues', icon: 'warning', tone: 'text-fg-danger' },
     { id: 'wine-guide', title: 'Wine configuration', description: 'The one-time CrossOver/Wine setup guide.', group: 'Guides', icon: 'settings', tone: 'text-purple-400' },
     { id: 'macos-guide', title: 'macOS launch option', description: 'The Steam launch-option setup guide.', group: 'Guides', icon: 'settings', tone: 'text-gray-300' },
+];
+
+const PREVIEW_MOD = { name: 'BetterUI', version: '2.4.1' };
+const PREVIEW_DEPENDENCIES = [
+    { name: 'ConfigManager', version: '1.3.0' },
+    { name: 'SharedLib', version: '0.8.2' },
+    { name: 'HarmonyHelpers', version: '1.0.5' },
+    { name: 'AssetBundleKit', version: '2.1.0' },
+    { name: 'LocalizationCore', version: '3.0.4' },
+    { name: 'InputRemapper', version: '1.7.2' },
+    { name: 'UIAnimations', version: '0.9.1' },
+    { name: 'NetworkSync', version: '4.2.0' },
+    { name: 'SaveGuard', version: '1.1.3' },
+    { name: 'ModdingUtils', version: '2.5.8' },
 ];
 
 export function UiPreviewLab({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
@@ -86,6 +108,36 @@ export function UiPreviewLab({ isOpen, onClose }: { isOpen: boolean; onClose: ()
                 onClearLogs={closePreview}
                 onClose={closePreview}
                 onDontShowAgain={closePreview}
+            />
+        );
+    }
+
+    if (activePreview === 'dependencies-disable' || activePreview === 'dependencies-enable') {
+        return (
+            <DependencyToggleModal
+                isOpen
+                enabling={activePreview === 'dependencies-enable'}
+                mod={PREVIEW_MOD}
+                dependencies={PREVIEW_DEPENDENCIES}
+                onCancel={closePreview}
+                onModOnly={closePreview}
+                onWithDependencies={closePreview}
+            />
+        );
+    }
+
+    if (activePreview === 'uninstall-dependencies') {
+        return (
+            <UninstallModal
+                isOpen
+                modName={PREVIEW_MOD.name}
+                orphanDeps={PREVIEW_DEPENDENCIES.slice(0, 5)}
+                allDeps={PREVIEW_DEPENDENCIES}
+                allDepsCount={PREVIEW_DEPENDENCIES.length}
+                onCancel={closePreview}
+                onModOnly={closePreview}
+                onWithOrphans={closePreview}
+                onWithAllDeps={closePreview}
             />
         );
     }
