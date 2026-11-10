@@ -905,6 +905,14 @@ mod tests {
     }
 }
 
+/// Whether the plan goes through a Windows Steam client that really exists. A
+/// plan can name a root with no `steam.exe` (the macOS Steam folder set in
+/// Settings, a library) only so the error is precise; that must not stop the
+/// game from being offered to NotProton first.
+fn plan_has_windows_steam_client(plan: &WindowsLaunchPlan) -> bool {
+    matches!(plan, WindowsLaunchPlan::ViaSteam(target) if target.client_root.join("steam.exe").exists())
+}
+
 pub(crate) fn launch_windows_game(
     app: &AppHandle,
     game_path: &std::path::Path,
@@ -923,7 +931,7 @@ pub(crate) fn launch_windows_game(
     // No bottle's Steam owns the game, but the macOS client may: a Windows
     // build it runs through NotProton.
     #[cfg(target_os = "macos")]
-    if !matches!(plan, WindowsLaunchPlan::ViaSteam(_)) {
+    if !plan_has_windows_steam_client(&plan) {
         if let Some(game) = notproton_game_for_path(game_path) {
             log::info!(
                 "[launch_windows_game] {:?} is app {} of the macOS Steam client, run through NotProton",
@@ -1042,5 +1050,32 @@ mod wine_steam_shutdown_tests {
             closed,
             "Steam was left running after a cancel it did not see"
         );
+    }
+}
+
+#[cfg(test)]
+mod notproton_precedence_tests {
+    use super::*;
+
+    fn via_steam(client_root: &std::path::Path) -> WindowsLaunchPlan {
+        WindowsLaunchPlan::ViaSteam(SteamLaunchTarget {
+            client_root: client_root.to_path_buf(),
+            library_root: client_root.to_path_buf(),
+            app_id: "3241660".to_string(),
+        })
+    }
+
+    #[test]
+    fn a_root_without_steam_exe_is_not_a_windows_steam_client() {
+        let root = std::env::temp_dir().join(format!("r2modmac-np-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+
+        assert!(!plan_has_windows_steam_client(&via_steam(&root)));
+        assert!(!plan_has_windows_steam_client(&WindowsLaunchPlan::Direct));
+
+        std::fs::write(root.join("steam.exe"), b"").unwrap();
+        assert!(plan_has_windows_steam_client(&via_steam(&root)));
+
+        std::fs::remove_dir_all(root).unwrap();
     }
 }
