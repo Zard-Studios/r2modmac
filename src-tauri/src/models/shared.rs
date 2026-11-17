@@ -223,6 +223,10 @@ pub struct Settings {
     /// (issue #45). Kept so older files still parse and round-trip.
     #[serde(default)]
     pub profile_isolation: bool,
+    /// Steam library folders the user added by hand, for a library Steam does
+    /// not list (a drive that was re-added, or a copy made outside Steam).
+    #[serde(default)]
+    pub extra_steam_libraries: Vec<String>,
 }
 
 impl Settings {
@@ -253,6 +257,7 @@ impl Settings {
             active_theme: None,
             keybinds: BTreeMap::new(),
             profile_isolation: false,
+            extra_steam_libraries: Vec::new(),
         }
     }
 }

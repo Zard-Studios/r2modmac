@@ -8,6 +8,7 @@ import {
     type PreferencesIconName,
 } from '../../utils/preferencesIconColors';
 import { DefaultGamePickerModal } from './DefaultGamePickerModal';
+import { GameLocationsSection } from './GameLocationsSection';
 import { runningOnWindows } from '../../utils/platformUtils';
 import { createLazyModal } from '../LazyModal';
 import { overridesFromKeybinds, resolveKeybinds, type KeybindMap } from '../../utils/keybinds';
@@ -76,7 +77,8 @@ export type PreferencesTarget =
     | 'stream-mode'
     | 'deprecated-warnings'
     | 'restore-warnings'
-    | 'clear-cache';
+    | 'clear-cache'
+    | 'game-locations';
 
 interface PreferencesModalProps {
     isOpen: boolean;
@@ -443,6 +445,8 @@ export default function PreferencesModal({
                             </div>
                         </div>
                     </div>
+
+                    <GameLocationsSection isOpen={isOpen} revealed={initialPanel === 'game-locations'} />
 
                     {/* Setup behavior Section */}
                     <div className="space-y-3">

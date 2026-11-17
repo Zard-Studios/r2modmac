@@ -3,6 +3,11 @@ export function runningOnWindows(): boolean {
     return navigator.userAgent.includes('Win');
 }
 
+/** True when r2modmac itself is running on Linux. */
+export function runningOnLinux(): boolean {
+    return typeof navigator !== 'undefined' && navigator.userAgent.includes('Linux') && !navigator.userAgent.includes('Android');
+}
+
 /** macOS profiles are available only in the macOS desktop release. */
 export function runningOnMacOS(): boolean {
     return typeof navigator !== 'undefined' && navigator.userAgent.includes('Mac');

@@ -4,10 +4,26 @@ import type { ConfigFileInfo } from '../tauriAdapter';
 import type { ProfileSyncInspection } from '../utils/profileSync';
 
 
+export interface SteamLibraryStatus {
+    path: string;
+    mounted: boolean;
+    external: boolean;
+    added_by_user: boolean;
+    games: number;
+}
+
+export interface SteamSetupStatus {
+    native_steam_found: boolean;
+    notproton: string | null;
+    bottle_steam_count: number;
+    libraries: SteamLibraryStatus[];
+}
+
 export interface AppSettings {
     steam_path: string | null;
     windows_steam_path?: string | null;
     mac_steam_path?: string | null;
+    extra_steam_libraries?: string[];
     favorite_games: string[];
     default_game?: string | null;
     default_profile?: string | null;
@@ -193,6 +209,7 @@ export interface IElectronAPI {
     getGamePath: (gameIdentifier: string, platform?: 'windows' | 'mac') => Promise<string | null>;
     getGameSource: (gameIdentifier: string, platform?: 'windows' | 'mac') => Promise<'steam' | 'manual' | 'unknown'>;
     setGamePath: (gameIdentifier: string, path: string, platform?: 'windows' | 'mac') => Promise<void>;
+    getSteamSetupStatus: () => Promise<SteamSetupStatus>;
     openGameFolder: (gameIdentifier: string, platform?: 'windows' | 'mac') => Promise<void>;
     removeMod: (profileId: string, modName: string) => Promise<void>;
     toggleMod: (profileId: string, modName: string, enabled: boolean, gameIdentifier?: string, platform?: 'windows' | 'mac') => Promise<void>;

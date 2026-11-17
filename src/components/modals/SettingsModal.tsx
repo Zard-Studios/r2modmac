@@ -4,9 +4,10 @@ import { Toggle } from '../ui/Toggle';
 import { AppIcon } from '../ui/icons';
 import type { Profile, ProfilePlatform } from '../../types/profile';
 import { ConfigEditorTab } from './ConfigEditorTab';
-import { PathCensor, CensoredInput } from '../ui/PathCensor';
-import { openFolderLabel, runningOnMacOS, runningOnWindows } from '../../utils/platformUtils';
+import { PathCensor } from '../ui/PathCensor';
+import { openFolderLabel, runningOnMacOS } from '../../utils/platformUtils';
 import { ProfileAdvancedSection } from './ProfileAdvancedSection';
+import { SteamLogo } from './GameLocationsSection';
 
 
 type SettingsTab = 'settings' | 'config-editor';
@@ -17,13 +18,12 @@ interface SettingsModalProps {
     selectedGame?: string;
     activeProfile?: Profile | null;
     onSetBepinexIsolation: (profileId: string, isolated: boolean) => Promise<void>;
+    onOpenSteamLocations?: () => void;
 }
 
-export function SettingsModal({ isOpen, onClose, selectedGame, activeProfile, onSetBepinexIsolation }: SettingsModalProps) {
+export function SettingsModal({ isOpen, onClose, selectedGame, activeProfile, onSetBepinexIsolation, onOpenSteamLocations }: SettingsModalProps) {
     const [activeTab, setActiveTab] = useState<SettingsTab>('settings');
     const [isAnimating, setIsAnimating] = useState(false);
-    const [steamPath, setSteamPath] = useState<string>('');
-    const [loading, setLoading] = useState(false);
     const [modeSaving, setModeSaving] = useState(false);
     const [inheritedIsolation, setInheritedIsolation] = useState(false);
     const [gamePath, setGamePath] = useState<string | null>(null);
@@ -42,32 +42,14 @@ export function SettingsModal({ isOpen, onClose, selectedGame, activeProfile, on
     const loaderKey = activeProfile
         ? `${activeProfile.id}:${activeProfile.gameIdentifier}:${activeProfilePlatform}`
         : null;
-    // A Windows profile only lives in a compatibility prefix when the host is
-    // not Windows, so the bottle wording has to stay off a real Windows install.
-    const isWindowsHost = runningOnWindows();
-    const defaultMacSteamPath = '~/Library/Application Support/Steam';
-    const getLegacyMacSteamPath = (legacyPath?: string | null) => {
-        if (!legacyPath) return null;
-        const lower = legacyPath.toLowerCase();
-        if (lower.includes('drive_c') || lower.includes('crossover') || lower.includes('wine')) {
-            return null;
-        }
-        return legacyPath;
-    };
 
     const loadSettings = async () => {
         try {
-            const settings = await window.ipcRenderer.getSettings();
             // A profile with no explicit mode uses whatever Apply and Play use
             // for it, which is read from its files, not the old global switch.
             setInheritedIsolation(activeProfile && activeProfile.bepinexIsolation === undefined
                 ? await window.ipcRenderer.getProfileBepinexIsolation(activeProfile.id).catch(() => false)
                 : false);
-            if (activeProfilePlatform === 'mac') {
-                setSteamPath(settings.mac_steam_path || getLegacyMacSteamPath(settings.steam_path) || defaultMacSteamPath);
-            } else {
-                setSteamPath(settings.windows_steam_path || settings.steam_path || '');
-            }
         } catch (e) {
             console.error("Failed to load settings", e);
         }
@@ -199,38 +181,6 @@ export function SettingsModal({ isOpen, onClose, selectedGame, activeProfile, on
         return () => observer.disconnect();
     }, [activeTab, activeProfile, isOpen]);
 
-    const handleSave = async () => {
-        setLoading(true);
-        try {
-            const currentSettings = await window.ipcRenderer.getSettings();
-            await window.ipcRenderer.saveSettings({
-                ...currentSettings,
-                steam_path: activeProfilePlatform === 'windows' ? (steamPath || null) : currentSettings.steam_path,
-                windows_steam_path: activeProfilePlatform === 'windows' ? (steamPath || null) : (currentSettings.windows_steam_path || null),
-                mac_steam_path: activeProfilePlatform === 'mac'
-                    ? ((steamPath && steamPath !== defaultMacSteamPath) ? steamPath : null)
-                    : (currentSettings.mac_steam_path || null)
-            });
-            if (selectedGame) {
-                await checkGamePath();
-            }
-            onClose();
-        } catch (e) {
-            console.error("Failed to save settings", e);
-            alert("Failed to save settings");
-        }
-        setLoading(false);
-    };
-
-    const handleBrowse = async () => {
-        try {
-            const path = await window.ipcRenderer.selectFolder();
-            if (path) setSteamPath(path);
-        } catch (e) {
-            console.error("Failed to select folder", e);
-        }
-    };
-
     const handleOpenGameFolder = async () => {
         if (!selectedGame) return;
         try {
@@ -266,7 +216,6 @@ export function SettingsModal({ isOpen, onClose, selectedGame, activeProfile, on
 
     if (!shouldRender) return null;
 
-    const shouldShowSteamDirectory = activeProfilePlatform === 'windows' || gameSource !== 'manual';
     const hasConfigEditor = !!activeProfile;
     const modalWidth = activeTab === 'config-editor' ? 'max-w-4xl w-full' : 'max-w-md w-full';
 
@@ -351,44 +300,24 @@ export function SettingsModal({ isOpen, onClose, selectedGame, activeProfile, on
                         }`}
                     >
                         <div className={`p-6 ${isAnimating ? 'w-[28rem]' : 'w-full'}`}>
-                            {shouldShowSteamDirectory && (
-                                <div className="mb-6">
-                                    <label className="block text-sm font-medium text-gray-400 mb-2">
-                                        Steam Directory
-                                    </label>
-                                    <div className="flex gap-2">
-                                        <CensoredInput
-                                            value={steamPath}
-                                            onChange={setSteamPath}
-                                            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
-                                            placeholder={activeProfilePlatform === 'mac'
-                                                ? defaultMacSteamPath
-                                                : isWindowsHost
-                                                    ? "C:\\Program Files (x86)\\Steam"
-                                                    : "(BottleName)/drive_c/Program Files (x86)/Steam"}
-                                        />
-                                        <button
-                                            onClick={handleBrowse}
-                                            className="bg-gray-700 hover:bg-gray-600 text-white px-3 py-2 rounded-lg text-sm transition-colors"
-                                        >
-                                            Browse
-                                        </button>
-                                    </div>
-                                    <p className="text-xs text-gray-500 mt-2">
-                                        {activeProfilePlatform === 'mac'
-                                            ? "Select your native macOS Steam folder (e.g., ~/Library/Application Support/Steam)."
-                                            : isWindowsHost
-                                                ? "Select your Steam installation folder (e.g., C:\\Program Files (x86)\\Steam)."
-                                                : "Select your Steam installation folder (e.g., C:/Program Files (x86)/Steam, or drive_c/Program Files (x86)/Steam inside a compatibility layer)."}
-                                    </p>
-                                </div>
-                            )}
-
                             {selectedGame && (
                                 <div className="mb-6">
-                                    <label className="block text-sm font-medium text-gray-400 mb-2">
-                                        Game Directory
-                                    </label>
+                                    <div className="mb-2 flex items-center justify-between gap-3">
+                                        <label className="text-sm font-medium text-gray-400">
+                                            Game Directory
+                                        </label>
+                                        {onOpenSteamLocations && (
+                                            <button
+                                                type="button"
+                                                onClick={onOpenSteamLocations}
+                                                title="Steam and library locations in Preferences"
+                                                className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-gray-400 transition-colors hover:bg-gray-800 hover:text-white"
+                                            >
+                                                <SteamLogo className="h-3.5 w-3.5" />
+                                                Steam locations
+                                            </button>
+                                        )}
+                                    </div>
                                     {checkingGamePath ? (
                                         <div className="flex items-center gap-2 text-sm text-gray-400 py-2">
                                             <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -432,7 +361,7 @@ export function SettingsModal({ isOpen, onClose, selectedGame, activeProfile, on
                                                 <svg className="h-4 w-4 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
                                                     <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
                                                 </svg>
-                                                <span>Game not detected inside Steam library folders.</span>
+                                                <span>Game not found in your Steam libraries.</span>
                                             </div>
                                             <button
                                                 onClick={handleManualGamePath}
@@ -447,7 +376,7 @@ export function SettingsModal({ isOpen, onClose, selectedGame, activeProfile, on
                                     ) : (
                                         <div className="space-y-3">
                                             <div className="text-xs text-gray-500 bg-gray-800 border border-gray-700 rounded-lg p-3">
-                                                Set the game directory manually for non-Steam copies.
+                                                Set the game directory manually for copies outside Steam (Epic, GOG, ...).
                                             </div>
                                             <button
                                                 onClick={handleManualGamePath}
@@ -511,10 +440,7 @@ export function SettingsModal({ isOpen, onClose, selectedGame, activeProfile, on
                             )}
 
                             <div className="flex justify-end gap-3">
-                                <Button variant="ghost" onClick={onClose}>Cancel</Button>
-                                <Button variant="primary" onClick={handleSave} disabled={loading}>
-                                    {loading ? 'Saving...' : 'Save'}
-                                </Button>
+                                <Button variant="primary" onClick={onClose}>Done</Button>
                             </div>
                         </div>
                     </div>

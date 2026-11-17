@@ -78,7 +78,7 @@ pub(crate) use self::macos::ensure_macos_steam_launch_options;
 pub(crate) use self::macos::{detach_isolated_bepinex_link, sync_isolated_bepinex_link};
 pub(crate) use self::paths::resolve_game_runtime_path;
 pub use self::paths::{
-    find_game_executable, get_game_path, get_game_source, open_game_folder, set_game_path,
+    find_game_executable, get_game_path, get_game_source, get_steam_setup_status, open_game_folder, set_game_path,
 };
 pub use self::runtime_health::check_profile_runtime_health;
 pub use self::shared::{restore_mscorlib_vanilla, restore_outerwilds_vanilla};

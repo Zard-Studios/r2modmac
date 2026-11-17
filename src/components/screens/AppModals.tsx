@@ -52,6 +52,8 @@ export interface AppModalsProps {
     showPreferences: boolean;
     preferencesInitialPanel?: PreferencesTarget | null;
     setShowPreferences: (show: boolean) => void;
+    /** Closes Profile Settings and opens Preferences at the Steam locations. */
+    onOpenSteamLocations: () => void;
     preferences: PreferencesSettings;
     communities: Community[];
     communityImages: Record<string, string>;
@@ -82,7 +84,7 @@ export function AppModals({
     showExportModal, setShowExportModal, handleExportCode, handleExportFile,
     showUpdateModal, setShowUpdateModal, updateInfo,
     showCrossOverGuide, setShowCrossOverGuide, hideCrossOverGuide, setHideCrossOverGuide,
-    showPreferences, preferencesInitialPanel, setShowPreferences, preferences, communities, communityImages, communityPlatforms, onSavePreferences,
+    showPreferences, preferencesInitialPanel, setShowPreferences, onOpenSteamLocations, preferences, communities, communityImages, communityPlatforms, onSavePreferences,
     hasHiddenGuideWarnings, onRestoreGuideWarnings, onSetGuideHidden,
     legacyInstallMode,
     onCheckForUpdates,
@@ -192,6 +194,7 @@ export function AppModals({
                 selectedGame={selectedCommunity || undefined}
                 activeProfile={activeProfile}
                 onSetBepinexIsolation={onSetBepinexIsolation}
+                onOpenSteamLocations={onOpenSteamLocations}
             />
 
             {showExportModal && activeProfileId && (

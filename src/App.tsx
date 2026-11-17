@@ -3798,6 +3798,11 @@ function App() {
         showPreferences={showPreferences}
         preferencesInitialPanel={preferencesPanel}
         setShowPreferences={setShowPreferences}
+        onOpenSteamLocations={() => {
+          setShowSettings(false);
+          setPreferencesPanel('game-locations');
+          setShowPreferences(true);
+        }}
         preferences={{
           legacy_install_mode: legacyInstallMode,
           ask_version_before_install: askVersionBeforeInstall,

@@ -584,6 +584,7 @@ pub fn run() {
             commands::theme_commands::read_theme_image,
             commands::game_commands::paths::get_game_path,
             commands::game_commands::paths::get_game_source,
+            commands::game_commands::paths::get_steam_setup_status,
             commands::game_commands::paths::set_game_path,
             commands::game_commands::paths::open_game_folder,
             commands::game_commands::paths::find_game_executable,

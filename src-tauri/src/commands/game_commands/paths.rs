@@ -50,33 +50,44 @@ fn find_game_in_steam_roots(
     game_identifier: &str,
     accept: impl Fn(&std::path::Path) -> bool,
 ) -> Option<String> {
-    let normalized_id = normalize_for_matching(game_identifier);
-    for base_steam in steam_roots {
-        for lib_folder in get_steam_library_folders(base_steam) {
-            let common_path = lib_folder.join("steamapps").join("common");
-            let Ok(entries) = fs::read_dir(&common_path) else {
-                continue;
-            };
-            for entry in entries.filter_map(|e| e.ok()) {
-                let folder_name = entry.file_name().to_string_lossy().to_string();
-                let normalized_folder = normalize_for_matching(&folder_name);
+    let libraries: Vec<std::path::PathBuf> = steam_roots
+        .iter()
+        .flat_map(|root| get_steam_library_folders(root))
+        .collect();
+    find_game_in_libraries(&libraries, game_identifier, accept)
+}
 
-                // Check for match (exact or high similarity)
-                if normalized_folder == normalized_id
-                    || normalized_folder.contains(&normalized_id)
-                    || normalized_id.contains(&normalized_folder)
-                {
-                    let game_path = resolve_game_runtime_path(game_identifier, &entry.path());
-                    if !accept(&game_path) {
-                        continue;
-                    }
-                    log::debug!(
-                        "[get_game_path] Found match: {} -> {}",
-                        folder_name,
-                        game_path.display()
-                    );
-                    return Some(game_path.to_string_lossy().to_string());
+/// [`find_game_in_steam_roots`] for library folders already known.
+fn find_game_in_libraries(
+    libraries: &[std::path::PathBuf],
+    game_identifier: &str,
+    accept: impl Fn(&std::path::Path) -> bool,
+) -> Option<String> {
+    let normalized_id = normalize_for_matching(game_identifier);
+    for lib_folder in libraries {
+        let common_path = lib_folder.join("steamapps").join("common");
+        let Ok(entries) = fs::read_dir(&common_path) else {
+            continue;
+        };
+        for entry in entries.filter_map(|e| e.ok()) {
+            let folder_name = entry.file_name().to_string_lossy().to_string();
+            let normalized_folder = normalize_for_matching(&folder_name);
+
+            // Check for match (exact or high similarity)
+            if normalized_folder == normalized_id
+                || normalized_folder.contains(&normalized_id)
+                || normalized_id.contains(&normalized_folder)
+            {
+                let game_path = resolve_game_runtime_path(game_identifier, &entry.path());
+                if !accept(&game_path) {
+                    continue;
                 }
+                log::debug!(
+                    "[get_game_path] Found match: {} -> {}",
+                    folder_name,
+                    game_path.display()
+                );
+                return Some(game_path.to_string_lossy().to_string());
             }
         }
     }
@@ -134,7 +145,13 @@ pub async fn get_game_path(
         Vec::new()
     };
 
-    if steam_paths_to_check.is_empty() && notproton_roots.is_empty() {
+    let linux_roots = linux_steam_roots();
+
+    if steam_paths_to_check.is_empty()
+        && notproton_roots.is_empty()
+        && linux_roots.is_empty()
+        && settings.extra_steam_libraries.is_empty()
+    {
         if is_windows_profile {
             // A Windows profile means a compatibility prefix only when the host
             // is not Windows itself; on Windows the prefix wording is nonsense.
@@ -158,6 +175,21 @@ pub async fn get_game_path(
     let found = find_game_in_steam_roots(&steam_paths_to_check, &game_identifier, |_| true)
         .or_else(|| {
             find_game_in_steam_roots(&notproton_roots, &game_identifier, is_windows_build_dir)
+        })
+        .or_else(|| find_game_in_steam_roots(&linux_roots, &game_identifier, |_| true))
+        .or_else(|| {
+            // Libraries the user added by hand come last, so a game that
+            // Steam itself lists is never shadowed by one of them.
+            let extras: Vec<std::path::PathBuf> = settings
+                .extra_steam_libraries
+                .iter()
+                .map(std::path::PathBuf::from)
+                .collect();
+            if is_windows_profile {
+                find_game_in_libraries(&extras, &game_identifier, is_windows_build_dir)
+            } else {
+                find_game_in_libraries(&extras, &game_identifier, |_| true)
+            }
         });
     if let Some(game_path) = found {
         if settings.game_paths.get(&cache_key) != Some(&game_path) {
@@ -172,6 +204,155 @@ pub async fn get_game_path(
 
     log::debug!("[get_game_path] No match found for: {}", game_identifier);
     Ok(None)
+}
+
+/// Steam clients on a Linux desktop: the usual install, the `~/.steam`
+/// symlinks it leaves behind, and the Flatpak and Snap packages.
+///
+/// Used only to find a game by name and to show what was found. Launching
+/// does not go through these, so a Linux launch behaves exactly as it does
+/// when the game folder is chosen by hand.
+pub(super) fn linux_steam_roots() -> Vec<std::path::PathBuf> {
+    if !cfg!(target_os = "linux") {
+        return Vec::new();
+    }
+    let Some(home) = dirs::home_dir() else {
+        return Vec::new();
+    };
+    linux_steam_roots_in_home(&home)
+}
+
+fn linux_steam_roots_in_home(home: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let candidates = [
+        home.join(".local/share/Steam"),
+        home.join(".steam/steam"),
+        home.join(".steam/root"),
+        home.join(".var/app/com.valvesoftware.Steam/.local/share/Steam"),
+        home.join(".var/app/com.valvesoftware.Steam/.steam/steam"),
+        home.join("snap/steam/common/.local/share/Steam"),
+    ];
+
+    let mut roots: Vec<std::path::PathBuf> = Vec::new();
+    for candidate in candidates {
+        if !candidate.join("steamapps").is_dir() {
+            continue;
+        }
+        // The symlinks point back at the same install; keep it once.
+        let resolved = fs::canonicalize(&candidate).unwrap_or(candidate);
+        if !roots.contains(&resolved) {
+            roots.push(resolved);
+        }
+    }
+    roots
+}
+
+/// One Steam library folder, as Preferences lists it.
+#[derive(serde::Serialize)]
+pub struct SteamLibraryStatus {
+    pub path: String,
+    /// The folder is reachable now. A library on a drive that is not plugged
+    /// in is still listed, so the user can see why its games are missing.
+    pub mounted: bool,
+    /// On another volume than the system one (macOS `/Volumes/...`).
+    pub external: bool,
+    /// Added by the user rather than listed by Steam.
+    pub added_by_user: bool,
+    pub games: usize,
+}
+
+/// What Steam setups this machine has, so Preferences can say what was found
+/// on its own instead of asking for a folder the app can already locate.
+#[derive(serde::Serialize)]
+pub struct SteamSetupStatus {
+    /// The native macOS Steam client is installed.
+    pub native_steam_found: bool,
+    /// Name of the NotProton tool registered with that client, if any.
+    pub notproton: Option<String>,
+    /// Windows Steam installs found in CrossOver, Whisky or similar bottles.
+    pub bottle_steam_count: usize,
+    pub libraries: Vec<SteamLibraryStatus>,
+}
+
+fn library_game_count(library: &std::path::Path) -> usize {
+    fs::read_dir(library.join("steamapps").join("common"))
+        .map(|entries| entries.filter_map(|entry| entry.ok()).count())
+        .unwrap_or(0)
+}
+
+/// Library paths a client's `libraryfolders.vdf` lists, whether or not the
+/// folder exists right now.
+fn listed_library_paths(steam_root: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut paths = vec![steam_root.to_path_buf()];
+    let vdf = steam_root.join("steamapps").join("libraryfolders.vdf");
+    if let Ok(content) = fs::read_to_string(vdf) {
+        if let Ok(re) = regex::Regex::new(r#""path"\s+"([^"]+)""#) {
+            for cap in re.captures_iter(&content) {
+                let path = std::path::PathBuf::from(&cap[1]);
+                if !paths.contains(&path) {
+                    paths.push(path);
+                }
+            }
+        }
+    }
+    paths
+}
+
+#[command]
+pub async fn get_steam_setup_status(app: AppHandle) -> Result<SteamSetupStatus, String> {
+    let native_root = native_macos_steam_root();
+    let notproton = native_root
+        .as_deref()
+        .and_then(|root| installed_notproton_tools(root).into_iter().last());
+    let bottle_steam_count = if cfg!(target_os = "macos") {
+        discover_windows_steam_roots().len()
+    } else {
+        0
+    };
+
+    let settings = load_settings_impl(&app);
+    let mut libraries: Vec<SteamLibraryStatus> = Vec::new();
+    let mut push = |path: std::path::PathBuf, added_by_user: bool| {
+        if libraries.iter().any(|library| std::path::Path::new(&library.path) == path) {
+            return;
+        }
+        let mounted = path.is_dir();
+        libraries.push(SteamLibraryStatus {
+            external: path.starts_with("/Volumes"),
+            games: if mounted { library_game_count(&path) } else { 0 },
+            path: path.to_string_lossy().to_string(),
+            mounted,
+            added_by_user,
+        });
+    };
+    let mut roots = get_steam_roots_for_platform(&app, false);
+    for root in get_steam_roots_for_platform(&app, true)
+        .into_iter()
+        .chain(linux_steam_roots())
+    {
+        if !roots.contains(&root) {
+            roots.push(root);
+        }
+    }
+    for root in &roots {
+        for library in listed_library_paths(root) {
+            push(library, false);
+        }
+    }
+    for extra in &settings.extra_steam_libraries {
+        push(std::path::PathBuf::from(extra), true);
+    }
+
+    Ok(SteamSetupStatus {
+        // Off macOS the only client is the Windows one, found among the roots.
+        native_steam_found: if cfg!(target_os = "macos") {
+            native_root.is_some()
+        } else {
+            !roots.is_empty()
+        },
+        notproton,
+        bottle_steam_count,
+        libraries,
+    })
 }
 
 #[command]
