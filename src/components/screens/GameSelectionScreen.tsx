@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { GameSelector } from '../game/GameSelector';
 import { SearchClearButton } from '../ui/SearchClearButton';
 import type { CommunityPlatformInfo } from '../../types/thunderstore';
@@ -40,7 +40,7 @@ export function GameSelectionScreen({
         }).catch((err: any) => console.error('Failed to load favorites', err));
     }, []);
 
-    const toggleFavorite = async (identifier: string, e: React.MouseEvent) => {
+    const toggleFavorite = useCallback(async (identifier: string, e: React.MouseEvent) => {
         e.stopPropagation();
         const newFavorites = favoriteGames.includes(identifier)
             ? favoriteGames.filter(id => id !== identifier)
@@ -54,9 +54,9 @@ export function GameSelectionScreen({
         } catch (e) {
             console.error("Failed to save favorites", e);
         }
-    };
+    }, [favoriteGames]);
 
-    const filteredCommunities = communities
+    const filteredCommunities = useMemo(() => communities
         .filter(c =>
             c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
             c.identifier.toLowerCase().includes(searchQuery.toLowerCase())
@@ -76,7 +76,7 @@ export function GameSelectionScreen({
             if (aFav && !bFav) return -1;
             if (!aFav && bFav) return 1;
             return a.name.localeCompare(b.name);
-        });
+        }), [communities, searchQuery, showWindowsGame, showMacGame, communityPlatforms, favoriteGames]);
 
     return (
         <div className="r2-app-backdrop relative flex h-full min-h-0 w-full bg-gray-900">

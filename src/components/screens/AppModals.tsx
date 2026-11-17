@@ -1,17 +1,21 @@
+import { useEffect } from 'react';
 import { listen } from '@tauri-apps/api/event';
-import { ModDetailModal } from '../modals/ModDetailModal'
 import { ProgressModal } from '../modals/ProgressModal'
 import { UninstallModal } from '../modals/UninstallModal'
-import { SettingsModal } from '../modals/SettingsModal'
 import { ExportModal } from '../modals/ExportModal'
 import { CrossOverGuideModal } from '../modals/CrossOverGuideModal';
 import { UpdateModal } from '../modals/UpdateModal';
-import PreferencesModal, { type PreferencesSettings, type PreferencesTarget } from '../modals/PreferencesModal';
+import type { PreferencesSettings, PreferencesTarget } from '../modals/PreferencesModal';
+import { createLazyModal } from '../LazyModal';
 import { shouldShowPreferencesModal } from '../../utils/modalVisibility';
 import { VerboseLogsWarningModal } from '../modals/VerboseLogsWarningModal';
 import { runningOnWindows } from '../../utils/platformUtils';
 import type { Package, PackageVersion, Community, CommunityPlatformInfo } from '../../types/thunderstore'
 import type { UpdateInfo } from '../../types/electron';
+
+const ModDetailModal = createLazyModal(() => import('../modals/ModDetailModal'), m => m.ModDetailModal);
+const SettingsModal = createLazyModal(() => import('../modals/SettingsModal'), m => m.SettingsModal);
+const PreferencesModal = createLazyModal(() => import('../modals/PreferencesModal'), m => m.default);
 
 export interface AppModalsProps {
     selectedMod: Package | null;
@@ -94,6 +98,17 @@ export function AppModals({
     const activeProfile = activeProfileId ? profiles.find(p => p.id === activeProfileId) || null : null;
     const selectedVersion = selectedMod?.versions[0];
     const selectedIsLocal = !!selectedVersion?.isLocal;
+
+    // Warm the split chunks shortly after the screen is up, off the startup path,
+    // so the first click on Settings / Preferences / a mod does not wait on a fetch.
+    useEffect(() => {
+        const timer = window.setTimeout(() => {
+            void ModDetailModal.preload();
+            void SettingsModal.preload();
+            void PreferencesModal.preload();
+        }, 3000);
+        return () => window.clearTimeout(timer);
+    }, []);
 
     return (
         <>

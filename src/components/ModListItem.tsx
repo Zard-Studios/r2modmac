@@ -43,6 +43,7 @@ export const ModListItem = memo(function ModListItem({ mod, likesCount, totalDow
                         src={mod.icon}
                         alt={mod.name}
                         className="w-full h-full"
+                        eager
                         fallback={
                             <div className="w-full h-full flex items-center justify-center text-xl font-bold text-gray-600">
                                 {mod.name[0]}

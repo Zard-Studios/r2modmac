@@ -8,15 +8,17 @@ import {
     type PreferencesIconName,
 } from '../../utils/preferencesIconColors';
 import { DefaultGamePickerModal } from './DefaultGamePickerModal';
-import { ThemeEditorModal } from './ThemeEditorModal';
-import { KeybindsModal } from './KeybindsModal';
 import { runningOnWindows } from '../../utils/platformUtils';
-import { UiPreviewLab } from './UiPreviewLab';
+import { createLazyModal } from '../LazyModal';
 import { overridesFromKeybinds, resolveKeybinds, type KeybindMap } from '../../utils/keybinds';
 import { useThemeStore } from '../../store/useThemeStore';
 import { isStockThemeId } from '../../utils/themePresets';
 import type { Community, CommunityPlatformInfo } from '../../types/thunderstore';
 import { getVersion } from '@tauri-apps/api/app';
+
+const ThemeEditorModal = createLazyModal(() => import('./ThemeEditorModal'), m => m.ThemeEditorModal);
+const KeybindsModal = createLazyModal(() => import('./KeybindsModal'), m => m.KeybindsModal);
+const UiPreviewLab = createLazyModal(() => import('./UiPreviewLab'), m => m.UiPreviewLab);
 
 const TROUBLESHOOTING_LOGS_EXPANDED_KEY = 'r2modmac:preferences:troubleshooting-logs-expanded';
 

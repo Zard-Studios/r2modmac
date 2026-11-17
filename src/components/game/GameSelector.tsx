@@ -105,7 +105,7 @@ export const GameCard = memo(function GameCard({
             className={`group relative flex flex-col rounded-xl overflow-hidden text-left border ${isSelected
                 ? 'ring-2 ring-blue-500 border-transparent shadow-md shadow-blue-500/20 scale-[1.02] hover:scale-[1.04] hover:-translate-y-1'
                 : 'border-gray-700/80 hover:border-gray-500 hover:shadow-xl hover:-translate-y-1'
-                } transition-all duration-300 transform-gpu`}
+                } transition-[transform,box-shadow,border-color] duration-300`}
         >
             {/* contain:paint — browser can skip painting off-screen subtrees */}
             <div className="aspect-[3/4] w-full relative overflow-hidden bg-gray-950" style={{ contain: 'paint' }}>
@@ -125,7 +125,7 @@ export const GameCard = memo(function GameCard({
 
                 {/* Platform badge — fixed scrim: it sits on cover art, not on a surface. */}
                 <div key={backdropKey} className="absolute top-2 right-2 flex flex-col gap-1 z-30 pointer-events-none items-end">
-                    <div className={`bg-scrim/75 text-on-media p-1 rounded-full shadow-lg border border-on-media/15 backdrop-blur-sm flex items-center justify-center gap-2 h-7 ${isMacCompatible ? 'px-2' : 'w-7 px-0'}`}>
+                    <div className={`bg-scrim/80 text-on-media p-1 rounded-full shadow-lg border border-on-media/15 flex items-center justify-center gap-2 h-7 ${isMacCompatible ? 'px-2' : 'w-7 px-0'}`}>
                         {isWindowsCompatible && (
                             <span title="Windows Compatible" className="flex items-center justify-center w-3.5 h-3.5 shrink-0">
                                 <svg xmlns="http://www.w3.org/2000/svg" className="w-[14px] h-[14px] shrink-0" viewBox="0 0 24 24" fill="currentColor">
@@ -156,11 +156,11 @@ export const GameCard = memo(function GameCard({
                 {/* Favorite star — fixed scrim, for the same reason as the platform badge. */}
                 <div
                     key={backdropKey}
-                    className={`absolute top-2 left-2 h-7 w-7 p-0 flex items-center justify-center rounded-full transition-all duration-200 z-20 shadow-md ${isFavorite
-                        ? 'bg-scrim/70 border border-on-media/15 backdrop-blur-sm text-yellow-400 opacity-100 hover:scale-110'
+                    className={`absolute top-2 left-2 h-7 w-7 p-0 flex items-center justify-center rounded-full transition-[opacity,transform,color,border-color] duration-200 z-20 shadow-md ${isFavorite
+                        ? 'bg-scrim/70 border border-on-media/15 text-yellow-400 opacity-100 hover:scale-110'
                         : showFavoriteAlways
-                            ? 'bg-scrim/55 border border-on-media/10 backdrop-blur-sm text-on-media/80 opacity-100 hover:scale-110 hover:text-yellow-400 hover:border-yellow-400/50'
-                            : 'bg-scrim/55 border border-on-media/10 backdrop-blur-sm text-on-media/80 opacity-0 group-hover:opacity-100 hover:text-yellow-400 hover:border-yellow-400/50 hover:scale-110'
+                            ? 'bg-scrim/55 border border-on-media/10 text-on-media/80 opacity-100 hover:scale-110 hover:text-yellow-400 hover:border-yellow-400/50'
+                            : 'bg-scrim/55 border border-on-media/10 text-on-media/80 opacity-0 group-hover:opacity-100 hover:text-yellow-400 hover:border-yellow-400/50 hover:scale-110'
                     }`}
                     onClick={(e) => onToggleFavorite(community.identifier, e)}
                     title={isFavorite ? "Remove from favorites" : "Add to favorites"}
@@ -211,14 +211,15 @@ export function GameSelector({
     const [columnCount, setColumnCount] = useState(() => gameGridColumnCount(0));
     const [containerWidth, setContainerWidth] = useState(0);
     const [scrollMargin, setScrollMargin] = useState(0);
-    const favorites = useMemo(
-        () => communities.filter(c => favoriteGames.includes(c.identifier)),
-        [communities, favoriteGames]
-    );
-    const others = useMemo(
-        () => communities.filter(c => !favoriteGames.includes(c.identifier)),
-        [communities, favoriteGames]
-    );
+    const { favorites, others } = useMemo(() => {
+        const favoriteSet = new Set(favoriteGames);
+        const favorites: Community[] = [];
+        const others: Community[] = [];
+        for (const community of communities) {
+            (favoriteSet.has(community.identifier) ? favorites : others).push(community);
+        }
+        return { favorites, others };
+    }, [communities, favoriteGames]);
 
     const rows = useMemo<GameSelectorRow[]>(() => {
         const nextRows: GameSelectorRow[] = [];

@@ -1,5 +1,5 @@
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { useRef, useState, useEffect, useLayoutEffect, useMemo, useCallback } from 'react';
+import { memo, useRef, useState, useEffect, useLayoutEffect, useMemo, useCallback } from 'react';
 import { flushSync } from 'react-dom';
 import { ModCard } from './ModCard';
 import { ModListItem } from './ModListItem';
@@ -30,6 +30,61 @@ const LIST_ROW_HEIGHT = 80;
 const GRID_REFLOW_DURATION = 260;
 const GRID_REFLOW_EASING = 'cubic-bezier(0.32, 0.72, 0, 1)';
 
+type InstallStatus = 'installed' | 'not_installed' | 'update_available';
+
+interface ModEntryProps {
+    pkg: Package;
+    installStatus: InstallStatus;
+    isBrowsing?: boolean;
+    legacyInstallMode: boolean;
+    onInstall: (pkg: Package) => void;
+    onUninstall: (pkg: Package) => void;
+    onModClick: (pkg: Package) => void;
+}
+
+// The cards used to receive `() => onInstall(pkg)` closures built inline by the
+// grid, so every grid render handed every card brand-new props and React.memo on
+// ModCard never skipped anything. These wrappers take the package plus handlers
+// that are stable for the life of the grid, and only re-render when the package,
+// its install status or a display flag actually changes.
+const GridModCard = memo(function GridModCard({ pkg, installStatus, isBrowsing, legacyInstallMode, onInstall, onUninstall, onModClick }: ModEntryProps) {
+    const install = useCallback(() => onInstall(pkg), [onInstall, pkg]);
+    const uninstall = useCallback(() => onUninstall(pkg), [onUninstall, pkg]);
+    const open = useCallback(() => onModClick(pkg), [onModClick, pkg]);
+    return (
+        <ModCard
+            mod={pkg.versions[0]}
+            likesCount={pkg.rating_score}
+            totalDownloads={pkg.total_downloads}
+            onInstall={install}
+            onUninstall={uninstall}
+            onClick={open}
+            installStatus={installStatus}
+            isBrowsing={isBrowsing}
+            legacyInstallMode={legacyInstallMode}
+        />
+    );
+});
+
+const ListModItem = memo(function ListModItem({ pkg, installStatus, isBrowsing, legacyInstallMode, onInstall, onUninstall, onModClick }: ModEntryProps) {
+    const install = useCallback(() => onInstall(pkg), [onInstall, pkg]);
+    const uninstall = useCallback(() => onUninstall(pkg), [onUninstall, pkg]);
+    const open = useCallback(() => onModClick(pkg), [onModClick, pkg]);
+    return (
+        <ModListItem
+            mod={pkg.versions[0]}
+            likesCount={pkg.rating_score}
+            totalDownloads={pkg.total_downloads}
+            onInstall={install}
+            onUninstall={uninstall}
+            onClick={open}
+            installStatus={installStatus}
+            isBrowsing={isBrowsing}
+            legacyInstallMode={legacyInstallMode}
+        />
+    );
+});
+
 // Split flat array into rows of `cols` items
 function chunkIntoRows<T>(items: T[], cols: number): T[][] {
     const rows: T[][] = [];
@@ -41,6 +96,16 @@ function chunkIntoRows<T>(items: T[], cols: number): T[][] {
 
 export function VirtualizedModGrid({ packages, installedMods, onInstall, onUninstall, onModClick, viewMode = 'grid', isBrowsing, searchQuery, legacyInstallMode = false, onLoadMore, hasMore, isLoadingMore }: VirtualizedModGridProps) {
     const parentRef = useRef<HTMLDivElement>(null);
+
+    // The parent hands over fresh handler functions on most renders. Route them
+    // through one stable function each so memoised cards are not invalidated.
+    const handlersRef = useRef({ onInstall, onUninstall, onModClick });
+    useLayoutEffect(() => {
+        handlersRef.current = { onInstall, onUninstall, onModClick };
+    });
+    const stableInstall = useCallback((pkg: Package) => handlersRef.current.onInstall(pkg), []);
+    const stableUninstall = useCallback((pkg: Package) => handlersRef.current.onUninstall(pkg), []);
+    const stableModClick = useCallback((pkg: Package) => handlersRef.current.onModClick(pkg), []);
     const [columnCount, setColumnCount] = useState(3);
     const columnCountRef = useRef(3);
 
@@ -283,16 +348,14 @@ export function VirtualizedModGrid({ packages, installedMods, onInstall, onUnins
                                     >
                                         {rowPkgs.map((pkg) => (
                                             <div key={pkg.uuid4} data-mod-grid-id={pkg.uuid4} className="min-w-0">
-                                                <ModCard
-                                                    mod={pkg.versions[0]}
-                                                    likesCount={pkg.rating_score}
-                                                    totalDownloads={pkg.total_downloads}
-                                                    onInstall={() => onInstall(pkg)}
-                                                    onUninstall={() => onUninstall(pkg)}
-                                                    onClick={() => onModClick(pkg)}
+                                                <GridModCard
+                                                    pkg={pkg}
                                                     installStatus={getInstallStatus(pkg)}
                                                     isBrowsing={isBrowsing}
                                                     legacyInstallMode={legacyInstallMode}
+                                                    onInstall={stableInstall}
+                                                    onUninstall={stableUninstall}
+                                                    onModClick={stableModClick}
                                                 />
                                             </div>
                                         ))}
@@ -358,17 +421,15 @@ export function VirtualizedModGrid({ packages, installedMods, onInstall, onUnins
                                 paddingBottom: '8px',
                             }}
                         >
-                            <ModListItem
+                            <ListModItem
                                 key={pkg.uuid4}
-                                mod={pkg.versions[0]}
-                                likesCount={pkg.rating_score}
-                                totalDownloads={pkg.total_downloads}
-                                onInstall={() => onInstall(pkg)}
-                                onUninstall={() => onUninstall(pkg)}
-                                onClick={() => onModClick(pkg)}
+                                pkg={pkg}
                                 installStatus={getInstallStatus(pkg)}
                                 isBrowsing={isBrowsing}
                                 legacyInstallMode={legacyInstallMode}
+                                onInstall={stableInstall}
+                                onUninstall={stableUninstall}
+                                onModClick={stableModClick}
                             />
                         </div>
                     );

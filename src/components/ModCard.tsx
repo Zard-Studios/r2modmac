@@ -47,6 +47,7 @@ export const ModCard = memo(function ModCard({ mod, likesCount, totalDownloads, 
                             src={mod.icon}
                             alt={mod.name}
                             className="w-full h-full"
+                            eager
                             fallback={
                                 <div className="w-full h-full flex items-center justify-center text-2xl font-bold text-gray-600">
                                     {mod.name[0]}
