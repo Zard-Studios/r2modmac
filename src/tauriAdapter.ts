@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { IElectronAPI, ThemeSummary } from './types/electron';
+import type { IElectronAPI, InstalledGame, ThemeSummary } from './types/electron';
 import type { Profile } from './types/profile';
 import type { Community, Package, CommunityPlatformInfo, ModSource } from './types/thunderstore';
 
@@ -179,6 +179,7 @@ export const tauriAPI: IElectronAPI = {
     getGamePath: async (gameIdentifier, platform?) => invoke('get_game_path', { gameIdentifier, platform }),
     getGameSource: async (gameIdentifier, platform?) => invoke<'steam' | 'manual' | 'unknown'>('get_game_source', { gameIdentifier, platform }),
     setGamePath: async (gameIdentifier, path, platform?) => invoke('set_game_path', { gameIdentifier, path, platform }),
+    getInstalledGames: async (identifiers) => invoke<InstalledGame[]>('get_installed_games', { identifiers }),
     getSteamSetupStatus: async () => invoke('get_steam_setup_status'),
     openGameFolder: async (gameIdentifier, platform?) => invoke('open_game_folder', { gameIdentifier, platform }),
     removeMod: async (profileId: string, modName: string) => {

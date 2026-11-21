@@ -2,6 +2,7 @@ import type { MouseEvent } from 'react';
 import { memo, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { Community, CommunityPlatformInfo } from '../../types/thunderstore';
+import type { InstalledBuilds } from '../../types/electron';
 import { LazyImage } from '../LazyImage';
 import { gameGridColumnCount } from '../../utils/gameGrid';
 
@@ -12,6 +13,7 @@ interface GameSelectorProps {
     communityImages: Record<string, string>;
     communityPlatforms: Record<string, CommunityPlatformInfo>;
     favoriteGames: string[];
+    installedGames?: Record<string, InstalledBuilds>;
     onToggleFavorite: (identifier: string, e: React.MouseEvent) => void;
     searchQuery: string;
     containerClassName?: string;
@@ -181,16 +183,17 @@ export const GameCard = memo(function GameCard({
 });
 
 const GAME_GRID_GAP = 16;
+const NO_GAMES: Record<string, InstalledBuilds> = {};
 
 type GameSelectorRow =
-    | { kind: 'favorites-heading' }
-    | { kind: 'divider' }
-    | { kind: 'games'; communities: Community[]; favorite: boolean };
+    | { kind: 'heading'; section: 'favorites' | 'installed' | 'others' }
+    | { kind: 'divider'; section: 'favorites' | 'installed' | 'others' }
+    | { kind: 'games'; communities: Community[]; section: 'favorites' | 'installed' | 'others' };
 
-function chunkCommunities(communities: Community[], columns: number, favorite: boolean): GameSelectorRow[] {
+function chunkCommunities(communities: Community[], columns: number, section: 'favorites' | 'installed' | 'others'): GameSelectorRow[] {
     const rows: GameSelectorRow[] = [];
     for (let index = 0; index < communities.length; index += columns) {
-        rows.push({ kind: 'games', communities: communities.slice(index, index + columns), favorite });
+        rows.push({ kind: 'games', communities: communities.slice(index, index + columns), section });
     }
     return rows;
 }
@@ -202,6 +205,7 @@ export function GameSelector({
     communityImages,
     communityPlatforms,
     favoriteGames,
+    installedGames = NO_GAMES,
     onToggleFavorite,
     searchQuery,
     containerClassName = "p-4 pt-0 space-y-8",
@@ -211,26 +215,38 @@ export function GameSelector({
     const [columnCount, setColumnCount] = useState(() => gameGridColumnCount(0));
     const [containerWidth, setContainerWidth] = useState(0);
     const [scrollMargin, setScrollMargin] = useState(0);
-    const { favorites, others } = useMemo(() => {
+    const { favorites, installed, others } = useMemo(() => {
         const favoriteSet = new Set(favoriteGames);
+        const installedSet = installedGames;
         const favorites: Community[] = [];
+        const installed: Community[] = [];
         const others: Community[] = [];
         for (const community of communities) {
-            (favoriteSet.has(community.identifier) ? favorites : others).push(community);
+            if (favoriteSet.has(community.identifier)) favorites.push(community);
+            else if (community.identifier in installedSet) installed.push(community);
+            else others.push(community);
         }
-        return { favorites, others };
-    }, [communities, favoriteGames]);
+        return { favorites, installed, others };
+    }, [communities, favoriteGames, installedGames]);
 
     const rows = useMemo<GameSelectorRow[]>(() => {
         const nextRows: GameSelectorRow[] = [];
-        if (favorites.length > 0) {
-            nextRows.push({ kind: 'favorites-heading' });
-            nextRows.push(...chunkCommunities(favorites, columnCount, true));
-            if (others.length > 0) nextRows.push({ kind: 'divider' });
+        const sections: Array<['favorites' | 'installed' | 'others', Community[]]> = [
+            ['favorites', favorites],
+            ['installed', installed],
+            ['others', others],
+        ];
+        let first = true;
+        for (const [section, list] of sections) {
+            if (list.length === 0) continue;
+            // Skip the "All other games" title when it would be the only section.
+            if (!first) nextRows.push({ kind: 'divider', section });
+            if (section !== 'others' || !first) nextRows.push({ kind: 'heading', section });
+            nextRows.push(...chunkCommunities(list, columnCount, section));
+            first = false;
         }
-        nextRows.push(...chunkCommunities(others, columnCount, false));
         return nextRows;
-    }, [columnCount, favorites, others]);
+    }, [columnCount, favorites, installed, others]);
 
     const getScrollElement = () => (
         containerRef.current?.closest<HTMLElement>('[data-game-selector-scroll]') ?? null
@@ -272,7 +288,7 @@ export function GameSelector({
         getScrollElement,
         estimateSize: index => {
             const row = rows[index];
-            if (row?.kind === 'favorites-heading') return 40;
+            if (row?.kind === 'heading') return 40;
             if (row?.kind === 'divider') return 48;
             return cardRowHeight;
         },
@@ -281,8 +297,8 @@ export function GameSelector({
         getItemKey: index => {
             const row = rows[index];
             if (!row) return index;
-            if (row.kind !== 'games') return row.kind;
-            return `${row.favorite ? 'favorite' : 'game'}:${row.communities.map(community => community.identifier).join(',')}`;
+            if (row.kind !== 'games') return `${row.kind}:${row.section}`;
+            return `${row.section}:${row.communities.map(community => community.identifier).join(',')}`;
         },
     });
 
@@ -305,12 +321,21 @@ export function GameSelector({
                                 className="absolute left-0 top-0 w-full"
                                 style={{ transform: `translateY(${virtualRow.start - scrollMargin}px)` }}
                             >
-                                {row.kind === 'favorites-heading' ? (
-                                    <div className="flex items-center gap-3 pb-4 text-yellow-400">
-                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                                            <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-                                        </svg>
-                                        <h2 className="text-sm font-bold uppercase tracking-wider text-white/90">Favorites</h2>
+                                {row.kind === 'heading' ? (
+                                    <div className={`flex items-center gap-3 pb-4 ${row.section === 'favorites' ? 'text-yellow-400' : row.section === 'installed' ? 'text-emerald-400' : 'text-gray-400'}`}>
+                                        {row.section === 'favorites' && (
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                                <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                                            </svg>
+                                        )}
+                                        {row.section === 'installed' && (
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                                            </svg>
+                                        )}
+                                        <h2 className="text-sm font-bold uppercase tracking-wider text-white/90">
+                                            {row.section === 'favorites' ? 'Favorites' : row.section === 'installed' ? 'Installed' : 'All other games'}
+                                        </h2>
                                     </div>
                                 ) : row.kind === 'divider' ? (
                                     <div className="relative h-12">
@@ -326,7 +351,7 @@ export function GameSelector({
                                                 key={community.identifier}
                                                 community={community}
                                                 isSelected={selectedCommunity === community.identifier}
-                                                isFavorite={row.favorite}
+                                                isFavorite={row.section === 'favorites'}
                                                 imageUrl={getCommunityImage(community, communityImages)}
                                                 platform={communityPlatforms[community.identifier]}
                                                 eager

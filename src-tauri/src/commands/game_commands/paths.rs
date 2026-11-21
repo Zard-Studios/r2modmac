@@ -355,6 +355,321 @@ pub async fn get_steam_setup_status(app: AppHandle) -> Result<SteamSetupStatus, 
     })
 }
 
+/// Does a `steamapps/common` folder belong to this game? Same rule as
+/// `find_game_in_libraries`, but a partial match (one name inside the other)
+/// needs at least 5 characters, so a short folder name can't claim a game.
+fn folder_matches_game(normalized_folder: &str, normalized_id: &str) -> bool {
+    if normalized_folder.is_empty() || normalized_id.is_empty() {
+        return false;
+    }
+    if normalized_folder == normalized_id {
+        return true;
+    }
+    normalized_folder.len().min(normalized_id.len()) >= 5
+        && (normalized_folder.contains(normalized_id)
+            || normalized_id.contains(normalized_folder))
+}
+
+/// Which builds of a game are installed. Both can be true when the game sits
+/// in two libraries, one per OS.
+#[derive(serde::Serialize, Clone, Copy, Default, PartialEq, Eq, Debug)]
+pub struct InstalledBuilds {
+    pub mac: bool,
+    pub windows: bool,
+}
+
+#[derive(serde::Serialize, Debug, PartialEq, Eq)]
+pub struct InstalledGame {
+    pub identifier: String,
+    #[serde(flatten)]
+    pub builds: InstalledBuilds,
+}
+
+/// Which build a game folder holds: a `.app` bundle is macOS, an `.exe` is
+/// Windows. Anything inside a Wine prefix is Windows.
+fn builds_in_folder(path: &std::path::Path) -> InstalledBuilds {
+    let mut builds = InstalledBuilds::default();
+    if find_wine_prefix_root(path).is_some() {
+        builds.windows = true;
+        return builds;
+    }
+    let Ok(entries) = fs::read_dir(path) else {
+        return builds;
+    };
+    for entry in entries.filter_map(|entry| entry.ok()) {
+        let name = entry.file_name().to_string_lossy().to_lowercase();
+        if name.ends_with(".app") {
+            builds.mac = true;
+        } else if name.ends_with(".exe") && !name.contains("crashhandler") {
+            builds.windows = true;
+        }
+    }
+    builds
+}
+
+fn installed_games_among(
+    libraries: &[std::path::PathBuf],
+    identifiers: Vec<String>,
+) -> Vec<InstalledGame> {
+    let mut folders: Vec<(String, std::path::PathBuf)> = Vec::new();
+    for library in libraries {
+        let Ok(entries) = fs::read_dir(library.join("steamapps").join("common")) else {
+            continue;
+        };
+        for entry in entries.filter_map(|entry| entry.ok()) {
+            folders.push((
+                normalize_for_matching(&entry.file_name().to_string_lossy()),
+                entry.path(),
+            ));
+        }
+    }
+    if folders.is_empty() {
+        return Vec::new();
+    }
+
+    identifiers
+        .into_iter()
+        .filter_map(|identifier| {
+            let normalized = normalize_for_matching(&identifier);
+            let mut builds = InstalledBuilds::default();
+            let mut found = false;
+            for (name, path) in &folders {
+                if !folder_matches_game(name, &normalized) {
+                    continue;
+                }
+                found = true;
+                let here = builds_in_folder(&resolve_game_runtime_path(&identifier, path));
+                builds.mac |= here.mac;
+                builds.windows |= here.windows;
+            }
+            found.then_some(InstalledGame { identifier, builds })
+        })
+        .collect()
+}
+
+/// The Steam client on a Windows host: the default install folders, plus the
+/// path Steam writes to the registry for custom locations. Libraries on other
+/// drives come from the client's own `libraryfolders.vdf`.
+#[cfg(windows)]
+fn host_windows_steam_roots() -> Vec<std::path::PathBuf> {
+    use std::os::windows::process::CommandExt;
+
+    let mut candidates: Vec<std::path::PathBuf> = Vec::new();
+    for var in ["ProgramFiles(x86)", "ProgramFiles"] {
+        if let Some(base) = std::env::var_os(var) {
+            candidates.push(std::path::PathBuf::from(base).join("Steam"));
+        }
+    }
+
+    if let Ok(output) = std::process::Command::new("reg")
+        .args(["query", r"HKCU\Software\Valve\Steam", "/v", "SteamPath"])
+        .creation_flags(0x08000000)
+        .output()
+    {
+        let text = String::from_utf8_lossy(&output.stdout);
+        if let Some(value) = text
+            .lines()
+            .find(|line| line.contains("SteamPath"))
+            .and_then(|line| line.split("REG_SZ").nth(1))
+        {
+            candidates.push(std::path::PathBuf::from(value.trim()));
+        }
+    }
+
+    let mut roots: Vec<std::path::PathBuf> = Vec::new();
+    for candidate in candidates {
+        if candidate.join("steamapps").is_dir() && !roots.contains(&candidate) {
+            roots.push(candidate);
+        }
+    }
+    roots
+}
+
+#[cfg(not(windows))]
+fn host_windows_steam_roots() -> Vec<std::path::PathBuf> {
+    Vec::new()
+}
+
+/// Mounted drives that may hold a Steam library: external and secondary
+/// drives on macOS, Linux and Windows.
+fn mounted_volume_bases() -> Vec<std::path::PathBuf> {
+    let mut bases: Vec<std::path::PathBuf> = Vec::new();
+    let mut add_children = |dir: std::path::PathBuf| {
+        if let Ok(entries) = fs::read_dir(dir) {
+            bases.extend(entries.filter_map(|e| e.ok()).map(|e| e.path()));
+        }
+    };
+
+    if cfg!(target_os = "macos") {
+        add_children(std::path::PathBuf::from("/Volumes"));
+    } else if cfg!(target_os = "linux") {
+        add_children(std::path::PathBuf::from("/mnt"));
+        add_children(std::path::PathBuf::from("/media"));
+        // /media/<user>/<drive> and /run/media/<user>/<drive>
+        for parent in ["/media", "/run/media"] {
+            if let Ok(users) = fs::read_dir(parent) {
+                for user in users.filter_map(|e| e.ok()) {
+                    add_children(user.path());
+                }
+            }
+        }
+    } else if cfg!(windows) {
+        // C: is the system drive, whose Steam is found by its own roots.
+        for letter in 'D'..='Z' {
+            let drive = std::path::PathBuf::from(format!("{letter}:\\"));
+            if drive.is_dir() {
+                bases.push(drive);
+            }
+        }
+    }
+    bases
+}
+
+/// Steam libraries on a mounted drive that no Steam client lists, for example
+/// a copied library, or one made by a client that isn't installed here.
+fn libraries_on_mounted_volumes() -> Vec<std::path::PathBuf> {
+    const LAYOUTS: [&str; 7] = [
+        "",
+        "SteamLibrary",
+        "Steam",
+        "Games/SteamLibrary",
+        "Games/Steam",
+        "Program Files (x86)/Steam",
+        "Program Files/Steam",
+    ];
+    let mut found = Vec::new();
+    for base in mounted_volume_bases() {
+        for layout in LAYOUTS {
+            let library = if layout.is_empty() {
+                base.clone()
+            } else {
+                base.join(layout)
+            };
+            if library.join("steamapps").join("common").is_dir() && !found.contains(&library) {
+                found.push(library);
+            }
+        }
+    }
+    found
+}
+
+/// Steam clients installed in a Wine prefix: `~/.wine` and the prefixes that
+/// Bottles, Lutris and Heroic create. Their `libraryfolders.vdf` leads to
+/// libraries on other drives.
+fn wine_prefix_steam_roots() -> Vec<std::path::PathBuf> {
+    let Some(home) = dirs::home_dir() else {
+        return Vec::new();
+    };
+
+    let mut prefixes: Vec<std::path::PathBuf> = vec![home.join(".wine")];
+    for container in [
+        home.join(".local/share/bottles/bottles"),
+        home.join(".var/app/com.usebottles.bottles/data/bottles/bottles"),
+        home.join("Games"),
+        home.join("Games/Heroic/Prefixes"),
+        home.join("Games/Heroic/Prefixes/default"),
+        home.join(".local/share/lutris/runners/wine/prefixes"),
+    ] {
+        if let Ok(entries) = fs::read_dir(container) {
+            prefixes.extend(entries.filter_map(|e| e.ok()).map(|e| e.path()));
+        }
+    }
+
+    let mut roots = Vec::new();
+    for prefix in prefixes {
+        for relative in [
+            "drive_c/Program Files (x86)/Steam",
+            "drive_c/Program Files/Steam",
+        ] {
+            let root = prefix.join(relative);
+            if root.join("steamapps").is_dir() && !roots.contains(&root) {
+                roots.push(root);
+            }
+        }
+    }
+    roots
+}
+
+/// Which of these games are installed on this machine, and as which build.
+/// It lists each library's `steamapps/common` and looks inside only the
+/// folders that match a game, so the cost doesn't grow with library size.
+#[command]
+pub async fn get_installed_games(
+    app: AppHandle,
+    identifiers: Vec<String>,
+) -> Result<Vec<InstalledGame>, String> {
+    let settings = load_settings_impl(&app);
+    let mut roots = get_steam_roots_for_platform(&app, false);
+    for root in get_steam_roots_for_platform(&app, true)
+        .into_iter()
+        .chain(host_windows_steam_roots())
+        .chain(notproton_steam_roots())
+        .chain(linux_steam_roots())
+        .chain(wine_prefix_steam_roots())
+    {
+        if !roots.contains(&root) {
+            roots.push(root);
+        }
+    }
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut libraries: Vec<std::path::PathBuf> = Vec::new();
+        for library in roots
+            .iter()
+            .flat_map(|root| get_steam_library_folders(root))
+            .chain(
+                settings
+                    .extra_steam_libraries
+                    .iter()
+                    .map(std::path::PathBuf::from),
+            )
+            .chain(libraries_on_mounted_volumes())
+        {
+            if !libraries.contains(&library) {
+                libraries.push(library);
+            }
+        }
+        let mut games = installed_games_among(&libraries, identifiers.clone());
+
+        // Games with a saved folder count too, whether the user picked it or
+        // we found it earlier (GOG, Epic, any store). A `game::mac` or
+        // `game::windows` key names the build; a plain key is read from the
+        // folder.
+        for (key, path) in &settings.game_paths {
+            let path = std::path::Path::new(path);
+            if !path.exists() {
+                continue;
+            }
+            let (id, platform) = match key.split_once("::") {
+                Some((id, platform)) => (id, Some(platform)),
+                None => (key.as_str(), None),
+            };
+            let Some(identifier) = identifiers.iter().find(|candidate| candidate.as_str() == id)
+            else {
+                continue;
+            };
+            let here = match platform {
+                Some("mac") => InstalledBuilds { mac: true, windows: false },
+                Some("windows") => InstalledBuilds { mac: false, windows: true },
+                _ => builds_in_folder(path),
+            };
+            match games.iter_mut().find(|game| &game.identifier == identifier) {
+                Some(game) => {
+                    game.builds.mac |= here.mac;
+                    game.builds.windows |= here.windows;
+                }
+                None => games.push(InstalledGame {
+                    identifier: identifier.clone(),
+                    builds: here,
+                }),
+            }
+        }
+        games
+    })
+    .await
+    .map_err(|err| err.to_string())
+}
+
 #[command]
 pub async fn get_game_source(
     app: AppHandle,
@@ -605,5 +920,38 @@ mod notproton_game_path_tests {
             Some(windows.to_string_lossy().to_string())
         );
         fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod installed_games_tests {
+    use super::installed_games_among;
+    use std::fs;
+
+    #[test]
+    fn installed_games_are_matched_by_folder_name_across_libraries() {
+        let root = std::env::temp_dir().join(format!("r2-installed-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let lib_a = root.join("a");
+        let lib_b = root.join("b");
+        for dir in ["Lethal Company", "Steamworks Shared"] {
+            fs::create_dir_all(lib_a.join("steamapps/common").join(dir)).unwrap();
+        }
+        fs::create_dir_all(lib_b.join("steamapps/common/Risk of Rain 2")).unwrap();
+        fs::create_dir_all(lib_a.join("steamapps/common/Lethal Company/Lethal Company.app"))
+            .unwrap();
+        fs::write(lib_b.join("steamapps/common/Risk of Rain 2/Risk of Rain 2.exe"), b"").unwrap();
+
+        let found = installed_games_among(
+            &[lib_a, lib_b, root.join("unplugged")],
+            ["lethal-company", "ror2", "risk-of-rain-2", "valheim", "go"]
+                .map(String::from)
+                .to_vec(),
+        );
+        let _ = fs::remove_dir_all(&root);
+        let ids: Vec<&str> = found.iter().map(|g| g.identifier.as_str()).collect();
+        assert_eq!(ids, vec!["lethal-company", "risk-of-rain-2"]);
+        assert!(found[0].builds.mac && !found[0].builds.windows);
+        assert!(!found[1].builds.mac && found[1].builds.windows);
     }
 }

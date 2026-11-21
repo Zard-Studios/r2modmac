@@ -5,6 +5,7 @@ import type { CommunityPlatformInfo } from '../../types/thunderstore';
 import { Button, HoverMarquee } from '../ui';
 import { Toggle } from '../ui/Toggle';
 import { PlatformPicker } from './PlatformPicker';
+import type { InstalledBuilds } from '../../types/electron';
 import { revealInFileManagerLabel, runningOnMacOS } from '../../utils/platformUtils';
 import { getProfileAvatarGradient, getProfileInitial } from '../../utils/profileAvatar';
 import { KeyboardShortcuts } from '../KeyboardShortcuts';
@@ -64,6 +65,17 @@ export function ProfileList({
     const profileMenuCloseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     // null = no pending import; string = code; { file: string } = file
     const [pendingImport, setPendingImport] = useState<string | { file: string } | null>(null);
+
+    // Builds of this game found on disk, used to tag the platform picker.
+    const [installedLookup, setInstalledLookup] = useState<{ game: string; builds?: InstalledBuilds }>();
+    const installedBuilds = installedLookup?.game === selectedGameIdentifier ? installedLookup.builds : undefined;
+    useEffect(() => {
+        let cancelled = false;
+        window.ipcRenderer.getInstalledGames([selectedGameIdentifier])
+            .then(games => { if (!cancelled) setInstalledLookup({ game: selectedGameIdentifier, builds: games[0] }); })
+            .catch(() => { /* the tag is a hint only */ });
+        return () => { cancelled = true; };
+    }, [selectedGameIdentifier]);
 
     useEffect(() => {
         const openRequestedAction = (event: Event) => {
@@ -621,6 +633,7 @@ export function ProfileList({
                                         <PlatformPicker
                                             value={selectedPlatform}
                                             onChange={setSelectedPlatform}
+                                            installed={installedBuilds}
                                         />
                                     </div>
                                 )}
@@ -752,6 +765,7 @@ export function ProfileList({
                                 <PlatformPicker
                                     value={selectedPlatform}
                                     onChange={setSelectedPlatform}
+                                    installed={installedBuilds}
                                 />
                             </div>
                             <div className="flex gap-3">

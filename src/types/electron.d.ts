@@ -4,6 +4,16 @@ import type { ConfigFileInfo } from '../tauriAdapter';
 import type { ProfileSyncInspection } from '../utils/profileSync';
 
 
+/** Which builds of a game are installed on this machine. */
+export interface InstalledBuilds {
+    mac: boolean;
+    windows: boolean;
+}
+
+export interface InstalledGame extends InstalledBuilds {
+    identifier: string;
+}
+
 export interface SteamLibraryStatus {
     path: string;
     mounted: boolean;
@@ -209,6 +219,7 @@ export interface IElectronAPI {
     getGamePath: (gameIdentifier: string, platform?: 'windows' | 'mac') => Promise<string | null>;
     getGameSource: (gameIdentifier: string, platform?: 'windows' | 'mac') => Promise<'steam' | 'manual' | 'unknown'>;
     setGamePath: (gameIdentifier: string, path: string, platform?: 'windows' | 'mac') => Promise<void>;
+    getInstalledGames: (identifiers: string[]) => Promise<InstalledGame[]>;
     getSteamSetupStatus: () => Promise<SteamSetupStatus>;
     openGameFolder: (gameIdentifier: string, platform?: 'windows' | 'mac') => Promise<void>;
     removeMod: (profileId: string, modName: string) => Promise<void>;

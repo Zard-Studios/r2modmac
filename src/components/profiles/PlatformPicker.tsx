@@ -1,6 +1,18 @@
+import type { InstalledBuilds } from '../../types/electron';
+
 interface PlatformPickerProps {
     value: 'windows' | 'mac';
     onChange: (platform: 'windows' | 'mac') => void;
+    /** Builds of the game found on this machine, to tag the matching option. */
+    installed?: InstalledBuilds;
+}
+
+function InstalledTag() {
+    return (
+        <span className="ml-1 rounded-full border border-emerald-400/30 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-emerald-300">
+            Installed
+        </span>
+    );
 }
 
 const WIN_ICON = (
@@ -16,7 +28,7 @@ const MAC_ICON = (
 );
 
 /** Unified platform toggle — Windows vs MacOS. Use wherever platform selection is needed. */
-export function PlatformPicker({ value, onChange }: PlatformPickerProps) {
+export function PlatformPicker({ value, onChange, installed }: PlatformPickerProps) {
     const base = 'flex items-center justify-center gap-2 p-3 rounded-xl border-2 transition-all font-medium text-sm';
     const active = 'bg-blue-500/20 border-blue-500 text-white';
     const inactive = 'bg-gray-900/50 border-gray-700 text-gray-400 hover:border-gray-500 hover:text-gray-200 hover:bg-gray-800/50';
@@ -32,6 +44,7 @@ export function PlatformPicker({ value, onChange }: PlatformPickerProps) {
                 >
                     {WIN_ICON}
                     Windows
+                    {installed?.windows && <InstalledTag />}
                 </button>
                 <button
                     type="button"
@@ -40,6 +53,7 @@ export function PlatformPicker({ value, onChange }: PlatformPickerProps) {
                 >
                     {MAC_ICON}
                     MacOS
+                    {installed?.mac && <InstalledTag />}
                 </button>
             </div>
         </div>

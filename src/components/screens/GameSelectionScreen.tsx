@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { GameSelector } from '../game/GameSelector';
 import { SearchClearButton } from '../ui/SearchClearButton';
 import type { CommunityPlatformInfo } from '../../types/thunderstore';
+import type { InstalledBuilds } from '../../types/electron';
 
 export interface GameSelectionScreenProps {
     communities: any[];
@@ -29,6 +30,7 @@ export function GameSelectionScreen({
     const [showWindowsGame, setShowWindowsGame] = useState(true);
     const [showMacGame, setShowMacGame] = useState(false);
     const [favoriteGames, setFavoriteGames] = useState<string[]>([]);
+    const [installedGames, setInstalledGames] = useState<Record<string, InstalledBuilds>>({});
     const currentYear = new Date().getFullYear();
 
     // Load favorites
@@ -39,6 +41,20 @@ export function GameSelectionScreen({
             }
         }).catch((err: any) => console.error('Failed to load favorites', err));
     }, []);
+
+    // Scan once per loaded game list. It depends on `communities`, not on the
+    // filtered list, so typing in the search box doesn't rescan.
+    useEffect(() => {
+        if (communities.length === 0) return;
+        let cancelled = false;
+        window.ipcRenderer.getInstalledGames(communities.map(c => c.identifier))
+            .then(games => {
+                if (cancelled) return;
+                setInstalledGames(Object.fromEntries(games.map(({ identifier, mac, windows }) => [identifier, { mac, windows }])));
+            })
+            .catch((err: any) => console.error('Failed to scan installed games', err));
+        return () => { cancelled = true; };
+    }, [communities]);
 
     const toggleFavorite = useCallback(async (identifier: string, e: React.MouseEvent) => {
         e.stopPropagation();
@@ -168,6 +184,7 @@ export function GameSelectionScreen({
                                 communityImages={communityImages}
                                 communityPlatforms={communityPlatforms}
                                 favoriteGames={favoriteGames}
+                                installedGames={installedGames}
                                 onToggleFavorite={toggleFavorite}
                                 searchQuery={searchQuery}
                             />
