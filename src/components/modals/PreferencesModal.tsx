@@ -361,7 +361,7 @@ export default function PreferencesModal({
                         <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-widest px-1">Updates</h3>
 
                         <div className="bg-gray-800 border border-gray-700 rounded-2xl overflow-hidden">
-                            <div className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-colors hover:bg-surface-hover">
+                            <div className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                                 <div className="flex items-center gap-4">
                                     <RowIcon kind="update" />
                                     <div>
@@ -396,7 +396,7 @@ export default function PreferencesModal({
                         <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-widest px-1">Startup</h3>
 
                         <div className="bg-gray-800 border border-gray-700 rounded-2xl divide-y divide-gray-700/50 overflow-hidden">
-                            <div id="preference-default-game" className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-surface-hover">
+                            <div id="preference-default-game" className="p-4 flex items-center justify-between gap-4">
                                 <div className="flex items-center gap-4">
                                     <RowIcon kind="game" />
                                     <div>
@@ -422,7 +422,7 @@ export default function PreferencesModal({
                             </div>
 
                             {defaultGame && (
-                                <div className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-surface-hover animate-[profile-update-action-enter_220ms_cubic-bezier(0.22,1,0.36,1)]">
+                                <div className="p-4 flex items-center justify-between gap-4 animate-[profile-update-action-enter_220ms_cubic-bezier(0.22,1,0.36,1)]">
                                     <div className="flex items-center gap-4">
                                         <RowIcon kind="profile" />
                                         <div>
@@ -457,7 +457,7 @@ export default function PreferencesModal({
                         <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-widest px-1">Installing mods</h3>
 
                         <div className="bg-gray-800 border border-gray-700 rounded-2xl divide-y divide-gray-700/50 overflow-hidden">
-                            <div id="preference-parallel-downloads" className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-surface-hover">
+                            <div id="preference-parallel-downloads" className="p-4 flex items-center justify-between gap-4">
                                 <div className="flex items-center gap-4">
                                     <RowIcon kind="parallel" />
                                     <div>
@@ -468,7 +468,7 @@ export default function PreferencesModal({
                                 <Toggle value={installInParallel} onChange={setInstallInParallel} />
                             </div>
 
-                            <div id="preference-ask-version" className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-surface-hover">
+                            <div id="preference-ask-version" className="p-4 flex items-center justify-between gap-4">
                                 <div className="flex items-center gap-4">
                                     <RowIcon kind="version" />
                                     <div>
@@ -479,7 +479,7 @@ export default function PreferencesModal({
                                 <Toggle value={askVersionBeforeInstall} onChange={setAskVersionBeforeInstall} />
                             </div>
 
-                            <div id="preference-manage-dependencies" className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-surface-hover">
+                            <div id="preference-manage-dependencies" className="p-4 flex items-center justify-between gap-4">
                                 <div className="flex items-center gap-4">
                                     <RowIcon kind="dependencies" />
                                     <div>
@@ -490,7 +490,7 @@ export default function PreferencesModal({
                                 <Toggle value={manageDependencies} onChange={setManageDependencies} />
                             </div>
 
-                            <div id="preference-confirm-apply" className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-surface-hover">
+                            <div id="preference-confirm-apply" className="p-4 flex items-center justify-between gap-4">
                                 <div className="flex items-center gap-4">
                                     <RowIcon kind="apply" />
                                     <div>
@@ -501,7 +501,7 @@ export default function PreferencesModal({
                                 <Toggle value={confirmBeforeApply} onChange={setConfirmBeforeApply} />
                             </div>
 
-                            <div id="preference-legacy-install" className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-surface-hover">
+                            <div id="preference-legacy-install" className="p-4 flex items-center justify-between gap-4">
                                 <div className="flex items-center gap-4">
                                     <RowIcon kind="install" />
                                     <div>
@@ -519,7 +519,7 @@ export default function PreferencesModal({
                         <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-widest px-1">Interface</h3>
 
                         <div className="bg-gray-800 border border-gray-700 rounded-2xl divide-y divide-gray-700/50 overflow-hidden">
-                            <div id="preference-theme" className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-surface-hover">
+                            <div id="preference-theme" className="p-4 flex items-center justify-between gap-4">
                                 <div className="flex items-center gap-4">
                                     <RowIcon kind="theme" />
                                     <div>
@@ -541,7 +541,7 @@ export default function PreferencesModal({
                                 </div>
                             </div>
 
-                            <div id="preference-default-view" className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-surface-hover">
+                            <div id="preference-default-view" className="p-4 flex items-center justify-between gap-4">
                                 <div className="flex items-center gap-4">
                                     <RowIcon kind="layout" />
                                     <div>
@@ -577,7 +577,7 @@ export default function PreferencesModal({
                                 </div>
                             </div>
 
-                            <div id="preference-keybinds" className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-surface-hover">
+                            <div id="preference-keybinds" className="p-4 flex items-center justify-between gap-4">
                                 <div className="flex items-center gap-4">
                                     <RowIcon kind="keyboard" />
                                     <div>
@@ -605,7 +605,7 @@ export default function PreferencesModal({
                         <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-widest px-1">Guides & Alerts</h3>
 
                         <div className="bg-gray-800 border border-gray-700 rounded-2xl divide-y divide-gray-700/50 overflow-hidden">
-                            <div id="preference-deprecated-warnings" className="flex items-center justify-between gap-4 p-4 transition-colors hover:bg-surface-hover">
+                            <div id="preference-deprecated-warnings" className="flex items-center justify-between gap-4 p-4">
                                 <div className="flex items-center gap-4">
                                     <button type="button" onClick={handleDeprecatedWarningClick} className="shrink-0 select-none" aria-label="Deprecated mod warnings">
                                         <RowIcon kind="warning" />
@@ -618,7 +618,7 @@ export default function PreferencesModal({
                                 <Toggle value={showDeprecatedWarnings} onChange={setShowDeprecatedWarnings} label="Show deprecated mod warnings" />
                             </div>
 
-                            <div id="preference-restore-warnings" className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-colors hover:bg-surface-hover">
+                            <div id="preference-restore-warnings" className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                                 <div className="flex items-center gap-4">
                                     <RowIcon kind="restore" />
                                     <div>
@@ -654,7 +654,7 @@ export default function PreferencesModal({
                         <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-widest px-1">Privacy</h3>
 
                         <div className="bg-gray-800 border border-gray-700 rounded-2xl divide-y divide-gray-700/50 overflow-hidden">
-                            <div id="preference-stream-mode" className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-surface-hover">
+                            <div id="preference-stream-mode" className="p-4 flex items-center justify-between gap-4">
                                 <div className="flex items-center gap-4">
                                     <RowIcon kind="stream" />
                                     <div>
@@ -704,7 +704,7 @@ export default function PreferencesModal({
                                 >
                                     <div className="min-h-0 overflow-hidden">
                                         <div className="divide-y divide-gray-700/50 border-t border-gray-700/50">
-                                            <div className="flex items-center justify-between gap-4 p-4 pl-8 transition-colors hover:bg-surface-hover">
+                                            <div className="flex items-center justify-between gap-4 p-4 pl-8">
                                                 <div className="flex items-center gap-4">
                                                     <RowIcon kind="debug" />
                                                     <div>
@@ -715,7 +715,7 @@ export default function PreferencesModal({
                                                 <Toggle value={writeDebugLogsToGame} onChange={changeDebugLogs} />
                                             </div>
 
-                                            <div id="preference-verbose-logs" className="flex items-center justify-between gap-4 p-4 pl-8 transition-colors hover:bg-surface-hover">
+                                            <div id="preference-verbose-logs" className="flex items-center justify-between gap-4 p-4 pl-8">
                                                 <div className="flex items-center gap-4">
                                                     <RowIcon kind="verbose" />
                                                     <div>
@@ -726,7 +726,7 @@ export default function PreferencesModal({
                                                 <Toggle value={verboseLogging} onChange={changeVerboseLogging} />
                                             </div>
 
-                                            <div id="preference-open-logs" className="flex items-center justify-between gap-4 p-4 pl-8 transition-colors hover:bg-surface-hover">
+                                            <div id="preference-open-logs" className="flex items-center justify-between gap-4 p-4 pl-8">
                                                 <div className="flex items-center gap-4">
                                                     <RowIcon kind="folder" />
                                                     <div>
