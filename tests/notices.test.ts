@@ -116,7 +116,7 @@ test('opening the bell looks again after a short wait, not the long one', async 
     const fetcher = async () => (calls++, calls === 1 ? [] : [notice(63)]);
 
     await refreshNotices(storage, fetcher, 1_000_000);
-    const tooSoon = await refreshNotices(storage, fetcher, 1_000_000 + 60_000, NOTICE_OPEN_INTERVAL_MS);
+    const tooSoon = await refreshNotices(storage, fetcher, 1_000_000 + 30_000, NOTICE_OPEN_INTERVAL_MS);
     const later = await refreshNotices(storage, fetcher, 1_000_000 + NOTICE_OPEN_INTERVAL_MS, NOTICE_OPEN_INTERVAL_MS);
 
     assert.deepEqual(tooSoon, []);

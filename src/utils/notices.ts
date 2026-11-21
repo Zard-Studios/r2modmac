@@ -13,11 +13,14 @@ const SEEN_KEY = 'r2modmac:noticesSeen';
 const CHECKED_KEY = 'r2modmac:noticesChecked';
 const OFF_KEY = 'r2modmac:noticesOff';
 
-/** One request every few hours at most, however often the app is opened. */
-export const NOTICE_CHECK_INTERVAL_MS = 3 * 60 * 60 * 1000;
+/**
+ * How often the app asks GitHub while it is open, however often it is started.
+ * GitHub's API keeps its answer for a minute, so asking more often is pointless.
+ */
+export const NOTICE_CHECK_INTERVAL_MS = 5 * 60 * 1000;
 
-/** Opening the bell looks again sooner, but never more than this often. */
-export const NOTICE_OPEN_INTERVAL_MS = 2 * 60 * 1000;
+/** The bell opening, or the window coming back to the front, looks sooner. */
+export const NOTICE_OPEN_INTERVAL_MS = 60 * 1000;
 
 /** Notices link to their own issue and nowhere else. */
 const ISSUE_URL_PREFIX = 'https://github.com/Zard-Studios/r2modmac/issues/';

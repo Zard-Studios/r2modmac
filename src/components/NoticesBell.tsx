@@ -4,6 +4,7 @@ import type { Notice } from '../types/electron';
 import {
     cachedNotices,
     markNoticeSeen,
+    NOTICE_CHECK_INTERVAL_MS,
     NOTICE_OPEN_INTERVAL_MS,
     noticesEnabled,
     refreshNotices,
@@ -55,22 +56,31 @@ export function NoticesBell() {
 
     useEffect(() => {
         let cancelled = false;
-        const load = async () => {
+        const check = async (interval: number) => {
             const current = storage();
             if (!current) return;
-            const shown = await refreshNotices(current, () => window.ipcRenderer.fetchNotices());
+            const shown = await refreshNotices(current, () => window.ipcRenderer.fetchNotices(), Date.now(), interval);
             if (cancelled) return;
             setNotices(shown);
             setVersion((value) => value + 1);
         };
-        void load();
-        const onSetting = () => void load();
-        window.addEventListener(NOTICES_SETTING_EVENT, onSetting);
+        // Opening the bell, and this effect running again because of it,
+        // looks right away; the switch in Preferences does too.
+        void check(open ? NOTICE_OPEN_INTERVAL_MS : NOTICE_CHECK_INTERVAL_MS);
+        const timer = window.setInterval(
+            () => void check(open ? NOTICE_OPEN_INTERVAL_MS : NOTICE_CHECK_INTERVAL_MS),
+            open ? NOTICE_OPEN_INTERVAL_MS : NOTICE_CHECK_INTERVAL_MS,
+        );
+        const onWake = () => void check(NOTICE_OPEN_INTERVAL_MS);
+        window.addEventListener(NOTICES_SETTING_EVENT, onWake);
+        window.addEventListener('focus', onWake);
         return () => {
             cancelled = true;
-            window.removeEventListener(NOTICES_SETTING_EVENT, onSetting);
+            window.clearInterval(timer);
+            window.removeEventListener(NOTICES_SETTING_EVENT, onWake);
+            window.removeEventListener('focus', onWake);
         };
-    }, []);
+    }, [open]);
 
     useEffect(() => {
         if (!open) return;
@@ -89,13 +99,6 @@ export function NoticesBell() {
     const openPanel = () => {
         setSelectedId(null);
         setOpen(true);
-        // Whoever opens the bell wants the latest, so look again if the last
-        // check is a couple of minutes old, without waiting for the long interval.
-        if (!store) return;
-        void refreshNotices(store, () => window.ipcRenderer.fetchNotices(), Date.now(), NOTICE_OPEN_INTERVAL_MS).then((shown) => {
-            setNotices(shown);
-            setVersion((value) => value + 1);
-        });
     };
 
     const closePanel = () => {
