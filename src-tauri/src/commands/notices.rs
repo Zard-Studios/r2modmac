@@ -15,7 +15,7 @@ const MAINTAINER_LOGIN: &str = "Zard-Studios";
 const NOTICE_LABEL: &str = "notice";
 const ISSUE_URL_PREFIX: &str = "https://github.com/Zard-Studios/r2modmac/issues/";
 const MAX_TITLE_CHARS: usize = 200;
-const MAX_BODY_CHARS: usize = 4000;
+const MAX_BODY_CHARS: usize = 20000;
 
 #[derive(Debug, Serialize, PartialEq)]
 pub struct Notice {
@@ -175,7 +175,7 @@ mod tests {
 
     #[test]
     fn long_text_is_cut() {
-        let item = issue("Zard-Studios", "notice", "").replace("Details", &"a".repeat(9000));
+        let item = issue("Zard-Studios", "notice", "").replace("Details", &"a".repeat(30000));
         let notices = parse_notices(&list(&[item])).unwrap();
 
         assert_eq!(notices[0].body.chars().count(), MAX_BODY_CHARS);

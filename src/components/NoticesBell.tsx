@@ -1,14 +1,18 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Bell, X } from 'lucide-react';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
+import { ArrowLeft, Bell, ChevronRight, X } from 'lucide-react';
 import type { Notice } from '../types/electron';
 import {
     cachedNotices,
-    markNoticesSeen,
+    markNoticeSeen,
     NOTICE_OPEN_INTERVAL_MS,
     noticesEnabled,
     refreshNotices,
+    seenNoticeIds,
     unreadCount,
 } from '../utils/notices';
+
+// The markdown code is only fetched when an announcement is opened.
+const NoticeBody = lazy(() => import('./NoticeBody').then((module) => ({ default: module.NoticeBody })));
 
 /** Preferences fires this when the announcements switch changes. */
 export const NOTICES_SETTING_EVENT = 'r2modmac:notices-setting';
@@ -27,9 +31,10 @@ function formatDate(iso: string): string {
 }
 
 /**
- * The bell on the home screen. Notices are messages from the maintainer; the
- * "From Zard Studios" label is written here, not taken from the notice, and
- * the backend only passes on issues opened by the maintainer's own account.
+ * The bell on the home screen. It lists the titles of the maintainer's
+ * announcements; opening one shows its text. The "From Zard Studios" label is
+ * written here, not taken from the announcement, and the backend only passes
+ * on issues opened by the maintainer's own account.
  */
 export function NoticesBell() {
     // `version` changes whenever the switch or the read list does, so the
@@ -40,10 +45,13 @@ export function NoticesBell() {
         return store && noticesEnabled(store) ? cachedNotices(store) : [];
     });
     const [open, setOpen] = useState(false);
+    const [selectedId, setSelectedId] = useState<number | null>(null);
 
     const store = storage();
     const enabled = useMemo(() => (store ? noticesEnabled(store) : true), [store, version]);
     const unread = useMemo(() => (store ? unreadCount(notices, store) : 0), [store, notices, version]);
+    const seen = useMemo(() => (store ? seenNoticeIds(store) : new Set<number>()), [store, version]);
+    const selected = notices.find((notice) => notice.id === selectedId) ?? null;
 
     useEffect(() => {
         let cancelled = false;
@@ -67,26 +75,38 @@ export function NoticesBell() {
     useEffect(() => {
         if (!open) return;
         const onKey = (event: KeyboardEvent) => {
-            if (event.key === 'Escape') setOpen(false);
+            if (event.key !== 'Escape') return;
+            // One step back: from an announcement to the list, then out.
+            if (selectedId !== null) setSelectedId(null);
+            else setOpen(false);
         };
         window.addEventListener('keydown', onKey);
         return () => window.removeEventListener('keydown', onKey);
-    }, [open]);
+    }, [open, selectedId]);
 
     if (!enabled) return null;
 
     const openPanel = () => {
-        if (store) markNoticesSeen(notices, store);
-        setVersion((value) => value + 1);
+        setSelectedId(null);
         setOpen(true);
         // Whoever opens the bell wants the latest, so look again if the last
-        // check is a few minutes old, without waiting for the long interval.
+        // check is a couple of minutes old, without waiting for the long interval.
         if (!store) return;
         void refreshNotices(store, () => window.ipcRenderer.fetchNotices(), Date.now(), NOTICE_OPEN_INTERVAL_MS).then((shown) => {
-            markNoticesSeen(shown, store);
             setNotices(shown);
             setVersion((value) => value + 1);
         });
+    };
+
+    const closePanel = () => {
+        setOpen(false);
+        setSelectedId(null);
+    };
+
+    const openNotice = (notice: Notice) => {
+        if (store) markNoticeSeen(notice, store);
+        setVersion((value) => value + 1);
+        setSelectedId(notice.id);
     };
 
     const openIssue = (url: string) => {
@@ -111,19 +131,31 @@ export function NoticesBell() {
             {open && (
                 <div
                     className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-6"
-                    onClick={() => setOpen(false)}
+                    onClick={closePanel}
                 >
                     <div
                         role="dialog"
                         aria-label="Announcements"
-                        className="flex max-h-[80vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-gray-700 bg-gray-800 shadow-2xl"
+                        className="flex max-h-[80vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-gray-700 bg-gray-800 shadow-2xl"
                         onClick={(event) => event.stopPropagation()}
                     >
-                        <div className="flex items-center justify-between gap-4 border-b border-gray-700/60 px-5 py-4">
-                            <h2 className="text-lg font-semibold text-white">Announcements</h2>
+                        <div className="flex items-center justify-between gap-3 border-b border-gray-700/60 px-5 py-4">
+                            <div className="flex min-w-0 items-center gap-2">
+                                {selected && (
+                                    <button
+                                        type="button"
+                                        onClick={() => setSelectedId(null)}
+                                        className="-ml-1.5 rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-gray-700 hover:text-white"
+                                        aria-label="Back to the list"
+                                    >
+                                        <ArrowLeft className="h-5 w-5" aria-hidden="true" />
+                                    </button>
+                                )}
+                                <h2 className="text-lg font-semibold text-white">Announcements</h2>
+                            </div>
                             <button
                                 type="button"
-                                onClick={() => setOpen(false)}
+                                onClick={closePanel}
                                 className="rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-gray-700 hover:text-white"
                                 aria-label="Close"
                             >
@@ -132,35 +164,66 @@ export function NoticesBell() {
                         </div>
 
                         <div className="overflow-y-auto">
-                            {notices.length === 0 ? (
-                                <p className="px-5 py-10 text-center text-sm text-gray-400">
-                                    Nothing new :)
-                                </p>
+                            {selected ? (
+                                <article className="px-5 py-5">
+                                    <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-500">
+                                        From Zard Studios
+                                        {formatDate(selected.created_at) && ` · ${formatDate(selected.created_at)}`}
+                                    </p>
+                                    <h3 className="mt-1.5 text-xl font-semibold leading-snug text-white">{selected.title}</h3>
+                                    <div className="mt-4">
+                                        {selected.body ? (
+                                            <Suspense fallback={null}>
+                                                <NoticeBody markdown={selected.body} />
+                                            </Suspense>
+                                        ) : (
+                                            <p className="text-sm text-gray-400">No more details.</p>
+                                        )}
+                                    </div>
+                                    {selected.url && (
+                                        <button
+                                            type="button"
+                                            onClick={() => openIssue(selected.url as string)}
+                                            className="mt-5 text-[13px] font-medium text-blue-400 transition-colors hover:text-blue-300"
+                                        >
+                                            Open on GitHub
+                                        </button>
+                                    )}
+                                </article>
+                            ) : notices.length === 0 ? (
+                                <p className="px-5 py-10 text-center text-sm text-gray-400">Nothing new :)</p>
                             ) : (
                                 <ul className="divide-y divide-gray-700/50">
-                                    {notices.map((notice) => (
-                                        <li key={notice.id} className="px-5 py-4">
-                                            <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-500">
-                                                From Zard Studios
-                                                {formatDate(notice.created_at) && ` · ${formatDate(notice.created_at)}`}
-                                            </p>
-                                            <h3 className="mt-1 text-[15px] font-medium text-white">{notice.title}</h3>
-                                            {notice.body && (
-                                                <p className="mt-2 whitespace-pre-wrap break-words text-[13px] leading-relaxed text-gray-300">
-                                                    {notice.body}
-                                                </p>
-                                            )}
-                                            {notice.url && (
+                                    {notices.map((notice) => {
+                                        const isUnread = !seen.has(notice.id);
+                                        return (
+                                            <li key={notice.id}>
                                                 <button
                                                     type="button"
-                                                    onClick={() => openIssue(notice.url as string)}
-                                                    className="mt-3 text-[13px] font-medium text-blue-400 transition-colors hover:text-blue-300"
+                                                    onClick={() => openNotice(notice)}
+                                                    className="flex w-full items-center gap-3 px-5 py-4 text-left transition-colors hover:bg-gray-700/40"
                                                 >
-                                                    Open on GitHub
+                                                    <span
+                                                        className={`h-2 w-2 flex-none rounded-full ${isUnread ? 'bg-white' : 'bg-transparent'}`}
+                                                        aria-label={isUnread ? 'New' : undefined}
+                                                    />
+                                                    <span className="min-w-0 flex-1">
+                                                        <span
+                                                            className={`line-clamp-2 block text-[15px] font-medium leading-snug ${isUnread ? 'text-white' : 'text-gray-300'}`}
+                                                        >
+                                                            {notice.title}
+                                                        </span>
+                                                        {formatDate(notice.created_at) && (
+                                                            <span className="mt-0.5 block text-xs text-gray-500">
+                                                                {formatDate(notice.created_at)}
+                                                            </span>
+                                                        )}
+                                                    </span>
+                                                    <ChevronRight className="h-4 w-4 flex-none text-gray-500" aria-hidden="true" />
                                                 </button>
-                                            )}
-                                        </li>
-                                    ))}
+                                            </li>
+                                        );
+                                    })}
                                 </ul>
                             )}
                         </div>

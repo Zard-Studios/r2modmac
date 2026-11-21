@@ -78,13 +78,20 @@ export function cachedNotices(storage: NoticeStorage): Notice[] {
     return sanitize(parseList(read(storage, CACHE_KEY)));
 }
 
+export function seenNoticeIds(storage: NoticeStorage): Set<number> {
+    return new Set(parseList(read(storage, SEEN_KEY)).filter((id): id is number => typeof id === 'number'));
+}
+
 export function unreadCount(notices: Notice[], storage: NoticeStorage): number {
-    const seen = new Set(parseList(read(storage, SEEN_KEY)));
+    const seen = seenNoticeIds(storage);
     return notices.filter((notice) => !seen.has(notice.id)).length;
 }
 
-export function markNoticesSeen(notices: Notice[], storage: NoticeStorage): void {
-    write(storage, SEEN_KEY, JSON.stringify(notices.map((notice) => notice.id)));
+/** An announcement counts as read once its text has been opened. */
+export function markNoticeSeen(notice: Notice, storage: NoticeStorage): void {
+    const seen = [...seenNoticeIds(storage), notice.id];
+    // Old announcements get closed on GitHub, so the list needs no more room.
+    write(storage, SEEN_KEY, JSON.stringify([...new Set(seen)].slice(-200)));
 }
 
 function checkIsDue(storage: NoticeStorage, now: number, interval: number): boolean {
