@@ -57,27 +57,78 @@ fn find_game_in_steam_roots(
     find_game_in_libraries(&libraries, game_identifier, accept)
 }
 
+/// How well a `steamapps/common` folder fits a game.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum FolderMatch {
+    /// The same name, ignoring case, spaces and punctuation.
+    Exact,
+    /// One name sits inside the other and they are mostly the same text,
+    /// like "Lethal Company" and "Lethal Company Beta".
+    Partial,
+}
+
+/// Compare two names already reduced by [`normalize_for_matching`].
+///
+/// A name merely containing another is not enough. "gladiomori" contains
+/// "omori" and "superhotminddelete..." contains "control", and treating those
+/// as the same game launched Omori for Gladio Mori and Control for Superhot.
+/// So the shorter name must also make up most of the longer one.
+fn folder_match_normalized(folder: &str, id: &str) -> Option<FolderMatch> {
+    if folder.is_empty() || id.is_empty() {
+        return None;
+    }
+    if folder == id {
+        return Some(FolderMatch::Exact);
+    }
+    let (short, long) = if folder.chars().count() <= id.chars().count() {
+        (folder, id)
+    } else {
+        (id, folder)
+    };
+    let mostly_the_same = short.chars().count() * 5 >= long.chars().count() * 3;
+    (mostly_the_same && long.contains(short)).then_some(FolderMatch::Partial)
+}
+
+/// A saved folder that only fits the game because the matching used to be
+/// too loose. Such a path was picked by mistake, not by the user, and must not
+/// keep being used just because it was saved.
+fn is_leftover_of_loose_matching(game_identifier: &str, path: &std::path::Path) -> bool {
+    let Some(folder) = path.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    let folder = normalize_for_matching(folder);
+    let id = normalize_for_matching(game_identifier);
+    if folder.is_empty() || id.is_empty() || folder == id {
+        return false;
+    }
+    (folder.contains(&id) || id.contains(&folder))
+        && folder_match_normalized(&folder, &id).is_none()
+}
+
 /// [`find_game_in_steam_roots`] for library folders already known.
+///
+/// Folders named exactly like the game are looked at in every library before
+/// any approximate match is considered, so a close name in an earlier library
+/// never wins over the right folder in a later one.
 fn find_game_in_libraries(
     libraries: &[std::path::PathBuf],
     game_identifier: &str,
     accept: impl Fn(&std::path::Path) -> bool,
 ) -> Option<String> {
     let normalized_id = normalize_for_matching(game_identifier);
-    for lib_folder in libraries {
-        let common_path = lib_folder.join("steamapps").join("common");
-        let Ok(entries) = fs::read_dir(&common_path) else {
-            continue;
-        };
-        for entry in entries.filter_map(|e| e.ok()) {
-            let folder_name = entry.file_name().to_string_lossy().to_string();
-            let normalized_folder = normalize_for_matching(&folder_name);
+    for wanted in [FolderMatch::Exact, FolderMatch::Partial] {
+        for lib_folder in libraries {
+            let common_path = lib_folder.join("steamapps").join("common");
+            let Ok(entries) = fs::read_dir(&common_path) else {
+                continue;
+            };
+            for entry in entries.filter_map(|e| e.ok()) {
+                let folder_name = entry.file_name().to_string_lossy().to_string();
+                let normalized_folder = normalize_for_matching(&folder_name);
+                if folder_match_normalized(&normalized_folder, &normalized_id) != Some(wanted) {
+                    continue;
+                }
 
-            // Check for match (exact or high similarity)
-            if normalized_folder == normalized_id
-                || normalized_folder.contains(&normalized_id)
-                || normalized_id.contains(&normalized_folder)
-            {
                 let game_path = resolve_game_runtime_path(game_identifier, &entry.path());
                 if !accept(&game_path) {
                     continue;
@@ -114,6 +165,14 @@ pub async fn get_game_path(
         if let Some(path) = settings.game_paths.get(&key) {
             let path_obj = std::path::Path::new(path);
             if !path_obj.exists() {
+                continue;
+            }
+            if is_leftover_of_loose_matching(&game_identifier, path_obj) {
+                log::info!(
+                    "[get_game_path] Ignoring the saved folder for {}: it was matched by mistake ({})",
+                    game_identifier,
+                    path
+                );
                 continue;
             }
             if platform.is_some()
@@ -358,21 +417,6 @@ pub async fn get_steam_setup_status(app: AppHandle) -> Result<SteamSetupStatus, 
     })
 }
 
-/// Does a `steamapps/common` folder belong to this game? Same rule as
-/// `find_game_in_libraries`, but a partial match (one name inside the other)
-/// needs at least 5 characters, so a short folder name can't claim a game.
-fn folder_matches_game(normalized_folder: &str, normalized_id: &str) -> bool {
-    if normalized_folder.is_empty() || normalized_id.is_empty() {
-        return false;
-    }
-    if normalized_folder == normalized_id {
-        return true;
-    }
-    normalized_folder.len().min(normalized_id.len()) >= 5
-        && (normalized_folder.contains(normalized_id)
-            || normalized_id.contains(normalized_folder))
-}
-
 /// Which builds of a game are installed. Both can be true when the game sits
 /// in two libraries, one per OS.
 #[derive(serde::Serialize, Clone, Copy, Default, PartialEq, Eq, Debug)]
@@ -437,7 +481,7 @@ fn installed_games_among(
             let mut builds = InstalledBuilds::default();
             let mut found = false;
             for (name, path) in &folders {
-                if !folder_matches_game(name, &normalized) {
+                if folder_match_normalized(name, &normalized).is_none() {
                     continue;
                 }
                 found = true;
@@ -647,13 +691,21 @@ pub async fn get_installed_games(
                 Some((id, platform)) => (id, Some(platform)),
                 None => (key.as_str(), None),
             };
-            let Some(identifier) = identifiers.iter().find(|candidate| candidate.as_str() == id)
+            let Some(identifier) = identifiers
+                .iter()
+                .find(|candidate| candidate.as_str() == id)
             else {
                 continue;
             };
             let here = match platform {
-                Some("mac") => InstalledBuilds { mac: true, windows: false },
-                Some("windows") => InstalledBuilds { mac: false, windows: true },
+                Some("mac") => InstalledBuilds {
+                    mac: true,
+                    windows: false,
+                },
+                Some("windows") => InstalledBuilds {
+                    mac: false,
+                    windows: true,
+                },
                 _ => builds_in_folder(path),
             };
             match games.iter_mut().find(|game| &game.identifier == identifier) {
@@ -943,7 +995,11 @@ mod installed_games_tests {
         fs::create_dir_all(lib_b.join("steamapps/common/Risk of Rain 2")).unwrap();
         fs::create_dir_all(lib_a.join("steamapps/common/Lethal Company/Lethal Company.app"))
             .unwrap();
-        fs::write(lib_b.join("steamapps/common/Risk of Rain 2/Risk of Rain 2.exe"), b"").unwrap();
+        fs::write(
+            lib_b.join("steamapps/common/Risk of Rain 2/Risk of Rain 2.exe"),
+            b"",
+        )
+        .unwrap();
 
         let found = installed_games_among(
             &[lib_a, lib_b, root.join("unplugged")],
@@ -956,5 +1012,146 @@ mod installed_games_tests {
         assert_eq!(ids, vec!["lethal-company", "risk-of-rain-2"]);
         assert!(found[0].builds.mac && !found[0].builds.windows);
         assert!(!found[1].builds.mac && found[1].builds.windows);
+    }
+}
+
+#[cfg(test)]
+mod game_folder_matching_tests {
+    use super::find_game_in_libraries;
+    use std::fs;
+    use std::path::PathBuf;
+
+    /// A Steam library holding the named folders under `steamapps/common`.
+    fn library(label: &str, folders: &[&str]) -> PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "r2modmac-folder-match-{}-{}-{}",
+            label,
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        for folder in folders {
+            fs::create_dir_all(root.join("steamapps/common").join(folder)).unwrap();
+        }
+        root
+    }
+
+    fn found(libraries: &[PathBuf], identifier: &str) -> Option<String> {
+        find_game_in_libraries(libraries, identifier, |_| true).map(|path| {
+            PathBuf::from(path)
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()
+        })
+    }
+
+    #[test]
+    fn a_game_is_not_taken_for_another_whose_name_is_inside_its_own() {
+        // Gladio Mori and Omori: "gladiomori" contains "omori". Likewise
+        // "superhotminddelete..." contains "control".
+        let libraries = [library("inside", &["OMORI", "Control"])];
+
+        assert_eq!(found(&libraries, "gladio-mori"), None);
+        assert_eq!(found(&libraries, "superhot-mind-control-delete"), None);
+    }
+
+    #[test]
+    fn an_exact_folder_wins_over_one_that_comes_first_in_the_listing() {
+        let libraries = [library("exact", &["OMORI", "Gladio Mori"])];
+
+        assert_eq!(
+            found(&libraries, "gladio-mori").as_deref(),
+            Some("Gladio Mori")
+        );
+        assert_eq!(found(&libraries, "omori").as_deref(), Some("OMORI"));
+    }
+
+    #[test]
+    fn an_exact_folder_in_a_later_library_beats_a_loose_one_in_an_earlier_one() {
+        let libraries = [
+            library("first", &["Lethal Company Demo"]),
+            library("second", &["Lethal Company"]),
+        ];
+
+        assert_eq!(
+            found(&libraries, "lethal-company").as_deref(),
+            Some("Lethal Company")
+        );
+    }
+
+    #[test]
+    fn names_that_differ_only_in_spelling_still_match() {
+        let libraries = [library(
+            "spelling",
+            &[
+                "Risk of Rain 2",
+                "Hollow Knight Silksong",
+                "20 Minutes Till Dawn",
+            ],
+        )];
+
+        assert_eq!(
+            found(&libraries, "riskofrain2").as_deref(),
+            Some("Risk of Rain 2")
+        );
+        assert_eq!(
+            found(&libraries, "hollow-knight-silksong").as_deref(),
+            Some("Hollow Knight Silksong")
+        );
+        assert_eq!(
+            found(&libraries, "20-minutes-till-dawn").as_deref(),
+            Some("20 Minutes Till Dawn")
+        );
+    }
+
+    #[test]
+    fn a_folder_saved_by_the_old_loose_matching_is_recognised_as_a_mistake() {
+        use super::is_leftover_of_loose_matching as leftover;
+        use std::path::Path;
+
+        // Saved by mistake in the past.
+        assert!(leftover(
+            "gladio-mori",
+            Path::new("/steam/steamapps/common/OMORI")
+        ));
+        assert!(leftover(
+            "superhot-mind-control-delete",
+            Path::new("/steam/steamapps/common/Control")
+        ));
+        // The right folder, or a folder the user chose with an unrelated name.
+        assert!(!leftover(
+            "gladio-mori",
+            Path::new("/steam/steamapps/common/Gladio Mori")
+        ));
+        assert!(!leftover(
+            "lethal-company",
+            Path::new("/steam/steamapps/common/Lethal Company Beta")
+        ));
+        assert!(!leftover(
+            "tcg-card-shop-simulator",
+            Path::new("/Users/me/Downloads/bbb")
+        ));
+        assert!(!leftover(
+            "hades-ii",
+            Path::new("/steam/steamapps/common/Hades II/Ship")
+        ));
+        assert!(!leftover(
+            "rv-there-yet",
+            Path::new("/steam/steamapps/common/Ride")
+        ));
+    }
+
+    #[test]
+    fn a_sequel_or_edition_is_not_the_original() {
+        let libraries = [library(
+            "sequels",
+            &["Subnautica Below Zero", "Valheim Dedicated Server"],
+        )];
+
+        assert_eq!(found(&libraries, "subnautica"), None);
+        assert_eq!(found(&libraries, "valheim"), None);
     }
 }
