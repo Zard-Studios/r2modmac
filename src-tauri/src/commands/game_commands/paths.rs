@@ -783,6 +783,54 @@ fn wine_prefix_steam_roots() -> Vec<std::path::PathBuf> {
     roots
 }
 
+/// What the saved game folders say about which games are installed.
+struct SavedFolders {
+    /// Games with a saved folder that exists, and which build it holds.
+    games: Vec<(String, InstalledBuilds)>,
+    /// Saved folders that only fit their game under the old, looser matching.
+    /// Gladio Mori saved as Omori's folder is the case that was reported.
+    mistaken_keys: Vec<String>,
+}
+
+/// Read `game_paths` from the settings. A `game::mac` or `game::windows` key
+/// names the build; a plain key is read from the folder.
+fn saved_game_folders(
+    game_paths: &std::collections::BTreeMap<String, String>,
+    identifiers: &[String],
+) -> SavedFolders {
+    let mut saved = SavedFolders {
+        games: Vec::new(),
+        mistaken_keys: Vec::new(),
+    };
+    for (key, path) in game_paths {
+        let (id, platform) = match key.split_once("::") {
+            Some((id, platform)) => (id, Some(platform)),
+            None => (key.as_str(), None),
+        };
+        let path = std::path::Path::new(path);
+        if is_leftover_of_loose_matching(id, path) {
+            saved.mistaken_keys.push(key.clone());
+            continue;
+        }
+        if !path.exists() || !identifiers.iter().any(|candidate| candidate == id) {
+            continue;
+        }
+        let here = match platform {
+            Some("mac") => InstalledBuilds {
+                mac: true,
+                windows: false,
+            },
+            Some("windows") => InstalledBuilds {
+                mac: false,
+                windows: true,
+            },
+            _ => builds_in_folder(path),
+        };
+        saved.games.push((id.to_string(), here));
+    }
+    saved
+}
+
 /// Which of these games are installed on this machine, and as which build.
 /// It lists each library's `steamapps/common` and looks inside only the
 /// folders that match a game, so the cost doesn't grow with library size.
@@ -805,6 +853,7 @@ pub async fn get_installed_games(
         }
     }
 
+    let app_for_cleanup = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mut libraries: Vec<std::path::PathBuf> = Vec::new();
         for library in roots
@@ -825,42 +874,24 @@ pub async fn get_installed_games(
         let mut games = installed_games_among(&libraries, identifiers.clone());
 
         // Games with a saved folder count too, whether the user picked it or
-        // we found it earlier (GOG, Epic, any store). A `game::mac` or
-        // `game::windows` key names the build; a plain key is read from the
-        // folder.
-        for (key, path) in &settings.game_paths {
-            let path = std::path::Path::new(path);
-            if !path.exists() {
-                continue;
-            }
-            let (id, platform) = match key.split_once("::") {
-                Some((id, platform)) => (id, Some(platform)),
-                None => (key.as_str(), None),
-            };
-            let Some(identifier) = identifiers
-                .iter()
-                .find(|candidate| candidate.as_str() == id)
-            else {
-                continue;
-            };
-            let here = match platform {
-                Some("mac") => InstalledBuilds {
-                    mac: true,
-                    windows: false,
-                },
-                Some("windows") => InstalledBuilds {
-                    mac: false,
-                    windows: true,
-                },
-                _ => builds_in_folder(path),
-            };
-            match games.iter_mut().find(|game| &game.identifier == identifier) {
+        // we found it earlier (GOG, Epic, any store). Folders the old, looser
+        // matching saved by mistake do not, and are dropped from the settings.
+        let saved = saved_game_folders(&settings.game_paths, &identifiers);
+        if !saved.mistaken_keys.is_empty() {
+            let _ = update_settings_impl(&app_for_cleanup, |current| {
+                for key in &saved.mistaken_keys {
+                    current.game_paths.remove(key);
+                }
+            });
+        }
+        for (identifier, here) in saved.games {
+            match games.iter_mut().find(|game| game.identifier == identifier) {
                 Some(game) => {
                     game.builds.mac |= here.mac;
                     game.builds.windows |= here.windows;
                 }
                 None => games.push(InstalledGame {
-                    identifier: identifier.clone(),
+                    identifier,
                     builds: here,
                 }),
             }
@@ -1430,5 +1461,80 @@ mod bottle_library_listing_tests {
         );
         // E: leads nowhere from here: written the way a person would.
         assert_eq!(listed[2], PathBuf::from("E:\\Elsewhere\\Games"));
+    }
+}
+
+#[cfg(test)]
+mod saved_folder_tests {
+    use super::saved_game_folders;
+    use std::collections::BTreeMap;
+    use std::fs;
+
+    fn folder(label: &str, name: &str) -> String {
+        let dir = std::env::temp_dir()
+            .join(format!(
+                "r2modmac-saved-{}-{}-{}",
+                label,
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ))
+            .join(name);
+        fs::create_dir_all(&dir).unwrap();
+        dir.to_string_lossy().to_string()
+    }
+
+    #[test]
+    fn a_folder_saved_by_mistake_does_not_make_the_game_installed() {
+        // The old matching saved Omori's folder for Gladio Mori, and Control's
+        // for Superhot: Mind Control Delete. Both folders exist.
+        let mut paths = BTreeMap::new();
+        paths.insert("gladio-mori::windows".to_string(), folder("a", "OMORI"));
+        paths.insert(
+            "superhot-mind-control-delete".to_string(),
+            folder("b", "Control"),
+        );
+        let ids = vec![
+            "gladio-mori".to_string(),
+            "superhot-mind-control-delete".to_string(),
+        ];
+
+        let saved = saved_game_folders(&paths, &ids);
+
+        assert!(saved.games.is_empty(), "{:?}", saved.games);
+        assert_eq!(
+            saved.mistaken_keys,
+            vec!["gladio-mori::windows", "superhot-mind-control-delete"]
+        );
+    }
+
+    #[test]
+    fn a_folder_the_user_chose_still_counts() {
+        let mut paths = BTreeMap::new();
+        paths.insert(
+            "gladio-mori::windows".to_string(),
+            folder("c", "Gladio Mori"),
+        );
+        // An unrelated name: a game kept outside Steam, in a folder of its own.
+        paths.insert("tcg-card-shop-simulator".to_string(), folder("d", "bbb"));
+        // A folder that is gone.
+        paths.insert(
+            "valheim::mac".to_string(),
+            "/does/not/exist/Valheim".to_string(),
+        );
+        let ids = vec![
+            "gladio-mori".to_string(),
+            "tcg-card-shop-simulator".to_string(),
+            "valheim".to_string(),
+        ];
+
+        let saved = saved_game_folders(&paths, &ids);
+        let names: Vec<&str> = saved.games.iter().map(|(id, _)| id.as_str()).collect();
+
+        assert_eq!(names, vec!["gladio-mori", "tcg-card-shop-simulator"]);
+        assert!(saved.mistaken_keys.is_empty());
+        assert!(saved.games[0].1.windows && !saved.games[0].1.mac);
     }
 }
