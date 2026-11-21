@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { PathCensor } from '../ui/PathCensor';
+import { PathMarquee } from '../ui/PathCensor';
+import { HoverMarquee } from '../ui/HoverMarquee';
 import { AppIcon } from '../ui/icons';
 import { runningOnLinux, runningOnMacOS } from '../../utils/platformUtils';
 import { PREFERENCE_ICON_COLORS, themedPreferenceIconStyle } from '../../utils/preferencesIconColors';
@@ -78,15 +79,15 @@ function PathRow({ title, detail, usualPath, value, detected = [], badge, wine, 
                 </div>
                 {shown ? (
                     <div className="flex min-w-0 items-baseline gap-2">
-                        <PathCensor path={shown} className="block min-w-0 truncate text-[13px] text-gray-400" />
+                        <PathMarquee path={shown} className="text-[13px] text-gray-400" />
                         {others > 0 && <span className="shrink-0 text-[12px] text-gray-500">+{others} more</span>}
                     </div>
                 ) : missing ? (
-                    <p className="truncate text-[13px] text-gray-500">{usualPath}</p>
+                    <HoverMarquee text={usualPath} className="text-[13px] text-gray-500" />
                 ) : detail ? (
-                    <p className="truncate text-[13px] text-gray-400">{detail}</p>
+                    <HoverMarquee text={detail} className="text-[13px] text-gray-400" />
                 ) : null}
-                {shown && detail && <p className="truncate text-[12px] text-gray-500">{detail}</p>}
+                {shown && detail && <HoverMarquee text={detail} className="text-[12px] text-gray-500" />}
             </div>
             <div className="flex shrink-0 items-center gap-2">
                 {value && (
@@ -138,7 +139,7 @@ function LibrariesRow({ libraries, expanded, onToggle, onAdd, onRemove }: {
                             <ul className="space-y-1.5">
                                 {libraries.map(library => (
                                     <li key={library.path} className="flex items-center gap-2 rounded-lg bg-gray-900/60 border border-gray-700/60 px-3 py-2">
-                                        <PathCensor path={library.path} className="min-w-0 flex-1 truncate text-[13px] text-gray-300" />
+                                        <PathMarquee path={library.path} lazy className="flex-1 text-[13px] text-gray-300" />
                                         {library.mounted
                                             ? <span className="text-[12px] text-gray-500 shrink-0">{library.games}</span>
                                             : <span className="rounded-full bg-yellow-500/15 px-2 py-0.5 text-[11px] text-fg-warning shrink-0">Disconnected</span>}

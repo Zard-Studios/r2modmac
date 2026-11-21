@@ -1,6 +1,7 @@
 import { useRef, useEffect } from 'react';
 import { useAppStore } from '../../store/useAppStore';
 import { censorPath, censorText, uncensorPath } from '../../utils/pathCensorUtils';
+import { HoverMarquee } from './HoverMarquee';
 
 interface PathCensorProps {
     path: string | null | undefined;
@@ -17,6 +18,21 @@ export function PathCensor({ path, className = '' }: PathCensorProps) {
     }
 
     return <span className={className}>{censorText(path, username)}</span>;
+}
+
+/**
+ * A path too long for its line scrolls on hover instead of ending in dots.
+ *
+ * The marquee also shows the whole text as a tooltip, so it is handed the text
+ * already censored: stream mode must hide the user name there too.
+ * `lazy` measures on hover, for long lists.
+ */
+export function PathMarquee({ path, className = '', lazy = false }: PathCensorProps & { lazy?: boolean }) {
+    const { streamMode, username } = useAppStore();
+
+    if (!path) return null;
+
+    return <HoverMarquee text={streamMode ? censorText(path, username) : path} className={className} lazy={lazy} />;
 }
 
 function getOverlayClasses(className: string): string {
