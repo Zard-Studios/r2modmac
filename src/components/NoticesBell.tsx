@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, Bell, ChevronRight, X } from 'lucide-react';
+import { Bell, ChevronRight } from 'lucide-react';
+import { PanelDialog } from './ui/PanelDialog';
 import type { Notice } from '../types/electron';
 import {
     cachedNotices,
@@ -161,107 +162,76 @@ export function NoticesBell() {
             </button>
 
             {open && (
-                <div
-                    className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-6"
-                    onClick={closePanel}
+                <PanelDialog
+                    title="Announcements"
+                    onClose={closePanel}
+                    onBack={selected ? () => setSelectedId(null) : undefined}
+                    backLabel="Back to the list"
+                    bodyClassName={selected ? '' : 'row-list-scroll'}
                 >
-                    <div
-                        role="dialog"
-                        aria-label="Announcements"
-                        className="flex max-h-[80vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-gray-700 bg-gray-800 shadow-2xl"
-                        onClick={(event) => event.stopPropagation()}
-                    >
-                        <div className="flex items-center justify-between gap-3 border-b border-gray-700/60 px-5 py-4">
-                            <div className="flex min-w-0 items-center gap-2">
-                                {selected && (
-                                    <button
-                                        type="button"
-                                        onClick={() => setSelectedId(null)}
-                                        className="-ml-1.5 rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-gray-700 hover:text-white"
-                                        aria-label="Back to the list"
-                                    >
-                                        <ArrowLeft className="h-5 w-5" aria-hidden="true" />
-                                    </button>
+                    {selected ? (
+                        <article className="px-5 py-5">
+                            <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-500">
+                                From Zard Studios
+                                {formatDate(selected.created_at) && ` · ${formatDate(selected.created_at)}`}
+                            </p>
+                            <h3 className="mt-1.5 text-xl font-semibold leading-snug text-white">{selected.title}</h3>
+                            <div className="mt-4">
+                                {selected.body ? (
+                                    <Suspense fallback={null}>
+                                        <NoticeBody markdown={selected.body} />
+                                    </Suspense>
+                                ) : (
+                                    <p className="text-sm text-gray-400">No more details.</p>
                                 )}
-                                <h2 className="text-lg font-semibold text-white">Announcements</h2>
                             </div>
-                            <button
-                                type="button"
-                                onClick={closePanel}
-                                className="rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-gray-700 hover:text-white"
-                                aria-label="Close"
-                            >
-                                <X className="h-5 w-5" aria-hidden="true" />
-                            </button>
-                        </div>
-
-                        {/* No scrollbar gutter, and none in the list: either would keep the highlighted rows from reaching the edges. */}
-                        <div className={`overflow-y-auto ${selected ? '' : 'row-list-scroll'}`} style={{ scrollbarGutter: 'auto' }}>
-                            {selected ? (
-                                <article className="px-5 py-5">
-                                    <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-500">
-                                        From Zard Studios
-                                        {formatDate(selected.created_at) && ` · ${formatDate(selected.created_at)}`}
-                                    </p>
-                                    <h3 className="mt-1.5 text-xl font-semibold leading-snug text-white">{selected.title}</h3>
-                                    <div className="mt-4">
-                                        {selected.body ? (
-                                            <Suspense fallback={null}>
-                                                <NoticeBody markdown={selected.body} />
-                                            </Suspense>
-                                        ) : (
-                                            <p className="text-sm text-gray-400">No more details.</p>
-                                        )}
-                                    </div>
-                                    {selected.url && (
+                            {selected.url && (
+                                <button
+                                    type="button"
+                                    onClick={() => openIssue(selected.url as string)}
+                                    className="mt-5 text-[13px] font-medium text-blue-400 transition-colors hover:text-blue-300"
+                                >
+                                    Open on GitHub
+                                </button>
+                            )}
+                        </article>
+                    ) : notices.length === 0 ? (
+                        <p className="px-5 py-10 text-center text-sm text-gray-400">Nothing new :)</p>
+                    ) : (
+                        <ul className="divide-y divide-gray-700/50">
+                            {notices.map((notice) => {
+                                const isUnread = !seen.has(notice.id);
+                                return (
+                                    <li key={notice.id}>
                                         <button
                                             type="button"
-                                            onClick={() => openIssue(selected.url as string)}
-                                            className="mt-5 text-[13px] font-medium text-blue-400 transition-colors hover:text-blue-300"
+                                            onClick={() => openNotice(notice)}
+                                            className="flex w-full items-center gap-3 px-5 py-4 text-left transition-colors hover:bg-gray-700/40"
                                         >
-                                            Open on GitHub
-                                        </button>
-                                    )}
-                                </article>
-                            ) : notices.length === 0 ? (
-                                <p className="px-5 py-10 text-center text-sm text-gray-400">Nothing new :)</p>
-                            ) : (
-                                <ul className="divide-y divide-gray-700/50">
-                                    {notices.map((notice) => {
-                                        const isUnread = !seen.has(notice.id);
-                                        return (
-                                            <li key={notice.id}>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => openNotice(notice)}
-                                                    className="flex w-full items-center gap-3 px-5 py-4 text-left transition-colors hover:bg-gray-700/40"
+                                            <span
+                                                className={`h-2 w-2 flex-none rounded-full ${isUnread ? 'bg-white' : 'bg-transparent'}`}
+                                                aria-label={isUnread ? 'New' : undefined}
+                                            />
+                                            <span className="min-w-0 flex-1">
+                                                <span
+                                                    className={`line-clamp-2 block text-[15px] font-medium leading-snug ${isUnread ? 'text-white' : 'text-gray-300'}`}
                                                 >
-                                                    <span
-                                                        className={`h-2 w-2 flex-none rounded-full ${isUnread ? 'bg-white' : 'bg-transparent'}`}
-                                                        aria-label={isUnread ? 'New' : undefined}
-                                                    />
-                                                    <span className="min-w-0 flex-1">
-                                                        <span
-                                                            className={`line-clamp-2 block text-[15px] font-medium leading-snug ${isUnread ? 'text-white' : 'text-gray-300'}`}
-                                                        >
-                                                            {notice.title}
-                                                        </span>
-                                                        {formatDate(notice.created_at) && (
-                                                            <span className="mt-0.5 block text-xs text-gray-500">
-                                                                {formatDate(notice.created_at)}
-                                                            </span>
-                                                        )}
+                                                    {notice.title}
+                                                </span>
+                                                {formatDate(notice.created_at) && (
+                                                    <span className="mt-0.5 block text-xs text-gray-500">
+                                                        {formatDate(notice.created_at)}
                                                     </span>
-                                                    <ChevronRight className="h-4 w-4 flex-none text-gray-500" aria-hidden="true" />
-                                                </button>
-                                            </li>
-                                        );
-                                    })}
-                                </ul>
-                            )}
-                        </div>
-                    </div>
-                </div>
+                                                )}
+                                            </span>
+                                            <ChevronRight className="h-4 w-4 flex-none text-gray-500" aria-hidden="true" />
+                                        </button>
+                                    </li>
+                                );
+                            })}
+                        </ul>
+                    )}
+                </PanelDialog>
             )}
         </>
     );
