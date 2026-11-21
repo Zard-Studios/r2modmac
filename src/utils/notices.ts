@@ -16,6 +16,9 @@ const OFF_KEY = 'r2modmac:noticesOff';
 /** One request every few hours at most, however often the app is opened. */
 export const NOTICE_CHECK_INTERVAL_MS = 3 * 60 * 60 * 1000;
 
+/** Opening the bell looks again sooner, but never more than this often. */
+export const NOTICE_OPEN_INTERVAL_MS = 10 * 60 * 1000;
+
 /** Notices link to their own issue and nowhere else. */
 const ISSUE_URL_PREFIX = 'https://github.com/Zard-Studios/r2modmac/issues/';
 
@@ -84,9 +87,9 @@ export function markNoticesSeen(notices: Notice[], storage: NoticeStorage): void
     write(storage, SEEN_KEY, JSON.stringify(notices.map((notice) => notice.id)));
 }
 
-function checkIsDue(storage: NoticeStorage, now: number): boolean {
+function checkIsDue(storage: NoticeStorage, now: number, interval: number): boolean {
     const last = Number(read(storage, CHECKED_KEY));
-    return !Number.isFinite(last) || last <= 0 || now - last >= NOTICE_CHECK_INTERVAL_MS || last > now;
+    return !Number.isFinite(last) || last <= 0 || now - last >= interval || last > now;
 }
 
 /**
@@ -98,10 +101,11 @@ export async function refreshNotices(
     storage: NoticeStorage,
     fetchNotices: () => Promise<Notice[]>,
     now: number = Date.now(),
+    interval: number = NOTICE_CHECK_INTERVAL_MS,
 ): Promise<Notice[]> {
     if (!noticesEnabled(storage)) return [];
     const cached = cachedNotices(storage);
-    if (!checkIsDue(storage, now)) return cached;
+    if (!checkIsDue(storage, now, interval)) return cached;
     try {
         const fresh = sanitize(await fetchNotices());
         write(storage, CACHE_KEY, JSON.stringify(fresh));

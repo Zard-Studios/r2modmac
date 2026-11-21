@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
     NOTICE_CHECK_INTERVAL_MS,
+    NOTICE_OPEN_INTERVAL_MS,
     cachedNotices,
     markNoticesSeen,
     refreshNotices,
@@ -103,4 +104,18 @@ test('a link that is not an issue of this repository is dropped', async () => {
     const [shown] = await refreshNotices(storage, async () => [notice(1, 'https://example.com/phish')], 1_000_000);
 
     assert.equal(shown.url, null);
+});
+
+test('opening the bell looks again after a short wait, not the long one', async () => {
+    const storage = memory();
+    let calls = 0;
+    const fetcher = async () => (calls++, calls === 1 ? [] : [notice(63)]);
+
+    await refreshNotices(storage, fetcher, 1_000_000);
+    const tooSoon = await refreshNotices(storage, fetcher, 1_000_000 + 60_000, NOTICE_OPEN_INTERVAL_MS);
+    const later = await refreshNotices(storage, fetcher, 1_000_000 + NOTICE_OPEN_INTERVAL_MS, NOTICE_OPEN_INTERVAL_MS);
+
+    assert.deepEqual(tooSoon, []);
+    assert.equal(calls, 2);
+    assert.equal(later[0].id, 63);
 });

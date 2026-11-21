@@ -4,6 +4,7 @@ import type { Notice } from '../types/electron';
 import {
     cachedNotices,
     markNoticesSeen,
+    NOTICE_OPEN_INTERVAL_MS,
     noticesEnabled,
     refreshNotices,
     unreadCount,
@@ -78,6 +79,14 @@ export function NoticesBell() {
         if (store) markNoticesSeen(notices, store);
         setVersion((value) => value + 1);
         setOpen(true);
+        // Whoever opens the bell wants the latest, so look again if the last
+        // check is a few minutes old, without waiting for the long interval.
+        if (!store) return;
+        void refreshNotices(store, () => window.ipcRenderer.fetchNotices(), Date.now(), NOTICE_OPEN_INTERVAL_MS).then((shown) => {
+            markNoticesSeen(shown, store);
+            setNotices(shown);
+            setVersion((value) => value + 1);
+        });
     };
 
     const openIssue = (url: string) => {
