@@ -63,6 +63,9 @@ interface RichTextProps {
     /** HTML that is already made, to show instead. */
     html?: string;
     mode: RichTextMode;
+    /** Where relative pictures and links point to, for a README written for GitHub. */
+    imageBase?: string;
+    linkBase?: string;
 }
 
 /**
@@ -71,8 +74,11 @@ interface RichTextProps {
  * announcements, the update notes and the mod descriptions all use this, so a
  * change here changes them all. See `renderRichText` for what each mode allows.
  */
-export function RichText({ markdown, html, mode }: RichTextProps) {
-    const rendered = useMemo(() => renderRichText({ markdown, html }, mode), [markdown, html, mode]);
+export function RichText({ markdown, html, mode, imageBase, linkBase }: RichTextProps) {
+    const rendered = useMemo(
+        () => renderRichText({ markdown, html }, mode, imageBase && linkBase ? { image: imageBase, link: linkBase } : undefined),
+        [markdown, html, mode, imageBase, linkBase],
+    );
     const root = useRef<HTMLDivElement>(null);
 
     useEffect(() => {

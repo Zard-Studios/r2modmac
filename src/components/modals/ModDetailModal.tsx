@@ -10,6 +10,7 @@ import { sourceName } from '../../utils/storeProviders';
 import { RichText } from '../RichText';
 import type { RichTextSource } from '../../utils/richText';
 import { looksLikeUnrenderedMarkdown } from '../../utils/markdownRepair';
+import { githubBases, hasUsefulReadme } from '../../utils/readmeSources';
 import { packageIdentityKey } from '../../utils/modVersioning';
 
 const getGithubRepo = (url: string | undefined): { owner: string; repo: string } | null => {
@@ -24,6 +25,26 @@ const getGithubRepo = (url: string | undefined): { owner: string; repo: string }
     repo = repo.split(/[?#]/)[0].replace(/\/$/, '');
     return { owner, repo };
 };
+
+/** The README of a GitHub repository, or null when it has none or can't be read. */
+async function readGithubReadme(owner: string, repo: string): Promise<string | null> {
+    try {
+        const jsonString = await window.ipcRenderer.fetchTextContent(`https://api.github.com/repos/${owner}/${repo}/readme`);
+        const data = JSON.parse(jsonString);
+        if (data.content && data.encoding === 'base64') {
+            const base64Content = data.content.replace(/\s/g, '');
+            return decodeURIComponent(escape(window.atob(base64Content)));
+        }
+    } catch (e) {
+        console.error("Failed to fetch README from GitHub:", e);
+    }
+    return null;
+}
+
+/** The GitHub README of a mod that also has one on its store: not asked for until it is needed. */
+type GithubReadme =
+    | { status: 'idle' | 'loading' | 'missing'; content: null }
+    | { status: 'ready'; content: RichTextSource };
 
 interface ModDetailModalProps {
     pkg: Package;
@@ -237,6 +258,10 @@ export function ModDetailModal({
     const [readmeContent, setReadmeContent] = useState<RichTextSource | null>(null);
     const [changelogContent, setChangelogContent] = useState<RichTextSource | null>(null);
     const [loadingContent, setLoadingContent] = useState(false);
+    const [readmeLoaded, setReadmeLoaded] = useState(false);
+    const [githubReadme, setGithubReadme] = useState<GithubReadme>({ status: 'idle', content: null });
+    const [readmeView, setReadmeView] = useState<'thunderstore' | 'github'>('thunderstore');
+    const githubRequest = useRef(0);
     const [dependencies, setDependencies] = useState<Package[]>([]);
     const [loadingKey, setLoadingKey] = useState<string>('');
     const [showImageLightbox, setShowImageLightbox] = useState(false);
@@ -244,19 +269,23 @@ export function ModDetailModal({
     const fetchGithubReadme = useCallback(async (owner: string, repo: string) => {
         setLoadingContent(true);
         try {
-            const url = `https://api.github.com/repos/${owner}/${repo}/readme`;
-            const jsonString = await window.ipcRenderer.fetchTextContent(url);
-            const data = JSON.parse(jsonString);
-            if (data.content && data.encoding === 'base64') {
-                const base64Content = data.content.replace(/\s/g, '');
-                const rawMarkdown = decodeURIComponent(escape(window.atob(base64Content)));
-                setReadmeContent({ markdown: rawMarkdown });
-            }
-        } catch (e) {
-            console.error("Failed to fetch README from GitHub:", e);
+            const markdown = await readGithubReadme(owner, repo);
+            if (markdown !== null) setReadmeContent({ markdown });
         } finally {
             setLoadingContent(false);
         }
+    }, []);
+
+    /** The second README, from the repository the mod points to. */
+    const loadGithubReadme = useCallback(async (owner: string, repo: string) => {
+        const request = ++githubRequest.current;
+        await Promise.resolve();
+        if (request !== githubRequest.current) return;
+        setGithubReadme({ status: 'loading', content: null });
+        const markdown = await readGithubReadme(owner, repo);
+        // The reader may have moved on to another mod meanwhile.
+        if (request !== githubRequest.current) return;
+        setGithubReadme(markdown ? { status: 'ready', content: { markdown } } : { status: 'missing', content: null });
     }, []);
 
     const fetchGithubChangelog = useCallback(async (owner: string, repo: string) => {
@@ -452,6 +481,7 @@ export function ModDetailModal({
             console.error(`Failed to fetch ${type}:`, e);
         } finally {
             setLoadingContent(false);
+            if (type === 'readme') setReadmeLoaded(true);
         }
     }, []);
 
@@ -465,6 +495,10 @@ export function ModDetailModal({
             if (cancelled) return;
 
             setLoadingKey(detailKey);
+            githubRequest.current++;
+            setReadmeLoaded(false);
+            setGithubReadme({ status: 'idle', content: null });
+            setReadmeView('thunderstore');
             setReadmeContent(null);
             setChangelogContent(null);
             setDependencies([]);
@@ -515,7 +549,33 @@ export function ModDetailModal({
         }
     }, [activeTab, changelogContent, fetchContent, isLocalMod, mod, gameId, pkg, fetchGithubChangelog]);
 
+    // A mod can have a README on its store, on GitHub, on both or on neither.
+    // The store's is shown first. When it says next to nothing and the mod
+    // points to a GitHub repository, that README is shown instead. When both
+    // have something, the other one is a click away, and is only fetched then
+    // (GitHub allows few requests an hour, and most pages don't need it).
+    const githubRepo = !isLocalMod && gameId !== 'outerwilds' ? getGithubRepo(mod.website_url) : null;
+    const storeReadmeUseful = hasUsefulReadme(readmeContent);
+    const githubRepoOwner = githubRepo?.owner;
+    const githubRepoName = githubRepo?.repo;
+
+    useEffect(() => {
+        if (!githubRepoOwner || !githubRepoName || !readmeLoaded || storeReadmeUseful || githubReadme.status !== 'idle') return;
+        void loadGithubReadme(githubRepoOwner, githubRepoName);
+    }, [githubRepoOwner, githubRepoName, readmeLoaded, storeReadmeUseful, githubReadme.status, loadGithubReadme]);
+
     if (!isOpen) return null;
+
+    const githubShown = githubReadme.status !== 'idle' && (readmeView === 'github' || !storeReadmeUseful);
+    const githubReady = githubShown && githubReadme.status === 'ready';
+    const githubLoading = githubShown && githubReadme.status === 'loading';
+    const readmeRepo = gameId === 'outerwilds' ? getGithubRepo(mod.website_url || pkg.package_url) : githubRepo;
+    const readmeBases = readmeRepo && (gameId === 'outerwilds' || githubReady) ? githubBases(readmeRepo.owner, readmeRepo.repo) : null;
+    const showReadmeSource = !!githubRepo && readmeLoaded && (storeReadmeUseful || githubReadme.status === 'ready');
+    const showGithubReadme = () => {
+        setReadmeView('github');
+        if (githubRepo && githubReadme.status === 'idle') void loadGithubReadme(githubRepo.owner, githubRepo.repo);
+    };
 
     // Format bytes to human readable string (KB, MB, GB)
     const formatBytes = (bytes: number): string => {
@@ -699,14 +759,62 @@ export function ModDetailModal({
                                     <div className="prose prose-invert prose-sm max-w-none whitespace-pre-wrap break-words overflow-hidden">
                                         {localReadme}
                                     </div>
-                                ) : loadingContent && !readmeContent ? (
+                                ) : (loadingContent && !readmeContent) || githubLoading ? (
                                     <div className="animate-pulse space-y-3">
                                         <div className="h-4 bg-gray-700 rounded w-3/4"></div>
                                         <div className="h-4 bg-gray-700 rounded w-1/2"></div>
                                         <div className="h-4 bg-gray-700 rounded w-5/6"></div>
                                     </div>
+                                ) : githubReady && githubReadme.content ? (
+                                    <>
+                                        {showReadmeSource && (
+                                            <div className="mb-4 flex items-center justify-between gap-3 text-xs text-gray-500">
+                                                <span>README from GitHub</span>
+                                                {storeReadmeUseful && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setReadmeView('thunderstore')}
+                                                        className="font-medium text-fg-accent transition-opacity hover:opacity-80"
+                                                    >
+                                                        Back to the {mod.source === 'hexium' ? 'Hexium' : 'Thunderstore'} README
+                                                    </button>
+                                                )}
+                                            </div>
+                                        )}
+                                        <RichText
+                                            markdown={githubReadme.content.markdown}
+                                            html={githubReadme.content.html}
+                                            mode="community"
+                                            imageBase={readmeBases?.image}
+                                            linkBase={readmeBases?.link}
+                                        />
+                                    </>
                                 ) : readmeContent ? (
-                                    <RichText markdown={readmeContent.markdown} html={readmeContent.html} mode="community" />
+                                    <>
+                                        {showReadmeSource && (
+                                            <div className="mb-4 flex items-center justify-between gap-3 text-xs text-gray-500">
+                                                <span>README from {mod.source === 'hexium' ? 'Hexium' : 'Thunderstore'}</span>
+                                                {githubReadme.status === 'missing' ? (
+                                                    <span>No README found on GitHub</span>
+                                                ) : (
+                                                    <button
+                                                        type="button"
+                                                        onClick={showGithubReadme}
+                                                        className="font-medium text-fg-accent transition-opacity hover:opacity-80"
+                                                    >
+                                                        View the GitHub README
+                                                    </button>
+                                                )}
+                                            </div>
+                                        )}
+                                        <RichText
+                                            markdown={readmeContent.markdown}
+                                            html={readmeContent.html}
+                                            mode="community"
+                                            imageBase={gameId === 'outerwilds' ? readmeBases?.image : undefined}
+                                            linkBase={gameId === 'outerwilds' ? readmeBases?.link : undefined}
+                                        />
+                                    </>
                                 ) : (
                                     <div className="text-center text-gray-500 py-10">
                                         <p>{mod.description || "No description available."}</p>

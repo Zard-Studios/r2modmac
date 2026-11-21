@@ -1,6 +1,7 @@
 import DOMPurify from 'dompurify';
 import { Marked } from 'marked';
 import { repairEscapedMarkdown } from './markdownRepair';
+import { resolveAgainst } from './readmeSources';
 import { attachmentLinesToVideos, isAllowedMediaUrl, isSafeLinkUrl, VIDEO_PREVIEW_SECONDS } from './richTextUrls';
 
 /**
@@ -29,6 +30,20 @@ export interface RichTextSource {
     html?: string;
 }
 
+/**
+ * Where relative addresses point to, for a text that was written to be shown
+ * somewhere else, such as a README written for GitHub.
+ */
+export interface RichTextBase {
+    /** For pictures and videos. */
+    image: string;
+    /** For links. */
+    link: string;
+}
+
+// Set for the length of one sanitize call, so the hooks below can read it.
+let activeBase: RichTextBase | null = null;
+
 const parsers: Record<RichTextMode, Marked> = {
     announcement: new Marked({ gfm: true, breaks: true }),
     community: new Marked({ gfm: true, breaks: false }),
@@ -44,6 +59,14 @@ function sanitizerFor(mode: RichTextMode): ReturnType<typeof DOMPurify> {
     const instance = DOMPurify(window);
     instance.addHook('afterSanitizeAttributes', (node) => {
         const tag = node.tagName;
+        if (activeBase) {
+            // A README on GitHub points at its own files by relative path.
+            const attribute = tag === 'A' ? 'href' : 'src';
+            const value = node.getAttribute(attribute);
+            if (value && (tag === 'A' || tag === 'IMG' || tag === 'VIDEO' || tag === 'SOURCE')) {
+                node.setAttribute(attribute, resolveAgainst(value, tag === 'A' ? activeBase.link : activeBase.image));
+            }
+        }
         if (tag === 'A') {
             const href = node.getAttribute('href');
             if (href && !isSafeLinkUrl(href, mode === 'community')) node.removeAttribute('href');
@@ -79,13 +102,18 @@ function sanitizerFor(mode: RichTextMode): ReturnType<typeof DOMPurify> {
 }
 
 /** HTML made from a text that someone else wrote, made safe. */
-export function sanitizeHtml(html: string, mode: RichTextMode): string {
-    return sanitizerFor(mode).sanitize(html, {
-        ADD_TAGS: ['video', 'source'],
-        ADD_ATTR: ['controls', 'preload', 'playsinline', 'muted', 'loop', 'poster'],
-        FORBID_TAGS: ['style', 'form', 'input', 'button', 'textarea', 'select', 'iframe', 'object', 'embed', 'link', 'meta'],
-        FORBID_ATTR: mode === 'announcement' ? ['style'] : [],
-    });
+export function sanitizeHtml(html: string, mode: RichTextMode, base?: RichTextBase): string {
+    activeBase = base ?? null;
+    try {
+        return sanitizerFor(mode).sanitize(html, {
+            ADD_TAGS: ['video', 'source'],
+            ADD_ATTR: ['controls', 'preload', 'playsinline', 'muted', 'loop', 'poster'],
+            FORBID_TAGS: ['style', 'form', 'input', 'button', 'textarea', 'select', 'iframe', 'object', 'embed', 'link', 'meta'],
+            FORBID_ATTR: mode === 'announcement' ? ['style'] : [],
+        });
+    } finally {
+        activeBase = null;
+    }
 }
 
 /** The checkboxes of a task list can't be kept as form controls; show their state. */
@@ -94,11 +122,11 @@ function taskBoxesAsSymbols(html: string): string {
 }
 
 /** Markdown or HTML turned into HTML that is safe to put in the page. */
-export function renderRichText(source: RichTextSource, mode: RichTextMode): string {
-    if (source.html !== undefined) return sanitizeHtml(source.html, mode);
+export function renderRichText(source: RichTextSource, mode: RichTextMode, base?: RichTextBase): string {
+    if (source.html !== undefined) return sanitizeHtml(source.html, mode, base);
     // Mod descriptions often come out of word processors with every symbol
     // escaped. The maintainer's own text doesn't, and is shown as written.
     const text = mode === 'community' ? repairEscapedMarkdown(source.markdown ?? '') : (source.markdown ?? '');
     const parsed = parsers[mode].parse(attachmentLinesToVideos(text)) as string;
-    return sanitizeHtml(taskBoxesAsSymbols(parsed), mode);
+    return sanitizeHtml(taskBoxesAsSymbols(parsed), mode, base);
 }
