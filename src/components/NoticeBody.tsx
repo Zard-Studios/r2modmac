@@ -1,6 +1,14 @@
-import { useMemo, type MouseEvent } from 'react';
+import { useEffect, useMemo, useRef, type MouseEvent } from 'react';
 import { renderNoticeMarkdown } from '../utils/noticeMarkdown';
 import { isSafeLinkUrl } from '../utils/noticeUrls';
+
+/** What the browser's own error code for a media element means. */
+const MEDIA_ERRORS: Record<number, string> = {
+    1: 'stopped',
+    2: 'network error',
+    3: 'could not be decoded',
+    4: 'format or address not accepted',
+};
 
 /**
  * An announcement's text, with its markdown shown: bold, strikethrough, lists,
@@ -9,6 +17,36 @@ import { isSafeLinkUrl } from '../utils/noticeUrls';
  */
 export function NoticeBody({ markdown }: { markdown: string }) {
     const html = useMemo(() => renderNoticeMarkdown(markdown), [markdown]);
+    const root = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        const container = root.current;
+        if (!container) return;
+
+        // `error` doesn't bubble, so listen on the way down. A video that can't
+        // play is replaced by a line that says why, and a link to open it.
+        const onError = (event: Event) => {
+            const video = event.target;
+            if (!(video instanceof HTMLVideoElement)) return;
+            const original = video.getAttribute('src');
+            const note = document.createElement('p');
+            note.className = 'my-3 rounded-lg bg-gray-900/60 px-3 py-2 text-[13px] text-gray-300';
+            const code = video.error?.code;
+            note.textContent = `This video can't be played here${code ? ` (${MEDIA_ERRORS[code] ?? `error ${code}`})` : ''}. `;
+            if (original && isSafeLinkUrl(original)) {
+                const link = document.createElement('a');
+                link.href = original;
+                link.textContent = 'Open it in your browser';
+                note.appendChild(link);
+            }
+            video.replaceWith(note);
+        };
+        container.addEventListener('error', onError, true);
+
+        return () => {
+            container.removeEventListener('error', onError, true);
+        };
+    }, [html]);
 
     // A link must never replace the app's own page: open it in the browser.
     const onClick = (event: MouseEvent<HTMLDivElement>) => {
@@ -23,6 +61,7 @@ export function NoticeBody({ markdown }: { markdown: string }) {
 
     return (
         <div
+            ref={root}
             onClick={onClick}
             className="prose prose-invert prose-sm max-w-none break-words
                        prose-headings:text-white prose-headings:mt-4 prose-headings:mb-2
