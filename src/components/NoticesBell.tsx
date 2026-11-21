@@ -163,7 +163,8 @@ export function NoticesBell() {
                             </button>
                         </div>
 
-                        <div className="overflow-y-auto">
+                        {/* No scrollbar gutter, and none in the list: either would keep the highlighted rows from reaching the edges. */}
+                        <div className={`overflow-y-auto ${selected ? '' : 'row-list-scroll'}`} style={{ scrollbarGutter: 'auto' }}>
                             {selected ? (
                                 <article className="px-5 py-5">
                                     <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-500">

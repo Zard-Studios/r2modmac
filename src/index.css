@@ -403,6 +403,14 @@
   display: none;
 }
 
+/* The announcements list: its highlighted rows fill the whole panel. */
+.row-list-scroll {
+  scrollbar-width: none;
+}
+.row-list-scroll::-webkit-scrollbar {
+  display: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
   :root.r2-theme-crossfade-a::after,
   :root.r2-theme-crossfade-b::after {
