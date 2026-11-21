@@ -125,7 +125,7 @@ export function NoticesBell() {
                         <div className="overflow-y-auto">
                             {notices.length === 0 ? (
                                 <p className="px-5 py-10 text-center text-sm text-gray-400">
-                                    Nothing new. Messages from Zard Studios show up here.
+                                    Nothing new :)
                                 </p>
                             ) : (
                                 <ul className="divide-y divide-gray-700/50">
