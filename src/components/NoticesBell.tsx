@@ -64,9 +64,10 @@ export function NoticesBell() {
             setNotices(shown);
             setVersion((value) => value + 1);
         };
-        // Opening the bell, and this effect running again because of it,
-        // looks right away; the switch in Preferences does too.
-        void check(open ? NOTICE_OPEN_INTERVAL_MS : NOTICE_CHECK_INTERVAL_MS);
+        // The bell only exists on the home screen, so the timer below only runs
+        // there. Coming back to the home screen, reloading the page and opening
+        // the bell all look right away; the switch in Preferences does too.
+        void check(NOTICE_OPEN_INTERVAL_MS);
         const timer = window.setInterval(
             () => void check(open ? NOTICE_OPEN_INTERVAL_MS : NOTICE_CHECK_INTERVAL_MS),
             open ? NOTICE_OPEN_INTERVAL_MS : NOTICE_CHECK_INTERVAL_MS,
