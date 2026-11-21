@@ -536,7 +536,7 @@ export function ModDetailModal({
     // Several sources to choose from: a menu. Only one that has something: just
     // its name, so it is still clear where the text comes from.
     const readmeSourceBar = showReadmeSource ? (
-        <div className="mb-4 flex items-center gap-2 text-xs text-gray-500">
+        <div className="ml-auto flex items-center gap-2 self-center text-xs text-gray-500">
             <span>README</span>
             {storeReadmeUseful ? (
                 <PickerMenu
@@ -733,6 +733,8 @@ export function ModDetailModal({
                                 )}
                             </button>
                         ))}
+                        {/* Which README is shown stays in the corner of the tab row, not scrolled away with the text. */}
+                        {activeTab === 'description' && readmeSourceBar}
                     </div>
 
                     {/* Scrollable Content */}
@@ -751,7 +753,6 @@ export function ModDetailModal({
                                     </div>
                                 ) : githubReady && githubReadme.content ? (
                                     <>
-                                        {readmeSourceBar}
                                         <RichText
                                             markdown={githubReadme.content.markdown}
                                             html={githubReadme.content.html}
@@ -762,7 +763,6 @@ export function ModDetailModal({
                                     </>
                                 ) : readmeContent ? (
                                     <>
-                                        {readmeSourceBar}
                                         <RichText
                                             markdown={readmeContent.markdown}
                                             html={readmeContent.html}
