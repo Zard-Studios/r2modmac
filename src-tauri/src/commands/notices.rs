@@ -78,6 +78,15 @@ pub fn parse_notices(json: &str) -> Result<Vec<Notice>, String> {
 /// error so the page keeps the notices it already has instead of showing none.
 #[tauri::command]
 pub async fn fetch_notices() -> Result<Vec<Notice>, String> {
+    let result = fetch_notices_inner().await;
+    match &result {
+        Ok(notices) => log::info!("[notices] Found {} announcement(s)", notices.len()),
+        Err(error) => log::warn!("[notices] Could not read announcements: {error}"),
+    }
+    result
+}
+
+async fn fetch_notices_inner() -> Result<Vec<Notice>, String> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
         .build()
