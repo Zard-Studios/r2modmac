@@ -390,10 +390,100 @@ pub(super) fn discover_windows_steam_roots() -> Vec<std::path::PathBuf> {
     discover_windows_steam_roots_in_home(&home)
 }
 
+/// The folder CrossOver keeps its bottles in, when it is not the default one.
+///
+/// People move the bottles to an external drive to save space, and CrossOver
+/// remembers where: the `BottleDir` preference its window writes, or a
+/// `BottlePath` in `CrossOver.conf`. Without reading them a Steam installed
+/// in such a bottle is never found on its own.
+fn crossover_custom_bottle_dirs(home: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let expand = |raw: &str| -> Option<std::path::PathBuf> {
+        let raw = raw.trim();
+        if raw.is_empty() {
+            None
+        } else if let Some(rest) = raw.strip_prefix("~/") {
+            Some(home.join(rest))
+        } else {
+            Some(std::path::PathBuf::from(raw))
+        }
+    };
+
+    let mut dirs: Vec<std::path::PathBuf> = Vec::new();
+    let conf = home.join("Library/Application Support/CrossOver/CrossOver.conf");
+    let from_conf = fs::read_to_string(&conf)
+        .ok()
+        .and_then(|text| bottle_path_from_conf(&text));
+    for raw in crossover_preference_bottle_dir(home)
+        .into_iter()
+        .chain(from_conf)
+    {
+        if let Some(dir) = expand(&raw) {
+            if !dirs.contains(&dir) {
+                dirs.push(dir);
+            }
+        }
+    }
+    dirs
+}
+
+/// `"BottlePath" = "..."` from the text of `CrossOver.conf`. The sample lines
+/// the file ships with are commented out with `;` and do not count.
+fn bottle_path_from_conf(text: &str) -> Option<String> {
+    text.lines().find_map(|line| {
+        let line = line.trim();
+        if line.starts_with(';') || line.starts_with('#') {
+            return None;
+        }
+        let (key, value) = line.split_once('=')?;
+        if key.trim().trim_matches('"') != "BottlePath" {
+            return None;
+        }
+        let value = value.trim().trim_matches('"').trim();
+        (!value.is_empty()).then(|| value.to_string())
+    })
+}
+
+/// `BottleDir` from CrossOver's preferences file.
+///
+/// The file is a binary property list; `plutil` ships with macOS and reads it.
+/// The answer is kept until the file changes, since discovery runs often.
+#[cfg(target_os = "macos")]
+fn crossover_preference_bottle_dir(home: &std::path::Path) -> Option<String> {
+    type Remembered = Vec<(std::path::PathBuf, std::time::SystemTime, Option<String>)>;
+    static REMEMBERED: Mutex<Remembered> = Mutex::new(Vec::new());
+
+    let plist = home.join("Library/Preferences/com.codeweavers.CrossOver.plist");
+    let modified = fs::metadata(&plist).ok()?.modified().ok()?;
+    let mut remembered = REMEMBERED.lock().ok()?;
+    if let Some((_, _, value)) = remembered
+        .iter()
+        .find(|(path, time, _)| path == &plist && *time == modified)
+    {
+        return value.clone();
+    }
+
+    let value = std::process::Command::new("/usr/bin/plutil")
+        .args(["-extract", "BottleDir", "raw", "-o", "-"])
+        .arg(&plist)
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+        .filter(|value| !value.is_empty());
+    remembered.retain(|(path, _, _)| path != &plist);
+    remembered.push((plist, modified, value.clone()));
+    value
+}
+
+#[cfg(not(target_os = "macos"))]
+fn crossover_preference_bottle_dir(_home: &std::path::Path) -> Option<String> {
+    None
+}
+
 fn discover_windows_steam_roots_in_home(home: &std::path::Path) -> Vec<std::path::PathBuf> {
     let mut roots = Vec::new();
 
-    let prefix_containers = [
+    let mut prefix_containers = vec![
         home.join("Library/Application Support/CrossOver/Bottles"),
         home.join(
             "Library/Containers/com.isaacmarovitz.Whisky/Data/Library/Application Support/Bottles",
@@ -401,6 +491,11 @@ fn discover_windows_steam_roots_in_home(home: &std::path::Path) -> Vec<std::path
         home.join("Library/Application Support/com.isaacmarovitz.Whisky/Bottles"),
         home.join("Library/Application Support/Whisky/Bottles"),
     ];
+    for dir in crossover_custom_bottle_dirs(home) {
+        if !prefix_containers.contains(&dir) {
+            prefix_containers.push(dir);
+        }
+    }
 
     let mut prefix_roots: Vec<std::path::PathBuf> = Vec::new();
     for container in prefix_containers {
@@ -910,6 +1005,81 @@ mod issue_25_launch_routing_tests {
         let client_root = world.steam_client(&bottle);
         // A second bottle with no Steam in it must not produce a false hit.
         world.crossover_bottle("Empty");
+
+        let discovered = discover_windows_steam_roots_in_home(&world.home);
+
+        assert_eq!(discovered.len(), 1, "{:?}", discovered);
+        assert_eq!(canonical(&discovered[0]), canonical(&client_root));
+    }
+
+    /// Bottles kept somewhere else than CrossOver's default, such as an
+    /// external drive, with the Steam client inside one of them.
+    fn bottle_on_another_drive(
+        world: &World,
+        label: &str,
+    ) -> (std::path::PathBuf, std::path::PathBuf) {
+        let bottles = world
+            .root
+            .join("Volumes")
+            .join(label)
+            .join("CrossOver/Bottles");
+        let client_root = bottles.join("Steam/drive_c/Program Files (x86)/Steam");
+        std::fs::create_dir_all(client_root.join("steamapps/common")).unwrap();
+        std::fs::write(client_root.join("steam.exe"), b"stub").unwrap();
+        (bottles, client_root)
+    }
+
+    #[test]
+    fn a_bottle_folder_named_in_crossover_conf_is_searched() {
+        let world = World::new("conf-bottles");
+        let (bottles, client_root) = bottle_on_another_drive(&world, "Games");
+        let conf = world
+            .home
+            .join("Library/Application Support/CrossOver/CrossOver.conf");
+        std::fs::create_dir_all(conf.parent().unwrap()).unwrap();
+        std::fs::write(
+            &conf,
+            format!(
+                ";;\"BottlePath\" = \"/sample/not/used\"\n[CrossOver]\n\"BottlePath\" = \"{}\"\n",
+                bottles.display()
+            ),
+        )
+        .unwrap();
+
+        let discovered = discover_windows_steam_roots_in_home(&world.home);
+
+        assert_eq!(discovered.len(), 1, "{:?}", discovered);
+        assert_eq!(canonical(&discovered[0]), canonical(&client_root));
+    }
+
+    #[test]
+    fn the_commented_sample_in_crossover_conf_is_ignored() {
+        assert_eq!(bottle_path_from_conf(";;\"BottlePath\" = \"/x\"\n"), None);
+        assert_eq!(bottle_path_from_conf("\"BottlePath\" = \"\"\n"), None);
+        assert_eq!(
+            bottle_path_from_conf("[CrossOver]\n\"BottlePath\" = \"/Volumes/Games/Bottles\"\n")
+                .as_deref(),
+            Some("/Volumes/Games/Bottles")
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_bottle_folder_set_in_the_crossover_app_is_searched() {
+        let world = World::new("pref-bottles");
+        let (bottles, client_root) = bottle_on_another_drive(&world, "Feduzi");
+        let plist = world
+            .home
+            .join("Library/Preferences/com.codeweavers.CrossOver.plist");
+        std::fs::create_dir_all(plist.parent().unwrap()).unwrap();
+        std::fs::write(
+            &plist,
+            format!(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\"><dict><key>BottleDir</key><string>{}</string></dict></plist>\n",
+                bottles.display()
+            ),
+        )
+        .unwrap();
 
         let discovered = discover_windows_steam_roots_in_home(&world.home);
 
