@@ -389,68 +389,11 @@ export default function PreferencesModal({
                         </div>
                     </div>
 
-                    {/* Appearance Section */}
-                    <div className="space-y-3">
-                        <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-widest px-1">Appearance</h3>
-
-                        <div className="bg-gray-800 border border-gray-700 rounded-2xl divide-y divide-gray-700/50 overflow-hidden">
-                            <div id="preference-theme" className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-surface-hover">
-                                <div className="flex items-center gap-4">
-                                    <RowIcon kind="theme" />
-                                    <div>
-                                        <p className="text-[15px] font-medium text-white">Theme</p>
-                                        <p className="text-[13px] text-gray-400 mt-0.5 leading-snug">Customise the background, surfaces, text and accent colours.</p>
-                                    </div>
-                                </div>
-                                <div className="flex shrink-0 items-center gap-3">
-                                    <span className="text-[13px] text-gray-400 max-w-[200px] truncate text-right">
-                                        {activeThemeName}
-                                    </span>
-                                    <button
-                                        type="button"
-                                        onClick={() => setShowThemeEditor(true)}
-                                        className="rounded-lg border border-gray-600 px-4 py-2 text-[13px] font-medium text-gray-200 transition-colors hover:border-gray-500 hover:bg-gray-700"
-                                    >
-                                        Customise
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Keyboard Section */}
-                    <div className="space-y-3">
-                        <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-widest px-1">Keyboard</h3>
-
-                        <div className="bg-gray-800 border border-gray-700 rounded-2xl overflow-hidden">
-                            <div id="preference-keybinds" className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-surface-hover">
-                                <div className="flex items-center gap-4">
-                                    <RowIcon kind="keyboard" />
-                                    <div>
-                                        <p className="text-[15px] font-medium text-white">Keyboard shortcuts</p>
-                                        <p className="text-[13px] text-gray-400 mt-0.5 leading-snug">
-                                            Launch, apply and switch profiles without reaching for the mouse.
-                                        </p>
-                                    </div>
-                                </div>
-                                <div className="flex shrink-0 items-center">
-                                    <button
-                                        type="button"
-                                        onClick={() => setShowKeybinds(true)}
-                                        className="rounded-lg border border-gray-600 px-4 py-2 text-[13px] font-medium text-gray-200 transition-colors hover:border-gray-500 hover:bg-gray-700"
-                                    >
-                                        Customise
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
                     <GameLocationsSection isOpen={isOpen} revealed={initialPanel === 'game-locations'} />
 
-                    {/* Setup behavior Section */}
+                    {/* Startup */}
                     <div className="space-y-3">
-                        <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-widest px-1">Behavior</h3>
+                        <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-widest px-1">Startup</h3>
 
                         <div className="bg-gray-800 border border-gray-700 rounded-2xl divide-y divide-gray-700/50 overflow-hidden">
                             <div id="preference-default-game" className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-surface-hover">
@@ -506,16 +449,23 @@ export default function PreferencesModal({
                                     </div>
                                 </div>
                             )}
+                        </div>
+                    </div>
 
-                            <div id="preference-legacy-install" className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-surface-hover">
+                    {/* Installing mods */}
+                    <div className="space-y-3">
+                        <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-widest px-1">Installing mods</h3>
+
+                        <div className="bg-gray-800 border border-gray-700 rounded-2xl divide-y divide-gray-700/50 overflow-hidden">
+                            <div id="preference-parallel-downloads" className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-surface-hover">
                                 <div className="flex items-center gap-4">
-                                    <RowIcon kind="install" />
+                                    <RowIcon kind="parallel" />
                                     <div>
-                                        <p className="text-[15px] font-medium text-white">Legacy install mode</p>
-                                        <p className="text-[13px] text-gray-400 mt-0.5 leading-snug">Download starts immediately on install. Uses more disk space.</p>
+                                        <p className="text-[15px] font-medium text-white">Download mods in parallel</p>
+                                        <p className="text-[13px] text-gray-400 mt-0.5 leading-snug">Downloads mods in parallel for faster installation.</p>
                                     </div>
                                 </div>
-                                <Toggle value={legacyMode} onChange={setLegacyMode} />
+                                <Toggle value={installInParallel} onChange={setInstallInParallel} />
                             </div>
 
                             <div id="preference-ask-version" className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-surface-hover">
@@ -529,15 +479,15 @@ export default function PreferencesModal({
                                 <Toggle value={askVersionBeforeInstall} onChange={setAskVersionBeforeInstall} />
                             </div>
 
-                            <div id="preference-parallel-downloads" className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-surface-hover">
+                            <div id="preference-manage-dependencies" className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-surface-hover">
                                 <div className="flex items-center gap-4">
-                                    <RowIcon kind="parallel" />
+                                    <RowIcon kind="dependencies" />
                                     <div>
-                                        <p className="text-[15px] font-medium text-white">Download mods in parallel</p>
-                                        <p className="text-[13px] text-gray-400 mt-0.5 leading-snug">Downloads mods in parallel for faster installation.</p>
+                                        <p className="text-[15px] font-medium text-white">Manage dependencies when toggling</p>
+                                        <p className="text-[13px] text-gray-400 mt-0.5 leading-snug">Ask to disable dependencies no other mod needs, and to enable a mod's disabled dependencies.</p>
                                     </div>
                                 </div>
-                                <Toggle value={installInParallel} onChange={setInstallInParallel} />
+                                <Toggle value={manageDependencies} onChange={setManageDependencies} />
                             </div>
 
                             <div id="preference-confirm-apply" className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-surface-hover">
@@ -551,17 +501,177 @@ export default function PreferencesModal({
                                 <Toggle value={confirmBeforeApply} onChange={setConfirmBeforeApply} />
                             </div>
 
-                            <div id="preference-manage-dependencies" className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-surface-hover">
+                            <div id="preference-legacy-install" className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-surface-hover">
                                 <div className="flex items-center gap-4">
-                                    <RowIcon kind="dependencies" />
+                                    <RowIcon kind="install" />
                                     <div>
-                                        <p className="text-[15px] font-medium text-white">Manage dependencies when toggling</p>
-                                        <p className="text-[13px] text-gray-400 mt-0.5 leading-snug">Ask to disable dependencies no other mod needs, and to enable a mod's disabled dependencies.</p>
+                                        <p className="text-[15px] font-medium text-white">Legacy install mode</p>
+                                        <p className="text-[13px] text-gray-400 mt-0.5 leading-snug">Download starts immediately on install. Uses more disk space.</p>
                                     </div>
                                 </div>
-                                <Toggle value={manageDependencies} onChange={setManageDependencies} />
+                                <Toggle value={legacyMode} onChange={setLegacyMode} />
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Interface */}
+                    <div className="space-y-3">
+                        <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-widest px-1">Interface</h3>
+
+                        <div className="bg-gray-800 border border-gray-700 rounded-2xl divide-y divide-gray-700/50 overflow-hidden">
+                            <div id="preference-theme" className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-surface-hover">
+                                <div className="flex items-center gap-4">
+                                    <RowIcon kind="theme" />
+                                    <div>
+                                        <p className="text-[15px] font-medium text-white">Theme</p>
+                                        <p className="text-[13px] text-gray-400 mt-0.5 leading-snug">Customise the background, surfaces, text and accent colours.</p>
+                                    </div>
+                                </div>
+                                <div className="flex shrink-0 items-center gap-3">
+                                    <span className="text-[13px] text-gray-400 max-w-[200px] truncate text-right">
+                                        {activeThemeName}
+                                    </span>
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowThemeEditor(true)}
+                                        className="rounded-lg border border-gray-600 px-4 py-2 text-[13px] font-medium text-gray-200 transition-colors hover:border-gray-500 hover:bg-gray-700"
+                                    >
+                                        Customise
+                                    </button>
+                                </div>
                             </div>
 
+                            <div id="preference-default-view" className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-surface-hover">
+                                <div className="flex items-center gap-4">
+                                    <RowIcon kind="layout" />
+                                    <div>
+                                        <p className="text-[15px] font-medium text-white">Default mods view</p>
+                                        <p className="text-[13px] text-gray-400 mt-0.5 leading-snug">Choose the initial layout when browsing mods.</p>
+                                    </div>
+                                </div>
+
+                                {/* Grid/List Switcher — identical to Browse Mods header */}
+                                <div className="relative flex bg-gray-800 rounded-lg p-1 border border-gray-700 overflow-hidden">
+                                    {/* Sliding background pill */}
+                                    <div
+                                        className={`absolute top-1 bottom-1 w-[calc(50%-4px)] bg-gray-600 rounded-md transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${defaultModViewMode === 'grid' ? 'left-1' : 'left-1/2'}`}
+                                    />
+                                    <button
+                                        onClick={() => setDefaultModViewMode('grid')}
+                                        className={`relative z-10 p-2 rounded w-10 flex items-center justify-center transition-colors ${defaultModViewMode === 'grid' ? 'text-white' : 'text-gray-400 hover:text-white'}`}
+                                        title="Grid view"
+                                    >
+                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+                                        </svg>
+                                    </button>
+                                    <button
+                                        onClick={() => setDefaultModViewMode('list')}
+                                        className={`relative z-10 p-2 rounded w-10 flex items-center justify-center transition-colors ${defaultModViewMode === 'list' ? 'text-white' : 'text-gray-400 hover:text-white'}`}
+                                        title="List view"
+                                    >
+                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                                        </svg>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div id="preference-keybinds" className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-surface-hover">
+                                <div className="flex items-center gap-4">
+                                    <RowIcon kind="keyboard" />
+                                    <div>
+                                        <p className="text-[15px] font-medium text-white">Keyboard shortcuts</p>
+                                        <p className="text-[13px] text-gray-400 mt-0.5 leading-snug">
+                                            Launch, apply and switch profiles without reaching for the mouse.
+                                        </p>
+                                    </div>
+                                </div>
+                                <div className="flex shrink-0 items-center">
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowKeybinds(true)}
+                                        className="rounded-lg border border-gray-600 px-4 py-2 text-[13px] font-medium text-gray-200 transition-colors hover:border-gray-500 hover:bg-gray-700"
+                                    >
+                                        Customise
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Guides & Alerts */}
+                    <div className="space-y-3">
+                        <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-widest px-1">Guides & Alerts</h3>
+
+                        <div className="bg-gray-800 border border-gray-700 rounded-2xl divide-y divide-gray-700/50 overflow-hidden">
+                            <div id="preference-deprecated-warnings" className="flex items-center justify-between gap-4 p-4 transition-colors hover:bg-surface-hover">
+                                <div className="flex items-center gap-4">
+                                    <button type="button" onClick={handleDeprecatedWarningClick} className="shrink-0 select-none" aria-label="Deprecated mod warnings">
+                                        <RowIcon kind="warning" />
+                                    </button>
+                                    <div>
+                                        <p className="text-[15px] font-medium text-white">Deprecated mod warnings</p>
+                                        <p className="mt-0.5 text-[13px] leading-snug text-gray-400">Show a red warning on deprecated mod icons.</p>
+                                    </div>
+                                </div>
+                                <Toggle value={showDeprecatedWarnings} onChange={setShowDeprecatedWarnings} label="Show deprecated mod warnings" />
+                            </div>
+
+                            <div id="preference-restore-warnings" className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-colors hover:bg-surface-hover">
+                                <div className="flex items-center gap-4">
+                                    <RowIcon kind="restore" />
+                                    <div>
+                                        <p className="text-[15px] font-medium text-white">Restore setup warnings</p>
+                                        <p className="text-[13px] text-gray-400 mt-0.5 leading-snug">
+                                            Re-enable alerts previously hidden with "Don't show again".
+                                        </p>
+                                    </div>
+                                </div>
+                                <button
+                                    disabled={!hasHiddenGuideWarnings || restoringWarnings}
+                                    onClick={async () => {
+                                        setRestoringWarnings(true);
+                                        try {
+                                            await onRestoreGuideWarnings();
+                                        } finally {
+                                            setRestoringWarnings(false);
+                                        }
+                                    }}
+                                    className={`px-4 py-2 rounded-xl text-[13px] font-medium transition-all duration-200 ease-in-out flex-shrink-0 ${hasHiddenGuideWarnings
+                                        ? 'bg-amber-500/10 hover:bg-amber-500/20 text-fg-warning border border-amber-500/30'
+                                        : 'bg-gray-700/40 text-gray-400 border border-gray-700 cursor-not-allowed opacity-50'
+                                        }`}
+                                >
+                                    {restoringWarnings ? 'Restoring...' : 'Show again'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Privacy */}
+                    <div className="space-y-3">
+                        <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-widest px-1">Privacy</h3>
+
+                        <div className="bg-gray-800 border border-gray-700 rounded-2xl divide-y divide-gray-700/50 overflow-hidden">
+                            <div id="preference-stream-mode" className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-surface-hover">
+                                <div className="flex items-center gap-4">
+                                    <RowIcon kind="stream" />
+                                    <div>
+                                        <p className="text-[15px] font-medium text-white">pls privacy</p>
+                                        <p className="text-[13px] text-gray-400 mt-0.5 leading-snug">Censors usernames in the app and its logs, so they stay private when streaming or screen sharing.</p>
+                                    </div>
+                                </div>
+                                <Toggle value={streamMode} onChange={setStreamMode} />
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Troubleshooting */}
+                    <div className="space-y-3">
+                        <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-widest px-1">Troubleshooting</h3>
+
+                        <div className="bg-gray-800 border border-gray-700 rounded-2xl divide-y divide-gray-700/50 overflow-hidden">
                             <div id="preference-debug-logs">
                                 <button
                                     type="button"
@@ -635,107 +745,7 @@ export default function PreferencesModal({
                                     </div>
                                 </div>
                             </div>
-
-                            <div id="preference-default-view" className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-surface-hover">
-                                <div className="flex items-center gap-4">
-                                    <RowIcon kind="layout" />
-                                    <div>
-                                        <p className="text-[15px] font-medium text-white">Default mods view</p>
-                                        <p className="text-[13px] text-gray-400 mt-0.5 leading-snug">Choose the initial layout when browsing mods.</p>
-                                    </div>
-                                </div>
-
-                                {/* Grid/List Switcher — identical to Browse Mods header */}
-                                <div className="relative flex bg-gray-800 rounded-lg p-1 border border-gray-700 overflow-hidden">
-                                    {/* Sliding background pill */}
-                                    <div
-                                        className={`absolute top-1 bottom-1 w-[calc(50%-4px)] bg-gray-600 rounded-md transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${defaultModViewMode === 'grid' ? 'left-1' : 'left-1/2'}`}
-                                    />
-                                    <button
-                                        onClick={() => setDefaultModViewMode('grid')}
-                                        className={`relative z-10 p-2 rounded w-10 flex items-center justify-center transition-colors ${defaultModViewMode === 'grid' ? 'text-white' : 'text-gray-400 hover:text-white'}`}
-                                        title="Grid view"
-                                    >
-                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
-                                        </svg>
-                                    </button>
-                                    <button
-                                        onClick={() => setDefaultModViewMode('list')}
-                                        className={`relative z-10 p-2 rounded w-10 flex items-center justify-center transition-colors ${defaultModViewMode === 'list' ? 'text-white' : 'text-gray-400 hover:text-white'}`}
-                                        title="List view"
-                                    >
-                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-                                        </svg>
-                                    </button>
-                                </div>
-                            </div>
-
-                            <div id="preference-stream-mode" className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-surface-hover">
-                                <div className="flex items-center gap-4">
-                                    <RowIcon kind="stream" />
-                                    <div>
-                                        <p className="text-[15px] font-medium text-white">pls privacy</p>
-                                        <p className="text-[13px] text-gray-400 mt-0.5 leading-snug">Censors usernames in the app and its logs, so they stay private when streaming or screen sharing.</p>
-                                    </div>
-                                </div>
-                                <Toggle value={streamMode} onChange={setStreamMode} />
-                            </div>
                         </div>
-                    </div>
-
-                    {/* Guides & Warnings Section */}
-                    <div className="space-y-3">
-                        <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-widest px-1">Guides & Alerts</h3>
-
-                        <div className="divide-y divide-gray-700/50 overflow-hidden rounded-2xl border border-gray-700 bg-gray-800">
-                            <div id="preference-deprecated-warnings" className="flex items-center justify-between gap-4 p-4 transition-colors hover:bg-surface-hover">
-                                <div className="flex items-center gap-4">
-                                    <button type="button" onClick={handleDeprecatedWarningClick} className="shrink-0 select-none" aria-label="Deprecated mod warnings">
-                                        <RowIcon kind="warning" />
-                                    </button>
-                                    <div>
-                                        <p className="text-[15px] font-medium text-white">Deprecated mod warnings</p>
-                                        <p className="mt-0.5 text-[13px] leading-snug text-gray-400">Show a red warning on deprecated mod icons.</p>
-                                    </div>
-                                </div>
-                                <Toggle value={showDeprecatedWarnings} onChange={setShowDeprecatedWarnings} label="Show deprecated mod warnings" />
-                            </div>
-                            <div id="preference-restore-warnings" className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-colors hover:bg-surface-hover">
-                                <div className="flex items-center gap-4">
-                                    <RowIcon kind="restore" />
-                                    <div>
-                                        <p className="text-[15px] font-medium text-white">Restore setup warnings</p>
-                                        <p className="text-[13px] text-gray-400 mt-0.5 leading-snug">
-                                            Re-enable alerts previously hidden with "Don't show again".
-                                        </p>
-                                    </div>
-                                </div>
-                                <button
-                                    disabled={!hasHiddenGuideWarnings || restoringWarnings}
-                                    onClick={async () => {
-                                        setRestoringWarnings(true);
-                                        try {
-                                            await onRestoreGuideWarnings();
-                                        } finally {
-                                            setRestoringWarnings(false);
-                                        }
-                                    }}
-                                    className={`px-4 py-2 rounded-xl text-[13px] font-medium transition-all duration-200 ease-in-out flex-shrink-0 ${hasHiddenGuideWarnings
-                                        ? 'bg-amber-500/10 hover:bg-amber-500/20 text-fg-warning border border-amber-500/30'
-                                        : 'bg-gray-700/40 text-gray-400 border border-gray-700 cursor-not-allowed opacity-50'
-                                        }`}
-                                >
-                                    {restoringWarnings ? 'Restoring...' : 'Show again'}
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-
-
-                    {/* Danger Zone */}
-                    <div className="space-y-3">
                         <div className="bg-red-500/5 hover:bg-red-500/10 border border-red-500/20 rounded-2xl overflow-hidden transition-colors duration-200 mt-2">
                             <div id="preference-clear-cache" className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                                 <div className="flex items-center gap-4">
