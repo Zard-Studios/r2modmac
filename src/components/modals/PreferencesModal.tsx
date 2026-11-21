@@ -627,6 +627,28 @@ export default function PreferencesModal({
                                 <Toggle value={showDeprecatedWarnings} onChange={setShowDeprecatedWarnings} label="Show deprecated mod warnings" />
                             </div>
 
+                            <div id="preference-notices" className="p-4 flex items-center justify-between gap-4">
+                                <div className="flex items-center gap-4">
+                                    <RowIcon kind="notices" />
+                                    <div>
+                                        <p className="text-[15px] font-medium text-white">Announcements</p>
+                                        <p className="text-[13px] text-gray-400 mt-0.5 leading-snug">Messages from the developer, shown behind the bell on the home screen.</p>
+                                    </div>
+                                </div>
+                                <Toggle
+                                    value={announcements}
+                                    onChange={(on) => {
+                                        setAnnouncements(on);
+                                        try {
+                                            setNoticesEnabled(window.localStorage, on);
+                                        } catch {
+                                            // Without storage the switch can't be remembered.
+                                        }
+                                        window.dispatchEvent(new Event(NOTICES_SETTING_EVENT));
+                                    }}
+                                />
+                            </div>
+
                             <div id="preference-restore-warnings" className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                                 <div className="flex items-center gap-4">
                                     <RowIcon kind="restore" />
@@ -672,27 +694,6 @@ export default function PreferencesModal({
                                     </div>
                                 </div>
                                 <Toggle value={streamMode} onChange={setStreamMode} />
-                            </div>
-                            <div id="preference-notices" className="p-4 flex items-center justify-between gap-4">
-                                <div className="flex items-center gap-4">
-                                    <RowIcon kind="notices" />
-                                    <div>
-                                        <p className="text-[15px] font-medium text-white">Announcements</p>
-                                        <p className="text-[13px] text-gray-400 mt-0.5 leading-snug">Checks GitHub every few hours for messages from the developer, shown behind the bell on the home screen. Nothing about you is sent.</p>
-                                    </div>
-                                </div>
-                                <Toggle
-                                    value={announcements}
-                                    onChange={(on) => {
-                                        setAnnouncements(on);
-                                        try {
-                                            setNoticesEnabled(window.localStorage, on);
-                                        } catch {
-                                            // Without storage the switch can't be remembered.
-                                        }
-                                        window.dispatchEvent(new Event(NOTICES_SETTING_EVENT));
-                                    }}
-                                />
                             </div>
                         </div>
                     </div>
