@@ -1,5 +1,6 @@
 import {
     Ban,
+    Bell,
     BellRing,
     Bug,
     Check,
@@ -71,6 +72,7 @@ export type IconName =
     | 'help'
     | 'cache'
     | 'stream'
+    | 'notices'
     | 'update'
     | 'support'
     | 'folder'
@@ -114,6 +116,7 @@ const ICONS: Record<IconName, LucideIcon> = {
     help: CircleHelp,
     cache: Trash2,
     stream: EyeOff,
+    notices: Bell,
     update: RefreshCw,
     support: Heart,
     folder: Folder,

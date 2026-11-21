@@ -17,6 +17,8 @@ import { isStockThemeId } from '../../utils/themePresets';
 import { activeThemeLabel } from '../../utils/themeLabel';
 import type { Community, CommunityPlatformInfo } from '../../types/thunderstore';
 import { getVersion } from '@tauri-apps/api/app';
+import { NOTICES_SETTING_EVENT } from '../NoticesBell';
+import { noticesEnabled, setNoticesEnabled } from '../../utils/notices';
 
 const ThemeEditorModal = createLazyModal(() => import('./ThemeEditorModal'), m => m.ThemeEditorModal);
 const KeybindsModal = createLazyModal(() => import('./KeybindsModal'), m => m.KeybindsModal);
@@ -158,6 +160,13 @@ export default function PreferencesModal({
     const [defaultModViewMode, setDefaultModViewMode] = useState<'grid' | 'list'>(settings.default_mod_view_mode);
     const [showDeprecatedWarnings, setShowDeprecatedWarnings] = useState(settings.show_deprecated_warnings);
     const [streamMode, setStreamMode] = useState(settings.stream_mode);
+    const [announcements, setAnnouncements] = useState(() => {
+        try {
+            return noticesEnabled(window.localStorage);
+        } catch {
+            return true;
+        }
+    });
     const [defaultGame, setDefaultGame] = useState<string | null>(settings.default_game ?? null);
     const [defaultProfile, setDefaultProfile] = useState<string | null>(settings.default_profile ?? null);
     const [showGamePicker, setShowGamePicker] = useState(false);
@@ -663,6 +672,27 @@ export default function PreferencesModal({
                                     </div>
                                 </div>
                                 <Toggle value={streamMode} onChange={setStreamMode} />
+                            </div>
+                            <div id="preference-notices" className="p-4 flex items-center justify-between gap-4">
+                                <div className="flex items-center gap-4">
+                                    <RowIcon kind="notices" />
+                                    <div>
+                                        <p className="text-[15px] font-medium text-white">Announcements</p>
+                                        <p className="text-[13px] text-gray-400 mt-0.5 leading-snug">Checks GitHub every few hours for messages from the developer, shown behind the bell on the home screen. Nothing about you is sent.</p>
+                                    </div>
+                                </div>
+                                <Toggle
+                                    value={announcements}
+                                    onChange={(on) => {
+                                        setAnnouncements(on);
+                                        try {
+                                            setNoticesEnabled(window.localStorage, on);
+                                        } catch {
+                                            // Without storage the switch can't be remembered.
+                                        }
+                                        window.dispatchEvent(new Event(NOTICES_SETTING_EVENT));
+                                    }}
+                                />
                             </div>
                         </div>
                     </div>

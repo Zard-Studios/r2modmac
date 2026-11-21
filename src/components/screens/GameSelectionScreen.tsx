@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { GameSelector } from '../game/GameSelector';
 import { SearchClearButton } from '../ui/SearchClearButton';
+import { NoticesBell } from '../NoticesBell';
 import type { CommunityPlatformInfo } from '../../types/thunderstore';
 import type { InstalledBuilds } from '../../types/electron';
 
@@ -151,6 +152,8 @@ export function GameSelectionScreen({
                                     </button>
                                 </div>
                             </div>
+
+                            <NoticesBell />
 
                             <button
                                 onClick={onOpenPreferences}

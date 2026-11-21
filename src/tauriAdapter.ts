@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { IElectronAPI, InstalledGame, ThemeSummary } from './types/electron';
+import type { IElectronAPI, InstalledGame, Notice, ThemeSummary } from './types/electron';
 import type { Profile } from './types/profile';
 import type { Community, Package, CommunityPlatformInfo, ModSource } from './types/thunderstore';
 
@@ -209,6 +209,9 @@ export const tauriAPI: IElectronAPI = {
     },
     checkUpdate: async (currentVersion: string) => {
         return await invoke('check_update_secure', { currentVersion });
+    },
+    fetchNotices: async () => {
+        return await invoke<Notice[]>('fetch_notices');
     },
     installUpdate: async (downloadUrl: string) => {
         return await invoke('install_update', { downloadUrl });

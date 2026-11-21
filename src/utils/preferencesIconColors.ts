@@ -15,6 +15,7 @@ export const PREFERENCE_ICON_CATALOG = {
     warning: { label: 'Warnings', tone: 'warning', className: 'text-fg-warning' },
     cache: { label: 'Cache', tone: 'danger', className: 'text-fg-danger' },
     stream: { label: 'pls privacy', tone: 'fuchsia', className: 'text-fuchsia-400' },
+    notices: { label: 'Announcements', tone: 'orange', className: 'text-orange-400' },
     update: { label: 'Updates', tone: 'success', className: 'text-fg-success' },
     folder: { label: 'Folders', tone: 'orange', className: 'text-orange-400' },
     game: { label: 'Games', tone: 'teal', className: 'text-teal-400' },

@@ -235,6 +235,7 @@ export interface IElectronAPI {
     installToGame: (gameIdentifier: string, profileId: string, disabledMods: string[], isVanillaOverride?: boolean) => Promise<void>;
     fetchTextContent: (url: string) => Promise<string>;
     checkUpdate: (currentVersion: string) => Promise<UpdateInfo>;
+    fetchNotices: () => Promise<Notice[]>;
     installUpdate: (downloadUrl: string) => Promise<void>;
     lookupPackagesByNames: (gameId: string, names: string[]) => Promise<any>;
     syncProfileToGame: (profileId: string, gameIdentifier: string, useLegacyCache?: boolean, finalize?: boolean) => Promise<ProfileSyncResult>;
@@ -275,6 +276,15 @@ export interface IElectronAPI {
     setActiveTheme: (fileName: string | null) => Promise<void>;
     importThemeImage: (sourcePath: string) => Promise<string>;
     readThemeImage: (relativePath: string) => Promise<string | null>;
+}
+
+/** A message from the maintainer, read from a labelled GitHub issue. */
+export interface Notice {
+    id: number;
+    title: string;
+    body: string;
+    url: string | null;
+    created_at: string;
 }
 
 export interface UpdateInfo {

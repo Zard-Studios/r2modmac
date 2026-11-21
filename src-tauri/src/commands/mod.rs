@@ -6,6 +6,7 @@ pub mod legacy_mod_commands;
 pub mod legacy_system_commands;
 #[path = "secure_mod_commands.rs"]
 pub mod mod_commands;
+pub mod notices;
 pub mod profile_commands;
 pub mod settings_commands;
 #[path = "secure_system_commands.rs"]
