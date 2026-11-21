@@ -28,7 +28,7 @@ export function NoticeBody({ markdown }: { markdown: string }) {
         const onError = (event: Event) => {
             const video = event.target;
             if (!(video instanceof HTMLVideoElement)) return;
-            const original = video.getAttribute('src');
+            const original = video.getAttribute('src')?.split('#')[0];
             const note = document.createElement('p');
             note.className = 'my-3 rounded-lg bg-gray-900/60 px-3 py-2 text-[13px] text-gray-300';
             const code = video.error?.code;

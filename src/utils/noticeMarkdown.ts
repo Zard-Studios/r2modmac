@@ -24,6 +24,11 @@ function sanitizer(): ReturnType<typeof DOMPurify> {
             if (tag === 'IMG') node.setAttribute('loading', 'lazy');
             if (tag === 'VIDEO') {
                 node.removeAttribute('autoplay');
+                // Without this the box stays black until play is pressed: the
+                // web view then loads the length but not a first picture.
+                if (src && isAllowedMediaUrl(src) && !src.includes('#')) {
+                    node.setAttribute('src', `${src}#t=0.001`);
+                }
                 node.setAttribute('controls', '');
                 node.setAttribute('preload', 'metadata');
             }
