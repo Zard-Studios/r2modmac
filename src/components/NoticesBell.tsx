@@ -65,21 +65,43 @@ export function NoticesBell() {
             setVersion((value) => value + 1);
         };
         // The bell only exists on the home screen, so the timer below only runs
-        // there. Coming back to the home screen, reloading the page and opening
-        // the bell all look right away; the switch in Preferences does too.
+        // there, and only while this window is in front: nothing is counted when
+        // the app is in the background or hidden. Coming back to the home
+        // screen, reloading the page, opening the bell and the window regaining
+        // focus all look right away; the switch in Preferences does too.
+        const period = open ? NOTICE_OPEN_INTERVAL_MS : NOTICE_CHECK_INTERVAL_MS;
+        let timer: number | undefined;
+        const stop = () => {
+            if (timer !== undefined) window.clearInterval(timer);
+            timer = undefined;
+        };
+        const start = () => {
+            stop();
+            timer = window.setInterval(() => void check(period), period);
+        };
+        const wake = () => {
+            void check(NOTICE_OPEN_INTERVAL_MS);
+            start();
+        };
+        const onVisibility = () => {
+            if (document.visibilityState === 'hidden') stop();
+            else if (document.hasFocus()) wake();
+        };
+
         void check(NOTICE_OPEN_INTERVAL_MS);
-        const timer = window.setInterval(
-            () => void check(open ? NOTICE_OPEN_INTERVAL_MS : NOTICE_CHECK_INTERVAL_MS),
-            open ? NOTICE_OPEN_INTERVAL_MS : NOTICE_CHECK_INTERVAL_MS,
-        );
-        const onWake = () => void check(NOTICE_OPEN_INTERVAL_MS);
-        window.addEventListener(NOTICES_SETTING_EVENT, onWake);
-        window.addEventListener('focus', onWake);
+        if (document.hasFocus() && document.visibilityState !== 'hidden') start();
+        window.addEventListener('focus', wake);
+        window.addEventListener('blur', stop);
+        document.addEventListener('visibilitychange', onVisibility);
+        const onSetting = () => void check(NOTICE_OPEN_INTERVAL_MS);
+        window.addEventListener(NOTICES_SETTING_EVENT, onSetting);
         return () => {
             cancelled = true;
-            window.clearInterval(timer);
-            window.removeEventListener(NOTICES_SETTING_EVENT, onWake);
-            window.removeEventListener('focus', onWake);
+            stop();
+            window.removeEventListener('focus', wake);
+            window.removeEventListener('blur', stop);
+            document.removeEventListener('visibilitychange', onVisibility);
+            window.removeEventListener(NOTICES_SETTING_EVENT, onSetting);
         };
     }, [open]);
 
