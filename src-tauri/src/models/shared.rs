@@ -294,7 +294,75 @@ pub fn load_settings_impl(app: &tauri::AppHandle) -> Settings {
 
 pub fn save_settings_impl(app: &tauri::AppHandle, settings: &Settings) -> Result<(), String> {
     let path = get_settings_path(app);
+    let _guard = settings_write_lock();
     crate::utils::stable_json::write_file(&path, settings)
+}
+
+/// Every change to `settings.json` goes through this lock.
+///
+/// Commands run in parallel. Two that each read the file, change one field
+/// and write the whole thing back will silently undo each other: the second
+/// write carries the first one's old value. That is how a theme the user had
+/// just picked could come back as the previous one.
+static SETTINGS_WRITE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn settings_write_lock() -> std::sync::MutexGuard<'static, ()> {
+    // A panic elsewhere while holding the lock leaves nothing half-written
+    // (the file is replaced in one step), so a poisoned lock is safe to reuse.
+    SETTINGS_WRITE_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// The settings on disk: `None` when there is no file yet, an error when the
+/// file is there but cannot be read.
+fn read_settings_file(path: &Path) -> Result<Option<Settings>, String> {
+    if !path.exists() {
+        return Ok(None);
+    }
+    let data = std::fs::read_to_string(path)
+        .map_err(|error| format!("Could not read the settings file: {}", error))?;
+    serde_json::from_str(&data)
+        .map(Some)
+        .map_err(|error| format!("The settings file could not be understood: {}", error))
+}
+
+/// Change some settings without disturbing the rest.
+///
+/// The file is read again under the lock, `change` is applied to that fresh
+/// copy, and the result is written back. Use this instead of loading the
+/// settings, working for a while and saving the old copy. If the file exists
+/// but cannot be read this refuses to write: carrying on from the defaults
+/// would replace the user's settings with an empty set.
+pub fn update_settings_at<F>(path: &Path, change: F) -> Result<Settings, String>
+where
+    F: FnOnce(&mut Settings),
+{
+    let _guard = settings_write_lock();
+    let mut settings = read_settings_file(path)?.unwrap_or_else(Settings::default);
+    change(&mut settings);
+    crate::utils::stable_json::write_file(path, &settings)?;
+    Ok(settings)
+}
+
+pub fn update_settings_impl<F>(app: &tauri::AppHandle, change: F) -> Result<Settings, String>
+where
+    F: FnOnce(&mut Settings),
+{
+    update_settings_at(&get_settings_path(app), change)
+}
+
+/// Store the settings the interface sends, keeping the selected theme.
+///
+/// The interface sends back a whole copy it fetched a moment earlier. The
+/// theme is only ever changed through `set_active_theme`, so whatever the copy
+/// says about it is at best the same and at worst out of date.
+pub fn save_interface_settings_at(path: &Path, mut incoming: Settings) -> Result<(), String> {
+    let _guard = settings_write_lock();
+    if let Ok(Some(current)) = read_settings_file(path) {
+        incoming.active_theme = current.active_theme;
+    }
+    crate::utils::stable_json::write_file(path, &incoming)
 }
 
 pub fn normalize_for_matching(s: &str) -> String {
@@ -853,5 +921,111 @@ mod settings_stable_order_tests {
         assert!(to_pretty_string(&Settings::default())
             .unwrap()
             .ends_with("\n"));
+    }
+}
+
+#[cfg(test)]
+mod settings_update_tests {
+    use super::*;
+    use std::sync::Arc;
+
+    fn temp_file(label: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "r2modmac-settings-{}-{}-{}",
+            label,
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir.join("settings.json")
+    }
+
+    #[test]
+    fn updates_made_at_the_same_time_do_not_undo_each_other() {
+        let path = Arc::new(temp_file("parallel"));
+        let mut workers = Vec::new();
+        for worker in 0..8 {
+            let path = Arc::clone(&path);
+            workers.push(std::thread::spawn(move || {
+                for entry in 0..25 {
+                    update_settings_at(&path, |settings| {
+                        settings
+                            .game_paths
+                            .insert(format!("game-{worker}-{entry}"), "/games".into());
+                    })
+                    .unwrap();
+                }
+            }));
+        }
+        let theme_path = Arc::clone(&path);
+        workers.push(std::thread::spawn(move || {
+            update_settings_at(&theme_path, |settings| {
+                settings.active_theme = Some("builtin:claudio-dark".into());
+            })
+            .unwrap();
+        }));
+        for worker in workers {
+            worker.join().unwrap();
+        }
+
+        let settings = read_settings_file(&path).unwrap().unwrap();
+        assert_eq!(settings.game_paths.len(), 8 * 25, "an update was lost");
+        assert_eq!(
+            settings.active_theme.as_deref(),
+            Some("builtin:claudio-dark")
+        );
+    }
+
+    #[test]
+    fn a_settings_file_that_cannot_be_read_is_not_replaced_by_defaults() {
+        let path = temp_file("unreadable");
+        std::fs::write(&path, "{ this is not json").unwrap();
+
+        let result = update_settings_at(&path, |settings| {
+            settings.active_theme = Some("builtin:nord".into());
+        });
+
+        assert!(result.is_err());
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "{ this is not json"
+        );
+    }
+
+    #[test]
+    fn with_no_settings_file_yet_an_update_starts_from_the_defaults() {
+        let path = temp_file("missing");
+        let settings = update_settings_at(&path, |settings| {
+            settings.active_theme = Some("builtin:nord".into());
+        })
+        .unwrap();
+
+        assert_eq!(settings.active_theme.as_deref(), Some("builtin:nord"));
+        assert!(path.is_file());
+    }
+
+    #[test]
+    fn a_copy_from_the_interface_cannot_undo_the_selected_theme() {
+        let path = temp_file("interface");
+        update_settings_at(&path, |settings| {
+            settings.active_theme = Some("builtin:claudio-dark".into());
+        })
+        .unwrap();
+
+        // The interface fetched its copy before the theme was picked.
+        let mut stale = Settings::default();
+        stale.active_theme = None;
+        stale.legacy_install_mode = true;
+        save_interface_settings_at(&path, stale).unwrap();
+
+        let saved = read_settings_file(&path).unwrap().unwrap();
+        assert_eq!(saved.active_theme.as_deref(), Some("builtin:claudio-dark"));
+        assert!(
+            saved.legacy_install_mode,
+            "the rest of the copy is still saved"
+        );
     }
 }

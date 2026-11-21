@@ -424,7 +424,7 @@ pub fn run() {
             }
 
             if utils::paths::app_data_dir(app).is_ok() {
-                let mut settings = models::shared::load_settings_impl(&app.handle());
+                let settings = models::shared::load_settings_impl(&app.handle());
 
                 if !settings.thunderstore_chunk_cache_migrated {
                     if let Ok(cache_dir) = utils::paths::app_cache_dir(app) {
@@ -433,8 +433,9 @@ pub fn run() {
                             let _ = std::fs::remove_dir_all(&chunks_dir);
                         }
                     }
-                    settings.thunderstore_chunk_cache_migrated = true;
-                    let _ = models::shared::save_settings_impl(&app.handle(), &settings);
+                    let _ = models::shared::update_settings_impl(&app.handle(), |current| {
+                        current.thunderstore_chunk_cache_migrated = true;
+                    });
                 }
 
                 // A profile's BepInEx tree may be its live installation.

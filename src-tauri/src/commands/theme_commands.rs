@@ -601,9 +601,10 @@ pub async fn set_active_theme(app: AppHandle, file_name: Option<String>) -> Resu
         Some(name) => Some(safe_theme_file_name(&name)?),
         None => None,
     };
-    let mut settings = crate::models::shared::load_settings_impl(&app);
-    settings.active_theme = normalized;
-    crate::models::shared::save_settings_impl(&app, &settings)
+    crate::models::shared::update_settings_impl(&app, |settings| {
+        settings.active_theme = normalized;
+    })
+    .map(|_| ())
 }
 
 /// Turn a theme name into a file name that will not collide with an existing one.

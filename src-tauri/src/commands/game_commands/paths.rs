@@ -193,11 +193,14 @@ pub async fn get_game_path(
         });
     if let Some(game_path) = found {
         if settings.game_paths.get(&cache_key) != Some(&game_path) {
-            let mut updated_settings = settings.clone();
-            updated_settings
-                .game_paths
-                .insert(cache_key.clone(), game_path.clone());
-            let _ = save_settings_impl(&app, &updated_settings);
+            // Only this entry is written, onto the settings as they are now:
+            // the search above can take a while, and the copy loaded before it
+            // would undo anything changed meanwhile, such as the theme.
+            let _ = update_settings_impl(&app, |current| {
+                current
+                    .game_paths
+                    .insert(cache_key.clone(), game_path.clone());
+            });
         }
         return Ok(Some(game_path));
     }
@@ -728,14 +731,14 @@ pub async fn set_game_path(
         ));
     }
 
-    let mut settings = load_settings_impl(&app);
     let key = if let Some(p) = normalized_platform(platform.as_deref()) {
         format!("{}::{}", game_identifier, p)
     } else {
         game_identifier
     };
-    settings.game_paths.insert(key, path);
-    save_settings_impl(&app, &settings)?;
+    update_settings_impl(&app, |settings| {
+        settings.game_paths.insert(key, path);
+    })?;
     Ok(())
 }
 

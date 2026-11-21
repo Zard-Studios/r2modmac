@@ -18,6 +18,9 @@ where
 }
 
 /// Same, written to `path`, creating the parent directory if needed.
+///
+/// The file is replaced in one step, so something reading it at the same
+/// moment sees the old content or the new content, never half of either.
 pub fn write_file<T>(path: &Path, value: &T) -> Result<(), String>
 where
     T: ?Sized + Serialize,
@@ -26,13 +29,123 @@ where
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    std::fs::write(path, json).map_err(|e| e.to_string())
+    write_atomic(path, json.as_bytes())
+}
+
+/// Write beside the target, then rename over it.
+///
+/// `std::fs::write` empties the file before filling it. A reader that arrives
+/// in between gets an empty or cut-off file; for settings that read fails to
+/// parse, falls back to the defaults, and the next save then writes those
+/// defaults over everything the user had set.
+fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    // A symlinked file (say, into a dotfiles repo) must stay a symlink, so the
+    // rename goes onto what it points at.
+    let target = if path.is_symlink() {
+        std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+    } else {
+        path.to_path_buf()
+    };
+    let Some(name) = target
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+    else {
+        return std::fs::write(path, bytes).map_err(|e| e.to_string());
+    };
+    let temp = target.with_file_name(format!(
+        ".{}.{}-{}.tmp",
+        name,
+        std::process::id(),
+        COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+
+    if std::fs::write(&temp, bytes).is_err() {
+        // No room or no right to create a second file: write in place, as before.
+        let _ = std::fs::remove_file(&temp);
+        return std::fs::write(path, bytes).map_err(|e| e.to_string());
+    }
+    if std::fs::rename(&temp, &target).is_err() {
+        // Some systems refuse to replace a file another program holds open.
+        let _ = std::fs::remove_file(&temp);
+        return std::fs::write(path, bytes).map_err(|e| e.to_string());
+    }
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::collections::BTreeMap;
+
+    fn temp_dir(label: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "r2modmac-stable-json-{}-{}-{}",
+            label,
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn a_reader_never_sees_a_half_written_file() {
+        let dir = temp_dir("atomic");
+        let path = dir.join("settings.json");
+        let big: Vec<String> = (0..3000).map(|i| format!("entry-{i}")).collect();
+        write_file(&path, &big).unwrap();
+
+        let writer_path = path.clone();
+        let writer_data = big.clone();
+        let writer = std::thread::spawn(move || {
+            for _ in 0..200 {
+                write_file(&writer_path, &writer_data).unwrap();
+            }
+        });
+        for _ in 0..2000 {
+            let text = std::fs::read_to_string(&path).unwrap();
+            assert!(
+                serde_json::from_str::<Vec<String>>(&text).is_ok(),
+                "read a file that was only partly written"
+            );
+        }
+        writer.join().unwrap();
+    }
+
+    #[test]
+    fn writing_leaves_no_temporary_files_behind() {
+        let dir = temp_dir("leftovers");
+        let path = dir.join("data.json");
+        for round in 0..5 {
+            write_file(&path, &round).unwrap();
+        }
+        let names: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().to_string())
+            .collect();
+        assert_eq!(names, vec!["data.json".to_string()]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_file_stays_a_symlink() {
+        let dir = temp_dir("symlink");
+        let real = dir.join("real.json");
+        let link = dir.join("link.json");
+        write_file(&real, &1).unwrap();
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+
+        write_file(&link, &2).unwrap();
+
+        assert!(link.is_symlink());
+        assert_eq!(std::fs::read_to_string(&real).unwrap().trim(), "2");
+    }
 
     #[test]
     fn output_ends_with_exactly_one_newline() {

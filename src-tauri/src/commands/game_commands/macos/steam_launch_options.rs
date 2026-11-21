@@ -796,7 +796,12 @@ pub(crate) fn ensure_macos_steam_launch_options(
     }
 
     if settings_changed {
-        save_settings_impl(app, &settings)?;
+        // Steam can take a while above; write only what changed, onto the
+        // settings as they are now.
+        let backups = settings.steam_launch_option_backups.clone();
+        update_settings_impl(app, |current| {
+            current.steam_launch_option_backups = backups;
+        })?;
     }
 
     if steam_was_running.unwrap_or(false) {
