@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, type MouseEvent } from 'react';
 import { renderNoticeMarkdown } from '../utils/noticeMarkdown';
-import { isSafeLinkUrl } from '../utils/noticeUrls';
+import { isSafeLinkUrl, VIDEO_PREVIEW_SECONDS } from '../utils/noticeUrls';
 
 /** What the browser's own error code for a media element means. */
 const MEDIA_ERRORS: Record<number, string> = {
@@ -19,20 +19,22 @@ const MEDIA_ERRORS: Record<number, string> = {
 function showFirstPicture(video: HTMLVideoElement) {
     if (video.dataset.primed) return;
     video.dataset.primed = 'true';
-    if (video.currentTime === 0) video.currentTime = 0.001;
+    if (video.currentTime < VIDEO_PREVIEW_SECONDS) video.currentTime = VIDEO_PREVIEW_SECONDS;
     window.setTimeout(() => {
         if (!video.isConnected || !video.paused || video.readyState >= 2) return;
         const wasMuted = video.muted;
         video.muted = true;
+        video.dataset.priming = 'true';
         video
             .play()
             .then(() => {
                 video.pause();
-                video.currentTime = 0;
+                video.currentTime = VIDEO_PREVIEW_SECONDS;
             })
             .catch(() => {})
             .finally(() => {
                 video.muted = wasMuted;
+                delete video.dataset.priming;
             });
     }, 800);
 }
@@ -76,6 +78,16 @@ export function NoticeBody({ markdown }: { markdown: string }) {
             if (event.target instanceof HTMLVideoElement) showFirstPicture(event.target);
         };
         container.addEventListener('loadedmetadata', onMetadata, true);
+
+        // The preview sits a moment after the start. When the reader presses
+        // play for the first time, start from the very beginning.
+        const onPlay = (event: Event) => {
+            const video = event.target;
+            if (!(video instanceof HTMLVideoElement) || video.dataset.priming || video.dataset.started) return;
+            video.dataset.started = 'true';
+            if (video.currentTime <= VIDEO_PREVIEW_SECONDS + 0.05) video.currentTime = 0;
+        };
+        container.addEventListener('play', onPlay, true);
         for (const video of container.querySelectorAll('video')) {
             if (video.readyState >= 1) showFirstPicture(video);
         }
@@ -83,6 +95,7 @@ export function NoticeBody({ markdown }: { markdown: string }) {
         return () => {
             container.removeEventListener('error', onError, true);
             container.removeEventListener('loadedmetadata', onMetadata, true);
+            container.removeEventListener('play', onPlay, true);
         };
     }, [html]);
 

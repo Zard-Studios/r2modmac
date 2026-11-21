@@ -4,6 +4,13 @@
  * stolen account or a careless paste cannot send the app anywhere unexpected.
  */
 
+/**
+ * The instant of a video that is shown as its preview. Not zero: a video can
+ * start a little after zero (the one this was found with has its first picture
+ * at 0.066 s), and a web view shows nothing at an instant with no picture.
+ */
+export const VIDEO_PREVIEW_SECONDS = 0.1;
+
 /** Pictures and videos come from GitHub's own hosting, nowhere else. */
 export function isAllowedMediaUrl(raw: string): boolean {
     let url: URL;

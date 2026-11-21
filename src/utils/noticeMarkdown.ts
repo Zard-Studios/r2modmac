@@ -1,6 +1,6 @@
 import DOMPurify from 'dompurify';
 import { Marked } from 'marked';
-import { attachmentLinesToVideos, isAllowedMediaUrl, isSafeLinkUrl } from './noticeUrls';
+import { attachmentLinesToVideos, isAllowedMediaUrl, isSafeLinkUrl, VIDEO_PREVIEW_SECONDS } from './noticeUrls';
 
 // Own instances, so the hooks and options here don't leak into the other
 // places that already render markdown with the shared ones.
@@ -24,10 +24,10 @@ function sanitizer(): ReturnType<typeof DOMPurify> {
             if (tag === 'IMG') node.setAttribute('loading', 'lazy');
             if (tag === 'VIDEO') {
                 node.removeAttribute('autoplay');
-                // Without this the box stays black until play is pressed: the
+                // Without this the box stays empty until play is pressed: the
                 // web view then loads the length but not a first picture.
                 if (src && isAllowedMediaUrl(src) && !src.includes('#')) {
-                    node.setAttribute('src', `${src}#t=0.001`);
+                    node.setAttribute('src', `${src}#t=${VIDEO_PREVIEW_SECONDS}`);
                 }
                 node.setAttribute('controls', '');
                 node.setAttribute('preload', 'metadata');
