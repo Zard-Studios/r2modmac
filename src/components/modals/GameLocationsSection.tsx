@@ -1,6 +1,10 @@
 import { useEffect, useState } from 'react';
 import { PathCensor } from '../ui/PathCensor';
+import { AppIcon } from '../ui/icons';
 import { runningOnLinux, runningOnMacOS } from '../../utils/platformUtils';
+import { PREFERENCE_ICON_COLORS, themedPreferenceIconStyle } from '../../utils/preferencesIconColors';
+import { useThemeStore } from '../../store/useThemeStore';
+import { isStockThemeId } from '../../utils/themePresets';
 
 type SteamStatus = Awaited<ReturnType<typeof window.ipcRenderer.getSteamSetupStatus>>;
 
@@ -13,6 +17,25 @@ export function SteamLogo({ className = 'h-5 w-5' }: { className?: string }) {
     );
 }
 
+/**
+ * A small wine glass for the corner of the Steam logo, so Steam for Wine does
+ * not look like Steam for macOS. It is a Preferences icon like the others, so
+ * custom themes can recolour it.
+ */
+function WineBadge() {
+    const hasThemePalette = useThemeStore(
+        (state) => state.preview !== null || !isStockThemeId(state.activeFileName)
+    );
+    return (
+        <span
+            className={`absolute -bottom-1 -right-1 flex h-[18px] w-[18px] items-center justify-center rounded-full border border-gray-700 bg-gray-800 ${PREFERENCE_ICON_COLORS.wine}`}
+            style={themedPreferenceIconStyle('wine', hasThemePalette)}
+        >
+            <AppIcon name="wine" className="h-3 w-3" strokeWidth={2} />
+        </span>
+    );
+}
+
 interface PathRowProps {
     title: string;
     /** One short line, or nothing. */
@@ -22,18 +45,21 @@ interface PathRowProps {
     value: string;
     /** `ok` is a green badge, `none` a muted one. */
     badge?: { label: string; ok: boolean };
+    /** Draw a wine glass on the Steam logo: the Steam inside a Wine bottle. */
+    wine?: boolean;
     onPick: () => void;
     onReset: () => void;
 }
 
 const smallButton = 'rounded-lg border border-gray-600 px-3 py-1 text-[13px] font-medium text-gray-200 transition-colors hover:border-gray-500 hover:bg-gray-700';
 
-function PathRow({ title, detail, usualPath, value, badge, onPick, onReset }: PathRowProps) {
+function PathRow({ title, detail, usualPath, value, badge, wine, onPick, onReset }: PathRowProps) {
     const missing = badge && !badge.ok && !value;
     return (
         <div className="p-4 flex items-center gap-4">
-            <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-gray-700/60 border border-gray-700 text-gray-200 flex-shrink-0">
+            <div className="relative w-9 h-9 rounded-xl flex items-center justify-center bg-gray-700/60 border border-gray-700 text-gray-200 flex-shrink-0">
                 <SteamLogo />
+                {wine && <WineBadge />}
             </div>
             <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
@@ -258,6 +284,7 @@ export function GameLocationsSection({ isOpen, revealed = false }: { isOpen: boo
                             usualPath="…/drive_c/Program Files (x86)/Steam"
                             value={wineOrWindowsPath}
                             badge={status ? { label: status.bottle_steam_count > 0 ? 'Found' : 'Not found', ok: status.bottle_steam_count > 0 } : undefined}
+                            wine
                             onPick={() => void pick('windows')}
                             onReset={() => void reset('windows')}
                         />

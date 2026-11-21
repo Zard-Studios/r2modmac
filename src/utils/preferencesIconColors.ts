@@ -21,6 +21,11 @@ export const PREFERENCE_ICON_CATALOG = {
     profile: { label: 'Profiles', tone: 'purple', className: 'text-purple-400' },
     theme: { label: 'Themes', tone: 'accent', className: 'text-fg-accent' },
     keyboard: { label: 'Keyboard', tone: 'warning', className: 'text-amber-400' },
+    dependencies: { label: 'Dependencies', tone: 'pink', className: 'text-pink-400' },
+    debug: { label: 'Debug logs', tone: 'rose', className: 'text-rose-400' },
+    verbose: { label: 'Verbose logging', tone: 'lime', className: 'text-lime-400' },
+    restore: { label: 'Restore warnings', tone: 'cyan', className: 'text-cyan-400' },
+    wine: { label: 'Wine', tone: 'rose', className: 'text-rose-400' },
 } as const;
 
 export type PreferencesIconName = keyof typeof PREFERENCE_ICON_CATALOG;

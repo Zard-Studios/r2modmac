@@ -21,16 +21,37 @@ test('the theme editor only offers icons that are still rendered in Preferences'
         new URL('../src/components/modals/PreferencesModal.tsx', import.meta.url),
         'utf8'
     );
-    const renderedIcons = Array.from(
-        preferencesSource.matchAll(/<RowIcon kind="([a-z-]+)"/g),
-        (match) => match[1]
+    const gameLocationsSource = readFileSync(
+        new URL('../src/components/modals/GameLocationsSection.tsx', import.meta.url),
+        'utf8'
     );
+    const renderedIcons = [
+        ...Array.from(
+            preferencesSource.matchAll(/<RowIcon kind="([a-z-]+)"/g),
+            (match) => match[1]
+        ),
+        // Game locations draws its own, themed the same way.
+        ...Array.from(
+            gameLocationsSource.matchAll(/themedPreferenceIconStyle\('([a-z-]+)'/g),
+            (match) => match[1]
+        ),
+    ];
 
     assert.deepEqual(
         [...PREFERENCE_ICON_NAMES].sort(),
         [...new Set(renderedIcons)].sort(),
         'Removing or adding a Preferences row must update the custom-theme SVG controls too.'
     );
+});
+
+test('no two Preferences rows share an icon', () => {
+    const source = readFileSync(
+        new URL('../src/components/modals/PreferencesModal.tsx', import.meta.url),
+        'utf8'
+    );
+    const kinds = Array.from(source.matchAll(/<RowIcon kind="([a-z-]+)"/g), (match) => match[1]);
+    const repeated = kinds.filter((kind, index) => kinds.indexOf(kind) !== index);
+    assert.deepEqual(repeated, [], 'Two settings with the same icon are easy to mix up.');
 });
 
 test('the default palette remains multicolour with semantic status icons', () => {

@@ -1,5 +1,7 @@
 import {
     Ban,
+    BellRing,
+    Bug,
     Check,
     ChevronRight,
     Clock3,
@@ -20,6 +22,7 @@ import {
     Link2,
     List,
     Lock,
+    Network,
     Palette,
     PanelsTopLeft,
     Pencil,
@@ -29,9 +32,11 @@ import {
     Search,
     Settings,
     Square,
+    Terminal,
     Trash2,
     TriangleAlert,
     UserRound,
+    Wine,
     X,
     Zap,
     type LucideIcon,
@@ -79,7 +84,12 @@ export type IconName =
     | 'pencil'
     | 'chevron'
     | 'linked'
-    | 'frozen';
+    | 'frozen'
+    | 'dependencies'
+    | 'debug'
+    | 'verbose'
+    | 'restore'
+    | 'wine';
 
 const ICONS: Record<IconName, LucideIcon> = {
     play: Play,
@@ -118,6 +128,11 @@ const ICONS: Record<IconName, LucideIcon> = {
     chevron: ChevronRight,
     linked: Link2,
     frozen: Lock,
+    dependencies: Network,
+    debug: Bug,
+    verbose: Terminal,
+    restore: BellRing,
+    wine: Wine,
 };
 
 export function AppIcon({

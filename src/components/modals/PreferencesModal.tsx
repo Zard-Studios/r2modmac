@@ -553,7 +553,7 @@ export default function PreferencesModal({
 
                             <div id="preference-manage-dependencies" className="p-4 flex items-center justify-between gap-4 transition-colors hover:bg-surface-hover">
                                 <div className="flex items-center gap-4">
-                                    <RowIcon kind="apply" />
+                                    <RowIcon kind="dependencies" />
                                     <div>
                                         <p className="text-[15px] font-medium text-white">Manage dependencies when toggling</p>
                                         <p className="text-[13px] text-gray-400 mt-0.5 leading-snug">Ask to disable dependencies no other mod needs, and to enable a mod's disabled dependencies.</p>
@@ -596,7 +596,7 @@ export default function PreferencesModal({
                                         <div className="divide-y divide-gray-700/50 border-t border-gray-700/50">
                                             <div className="flex items-center justify-between gap-4 p-4 pl-8 transition-colors hover:bg-surface-hover">
                                                 <div className="flex items-center gap-4">
-                                                    <RowIcon kind="logs" />
+                                                    <RowIcon kind="debug" />
                                                     <div>
                                                         <p className="text-[15px] font-medium text-white">Write debug logs to game folder</p>
                                                         <p className="mt-0.5 text-[13px] leading-snug text-gray-400">Writes bootstrap, dyld, and exec logs when launching supported games.</p>
@@ -607,7 +607,7 @@ export default function PreferencesModal({
 
                                             <div id="preference-verbose-logs" className="flex items-center justify-between gap-4 p-4 pl-8 transition-colors hover:bg-surface-hover">
                                                 <div className="flex items-center gap-4">
-                                                    <RowIcon kind="logs" />
+                                                    <RowIcon kind="verbose" />
                                                     <div>
                                                         <p className="text-[15px] font-medium text-white">Verbose app logging</p>
                                                         <p className="mt-0.5 text-[13px] leading-snug text-gray-400">Records detailed per-mod and per-file tracing while reproducing a bug.</p>
@@ -704,7 +704,7 @@ export default function PreferencesModal({
                             </div>
                             <div id="preference-restore-warnings" className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-colors hover:bg-surface-hover">
                                 <div className="flex items-center gap-4">
-                                    <RowIcon kind="warning" />
+                                    <RowIcon kind="restore" />
                                     <div>
                                         <p className="text-[15px] font-medium text-white">Restore setup warnings</p>
                                         <p className="text-[13px] text-gray-400 mt-0.5 leading-snug">
