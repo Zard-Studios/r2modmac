@@ -114,7 +114,7 @@ export function NoticeBody({ markdown }: { markdown: string }) {
         <div
             ref={root}
             onClick={onClick}
-            className="prose prose-invert prose-sm max-w-none break-words
+            className="prose prose-invert prose-sm max-w-none break-words [&>:first-child]:mt-0 [&>:last-child]:mb-0
                        prose-headings:text-white prose-headings:mt-4 prose-headings:mb-2
                        prose-p:my-2 prose-ul:my-2 prose-li:my-0.5
                        prose-a:text-blue-400 hover:prose-a:text-blue-300

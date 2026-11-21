@@ -170,7 +170,7 @@ export function NoticesBell() {
                     bodyClassName={selected ? '' : 'row-list-scroll'}
                 >
                     {selected ? (
-                        <article className="px-5 py-5">
+                        <article className="px-5 py-4">
                             <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-500">
                                 From Zard Studios
                                 {formatDate(selected.created_at) && ` · ${formatDate(selected.created_at)}`}

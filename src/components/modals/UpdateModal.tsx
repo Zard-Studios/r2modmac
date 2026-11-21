@@ -47,7 +47,7 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({ updateInfo, onClose, o
                 </>
             }
         >
-            <div className="px-5 py-5">
+            <div className="px-5 py-4">
                 {notes ? (
                     <Suspense fallback={null}>
                         <NoticeBody markdown={notes} />
