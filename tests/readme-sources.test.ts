@@ -3,8 +3,10 @@ import test from 'node:test';
 
 import {
     MIN_USEFUL_README_CHARS,
+    availableReadmeSources,
     githubBases,
     hasUsefulReadme,
+    readmeSourceName,
     resolveAgainst,
     visibleTextLength,
 } from '../src/utils/readmeSources.ts';
@@ -43,4 +45,18 @@ test('complete addresses and in-page links are left alone', () => {
 test('an address that would climb out of the repository stays as it was', () => {
     assert.equal(resolveAgainst('../../secret.png', image), '../../secret.png');
     assert.equal(resolveAgainst('docs/../../x.png', image), 'docs/../../x.png');
+});
+
+test('each source has a name to show', () => {
+    assert.equal(readmeSourceName('thunderstore'), 'Thunderstore');
+    assert.equal(readmeSourceName('hexium'), 'Hexium');
+    assert.equal(readmeSourceName('outerwilds'), 'Outer Wilds Mods');
+    assert.equal(readmeSourceName('github'), 'GitHub');
+});
+
+test('a mod offers its store first, and GitHub only when it points to a repository', () => {
+    assert.deepEqual(availableReadmeSources('thunderstore', true), ['thunderstore', 'github']);
+    assert.deepEqual(availableReadmeSources('hexium', true), ['hexium', 'github']);
+    assert.deepEqual(availableReadmeSources('hexium', false), ['hexium']);
+    assert.deepEqual(availableReadmeSources(undefined, false), ['thunderstore']);
 });

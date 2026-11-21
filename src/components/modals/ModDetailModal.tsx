@@ -1,16 +1,16 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ModSource, PackageVersion, Package } from '../../types/thunderstore';
 import type { InstalledMod, ModFolder } from '../../types/profile';
 import { ignoreMode } from '../../utils/profileModFolders';
 import { LikeStat } from '../LikeStat';
 import { firstKnownCount, knownCount, knownSize } from '../../utils/packageStats';
-import { readScrollFades, ScrollFades } from '../ui/ScrollFades';
+import { PickerMenu, type PickerItem } from '../ui/PickerMenu';
 import { StoreLogo } from '../ui/StoreLogo';
 import { sourceName } from '../../utils/storeProviders';
 import { RichText } from '../RichText';
 import type { RichTextSource } from '../../utils/richText';
 import { looksLikeUnrenderedMarkdown } from '../../utils/markdownRepair';
-import { githubBases, hasUsefulReadme } from '../../utils/readmeSources';
+import { availableReadmeSources, githubBases, hasUsefulReadme, readmeSourceName, type ReadmeSourceId } from '../../utils/readmeSources';
 import { packageIdentityKey } from '../../utils/modVersioning';
 
 const getGithubRepo = (url: string | undefined): { owner: string; repo: string } | null => {
@@ -78,96 +78,32 @@ function VersionSourcePicker({
     selected: PackageVersion;
     onChange: (version: PackageVersion) => void;
 }) {
-    const [isOpen, setIsOpen] = useState(false);
-    const rootRef = useRef<HTMLDivElement>(null);
-    const scrollRef = useRef<HTMLDivElement>(null);
-    const [scrollFades, setScrollFades] = useState({ top: false, bottom: false });
-
-    const updateScrollFades = useCallback((element: HTMLDivElement) => {
-        const next = readScrollFades(element);
-        setScrollFades(current => current.top === next.top && current.bottom === next.bottom ? current : next);
-    }, []);
-
-    useLayoutEffect(() => {
-        if (!isOpen || !scrollRef.current) return;
-        const element = scrollRef.current;
-        updateScrollFades(element);
-        const resizeObserver = new ResizeObserver(() => updateScrollFades(element));
-        resizeObserver.observe(element);
-        return () => resizeObserver.disconnect();
-    }, [isOpen, versions.length, updateScrollFades]);
-
-    useEffect(() => {
-        if (!isOpen) return;
-        const close = (event: PointerEvent) => {
-            if (!rootRef.current?.contains(event.target as Node)) setIsOpen(false);
-        };
-        const closeOnEscape = (event: KeyboardEvent) => {
-            if (event.key === 'Escape') setIsOpen(false);
-        };
-        document.addEventListener('pointerdown', close);
-        document.addEventListener('keydown', closeOnEscape);
-        return () => {
-            document.removeEventListener('pointerdown', close);
-            document.removeEventListener('keydown', closeOnEscape);
-        };
-    }, [isOpen]);
-
     return (
-        <div ref={rootRef} className="relative inline-block w-fit max-w-full">
-            <button
-                type="button"
-                onClick={() => setIsOpen(open => !open)}
-                className="flex max-w-full items-center gap-2.5 rounded-lg border border-gray-700 bg-gray-800 px-2.5 py-1.5 text-sm text-gray-200 transition-colors hover:border-gray-600 focus:border-blue-500 focus:outline-none"
-                aria-haspopup="listbox"
-                aria-expanded={isOpen}
-                aria-label={`Version ${selected.version_number} from ${sourceName(selected.source)}`}
-            >
-                <span className="flex items-center gap-2">
+        <PickerMenu
+            triggerLabel={`Version ${selected.version_number} from ${sourceName(selected.source)}`}
+            trigger={
+                <>
                     <StoreLogo source={selected.source} />
                     <span>v{selected.version_number}</span>
-                </span>
-                <svg className={`h-4 w-4 flex-shrink-0 text-gray-500 transition-transform ${isOpen ? 'rotate-180' : ''}`} viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                    <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 11.19l3.71-3.96a.75.75 0 1 1 1.1 1.02l-4.25 4.54a.75.75 0 0 1-1.1 0L5.21 8.25a.75.75 0 0 1 .02-1.04Z" clipRule="evenodd" />
-                </svg>
-            </button>
-            {isOpen && (
-                <div
-                    className="absolute left-0 top-full z-30 w-max min-w-full max-w-[min(22rem,calc(100vw-3rem))] overflow-hidden rounded-lg border border-gray-700 bg-gray-800 shadow-xl"
-                    role="listbox"
-                >
-                    <div
-                        ref={scrollRef}
-                        onScroll={event => updateScrollFades(event.currentTarget)}
-                        className="mod-version-scroll w-full overflow-y-auto overscroll-contain"
-                        style={{ maxHeight: 'min(22rem, 45dvh)' }}
-                    >
-                        {versions.map(version => {
-                            const active = versionChoiceKey(version) === versionChoiceKey(selected);
-                            return (
-                                <button
-                                    type="button"
-                                    key={versionChoiceKey(version)}
-                                    onClick={() => {
-                                        onChange(version);
-                                        setIsOpen(false);
-                                    }}
-                                    className={`flex w-full items-center gap-2 whitespace-nowrap px-3 py-2 text-left text-sm transition-colors ${active ? 'bg-blue-500/15 text-fg-accent' : 'text-gray-200 hover:bg-gray-700'}`}
-                                    role="option"
-                                    aria-selected={active}
-                                    title={sourceName(version.source)}
-                                >
-                                    <StoreLogo source={version.source} className="h-4 w-4 shrink-0" />
-                                    <span className="shrink-0">v{version.version_number}</span>
-                                    <span className="ml-auto pl-4 text-xs text-gray-500">{sourceName(version.source)}</span>
-                                </button>
-                            );
-                        })}
-                    </div>
-                    <ScrollFades {...scrollFades} surface="gray-800" />
-                </div>
-            )}
-        </div>
+                </>
+            }
+            items={versions.map(version => ({
+                key: versionChoiceKey(version),
+                content: (
+                    <>
+                        <StoreLogo source={version.source} className="h-4 w-4 shrink-0" />
+                        <span className="shrink-0">v{version.version_number}</span>
+                    </>
+                ),
+                hint: sourceName(version.source),
+                title: sourceName(version.source),
+            }))}
+            selectedKey={versionChoiceKey(selected)}
+            onSelect={key => {
+                const version = versions.find(candidate => versionChoiceKey(candidate) === key);
+                if (version) onChange(version);
+            }}
+        />
     );
 }
 
@@ -572,10 +508,58 @@ export function ModDetailModal({
     const readmeRepo = gameId === 'outerwilds' ? getGithubRepo(mod.website_url || pkg.package_url) : githubRepo;
     const readmeBases = readmeRepo && (gameId === 'outerwilds' || githubReady) ? githubBases(readmeRepo.owner, readmeRepo.repo) : null;
     const showReadmeSource = !!githubRepo && readmeLoaded && (storeReadmeUseful || githubReadme.status === 'ready');
-    const showGithubReadme = () => {
+    const chooseReadmeSource = (source: string) => {
+        if (source !== 'github') {
+            setReadmeView('thunderstore');
+            return;
+        }
         setReadmeView('github');
         if (githubRepo && githubReadme.status === 'idle') void loadGithubReadme(githubRepo.owner, githubRepo.repo);
     };
+    // Which README is on screen, and the choices for another one. The same
+    // list serves any number of sources: each is an icon and a name.
+    const storeSource: ReadmeSourceId = mod.source || 'thunderstore';
+    const shownReadmeSource: ReadmeSourceId = githubReady ? 'github' : storeSource;
+    const readmeSourceItems: PickerItem[] = availableReadmeSources(storeSource, !!githubRepo).map(source => ({
+        key: source,
+        content: (
+            <>
+                <StoreLogo source={source} className="h-4 w-4 shrink-0" />
+                <span>{readmeSourceName(source)}</span>
+            </>
+        ),
+        hint: source === 'github'
+            ? githubReadme.status === 'loading' ? 'Loading…' : githubReadme.status === 'missing' ? 'No README' : undefined
+            : undefined,
+        disabled: source === 'github' && githubReadme.status === 'missing',
+    }));
+    // Several sources to choose from: a menu. Only one that has something: just
+    // its name, so it is still clear where the text comes from.
+    const readmeSourceBar = showReadmeSource ? (
+        <div className="mb-4 flex items-center gap-2 text-xs text-gray-500">
+            <span>README</span>
+            {storeReadmeUseful ? (
+                <PickerMenu
+                    size="sm"
+                    triggerLabel={`README from ${readmeSourceName(shownReadmeSource)}. Choose another source`}
+                    trigger={
+                        <>
+                            <StoreLogo source={shownReadmeSource} className="h-4 w-4" />
+                            <span>{readmeSourceName(shownReadmeSource)}</span>
+                        </>
+                    }
+                    items={readmeSourceItems}
+                    selectedKey={shownReadmeSource}
+                    onSelect={chooseReadmeSource}
+                />
+            ) : (
+                <span className="flex items-center gap-1.5 text-gray-300">
+                    <StoreLogo source={shownReadmeSource} className="h-4 w-4" />
+                    {readmeSourceName(shownReadmeSource)}
+                </span>
+            )}
+        </div>
+    ) : null;
 
     // Format bytes to human readable string (KB, MB, GB)
     const formatBytes = (bytes: number): string => {
@@ -767,20 +751,7 @@ export function ModDetailModal({
                                     </div>
                                 ) : githubReady && githubReadme.content ? (
                                     <>
-                                        {showReadmeSource && (
-                                            <div className="mb-4 flex items-center justify-between gap-3 text-xs text-gray-500">
-                                                <span>README from GitHub</span>
-                                                {storeReadmeUseful && (
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => setReadmeView('thunderstore')}
-                                                        className="font-medium text-fg-accent transition-opacity hover:opacity-80"
-                                                    >
-                                                        Back to the {mod.source === 'hexium' ? 'Hexium' : 'Thunderstore'} README
-                                                    </button>
-                                                )}
-                                            </div>
-                                        )}
+                                        {readmeSourceBar}
                                         <RichText
                                             markdown={githubReadme.content.markdown}
                                             html={githubReadme.content.html}
@@ -791,22 +762,7 @@ export function ModDetailModal({
                                     </>
                                 ) : readmeContent ? (
                                     <>
-                                        {showReadmeSource && (
-                                            <div className="mb-4 flex items-center justify-between gap-3 text-xs text-gray-500">
-                                                <span>README from {mod.source === 'hexium' ? 'Hexium' : 'Thunderstore'}</span>
-                                                {githubReadme.status === 'missing' ? (
-                                                    <span>No README found on GitHub</span>
-                                                ) : (
-                                                    <button
-                                                        type="button"
-                                                        onClick={showGithubReadme}
-                                                        className="font-medium text-fg-accent transition-opacity hover:opacity-80"
-                                                    >
-                                                        View the GitHub README
-                                                    </button>
-                                                )}
-                                            </div>
-                                        )}
+                                        {readmeSourceBar}
                                         <RichText
                                             markdown={readmeContent.markdown}
                                             html={readmeContent.html}
