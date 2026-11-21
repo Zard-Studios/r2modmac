@@ -11,6 +11,33 @@ const MEDIA_ERRORS: Record<number, string> = {
 };
 
 /**
+ * Make a paused video show its first picture instead of an empty box. Some web
+ * views load the length of a video but no picture until it plays, so if there
+ * is still none a moment after the length is known, play it for an instant
+ * without sound and put it back at the start.
+ */
+function showFirstPicture(video: HTMLVideoElement) {
+    if (video.dataset.primed) return;
+    video.dataset.primed = 'true';
+    if (video.currentTime === 0) video.currentTime = 0.001;
+    window.setTimeout(() => {
+        if (!video.isConnected || !video.paused || video.readyState >= 2) return;
+        const wasMuted = video.muted;
+        video.muted = true;
+        video
+            .play()
+            .then(() => {
+                video.pause();
+                video.currentTime = 0;
+            })
+            .catch(() => {})
+            .finally(() => {
+                video.muted = wasMuted;
+            });
+    }, 800);
+}
+
+/**
  * An announcement's text, with its markdown shown: bold, strikethrough, lists,
  * tables, code, images and videos. Kept apart from the bell so the markdown
  * code is only loaded when someone opens an announcement.
@@ -43,8 +70,19 @@ export function NoticeBody({ markdown }: { markdown: string }) {
         };
         container.addEventListener('error', onError, true);
 
+        // `loadedmetadata` doesn't bubble either. A video that already has its
+        // length by now missed the event, so it is handled here.
+        const onMetadata = (event: Event) => {
+            if (event.target instanceof HTMLVideoElement) showFirstPicture(event.target);
+        };
+        container.addEventListener('loadedmetadata', onMetadata, true);
+        for (const video of container.querySelectorAll('video')) {
+            if (video.readyState >= 1) showFirstPicture(video);
+        }
+
         return () => {
             container.removeEventListener('error', onError, true);
+            container.removeEventListener('loadedmetadata', onMetadata, true);
         };
     }, [html]);
 
