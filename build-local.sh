@@ -246,11 +246,22 @@ build_macos_target() {
   if [[ "${R2MODMAC_SKIP_APPLE_SILICON:-0}" != "1" ]]; then
     apple_silicon_config=(--config "src-tauri/tauri.apple-silicon.conf.json")
   fi
-  npm run tauri build -- --target "$rust_target" --bundles app \
+  # Tauri gets the signing identity but not the notarization credentials: it
+  # would notarize before the loose dylibs are signed and Apple would reject
+  # it. scripts/macos-sign-and-notarize.sh finishes the job below. /usr/bin
+  # goes first so Tauri finds the system xattr, not a Python one that lacks -r.
+  PATH="/usr/bin:$PATH" env \
+    -u APPLE_API_KEY -u APPLE_API_ISSUER -u APPLE_API_KEY_PATH \
+    -u APPLE_ID -u APPLE_PASSWORD -u APPLE_TEAM_ID \
+    npm run tauri build -- --target "$rust_target" --bundles app \
     --config "$SKIP_BEFORE_MACOS" ${apple_silicon_config[@]+"${apple_silicon_config[@]}"} -- --locked
 
   local app_path="$ROOT_DIR/src-tauri/target/$rust_target/release/bundle/macos/r2modmac.app"
   [[ -d "$app_path" ]] || die "macOS app bundle was not produced at $app_path"
+
+  # Signs and notarizes when APPLE_SIGNING_IDENTITY (and the APPLE_API_* key
+  # variables) are set in your shell; otherwise it leaves the app alone.
+  "$ROOT_DIR/scripts/macos-sign-and-notarize.sh" "$app_path"
 
   local dmg_root
   dmg_root="$(mktemp -d "${TMPDIR:-/tmp}/r2modmac-dmg.XXXXXX")"
@@ -280,6 +291,10 @@ build_macos_target() {
     "${extra_icon_args[@]}" \
     "$output" \
     "$dmg_root"
+
+  if [[ -n "${APPLE_SIGNING_IDENTITY:-}" ]]; then
+    codesign --force --timestamp --sign "$APPLE_SIGNING_IDENTITY" "$output"
+  fi
 
   hdiutil verify "$output" >/dev/null
   sha256_file "$output"

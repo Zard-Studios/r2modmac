@@ -141,9 +141,65 @@ jobs:
         if: matrix.settings.platform == 'macos-latest'
         run: tools/apple-silicon/build.sh
 
+      # Code signing. Every secret below is optional: without them the build
+      # carries on unsigned, as before. A secret reaches only the step that
+      # lists it under `env`, never the other steps of the job.
+      - name: Import signing certificate (macOS)
+        if: matrix.settings.platform == 'macos-latest'
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$APPLE_CERTIFICATE" || -z "$APPLE_SIGNING_IDENTITY" ]]; then
+            echo "No signing certificate configured: building unsigned."
+            exit 0
+          fi
+
+          # A throwaway keychain with a random password, deleted at the end.
+          keychain_password="$(openssl rand -base64 32)"
+          echo "::add-mask::$keychain_password"
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          certificate="$RUNNER_TEMP/certificate.p12"
+
+          base64 --decode <<<"$APPLE_CERTIFICATE" > "$certificate"
+          chmod 600 "$certificate"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$certificate" -k "$keychain" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign >/dev/null
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain" >/dev/null
+          existing="$(security list-keychains -d user | tr -d '"' | tr '\n' ' ')"
+          security list-keychains -d user -s "$keychain" $existing
+          rm -f "$certificate"
+
+          echo "SIGNING_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
+          echo "APPLE_SIGNING_IDENTITY=$APPLE_SIGNING_IDENTITY" >> "$GITHUB_ENV"
+
+      # Tauri signs the app but is not given the notarization credentials: it
+      # would notarize before the loose dylibs are signed, and Apple would
+      # reject that. The script below finishes the job.
       - name: Build Tauri app (macOS)
         if: matrix.settings.platform == 'macos-latest'
         run: npm run tauri build -- --target ${{ matrix.settings.rust-target }} --bundles app --config src-tauri/tauri.apple-silicon.conf.json
+
+      - name: Sign and notarize app (macOS)
+        if: matrix.settings.platform == 'macos-latest'
+        shell: bash
+        env:
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${APPLE_API_KEY_P8:-}" && -n "${APPLE_API_KEY:-}" ]]; then
+            umask 077
+            export APPLE_API_KEY_PATH="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY}.p8"
+            printf '%s' "$APPLE_API_KEY_P8" > "$APPLE_API_KEY_PATH"
+          fi
+          scripts/macos-sign-and-notarize.sh "src-tauri/target/${{ matrix.settings.rust-target }}/release/bundle/macos/r2modmac.app"
 
       - name: Build Tauri app (Windows)
         if: matrix.settings.platform == 'windows-latest'
@@ -183,6 +239,12 @@ jobs:
             "r2modmac_macos_${{ matrix.settings.arch }}.dmg" \
             "dmg_root"
 
+          # The app inside is already notarized; signing the disk image too
+          # lets Gatekeeper recognise the download itself.
+          if [[ -n "${APPLE_SIGNING_IDENTITY:-}" ]]; then
+            codesign --force --timestamp --sign "$APPLE_SIGNING_IDENTITY" "r2modmac_macos_${{ matrix.settings.arch }}.dmg"
+          fi
+
       - name: Package Windows Binary
         if: matrix.settings.platform == 'windows-latest'
         shell: bash
@@ -209,6 +271,16 @@ jobs:
             r2modmac_linux_${{ matrix.settings.arch }}.tar.gz
           if-no-files-found: ignore
           retention-days: 1
+
+      # Runs even when the build fails, so no certificate or key outlives it.
+      - name: Remove signing material (macOS)
+        if: always() && matrix.settings.platform == 'macos-latest'
+        shell: bash
+        run: |
+          if [[ -n "${SIGNING_KEYCHAIN:-}" ]]; then
+            security delete-keychain "$SIGNING_KEYCHAIN" || true
+          fi
+          rm -f "$RUNNER_TEMP"/AuthKey_*.p8 "$RUNNER_TEMP/certificate.p12"
 
   release:
     needs: build

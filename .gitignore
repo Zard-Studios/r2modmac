@@ -64,3 +64,13 @@ CLAUDE.md
 
 # Private migration notes (local only)
 /docs/bepinex-game-local-migration.md
+
+# Signing material: must never be committed
+*.p12
+*.p8
+*.pem
+*.key
+*.keychain
+*.keychain-db
+*.certSigningRequest
+AuthKey_*
