@@ -69,7 +69,8 @@ export function NoticesBell() {
         // the app is in the background or hidden. Coming back to the home
         // screen, reloading the page, opening the bell and the window regaining
         // focus all look right away; the switch in Preferences does too.
-        const period = open ? NOTICE_OPEN_INTERVAL_MS : NOTICE_CHECK_INTERVAL_MS;
+        // While the panel is open there is one check, when it opens, and then
+        // nothing: the list stays as it is until it is closed.
         let timer: number | undefined;
         const stop = () => {
             if (timer !== undefined) window.clearInterval(timer);
@@ -77,9 +78,11 @@ export function NoticesBell() {
         };
         const start = () => {
             stop();
-            timer = window.setInterval(() => void check(period), period);
+            if (open) return;
+            timer = window.setInterval(() => void check(NOTICE_CHECK_INTERVAL_MS), NOTICE_CHECK_INTERVAL_MS);
         };
         const wake = () => {
+            if (open) return;
             void check(NOTICE_OPEN_INTERVAL_MS);
             start();
         };
