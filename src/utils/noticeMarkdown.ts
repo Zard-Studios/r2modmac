@@ -21,7 +21,11 @@ function sanitizer(): ReturnType<typeof DOMPurify> {
             if (src && !isAllowedMediaUrl(src)) node.removeAttribute('src');
             const poster = node.getAttribute('poster');
             if (poster && !isAllowedMediaUrl(poster)) node.removeAttribute('poster');
-            if (tag === 'IMG') node.setAttribute('loading', 'lazy');
+            if (tag === 'IMG') {
+                node.setAttribute('loading', 'lazy');
+                // Decode big pictures off the main thread so the panel stays smooth.
+                node.setAttribute('decoding', 'async');
+            }
             if (tag === 'VIDEO') {
                 node.removeAttribute('autoplay');
                 // Without this the box stays empty until play is pressed: the

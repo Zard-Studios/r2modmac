@@ -125,6 +125,9 @@ export function NoticesBell() {
     const openPanel = () => {
         setSelectedId(null);
         setOpen(true);
+        // Fetch the code that shows an announcement's text now, while the list
+        // is being read, so the first click on a title doesn't wait for it.
+        void import('./NoticeBody');
     };
 
     const closePanel = () => {
