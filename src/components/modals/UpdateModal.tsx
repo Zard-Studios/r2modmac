@@ -2,9 +2,9 @@ import React, { Suspense, lazy } from 'react';
 import type { UpdateInfo } from '../../types/electron';
 import { PanelDialog } from '../ui/PanelDialog';
 
-// The release notes are shown by the same code as the announcements, so they
-// get the same markdown, links and videos. It loads when this dialog opens.
-const NoticeBody = lazy(() => import('../NoticeBody').then((module) => ({ default: module.NoticeBody })));
+// The release notes are shown by the same code as the announcements and the mod
+// descriptions. It loads when this dialog opens.
+const RichText = lazy(() => import('../RichText').then((module) => ({ default: module.RichText })));
 
 interface UpdateModalProps {
     updateInfo: UpdateInfo;
@@ -50,7 +50,7 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({ updateInfo, onClose, o
             <div className="px-5 py-4">
                 {notes ? (
                     <Suspense fallback={null}>
-                        <NoticeBody markdown={notes} />
+                        <RichText markdown={notes} mode="announcement" />
                     </Suspense>
                 ) : (
                     <p className="text-sm text-gray-400">No release notes for this version.</p>

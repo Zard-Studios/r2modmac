@@ -1,7 +1,8 @@
 /**
- * What an announcement may link to or show. The text comes from the
- * maintainer's own GitHub issue, but it still goes through these rules, so a
- * stolen account or a careless paste cannot send the app anywhere unexpected.
+ * What formatted text (announcements, release notes, mod descriptions) may link
+ * to or show. Even text from the maintainer's own GitHub issue goes through
+ * these rules, so a stolen account or a careless paste cannot send the app
+ * anywhere unexpected.
  */
 
 /**
@@ -30,11 +31,15 @@ export function isAllowedMediaUrl(raw: string): boolean {
     return host === 'githubusercontent.com' || host.endsWith('.githubusercontent.com');
 }
 
-/** Links open in the browser, and only over https (or as a mail address). */
-export function isSafeLinkUrl(raw: string): boolean {
+/**
+ * Links open in the browser, and only over https (or as a mail address). Mod
+ * descriptions are written by other people and many still link to http sites,
+ * so they may allow plain http too.
+ */
+export function isSafeLinkUrl(raw: string, allowHttp = false): boolean {
     try {
         const protocol = new URL(raw).protocol;
-        return protocol === 'https:' || protocol === 'mailto:';
+        return protocol === 'https:' || protocol === 'mailto:' || (allowHttp && protocol === 'http:');
     } catch {
         return false;
     }

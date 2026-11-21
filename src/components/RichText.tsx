@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, type MouseEvent } from 'react';
-import { renderNoticeMarkdown } from '../utils/noticeMarkdown';
-import { isSafeLinkUrl, VIDEO_PREVIEW_SECONDS } from '../utils/noticeUrls';
+import { renderRichText, type RichTextMode } from '../utils/richText';
+import { isSafeLinkUrl, VIDEO_PREVIEW_SECONDS } from '../utils/richTextUrls';
 
 /** What the browser's own error code for a media element means. */
 const MEDIA_ERRORS: Record<number, string> = {
@@ -9,6 +9,24 @@ const MEDIA_ERRORS: Record<number, string> = {
     3: 'could not be decoded',
     4: 'format or address not accepted',
 };
+
+// Tailwind needs the class names written out in full, so they live here as
+// plain strings rather than being put together from pieces.
+const SHARED_CLASSES =
+    'rich-text prose prose-invert prose-sm max-w-none break-words ' +
+    'prose-a:text-fg-accent hover:prose-a:text-fg-accent ' +
+    'prose-code:rounded prose-code:bg-black/25 prose-code:px-1 prose-code:py-0.5 prose-code:font-normal ' +
+    'prose-code:before:content-none prose-code:after:content-none ' +
+    'prose-img:rounded-lg [&_video]:w-full [&_video]:rounded-lg [&_video]:my-3';
+
+/** Compact spacing for text in a dialog: no margin outside the first and last block. */
+const ANNOUNCEMENT_CLASSES =
+    '[&>:first-child]:mt-0 [&>:last-child]:mb-0 ' +
+    'prose-headings:text-white prose-headings:mt-4 prose-headings:mb-2 ' +
+    'prose-p:my-2 prose-ul:my-2 prose-li:my-0.5 prose-img:my-3';
+
+/** A mod description keeps the usual spacing of a document. */
+const COMMUNITY_CLASSES = 'overflow-hidden prose-headings:text-white';
 
 /**
  * Make a paused video show its first picture instead of an empty box. Some web
@@ -39,13 +57,22 @@ function showFirstPicture(video: HTMLVideoElement) {
     }, 800);
 }
 
+interface RichTextProps {
+    /** Markdown to show. */
+    markdown?: string;
+    /** HTML that is already made, to show instead. */
+    html?: string;
+    mode: RichTextMode;
+}
+
 /**
- * An announcement's text, with its markdown shown: bold, strikethrough, lists,
- * tables, code, images and videos. Kept apart from the bell so the markdown
- * code is only loaded when someone opens an announcement.
+ * Formatted text, shown the same way everywhere: bold, strikethrough, lists,
+ * tables, code, images and videos, with links that open in the browser. The
+ * announcements, the update notes and the mod descriptions all use this, so a
+ * change here changes them all. See `renderRichText` for what each mode allows.
  */
-export function NoticeBody({ markdown }: { markdown: string }) {
-    const html = useMemo(() => renderNoticeMarkdown(markdown), [markdown]);
+export function RichText({ markdown, html, mode }: RichTextProps) {
+    const rendered = useMemo(() => renderRichText({ markdown, html }, mode), [markdown, html, mode]);
     const root = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
@@ -59,7 +86,7 @@ export function NoticeBody({ markdown }: { markdown: string }) {
             if (!(video instanceof HTMLVideoElement)) return;
             const original = video.getAttribute('src')?.split('#')[0];
             const note = document.createElement('p');
-            note.className = 'my-3 rounded-lg bg-gray-900/60 px-3 py-2 text-[13px] text-gray-300';
+            note.className = 'my-3 rounded-lg bg-black/25 px-3 py-2 text-[13px] text-gray-300';
             const code = video.error?.code;
             note.textContent = `This video can't be played here${code ? ` (${MEDIA_ERRORS[code] ?? `error ${code}`})` : ''}. `;
             if (original && isSafeLinkUrl(original)) {
@@ -97,7 +124,7 @@ export function NoticeBody({ markdown }: { markdown: string }) {
             container.removeEventListener('loadedmetadata', onMetadata, true);
             container.removeEventListener('play', onPlay, true);
         };
-    }, [html]);
+    }, [rendered]);
 
     // A link must never replace the app's own page: open it in the browser.
     const onClick = (event: MouseEvent<HTMLDivElement>) => {
@@ -105,7 +132,7 @@ export function NoticeBody({ markdown }: { markdown: string }) {
         if (!link) return;
         event.preventDefault();
         const href = link.getAttribute('href');
-        if (href && isSafeLinkUrl(href)) {
+        if (href && isSafeLinkUrl(href, mode === 'community')) {
             void import('@tauri-apps/plugin-shell').then(({ open }) => open(href));
         }
     };
@@ -114,14 +141,8 @@ export function NoticeBody({ markdown }: { markdown: string }) {
         <div
             ref={root}
             onClick={onClick}
-            className="prose prose-invert prose-sm max-w-none break-words [&>:first-child]:mt-0 [&>:last-child]:mb-0
-                       prose-headings:text-white prose-headings:mt-4 prose-headings:mb-2
-                       prose-p:my-2 prose-ul:my-2 prose-li:my-0.5
-                       prose-a:text-blue-400 hover:prose-a:text-blue-300
-                       prose-code:rounded prose-code:bg-gray-900/60 prose-code:px-1 prose-code:py-0.5 prose-code:font-normal
-                       prose-code:before:content-none prose-code:after:content-none
-                       prose-img:rounded-lg prose-img:my-3 [&_video]:w-full [&_video]:rounded-lg [&_video]:my-3"
-            dangerouslySetInnerHTML={{ __html: html }}
+            className={`${SHARED_CLASSES} ${mode === 'announcement' ? ANNOUNCEMENT_CLASSES : COMMUNITY_CLASSES}`}
+            dangerouslySetInnerHTML={{ __html: rendered }}
         />
     );
 }

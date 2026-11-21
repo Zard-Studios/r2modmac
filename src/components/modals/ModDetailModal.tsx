@@ -2,13 +2,13 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { ModSource, PackageVersion, Package } from '../../types/thunderstore';
 import type { InstalledMod, ModFolder } from '../../types/profile';
 import { ignoreMode } from '../../utils/profileModFolders';
-import DOMPurify from 'dompurify';
 import { LikeStat } from '../LikeStat';
 import { firstKnownCount, knownCount, knownSize } from '../../utils/packageStats';
 import { readScrollFades, ScrollFades } from '../ui/ScrollFades';
 import { StoreLogo } from '../ui/StoreLogo';
 import { sourceName } from '../../utils/storeProviders';
-import { marked } from 'marked';
+import { RichText } from '../RichText';
+import type { RichTextSource } from '../../utils/richText';
 import { packageIdentityKey } from '../../utils/modVersioning';
 
 const getGithubRepo = (url: string | undefined): { owner: string; repo: string } | null => {
@@ -233,8 +233,8 @@ export function ModDetailModal({
     )?.version_number === mod.version_number;
 
     const [activeTab, setActiveTab] = useState<Tab>('description');
-    const [readmeContent, setReadmeContent] = useState<string | null>(null);
-    const [changelogContent, setChangelogContent] = useState<string | null>(null);
+    const [readmeContent, setReadmeContent] = useState<RichTextSource | null>(null);
+    const [changelogContent, setChangelogContent] = useState<RichTextSource | null>(null);
     const [loadingContent, setLoadingContent] = useState(false);
     const [dependencies, setDependencies] = useState<Package[]>([]);
     const [loadingKey, setLoadingKey] = useState<string>('');
@@ -249,9 +249,7 @@ export function ModDetailModal({
             if (data.content && data.encoding === 'base64') {
                 const base64Content = data.content.replace(/\s/g, '');
                 const rawMarkdown = decodeURIComponent(escape(window.atob(base64Content)));
-                const parsedHtml = await marked.parse(rawMarkdown);
-                const sanitized = DOMPurify.sanitize(parsedHtml);
-                setReadmeContent(sanitized);
+                setReadmeContent({ markdown: rawMarkdown });
             }
         } catch (e) {
             console.error("Failed to fetch README from GitHub:", e);
@@ -279,16 +277,10 @@ export function ModDetailModal({
                     // try next candidate
                 }
             }
-            if (content) {
-                const parsedHtml = await marked.parse(content);
-                const sanitized = DOMPurify.sanitize(parsedHtml);
-                setChangelogContent(sanitized);
-            } else {
-                setChangelogContent("<p>No changelog found in repository.</p>");
-            }
+            setChangelogContent({ markdown: content || 'No changelog found in repository.' });
         } catch (e) {
             console.error("Failed to fetch changelog from GitHub:", e);
-            setChangelogContent("<p>No changelog found in repository.</p>");
+            setChangelogContent({ markdown: 'No changelog found in repository.' });
         } finally {
             setLoadingContent(false);
         }
@@ -432,15 +424,12 @@ export function ModDetailModal({
             const jsonString = await window.ipcRenderer.fetchTextContent(url);
             const data = JSON.parse(jsonString);
 
-            if (data.html) {
-                const sanitized = DOMPurify.sanitize(data.html);
-                if (type === 'readme') setReadmeContent(sanitized);
-                else setChangelogContent(sanitized);
-            } else if (typeof data.markdown === 'string' && data.markdown.trim()) {
-                const html = await marked.parse(data.markdown);
-                const sanitized = DOMPurify.sanitize(html);
-                if (type === 'readme') setReadmeContent(sanitized);
-                else setChangelogContent(sanitized);
+            let content: RichTextSource | null = null;
+            if (data.html) content = { html: data.html };
+            else if (typeof data.markdown === 'string' && data.markdown.trim()) content = { markdown: data.markdown };
+            if (content) {
+                if (type === 'readme') setReadmeContent(content);
+                else setChangelogContent(content);
             }
         } catch (e) {
             console.error(`Failed to fetch ${type}:`, e);
@@ -687,25 +676,6 @@ export function ModDetailModal({
 
                     {/* Scrollable Content */}
                     <div className="overflow-y-auto flex-1 p-6 min-h-0 bg-gray-900">
-                        <style>{`
-                        .prose details {
-                            background-color: rgb(var(--r2-gray-800) / calc(var(--r2-gray-800-alpha, 1) * 0.5));
-                            border: 1px solid rgb(var(--r2-gray-700) / calc(var(--r2-gray-700-alpha, 1) * 0.4));
-                            border-radius: 0.5rem;
-                            padding: 0.5rem;
-                            margin-top: 1rem;
-                            margin-bottom: 1rem;
-                        }
-                        .prose summary {
-                            cursor: pointer;
-                            font-weight: 600;
-                            color: rgb(var(--r2-gray-300) / var(--r2-gray-300-alpha, 1));
-                            outline: none;
-                        }
-                        .prose summary:hover {
-                            color: rgb(var(--r2-white) / var(--r2-white-alpha, 1));
-                        }
-                    `}</style>
                         {activeTab === 'description' && (
                             <div>
                                 {isLocalMod && localReadme ? (
@@ -719,10 +689,7 @@ export function ModDetailModal({
                                         <div className="h-4 bg-gray-700 rounded w-5/6"></div>
                                     </div>
                                 ) : readmeContent ? (
-                                    <div
-                                        className="prose prose-invert prose-sm max-w-none prose-headings:text-white prose-a:text-fg-accent hover:prose-a:text-fg-accent prose-img:rounded-lg break-words overflow-hidden"
-                                        dangerouslySetInnerHTML={{ __html: readmeContent }}
-                                    />
+                                    <RichText markdown={readmeContent.markdown} html={readmeContent.html} mode="community" />
                                 ) : (
                                     <div className="text-center text-gray-500 py-10">
                                         <p>{mod.description || "No description available."}</p>
@@ -739,10 +706,7 @@ export function ModDetailModal({
                                         <div className="h-4 bg-gray-700 rounded w-full"></div>
                                     </div>
                                 ) : changelogContent ? (
-                                    <div
-                                        className="prose prose-invert prose-sm max-w-none prose-headings:text-white prose-a:text-fg-accent hover:prose-a:text-fg-accent break-words overflow-hidden"
-                                        dangerouslySetInnerHTML={{ __html: changelogContent }}
-                                    />
+                                    <RichText markdown={changelogContent.markdown} html={changelogContent.html} mode="community" />
                                 ) : (
                                     <div className="text-center text-gray-500 py-10">
                                         <p>No changelog found.</p>

@@ -403,6 +403,26 @@
   display: none;
 }
 
+/* Collapsible sections inside formatted text (announcements, release notes and
+   mod descriptions all share RichText). */
+.rich-text details {
+  background-color: rgb(var(--r2-gray-800) / calc(var(--r2-gray-800-alpha, 1) * 0.5));
+  border: 1px solid rgb(var(--r2-gray-700) / calc(var(--r2-gray-700-alpha, 1) * 0.4));
+  border-radius: 0.5rem;
+  padding: 0.5rem;
+  margin-top: 1rem;
+  margin-bottom: 1rem;
+}
+.rich-text summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: rgb(var(--r2-gray-300) / var(--r2-gray-300-alpha, 1));
+  outline: none;
+}
+.rich-text summary:hover {
+  color: rgb(var(--r2-white) / var(--r2-white-alpha, 1));
+}
+
 /* The announcements list: its highlighted rows fill the whole panel. */
 .row-list-scroll {
   scrollbar-width: none;

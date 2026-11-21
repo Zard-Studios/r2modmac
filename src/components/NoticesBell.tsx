@@ -14,7 +14,7 @@ import {
 } from '../utils/notices';
 
 // The markdown code is only fetched when an announcement is opened.
-const NoticeBody = lazy(() => import('./NoticeBody').then((module) => ({ default: module.NoticeBody })));
+const RichText = lazy(() => import('./RichText').then((module) => ({ default: module.RichText })));
 
 /** Preferences fires this when the announcements switch changes. */
 export const NOTICES_SETTING_EVENT = 'r2modmac:notices-setting';
@@ -128,7 +128,7 @@ export function NoticesBell() {
         setOpen(true);
         // Fetch the code that shows an announcement's text now, while the list
         // is being read, so the first click on a title doesn't wait for it.
-        void import('./NoticeBody');
+        void import('./RichText');
     };
 
     const closePanel = () => {
@@ -179,7 +179,7 @@ export function NoticesBell() {
                             <div className="mt-4">
                                 {selected.body ? (
                                     <Suspense fallback={null}>
-                                        <NoticeBody markdown={selected.body} />
+                                        <RichText markdown={selected.body} mode="announcement" />
                                     </Suspense>
                                 ) : (
                                     <p className="text-sm text-gray-400">No more details.</p>
@@ -189,7 +189,7 @@ export function NoticesBell() {
                                 <button
                                     type="button"
                                     onClick={() => openIssue(selected.url as string)}
-                                    className="mt-5 text-[13px] font-medium text-blue-400 transition-colors hover:text-blue-300"
+                                    className="mt-5 text-[13px] font-medium text-fg-accent transition-opacity hover:opacity-80"
                                 >
                                     Open on GitHub
                                 </button>
