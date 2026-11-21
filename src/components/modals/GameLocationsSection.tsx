@@ -42,7 +42,10 @@ interface PathRowProps {
     detail?: string;
     /** Where Steam usually is; shown as a tooltip and, when missing, as the line itself. */
     usualPath: string;
+    /** The folder the user picked by hand. Empty when detection is in charge. */
     value: string;
+    /** Where it was found on its own. Shown when there is no `value`. */
+    detected?: string[];
     /** `ok` is a green badge, `none` a muted one. */
     badge?: { label: string; ok: boolean };
     /** Draw a wine glass on the Steam logo: the Steam inside a Wine bottle. */
@@ -53,8 +56,11 @@ interface PathRowProps {
 
 const smallButton = 'rounded-lg border border-gray-600 px-3 py-1 text-[13px] font-medium text-gray-200 transition-colors hover:border-gray-500 hover:bg-gray-700';
 
-function PathRow({ title, detail, usualPath, value, badge, wine, onPick, onReset }: PathRowProps) {
+function PathRow({ title, detail, usualPath, value, detected = [], badge, wine, onPick, onReset }: PathRowProps) {
     const missing = badge && !badge.ok && !value;
+    // A folder picked by hand wins; otherwise show where it was found.
+    const shown = value || detected[0] || '';
+    const others = value ? 0 : Math.max(0, detected.length - 1);
     return (
         <div className="p-4 flex items-center gap-4">
             <div className="relative w-9 h-9 rounded-xl flex items-center justify-center bg-gray-700/60 border border-gray-700 text-gray-200 flex-shrink-0">
@@ -70,13 +76,17 @@ function PathRow({ title, detail, usualPath, value, badge, wine, onPick, onReset
                         </span>
                     )}
                 </div>
-                {value ? (
-                    <PathCensor path={value} className="block truncate text-[13px] text-gray-400" />
+                {shown ? (
+                    <div className="flex min-w-0 items-baseline gap-2">
+                        <PathCensor path={shown} className="block min-w-0 truncate text-[13px] text-gray-400" />
+                        {others > 0 && <span className="shrink-0 text-[12px] text-gray-500">+{others} more</span>}
+                    </div>
                 ) : missing ? (
                     <p className="truncate text-[13px] text-gray-500">{usualPath}</p>
                 ) : detail ? (
                     <p className="truncate text-[13px] text-gray-400">{detail}</p>
                 ) : null}
+                {shown && detail && <p className="truncate text-[12px] text-gray-500">{detail}</p>}
             </div>
             <div className="flex shrink-0 items-center gap-2">
                 {value && (
@@ -274,15 +284,17 @@ export function GameLocationsSection({ isOpen, revealed = false }: { isOpen: boo
                             detail={status?.notproton ? `NotProton ${status.notproton.replace(/^notproton-?/i, '')}` : undefined}
                             usualPath="~/Library/Application Support/Steam"
                             value={nativePath}
+                            detected={status?.native_steam_path ? [status.native_steam_path] : []}
                             badge={status ? { label: status.native_steam_found ? 'Found' : 'Not found', ok: status.native_steam_found } : undefined}
                             onPick={() => void pick('native')}
                             onReset={() => void reset('native')}
                         />
                         <PathRow
                             title="Steam for Wine"
-                            detail="CrossOver, Whisky and other bottles"
+                            detail={status?.bottle_steam_paths?.length ? undefined : 'CrossOver, Whisky and other bottles'}
                             usualPath="…/drive_c/Program Files (x86)/Steam"
                             value={wineOrWindowsPath}
+                            detected={status?.bottle_steam_paths ?? []}
                             badge={status ? { label: status.bottle_steam_count > 0 ? 'Found' : 'Not found', ok: status.bottle_steam_count > 0 } : undefined}
                             wine
                             onPick={() => void pick('windows')}
@@ -294,6 +306,7 @@ export function GameLocationsSection({ isOpen, revealed = false }: { isOpen: boo
                         title={isLinux ? 'Steam' : 'Steam for Windows'}
                         usualPath={isLinux ? '~/.local/share/Steam' : 'C:\\Program Files (x86)\\Steam'}
                         value={wineOrWindowsPath}
+                        detected={status?.native_steam_path ? [status.native_steam_path] : []}
                         badge={status ? { label: status.native_steam_found ? 'Found' : 'Not found', ok: status.native_steam_found } : undefined}
                         onPick={() => void pick('windows')}
                         onReset={() => void reset('windows')}

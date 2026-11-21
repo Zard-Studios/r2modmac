@@ -443,6 +443,11 @@ pub struct SteamSetupStatus {
     pub notproton: Option<String>,
     /// Windows Steam installs found in CrossOver, Whisky or similar bottles.
     pub bottle_steam_count: usize,
+    /// Where the native macOS Steam client was found, or on other systems the
+    /// Steam client that was.
+    pub native_steam_path: Option<String>,
+    /// Where each Windows Steam install in a bottle was found.
+    pub bottle_steam_paths: Vec<String>,
     pub libraries: Vec<SteamLibraryStatus>,
 }
 
@@ -452,16 +457,45 @@ fn library_game_count(library: &std::path::Path) -> usize {
         .unwrap_or(0)
 }
 
+/// The same folder, even when one path reaches it through a symlink.
+fn same_folder(a: &std::path::Path, b: &std::path::Path) -> bool {
+    a == b
+        || matches!(
+            (fs::canonicalize(a), fs::canonicalize(b)),
+            (Ok(a), Ok(b)) if a == b
+        )
+}
+
+/// A library path as `libraryfolders.vdf` writes it, turned into one that
+/// means something on this Mac.
+///
+/// A Steam inside a Wine bottle records its libraries as Windows paths
+/// (`C:\\Program Files (x86)\\Steam`, with every backslash doubled). Left as
+/// they are they look like folders that are not there; mapped through the
+/// bottle's drives they are the real folder, often the one already listed.
+fn library_path_from_vdf(prefix_root: Option<&std::path::Path>, raw: &str) -> std::path::PathBuf {
+    let direct = std::path::PathBuf::from(raw);
+    if direct.exists() {
+        return direct;
+    }
+    if let Some(mapped) = prefix_root.and_then(|prefix| map_wine_path_to_native_path(prefix, raw)) {
+        return mapped;
+    }
+    // Not reachable from here: show it the way a person would write it.
+    std::path::PathBuf::from(raw.replace("\\\\", "\\"))
+}
+
 /// Library paths a client's `libraryfolders.vdf` lists, whether or not the
 /// folder exists right now.
 fn listed_library_paths(steam_root: &std::path::Path) -> Vec<std::path::PathBuf> {
     let mut paths = vec![steam_root.to_path_buf()];
+    let prefix_root = find_wine_prefix_root(steam_root);
     let vdf = steam_root.join("steamapps").join("libraryfolders.vdf");
     if let Ok(content) = fs::read_to_string(vdf) {
         if let Ok(re) = regex::Regex::new(r#""path"\s+"([^"]+)""#) {
             for cap in re.captures_iter(&content) {
-                let path = std::path::PathBuf::from(&cap[1]);
-                if !paths.contains(&path) {
+                let path = library_path_from_vdf(prefix_root.as_deref(), &cap[1]);
+                if !paths.iter().any(|known| same_folder(known, &path)) {
                     paths.push(path);
                 }
             }
@@ -476,16 +510,20 @@ pub async fn get_steam_setup_status(app: AppHandle) -> Result<SteamSetupStatus, 
     let notproton = native_root
         .as_deref()
         .and_then(|root| installed_notproton_tools(root).into_iter().last());
-    let bottle_steam_count = if cfg!(target_os = "macos") {
-        discover_windows_steam_roots().len()
+    let bottle_roots = if cfg!(target_os = "macos") {
+        discover_windows_steam_roots()
     } else {
-        0
+        Vec::new()
     };
+    let bottle_steam_count = bottle_roots.len();
 
     let settings = load_settings_impl(&app);
     let mut libraries: Vec<SteamLibraryStatus> = Vec::new();
     let mut push = |path: std::path::PathBuf, added_by_user: bool| {
-        if libraries.iter().any(|library| std::path::Path::new(&library.path) == path) {
+        if libraries
+            .iter()
+            .any(|library| same_folder(std::path::Path::new(&library.path), &path))
+        {
             return;
         }
         let mounted = path.is_dir();
@@ -522,8 +560,17 @@ pub async fn get_steam_setup_status(app: AppHandle) -> Result<SteamSetupStatus, 
         } else {
             !roots.is_empty()
         },
+        native_steam_path: if cfg!(target_os = "macos") {
+            native_root.map(|root| root.to_string_lossy().to_string())
+        } else {
+            roots.first().map(|root| root.to_string_lossy().to_string())
+        },
         notproton,
         bottle_steam_count,
+        bottle_steam_paths: bottle_roots
+            .iter()
+            .map(|root| root.to_string_lossy().to_string())
+            .collect(),
         libraries,
     })
 }
@@ -1318,5 +1365,70 @@ mod game_folder_matching_tests {
 
         assert_eq!(found(&libraries, "subnautica"), None);
         assert_eq!(found(&libraries, "valheim"), None);
+    }
+}
+
+#[cfg(all(test, unix))]
+mod bottle_library_listing_tests {
+    use super::listed_library_paths;
+    use std::fs;
+    use std::path::PathBuf;
+
+    #[test]
+    fn libraries_a_bottle_names_as_windows_paths_are_shown_as_the_folders_they_are() {
+        let root = std::env::temp_dir().join(format!(
+            "r2modmac-bottle-libraries-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let prefix = root.join("Bottles/Steam");
+        let steam_root = prefix.join("drive_c/Program Files (x86)/Steam");
+        fs::create_dir_all(steam_root.join("steamapps")).unwrap();
+        // The bottle's D: is a folder elsewhere on the Mac.
+        let drive_d = root.join("DriveD");
+        fs::create_dir_all(drive_d.join("SteamLibrary")).unwrap();
+        fs::create_dir_all(prefix.join("dosdevices")).unwrap();
+        std::os::unix::fs::symlink("../drive_c", prefix.join("dosdevices/c:")).unwrap();
+        std::os::unix::fs::symlink(&drive_d, prefix.join("dosdevices/d:")).unwrap();
+
+        // Steam writes every backslash twice.
+        fs::write(
+            steam_root.join("steamapps/libraryfolders.vdf"),
+            r#""libraryfolders"
+{
+	"0"
+	{
+		"path"		"C:\\Program Files (x86)\\Steam"
+	}
+	"1"
+	{
+		"path"		"D:\\SteamLibrary"
+	}
+	"2"
+	{
+		"path"		"E:\\Elsewhere\\Games"
+	}
+}
+"#,
+        )
+        .unwrap();
+
+        let listed = listed_library_paths(&steam_root);
+
+        assert_eq!(
+            listed.len(),
+            3,
+            "the bottle's own library is listed twice: {listed:?}"
+        );
+        assert_eq!(listed[0], steam_root);
+        assert_eq!(
+            fs::canonicalize(&listed[1]).unwrap(),
+            fs::canonicalize(drive_d.join("SteamLibrary")).unwrap()
+        );
+        // E: leads nowhere from here: written the way a person would.
+        assert_eq!(listed[2], PathBuf::from("E:\\Elsewhere\\Games"));
     }
 }

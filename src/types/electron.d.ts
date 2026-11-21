@@ -26,6 +26,10 @@ export interface SteamSetupStatus {
     native_steam_found: boolean;
     notproton: string | null;
     bottle_steam_count: number;
+    /** Where the native macOS Steam was found; on other systems, the Steam that was. */
+    native_steam_path: string | null;
+    /** Where each Windows Steam in a bottle was found. */
+    bottle_steam_paths: string[];
     libraries: SteamLibraryStatus[];
 }
 
