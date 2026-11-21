@@ -105,6 +105,49 @@ fn is_leftover_of_loose_matching(game_identifier: &str, path: &std::path::Path) 
         && folder_match_normalized(&folder, &id).is_none()
 }
 
+/// Whether a folder still holds a game. Steam keeps `steamapps/common/<Game>`
+/// after an uninstall when it has saves, logs or mod files in it, and a mod
+/// manager can leave files of its own. None of that is a game, so such a
+/// folder must not count as installed, whatever profile or saved path points
+/// at it. A file path is taken as it is.
+fn holds_a_game(path: &std::path::Path) -> bool {
+    const LEFTOVER_DIRS: [&str; 9] = [
+        "saves",
+        "savesdir",
+        "saveimages",
+        "savegames",
+        "logs",
+        "log",
+        "bepinex",
+        "_commonredist",
+        "crashes",
+    ];
+    const LEFTOVER_FILE_EXTENSIONS: [&str; 8] =
+        ["log", "txt", "md", "xml", "json", "vdf", "bak", "ini"];
+
+    if path.is_file() {
+        return true;
+    }
+    let Ok(entries) = fs::read_dir(path) else {
+        return false;
+    };
+    entries.filter_map(|entry| entry.ok()).any(|entry| {
+        let name = entry.file_name().to_string_lossy().to_lowercase();
+        if name.starts_with('.') || name.starts_with("r2modmac") {
+            return false;
+        }
+        // Steam keeps controller layouts in folders named by account number.
+        if !name.is_empty() && name.chars().all(|c| c.is_ascii_digit()) {
+            return false;
+        }
+        if entry.path().is_dir() {
+            return !LEFTOVER_DIRS.contains(&name.as_str());
+        }
+        let extension = name.rsplit_once('.').map(|(_, ext)| ext).unwrap_or("");
+        !LEFTOVER_FILE_EXTENSIONS.contains(&extension)
+    })
+}
+
 /// What one Steam library holds, read once: the folders under
 /// `steamapps/common` (with their names reduced for comparing) and the app ids
 /// Steam has a manifest for.
@@ -224,12 +267,17 @@ fn game_folder_tiers(
             .map(|(_, path)| path.clone())
             .collect()
     };
-    [
+    // A folder Steam left behind after an uninstall is not the game.
+    let mut tiers = [
         by_app_id,
         by_schema_folder,
         named(FolderMatch::Exact),
         named(FolderMatch::Partial),
-    ]
+    ];
+    for tier in &mut tiers {
+        tier.retain(|folder| holds_a_game(folder));
+    }
+    tiers
 }
 
 /// [`find_game_in_steam_roots`] for library folders already known.
@@ -276,6 +324,14 @@ pub async fn get_game_path(
         if let Some(path) = settings.game_paths.get(&key) {
             let path_obj = std::path::Path::new(path);
             if !path_obj.exists() {
+                continue;
+            }
+            if !holds_a_game(path_obj) {
+                log::info!(
+                    "[get_game_path] Ignoring the saved folder for {}: nothing of the game is in it ({})",
+                    game_identifier,
+                    path
+                );
                 continue;
             }
             if is_leftover_of_loose_matching(&game_identifier, path_obj) {
@@ -812,7 +868,10 @@ fn saved_game_folders(
             saved.mistaken_keys.push(key.clone());
             continue;
         }
-        if !path.exists() || !identifiers.iter().any(|candidate| candidate == id) {
+        if !path.exists()
+            || !holds_a_game(path)
+            || !identifiers.iter().any(|candidate| candidate == id)
+        {
             continue;
         }
         let here = match platform {
@@ -1210,7 +1269,10 @@ mod game_folder_matching_tests {
                 .as_nanos()
         ));
         for folder in folders {
-            fs::create_dir_all(root.join("steamapps/common").join(folder)).unwrap();
+            let game = root.join("steamapps/common").join(folder);
+            fs::create_dir_all(&game).unwrap();
+            // A folder with nothing in it is a leftover, not an installed game.
+            fs::write(game.join("game.bin"), b"stub").unwrap();
         }
         root
     }
@@ -1483,6 +1545,7 @@ mod saved_folder_tests {
             ))
             .join(name);
         fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("game.bin"), b"stub").unwrap();
         dir.to_string_lossy().to_string()
     }
 
@@ -1536,5 +1599,89 @@ mod saved_folder_tests {
         assert_eq!(names, vec!["gladio-mori", "tcg-card-shop-simulator"]);
         assert!(saved.mistaken_keys.is_empty());
         assert!(saved.games[0].1.windows && !saved.games[0].1.mac);
+    }
+
+    #[test]
+    fn a_saved_folder_with_only_leftovers_does_not_count() {
+        // Steam keeps the folder of an uninstalled game when it holds saves.
+        let dir = folder("e", "Crab Game");
+        fs::remove_file(std::path::Path::new(&dir).join("game.bin")).unwrap();
+        fs::create_dir_all(std::path::Path::new(&dir).join("SavesDir")).unwrap();
+        let mut paths = BTreeMap::new();
+        paths.insert("crab-game".to_string(), dir);
+
+        let saved = saved_game_folders(&paths, &["crab-game".to_string()]);
+
+        assert!(saved.games.is_empty(), "{:?}", saved.games);
+    }
+}
+
+#[cfg(test)]
+mod leftover_folder_tests {
+    use super::{holds_a_game, installed_games_among};
+    use std::fs;
+    use std::path::PathBuf;
+
+    fn folder_with(label: &str, entries: &[&str]) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "r2modmac-leftover-{}-{}-{}",
+            label,
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        for entry in entries {
+            if entry.ends_with('/') {
+                fs::create_dir_all(dir.join(entry)).unwrap();
+            } else {
+                fs::write(dir.join(entry), b"x").unwrap();
+            }
+        }
+        dir
+    }
+
+    #[test]
+    fn what_an_uninstall_leaves_behind_is_not_a_game() {
+        for entries in [
+            vec![],
+            vec![".DS_Store"],
+            vec![".DS_Store", "SavesDir/"],
+            vec!["saves/", "saveimages/"],
+            vec!["logs/", "logConfig.xml"],
+            vec!["BepInEx/", "PATRONS.md"],
+            vec!["r2modmac_exec.log", ".r2modmac_codesign_state"],
+            vec!["1023156944/"],
+        ] {
+            let dir = folder_with("gone", &entries);
+            assert!(!holds_a_game(&dir), "{entries:?}");
+        }
+    }
+
+    #[test]
+    fn a_folder_with_game_files_is_a_game() {
+        for entries in [
+            vec!["Game.exe"],
+            vec!["Game.app/"],
+            vec!["bapbap_Data/", ".DS_Store"],
+            vec!["Binaries/", "WillowGame/"],
+            vec!["Game.x86_64", "SavesDir/"],
+        ] {
+            let dir = folder_with("here", &entries);
+            assert!(holds_a_game(&dir), "{entries:?}");
+        }
+    }
+
+    #[test]
+    fn a_leftover_folder_does_not_make_the_game_installed() {
+        let library = folder_with("lib", &[]);
+        let common = library.join("steamapps/common");
+        fs::create_dir_all(common.join("Crab Game/SavesDir")).unwrap();
+
+        let found = installed_games_among(&[library], vec!["crab-game".to_string()]);
+
+        assert!(found.is_empty(), "{:?}", found.len());
     }
 }
