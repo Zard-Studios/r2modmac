@@ -104,7 +104,7 @@ export function NoticesBell() {
             >
                 <Bell className="w-5 h-5" strokeWidth={2} aria-hidden="true" />
                 {unread > 0 && (
-                    <span className="absolute top-2.5 right-2.5 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-gray-800" />
+                    <span className="absolute top-[13px] right-[13px] h-2 w-2 rounded-full bg-white ring-2 ring-gray-800" />
                 )}
             </button>
 
