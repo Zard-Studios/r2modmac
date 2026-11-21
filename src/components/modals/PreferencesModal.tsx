@@ -777,7 +777,7 @@ export default function PreferencesModal({
                                 </div>
                             </div>
                         </div>
-                        <div className="bg-red-500/5 hover:bg-red-500/10 border border-red-500/20 rounded-2xl overflow-hidden transition-colors duration-200 mt-2">
+                        <div className="bg-red-500/5 border border-red-500/20 rounded-2xl overflow-hidden mt-2">
                             <div id="preference-clear-cache" className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                                 <div className="flex items-center gap-4">
                                     <RowIcon kind="cache" />
