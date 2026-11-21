@@ -256,7 +256,10 @@ build_macos_target() {
   dmg_root="$(mktemp -d "${TMPDIR:-/tmp}/r2modmac-dmg.XXXXXX")"
   cleanup_paths+=("$dmg_root")
   ditto "$app_path" "$dmg_root/r2modmac.app"
-  [[ -f UNVERIFIED_APP_INSTRUCTIONS.txt ]] && cp UNVERIFIED_APP_INSTRUCTIONS.txt "$dmg_root/"
+  # Only an app that fails Gatekeeper needs the instructions.
+  if ! "$ROOT_DIR/scripts/app-is-verified.sh" "$dmg_root/r2modmac.app"; then
+    [[ -f UNVERIFIED_APP_INSTRUCTIONS.txt ]] && cp UNVERIFIED_APP_INSTRUCTIONS.txt "$dmg_root/"
+  fi
 
   local output="$DIST_DIR/r2modmac_macos_${asset_arch}.dmg"
   rm -f -- "$output"

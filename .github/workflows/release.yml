@@ -157,9 +157,18 @@ jobs:
         if: matrix.settings.platform == 'macos-latest'
         run: |
           mkdir -p dmg_root
-          cp -r src-tauri/target/${{ matrix.settings.rust-target }}/release/bundle/macos/r2modmac.app dmg_root/
-          cp UNVERIFIED_APP_INSTRUCTIONS.txt dmg_root/
-          
+          # ditto, not cp: cp can break a code signature.
+          ditto src-tauri/target/${{ matrix.settings.rust-target }}/release/bundle/macos/r2modmac.app dmg_root/r2modmac.app
+
+          # Only an app that fails Gatekeeper needs the instructions.
+          extra_icon_args=()
+          if scripts/app-is-verified.sh dmg_root/r2modmac.app; then
+            echo "App is signed and notarized: leaving out UNVERIFIED_APP_INSTRUCTIONS.txt"
+          else
+            cp UNVERIFIED_APP_INSTRUCTIONS.txt dmg_root/
+            extra_icon_args=(--icon "UNVERIFIED_APP_INSTRUCTIONS.txt" 400 350)
+          fi
+
           # Create DMG
           create-dmg \
             --volname "r2modmac" \
@@ -170,7 +179,7 @@ jobs:
             --icon "r2modmac.app" 200 190 \
             --hide-extension "r2modmac.app" \
             --app-drop-link 600 185 \
-            --icon "UNVERIFIED_APP_INSTRUCTIONS.txt" 400 350 \
+            ${extra_icon_args[@]+"${extra_icon_args[@]}"} \
             "r2modmac_macos_${{ matrix.settings.arch }}.dmg" \
             "dmg_root"
 
