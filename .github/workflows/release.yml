@@ -284,6 +284,8 @@ jobs:
 
   release:
     needs: build
+    # A manual run only builds; it never publishes.
+    if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
     runs-on: ubuntu-latest
