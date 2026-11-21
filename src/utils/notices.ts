@@ -17,7 +17,7 @@ const OFF_KEY = 'r2modmac:noticesOff';
 export const NOTICE_CHECK_INTERVAL_MS = 3 * 60 * 60 * 1000;
 
 /** Opening the bell looks again sooner, but never more than this often. */
-export const NOTICE_OPEN_INTERVAL_MS = 10 * 60 * 1000;
+export const NOTICE_OPEN_INTERVAL_MS = 2 * 60 * 1000;
 
 /** Notices link to their own issue and nowhere else. */
 const ISSUE_URL_PREFIX = 'https://github.com/Zard-Studios/r2modmac/issues/';
