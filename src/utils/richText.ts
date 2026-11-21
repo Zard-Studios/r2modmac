@@ -1,5 +1,6 @@
 import DOMPurify from 'dompurify';
 import { Marked } from 'marked';
+import { repairEscapedMarkdown } from './markdownRepair';
 import { attachmentLinesToVideos, isAllowedMediaUrl, isSafeLinkUrl, VIDEO_PREVIEW_SECONDS } from './richTextUrls';
 
 /**
@@ -95,6 +96,9 @@ function taskBoxesAsSymbols(html: string): string {
 /** Markdown or HTML turned into HTML that is safe to put in the page. */
 export function renderRichText(source: RichTextSource, mode: RichTextMode): string {
     if (source.html !== undefined) return sanitizeHtml(source.html, mode);
-    const parsed = parsers[mode].parse(attachmentLinesToVideos(source.markdown ?? '')) as string;
+    // Mod descriptions often come out of word processors with every symbol
+    // escaped. The maintainer's own text doesn't, and is shown as written.
+    const text = mode === 'community' ? repairEscapedMarkdown(source.markdown ?? '') : (source.markdown ?? '');
+    const parsed = parsers[mode].parse(attachmentLinesToVideos(text)) as string;
     return sanitizeHtml(taskBoxesAsSymbols(parsed), mode);
 }

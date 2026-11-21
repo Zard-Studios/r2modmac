@@ -9,6 +9,7 @@ import { StoreLogo } from '../ui/StoreLogo';
 import { sourceName } from '../../utils/storeProviders';
 import { RichText } from '../RichText';
 import type { RichTextSource } from '../../utils/richText';
+import { looksLikeUnrenderedMarkdown } from '../../utils/markdownRepair';
 import { packageIdentityKey } from '../../utils/modVersioning';
 
 const getGithubRepo = (url: string | undefined): { owner: string; repo: string } | null => {
@@ -425,8 +426,24 @@ export function ModDetailModal({
             const data = JSON.parse(jsonString);
 
             let content: RichTextSource | null = null;
-            if (data.html) content = { html: data.html };
-            else if (typeof data.markdown === 'string' && data.markdown.trim()) content = { markdown: data.markdown };
+            if (data.html) {
+                content = { html: data.html };
+                // Thunderstore sometimes gives up on formatting a description
+                // and sends the symbols as plain text. Its other endpoint has
+                // the original markdown, which is then shown properly.
+                if (targetMod.source !== 'hexium' && looksLikeUnrenderedMarkdown(data.html)) {
+                    try {
+                        const original = JSON.parse(await window.ipcRenderer.fetchTextContent(
+                            `https://thunderstore.io/api/experimental/package/${owner}/${name}/${targetMod.version_number}/${type}/`,
+                        ));
+                        if (typeof original.markdown === 'string' && original.markdown.trim()) {
+                            content = { markdown: original.markdown };
+                        }
+                    } catch {
+                        // The formatted version stays.
+                    }
+                }
+            } else if (typeof data.markdown === 'string' && data.markdown.trim()) content = { markdown: data.markdown };
             if (content) {
                 if (type === 'readme') setReadmeContent(content);
                 else setChangelogContent(content);
