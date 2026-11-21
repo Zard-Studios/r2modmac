@@ -14,6 +14,7 @@ import { createLazyModal } from '../LazyModal';
 import { overridesFromKeybinds, resolveKeybinds, type KeybindMap } from '../../utils/keybinds';
 import { useThemeStore } from '../../store/useThemeStore';
 import { isStockThemeId } from '../../utils/themePresets';
+import { activeThemeLabel } from '../../utils/themeLabel';
 import type { Community, CommunityPlatformInfo } from '../../types/thunderstore';
 import { getVersion } from '@tauri-apps/api/app';
 
@@ -167,8 +168,7 @@ export default function PreferencesModal({
     const [keybinds, setKeybinds] = useState<KeybindMap>(() => resolveKeybinds(settings.keybinds));
     const themes = useThemeStore((s) => s.themes);
     const activeThemeFileName = useThemeStore((s) => s.activeFileName);
-    const activeThemeName =
-        themes.find((t) => t.file_name === activeThemeFileName)?.name ?? 'Default';
+    const activeThemeName = activeThemeLabel(themes, activeThemeFileName);
     const [pickerInitialStep, setPickerInitialStep] = useState<'game' | 'profile'>('game');
     const defaultGameName = communities.find(c => c.identifier === defaultGame)?.name ?? null;
     const [restoringWarnings, setRestoringWarnings] = useState(false);
