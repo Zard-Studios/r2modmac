@@ -30,15 +30,37 @@ const schema = await response.json();
 
 const communities = {};
 const shimloaderGames = {};
+// Where each game lives in a Steam library, as the schema states it. Finding a
+// game by comparing its name to the folder names only works while the two
+// happen to look alike; `Ride` is RV There Yet?, `20MinuteTillDawn` is
+// 20 Minutes Till Dawn. The app id and the folder are exact.
+const steamGames = {};
 for (const [gameKey, game] of Object.entries(schema.games ?? {})) {
   for (const entry of game.r2modman ?? []) {
-    const loader = entry.packageLoader;
-    if (!loader) continue;
     // A game entry names its community through its package index URL; the game
     // key itself is not always the community slug (`gtfo` vs `gtfo` differ for
     // some titles, and several games share one community).
     const match = /\/c\/([^/]+)\//.exec(entry.packageIndex ?? '');
     const community = match ? match[1] : gameKey;
+
+    // Dedicated servers have their own entry and their own app id; the game
+    // is what a profile launches.
+    if ((entry.gameInstanceType ?? 'game') === 'game') {
+      const steam = (steamGames[community] ??= { appIds: [], folders: [] });
+      for (const distribution of entry.distributions ?? []) {
+        const appId = String(distribution.identifier ?? '').trim();
+        if (distribution.platform === 'steam' && appId && !steam.appIds.includes(appId)) {
+          steam.appIds.push(appId);
+        }
+      }
+      // Some entries name a folder inside the install (`Hades II/Ship`); the
+      // install folder is the first part.
+      const folder = String(entry.steamFolderName ?? '').split(/[\\/]/)[0].trim();
+      if (folder && !steam.folders.includes(folder)) steam.folders.push(folder);
+    }
+
+    const loader = entry.packageLoader;
+    if (!loader) continue;
     const known = communities[community];
     if (known && known !== loader) {
       throw new Error(`Community ${community} declares conflicting loaders: ${known} vs ${loader}`);
@@ -68,6 +90,12 @@ for (const entry of schema.modloaderPackages ?? []) {
   });
 }
 
+for (const [community, steam] of Object.entries(steamGames)) {
+  steam.appIds.sort();
+  steam.folders.sort((a, b) => a.localeCompare(b));
+  if (steam.appIds.length === 0 && steam.folders.length === 0) delete steamGames[community];
+}
+
 const sortObject = (value) => Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)));
 for (const loader of Object.keys(loaderPackages)) {
   loaderPackages[loader].sort((a, b) => a.packageId.localeCompare(b.packageId));
@@ -80,6 +108,7 @@ const map = {
   communities: sortObject(communities),
   loaderPackages: sortObject(loaderPackages),
   shimloaderGames: sortObject(shimloaderGames),
+  steamGames: sortObject(steamGames),
 };
 
 writeFileSync(OUTPUT, `${JSON.stringify(map, null, 2)}\n`);
@@ -96,6 +125,7 @@ writeFileSync(
 
 console.log(
   `Wrote ${OUTPUT}: ${Object.keys(map.communities).length} communities, ` +
-  `${Object.keys(map.loaderPackages).length} loaders`
+  `${Object.keys(map.loaderPackages).length} loaders, ` +
+  `${Object.keys(map.steamGames).length} Steam games`
 );
 console.log(`Wrote ${FRONTEND_OUTPUT}`);

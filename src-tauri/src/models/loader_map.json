@@ -743,5 +743,2774 @@
       "dataFolder": "R5",
       "pakExtensions": []
     }
+  },
+  "steamGames": {
+    "20-minutes-till-dawn": {
+      "appIds": [
+        "1966900"
+      ],
+      "folders": [
+        "20MinuteTillDawn"
+      ]
+    },
+    "9-kings": {
+      "appIds": [
+        "2784470"
+      ],
+      "folders": [
+        "9 Kings"
+      ]
+    },
+    "a-dance-of-fire-and-ice": {
+      "appIds": [
+        "977950"
+      ],
+      "folders": [
+        "A Dance of Fire and Ice"
+      ]
+    },
+    "a-gentlemens-dispute": {
+      "appIds": [
+        "2820700"
+      ],
+      "folders": [
+        "A Gentlemen's Dispute"
+      ]
+    },
+    "a-little-to-the-left": {
+      "appIds": [
+        "1629520"
+      ],
+      "folders": [
+        "A Little To The Left"
+      ]
+    },
+    "a-webbing-journey": {
+      "appIds": [
+        "2073910"
+      ],
+      "folders": [
+        "A Webbing Journey"
+      ]
+    },
+    "across-the-obelisk": {
+      "appIds": [
+        "1385380"
+      ],
+      "folders": [
+        "Across the Obelisk"
+      ]
+    },
+    "aeruta": {
+      "appIds": [
+        "2286780"
+      ],
+      "folders": [
+        "Aeruta"
+      ]
+    },
+    "against": {
+      "appIds": [
+        "1584840"
+      ],
+      "folders": [
+        "AGAINST_steam"
+      ]
+    },
+    "against-the-storm": {
+      "appIds": [
+        "1336490"
+      ],
+      "folders": [
+        "Against the Storm"
+      ]
+    },
+    "ai-limit": {
+      "appIds": [
+        "2407270"
+      ],
+      "folders": [
+        "AI Limit"
+      ]
+    },
+    "airframe-ultra": {
+      "appIds": [
+        "2522120"
+      ],
+      "folders": [
+        "Airframe Ultra"
+      ]
+    },
+    "airport-security-sucks": {
+      "appIds": [
+        "4285690"
+      ],
+      "folders": [
+        "Airport Security Sucks!"
+      ]
+    },
+    "ale-and-tale-tavern": {
+      "appIds": [
+        "2683150"
+      ],
+      "folders": [
+        "Ale & Tale Tavern"
+      ]
+    },
+    "aloft": {
+      "appIds": [
+        "1660080"
+      ],
+      "folders": [
+        "Aloft Demo"
+      ]
+    },
+    "among-us": {
+      "appIds": [
+        "945360"
+      ],
+      "folders": [
+        "Among Us"
+      ]
+    },
+    "among-us-3d": {
+      "appIds": [
+        "3168600"
+      ],
+      "folders": [
+        "Among Us 3D"
+      ]
+    },
+    "an-unfinished-game": {
+      "appIds": [
+        "2919990"
+      ],
+      "folders": [
+        "An Unfinished Game"
+      ]
+    },
+    "ancient-dungeon-vr": {
+      "appIds": [
+        "1125240"
+      ],
+      "folders": [
+        "Ancient Dungeon VR"
+      ]
+    },
+    "aneurism-iv": {
+      "appIds": [
+        "2773280"
+      ],
+      "folders": [
+        "ANEURISMIV"
+      ]
+    },
+    "angry-birds-vr-isle-of-pigs": {
+      "appIds": [
+        "1001140"
+      ],
+      "folders": [
+        "Angry Birds VR Isle of Pigs"
+      ]
+    },
+    "another-crabs-treasure": {
+      "appIds": [
+        "1887840"
+      ],
+      "folders": [
+        "AnotherCrabsTreasure"
+      ]
+    },
+    "approximately-up": {
+      "appIds": [
+        "3904850"
+      ],
+      "folders": [
+        "Approximately Up"
+      ]
+    },
+    "arcus-chroma": {
+      "appIds": [
+        "1447350"
+      ],
+      "folders": [
+        "Arcus Chroma"
+      ]
+    },
+    "aska": {
+      "appIds": [
+        "1898300"
+      ],
+      "folders": [
+        "ASKA"
+      ]
+    },
+    "astroneer": {
+      "appIds": [
+        "361420"
+      ],
+      "folders": [
+        "ASTRONEER"
+      ]
+    },
+    "atlyss": {
+      "appIds": [
+        "2768430"
+      ],
+      "folders": [
+        "ATLYSS"
+      ]
+    },
+    "atomicrops": {
+      "appIds": [
+        "757320"
+      ],
+      "folders": [
+        "Atomicrops"
+      ]
+    },
+    "atrio-the-dark-wild": {
+      "appIds": [
+        "1125390"
+      ],
+      "folders": [
+        "Atrio The Dark Wild"
+      ]
+    },
+    "baby-steps": {
+      "appIds": [
+        "1281040"
+      ],
+      "folders": [
+        "Baby Steps"
+      ]
+    },
+    "back-to-the-dawn": {
+      "appIds": [
+        "1735700"
+      ],
+      "folders": [
+        "MetalHeadGames"
+      ]
+    },
+    "backpack-hero": {
+      "appIds": [
+        "1970580"
+      ],
+      "folders": [
+        "Backpack Hero"
+      ]
+    },
+    "bad-north": {
+      "appIds": [
+        "688420"
+      ],
+      "folders": [
+        "BadNorth"
+      ]
+    },
+    "balatro": {
+      "appIds": [
+        "2379780"
+      ],
+      "folders": [
+        "Balatro"
+      ]
+    },
+    "beetleball": {
+      "appIds": [
+        "2776270"
+      ],
+      "folders": [
+        "BeetleBall"
+      ]
+    },
+    "below-the-stone": {
+      "appIds": [
+        "1170230"
+      ],
+      "folders": [
+        "Below The Stone"
+      ]
+    },
+    "bendy-and-the-ink-machine": {
+      "appIds": [
+        "622650"
+      ],
+      "folders": [
+        "Bendy and the Ink Machine"
+      ]
+    },
+    "berry-bury-berry": {
+      "appIds": [
+        "3370870"
+      ],
+      "folders": [
+        "BerryBerryBerry"
+      ]
+    },
+    "beton-brutal": {
+      "appIds": [
+        "2330500"
+      ],
+      "folders": [
+        "BETON BRUTAL"
+      ]
+    },
+    "betrayal-beach": {
+      "appIds": [
+        "2643810"
+      ],
+      "folders": [
+        "Betrayal Beach"
+      ]
+    },
+    "big-ambitions": {
+      "appIds": [
+        "1331550"
+      ],
+      "folders": [
+        "Big Ambitions"
+      ]
+    },
+    "big-walk": {
+      "appIds": [
+        "1478500"
+      ],
+      "folders": [
+        "Big Walk"
+      ]
+    },
+    "block-story": {
+      "appIds": [
+        "270110"
+      ],
+      "folders": [
+        "BlockStory"
+      ]
+    },
+    "bloons-td-6": {
+      "appIds": [
+        "960090"
+      ],
+      "folders": [
+        "BloonsTD6"
+      ]
+    },
+    "blue-prince": {
+      "appIds": [
+        "1569580"
+      ],
+      "folders": [
+        "Blue Prince"
+      ]
+    },
+    "bomb-rush-cyberfunk": {
+      "appIds": [
+        "1353230"
+      ],
+      "folders": [
+        "BombRushCyberfunk"
+      ]
+    },
+    "bombanana": {
+      "appIds": [
+        "4656000"
+      ],
+      "folders": [
+        "BOMBANANA!"
+      ]
+    },
+    "bonelab": {
+      "appIds": [
+        "1592190"
+      ],
+      "folders": [
+        "BONELAB"
+      ]
+    },
+    "boneworks": {
+      "appIds": [
+        "823500"
+      ],
+      "folders": [
+        "BONEWORKS"
+      ]
+    },
+    "book-of-travels": {
+      "appIds": [
+        "1152340"
+      ],
+      "folders": [
+        "Book of Travels"
+      ]
+    },
+    "bopl-battle": {
+      "appIds": [
+        "1686940"
+      ],
+      "folders": [
+        "Bopl Battle"
+      ]
+    },
+    "broforce": {
+      "appIds": [
+        "274190"
+      ],
+      "folders": [
+        "Broforce"
+      ]
+    },
+    "brotato": {
+      "appIds": [
+        "1942280"
+      ],
+      "folders": [
+        "Brotato"
+      ]
+    },
+    "brutalistick-vr": {
+      "appIds": [
+        "2669380"
+      ],
+      "folders": [
+        "BRUTALISTICK VR"
+      ]
+    },
+    "burglin-gnomes": {
+      "appIds": [
+        "3844970"
+      ],
+      "folders": [
+        "Burglin' Gnomes"
+      ]
+    },
+    "cairn": {
+      "appIds": [
+        "1588550"
+      ],
+      "folders": [
+        "Cairn"
+      ]
+    },
+    "carrier-deck": {
+      "appIds": [
+        "580720"
+      ],
+      "folders": [
+        "Carrier Deck"
+      ]
+    },
+    "cast-n-chill": {
+      "appIds": [
+        "3483740"
+      ],
+      "folders": [
+        "Cast n Chill"
+      ]
+    },
+    "castle-story": {
+      "appIds": [],
+      "folders": [
+        "Castle Story"
+      ]
+    },
+    "casualties-unknown": {
+      "appIds": [
+        "4576490"
+      ],
+      "folders": [
+        "Casualties Unknown"
+      ]
+    },
+    "cat-mail-co": {
+      "appIds": [
+        "4380490"
+      ],
+      "folders": [
+        "CatMailCo"
+      ]
+    },
+    "cats-are-liquid": {
+      "appIds": [
+        "1188080"
+      ],
+      "folders": [
+        "Cats are Liquid - A Better Place"
+      ]
+    },
+    "cave-crawlers": {
+      "appIds": [
+        "2143030"
+      ],
+      "folders": [
+        "Cave Crawlers"
+      ]
+    },
+    "chill-with-you": {
+      "appIds": [
+        "3548580"
+      ],
+      "folders": [
+        "Chill with You Lo-Fi Story"
+      ]
+    },
+    "chrono-ark": {
+      "appIds": [
+        "1188930"
+      ],
+      "folders": [
+        "Chrono Ark"
+      ]
+    },
+    "cities-skylines-ii": {
+      "appIds": [
+        "949230"
+      ],
+      "folders": [
+        "Cities Skylines II"
+      ]
+    },
+    "clover-pit": {
+      "appIds": [
+        "3314790"
+      ],
+      "folders": [
+        "CloverPit"
+      ]
+    },
+    "content-warning": {
+      "appIds": [
+        "2881650"
+      ],
+      "folders": [
+        "Content Warning"
+      ]
+    },
+    "core-keeper": {
+      "appIds": [
+        "1621690"
+      ],
+      "folders": [
+        "Core Keeper"
+      ]
+    },
+    "crab-game": {
+      "appIds": [
+        "1782210"
+      ],
+      "folders": [
+        "Crab Game"
+      ]
+    },
+    "crack": {
+      "appIds": [
+        "4312190"
+      ],
+      "folders": [
+        "CRACK"
+      ]
+    },
+    "crashout-crew": {
+      "appIds": [
+        "3583210"
+      ],
+      "folders": [
+        "CrashoutCrew"
+      ]
+    },
+    "crawl": {
+      "appIds": [
+        "293780"
+      ],
+      "folders": [
+        "Crawl"
+      ]
+    },
+    "crawlspace": {
+      "appIds": [
+        "1787860"
+      ],
+      "folders": [
+        "Crawlspace"
+      ]
+    },
+    "crawlspace-2": {
+      "appIds": [
+        "2258670"
+      ],
+      "folders": [
+        "Crawlspace 2"
+      ]
+    },
+    "crime-simulator": {
+      "appIds": [
+        "2737070"
+      ],
+      "folders": [
+        "Crime Simulator"
+      ]
+    },
+    "cryo": {
+      "appIds": [
+        "2564910"
+      ],
+      "folders": [
+        "CRYO"
+      ]
+    },
+    "cult-of-pin": {
+      "appIds": [
+        "3144340"
+      ],
+      "folders": [
+        "CultOfPiN"
+      ]
+    },
+    "cult-of-the-lamb": {
+      "appIds": [
+        "1313140"
+      ],
+      "folders": [
+        "Cult of the Lamb"
+      ]
+    },
+    "cuphead": {
+      "appIds": [
+        "268910"
+      ],
+      "folders": [
+        "Cuphead"
+      ]
+    },
+    "cursed-words": {
+      "appIds": [
+        "3856460"
+      ],
+      "folders": [
+        "Cursed Words"
+      ]
+    },
+    "dale-dawson-stationery-supplies": {
+      "appIds": [
+        "2920570"
+      ],
+      "folders": [
+        "Dale&Dawson"
+      ]
+    },
+    "darkwater": {
+      "appIds": [
+        "619540"
+      ],
+      "folders": [
+        "Darkwater"
+      ]
+    },
+    "deadly-delivery": {
+      "appIds": [
+        "3743090"
+      ],
+      "folders": [
+        "Deadly Delivery"
+      ]
+    },
+    "deep-rock-galactic-survivor": {
+      "appIds": [
+        "2321470"
+      ],
+      "folders": [
+        "Deep Rock Survivor"
+      ]
+    },
+    "depo": {
+      "appIds": [
+        "1091320"
+      ],
+      "folders": [
+        "DEPO"
+      ]
+    },
+    "dice-kingdoms": {
+      "appIds": [
+        "1501690"
+      ],
+      "folders": [
+        "Dice-Kingdoms"
+      ]
+    },
+    "disco-elysium": {
+      "appIds": [
+        "632470"
+      ],
+      "folders": [
+        "Disco Elysium"
+      ]
+    },
+    "distance": {
+      "appIds": [
+        "233610"
+      ],
+      "folders": [
+        "Distance"
+      ]
+    },
+    "dome-keeper": {
+      "appIds": [
+        "1637320"
+      ],
+      "folders": [
+        "Dome Keeper"
+      ]
+    },
+    "dread-hunger": {
+      "appIds": [
+        "1418630"
+      ],
+      "folders": [
+        "Dread Hunger"
+      ]
+    },
+    "dredge": {
+      "appIds": [
+        "1562430"
+      ],
+      "folders": [
+        "DREDGE"
+      ]
+    },
+    "ducks-can-drive": {
+      "appIds": [
+        "2472840"
+      ],
+      "folders": [
+        "Ducks Can Drive"
+      ]
+    },
+    "dusk": {
+      "appIds": [
+        "519860"
+      ],
+      "folders": [
+        "Dusk"
+      ]
+    },
+    "dyson-sphere-program": {
+      "appIds": [
+        "1366540"
+      ],
+      "folders": [
+        "Dyson Sphere Program"
+      ]
+    },
+    "easy-delivery-co": {
+      "appIds": [
+        "3293010"
+      ],
+      "folders": [
+        "Easy Delivery Co"
+      ]
+    },
+    "electoral-carnage": {
+      "appIds": [
+        "3706810"
+      ],
+      "folders": [
+        "Electoral Carnage"
+      ]
+    },
+    "ena-dream-bbq": {
+      "appIds": [
+        "2134320"
+      ],
+      "folders": [
+        "ENA-4-DreamBBQ"
+      ]
+    },
+    "enter-the-gungeon": {
+      "appIds": [
+        "311690"
+      ],
+      "folders": [
+        "Enter the Gungeon"
+      ]
+    },
+    "erenshor": {
+      "appIds": [
+        "2382520"
+      ],
+      "folders": [
+        "Erenshor"
+      ]
+    },
+    "escape-from-playtime": {
+      "appIds": [
+        "2087540"
+      ],
+      "folders": [
+        "Escape From Playtime"
+      ]
+    },
+    "everything-is-crab": {
+      "appIds": [
+        "3526710"
+      ],
+      "folders": [
+        "Everything is Crab"
+      ]
+    },
+    "factory-planner": {
+      "appIds": [
+        "3679930"
+      ],
+      "folders": [
+        "Factory Planner"
+      ]
+    },
+    "fate-reawakened": {
+      "appIds": [
+        "3030720"
+      ],
+      "folders": [
+        "FATE Reawakened"
+      ]
+    },
+    "five-nights-at-freddys-into-the-pit": {
+      "appIds": [
+        "2638370"
+      ],
+      "folders": [
+        "Five Nights at Freddy's Into the Pit"
+      ]
+    },
+    "flipping-is-hard": {
+      "appIds": [
+        "3826670"
+      ],
+      "folders": [
+        "Flipping is Hard"
+      ]
+    },
+    "football-manager-26": {
+      "appIds": [
+        "3551340"
+      ],
+      "folders": [
+        "Football Manager 26"
+      ]
+    },
+    "for-the-king": {
+      "appIds": [
+        "527230"
+      ],
+      "folders": [
+        "For The King"
+      ]
+    },
+    "forsaken-frontiers": {
+      "appIds": [
+        "2810780"
+      ],
+      "folders": [
+        "Forsaken Frontiers"
+      ]
+    },
+    "frozen-ship": {
+      "appIds": [
+        "3423990"
+      ],
+      "folders": [
+        "Frozen Ship"
+      ]
+    },
+    "frukt": {
+      "appIds": [
+        "3880400"
+      ],
+      "folders": [
+        "FRUKT"
+      ]
+    },
+    "gamble-with-your-friends": {
+      "appIds": [
+        "3892270"
+      ],
+      "folders": [
+        "Gamble With Your Friends"
+      ]
+    },
+    "gang-beasts": {
+      "appIds": [
+        "285900"
+      ],
+      "folders": [
+        "Gang Beasts"
+      ]
+    },
+    "garfield-kart-furious-racing": {
+      "appIds": [
+        "1085510"
+      ],
+      "folders": [
+        "Garfield Kart - Furious Racing"
+      ]
+    },
+    "gatekeeper": {
+      "appIds": [
+        "2106670"
+      ],
+      "folders": [
+        "Gatekeeper"
+      ]
+    },
+    "getting-over-it": {
+      "appIds": [
+        "240720"
+      ],
+      "folders": [
+        "Getting Over It"
+      ]
+    },
+    "gladio-mori": {
+      "appIds": [
+        "2689120"
+      ],
+      "folders": [
+        "Gladio Mori"
+      ]
+    },
+    "gloomwood": {
+      "appIds": [
+        "1150760"
+      ],
+      "folders": [
+        "Gloomwood"
+      ]
+    },
+    "goblin-buster": {
+      "appIds": [
+        "2482250"
+      ],
+      "folders": [
+        "Goblin Buster"
+      ]
+    },
+    "goblin-cleanup": {
+      "appIds": [
+        "2748340"
+      ],
+      "folders": [
+        "Goblin Cleanup"
+      ]
+    },
+    "goodbye-volcano-high": {
+      "appIds": [
+        "1310330"
+      ],
+      "folders": [
+        "Goodbye Volcano High"
+      ]
+    },
+    "gorebox": {
+      "appIds": [
+        "2027330"
+      ],
+      "folders": [
+        "GoreBox"
+      ]
+    },
+    "gorilla-tag": {
+      "appIds": [
+        "1533390"
+      ],
+      "folders": [
+        "Gorilla Tag"
+      ]
+    },
+    "grain-rot": {
+      "appIds": [
+        "4450620"
+      ],
+      "folders": [
+        "Grain Rot"
+      ]
+    },
+    "granny-chapter-two": {
+      "appIds": [
+        "1205040"
+      ],
+      "folders": [
+        "Granny Chapter Two"
+      ]
+    },
+    "graveyard-keeper-2": {
+      "appIds": [
+        "4358690"
+      ],
+      "folders": [
+        "Graveyard Keeper 2"
+      ]
+    },
+    "green-hell-vr": {
+      "appIds": [
+        "1782330"
+      ],
+      "folders": [
+        "Green Hell VR"
+      ]
+    },
+    "grey-hack": {
+      "appIds": [
+        "605230"
+      ],
+      "folders": [
+        "Grey Hack"
+      ]
+    },
+    "grilluminati": {
+      "appIds": [
+        "5368860"
+      ],
+      "folders": [
+        "Grilluminati Demo"
+      ]
+    },
+    "grime": {
+      "appIds": [
+        "1123050"
+      ],
+      "folders": [
+        "GRIME"
+      ]
+    },
+    "gtfo": {
+      "appIds": [
+        "493520"
+      ],
+      "folders": [
+        "GTFO"
+      ]
+    },
+    "guilty-as-sock": {
+      "appIds": [
+        "3400930"
+      ],
+      "folders": [
+        "Guilty as Sock!"
+      ]
+    },
+    "gunman-contracts-stand-alone": {
+      "appIds": [
+        "2421750"
+      ],
+      "folders": [
+        "Gunman Contracts - Stand Alone"
+      ]
+    },
+    "h3vr": {
+      "appIds": [
+        "450540"
+      ],
+      "folders": [
+        "H3VR"
+      ]
+    },
+    "hades-ii": {
+      "appIds": [
+        "1145350"
+      ],
+      "folders": [
+        "Hades II"
+      ]
+    },
+    "hard-bullet": {
+      "appIds": [
+        "1294760"
+      ],
+      "folders": [
+        "Hard Bullet"
+      ]
+    },
+    "hard-time-3": {
+      "appIds": [
+        "3009850"
+      ],
+      "folders": [
+        "Hard Time III"
+      ]
+    },
+    "holdfast-nations-at-war": {
+      "appIds": [
+        "589290"
+      ],
+      "folders": [
+        "Holdfast Nations At War"
+      ]
+    },
+    "hollow-knight-silksong": {
+      "appIds": [
+        "1030300"
+      ],
+      "folders": [
+        "Hollow Knight Silksong"
+      ]
+    },
+    "home-safety-hotline": {
+      "appIds": [
+        "2357910"
+      ],
+      "folders": [
+        "Home Safety Hotline"
+      ]
+    },
+    "hot-lava": {
+      "appIds": [
+        "382560"
+      ],
+      "folders": [
+        "Hot Lava"
+      ]
+    },
+    "hotds": {
+      "appIds": [
+        "283160"
+      ],
+      "folders": [
+        "DyingSun"
+      ]
+    },
+    "house-of-legacy": {
+      "appIds": [
+        "2503770"
+      ],
+      "folders": [
+        "吾今有世家"
+      ]
+    },
+    "how-to-fish": {
+      "appIds": [
+        "4001890"
+      ],
+      "folders": [
+        "How to Fish"
+      ]
+    },
+    "human-fall-flat": {
+      "appIds": [
+        "477160"
+      ],
+      "folders": [
+        "Human Fall Flat"
+      ]
+    },
+    "i-am-your-beast": {
+      "appIds": [
+        "1876590"
+      ],
+      "folders": [
+        "I Am Your Beast"
+      ]
+    },
+    "in-falsus": {
+      "appIds": [
+        "3971950"
+      ],
+      "folders": [
+        "In Falsus"
+      ]
+    },
+    "inferno-protocol": {
+      "appIds": [
+        "3908940"
+      ],
+      "folders": [
+        "Inferno Protocol"
+      ]
+    },
+    "inscryption": {
+      "appIds": [
+        "1092790"
+      ],
+      "folders": [
+        "Inscryption"
+      ]
+    },
+    "inside-the-backrooms": {
+      "appIds": [
+        "1987080"
+      ],
+      "folders": [
+        "Inside The Backrooms"
+      ]
+    },
+    "iron-nest": {
+      "appIds": [
+        "2950790"
+      ],
+      "folders": [
+        "Iron Nest Heavy Turret Simulator"
+      ]
+    },
+    "ironstrike": {
+      "appIds": [
+        "3233230"
+      ],
+      "folders": [
+        "IRONSTRIKE"
+      ]
+    },
+    "island-market-simulator": {
+      "appIds": [
+        "3391510"
+      ],
+      "folders": [
+        "Island Market Simulator"
+      ]
+    },
+    "jump-scare-mansion": {
+      "appIds": [
+        "577690"
+      ],
+      "folders": [
+        "Spooky's Jump Scare Mansion HD Renovation"
+      ]
+    },
+    "jump-space": {
+      "appIds": [
+        "1757300"
+      ],
+      "folders": [
+        "JumpSpace"
+      ]
+    },
+    "keywe": {
+      "appIds": [
+        "1242980"
+      ],
+      "folders": [
+        "KeyWe"
+      ]
+    },
+    "labyrinthine": {
+      "appIds": [
+        "1302240"
+      ],
+      "folders": [
+        "Labyrinthine"
+      ]
+    },
+    "last-pirates-die-together": {
+      "appIds": [
+        "4317790"
+      ],
+      "folders": [
+        "Last Pirates Die Together"
+      ]
+    },
+    "last-train-outta-wormtown": {
+      "appIds": [
+        "2318480"
+      ],
+      "folders": [
+        "Last Train Outta' Wormtown"
+      ]
+    },
+    "lazy-witchs-factory": {
+      "appIds": [
+        "3971650"
+      ],
+      "folders": [
+        "Lazy Witch's Factory"
+      ]
+    },
+    "lens-island": {
+      "appIds": [
+        "1335830"
+      ],
+      "folders": [
+        "Len's Island"
+      ]
+    },
+    "lethal-company": {
+      "appIds": [
+        "1966720"
+      ],
+      "folders": [
+        "Lethal Company"
+      ]
+    },
+    "lethal-league-blaze": {
+      "appIds": [
+        "553310"
+      ],
+      "folders": [
+        "LLBlaze"
+      ]
+    },
+    "limitless-survivor": {
+      "appIds": [
+        "4438540"
+      ],
+      "folders": [
+        "Limitless Survivor"
+      ]
+    },
+    "logic-world": {
+      "appIds": [
+        "1054340"
+      ],
+      "folders": [
+        "Logic World"
+      ]
+    },
+    "lootun": {
+      "appIds": [
+        "1960270"
+      ],
+      "folders": [
+        "Lootun"
+      ]
+    },
+    "lost-skies": {
+      "appIds": [
+        "1931180"
+      ],
+      "folders": [
+        "Wild Skies"
+      ]
+    },
+    "lost-skies-ic": {
+      "appIds": [
+        "2102670"
+      ],
+      "folders": [
+        "Lost Skies Island Creator"
+      ]
+    },
+    "lucid-cats": {
+      "appIds": [
+        "4778540"
+      ],
+      "folders": [
+        "Lucid Cats"
+      ]
+    },
+    "lucky-shot": {
+      "appIds": [
+        "4092940"
+      ],
+      "folders": [
+        "Lucky Shot"
+      ]
+    },
+    "lumentale-memories-of-trey": {
+      "appIds": [
+        "2261430"
+      ],
+      "folders": [
+        "LumenTale Memories of Trey"
+      ]
+    },
+    "lycans": {
+      "appIds": [
+        "2596100"
+      ],
+      "folders": [
+        "Lycans"
+      ]
+    },
+    "madness-melee": {
+      "appIds": [],
+      "folders": [
+        "Madness Melee"
+      ]
+    },
+    "mage-arena": {
+      "appIds": [
+        "3716600"
+      ],
+      "folders": [
+        "Mage Arena"
+      ]
+    },
+    "magicite": {
+      "appIds": [
+        "268750"
+      ],
+      "folders": [
+        "Magicite"
+      ]
+    },
+    "magicraft": {
+      "appIds": [
+        "2103140"
+      ],
+      "folders": [
+        "Magicraft"
+      ]
+    },
+    "make-way": {
+      "appIds": [
+        "1445790"
+      ],
+      "folders": [
+        "Make Way"
+      ]
+    },
+    "malteses-fluffy-onsen": {
+      "appIds": [
+        "3404470"
+      ],
+      "folders": [
+        "Animal Spa"
+      ]
+    },
+    "meccha-chameleon": {
+      "appIds": [
+        "4704690"
+      ],
+      "folders": [
+        "MECCHA CHAMELEON"
+      ]
+    },
+    "mechanica": {
+      "appIds": [
+        "1226990"
+      ],
+      "folders": [
+        "Mechanica"
+      ]
+    },
+    "meeple-station": {
+      "appIds": [
+        "900010"
+      ],
+      "folders": [
+        "Meeple Station"
+      ]
+    },
+    "megabonk": {
+      "appIds": [
+        "3405340"
+      ],
+      "folders": [
+        "Megabonk"
+      ]
+    },
+    "mimesis": {
+      "appIds": [
+        "2827200"
+      ],
+      "folders": [
+        "MIMESIS"
+      ]
+    },
+    "mine-mogul": {
+      "appIds": [
+        "3846120"
+      ],
+      "folders": [
+        "MineMogul"
+      ]
+    },
+    "minigunner": {
+      "appIds": [
+        "1778200"
+      ],
+      "folders": [
+        "Minigunner"
+      ]
+    },
+    "minos": {
+      "appIds": [
+        "3181650"
+      ],
+      "folders": [
+        "Minos"
+      ]
+    },
+    "mio-memories-in-orbit": {
+      "appIds": [
+        "1672810"
+      ],
+      "folders": [
+        "MIO"
+      ]
+    },
+    "miside": {
+      "appIds": [
+        "2527500"
+      ],
+      "folders": [
+        "MiSide"
+      ]
+    },
+    "miside-zero": {
+      "appIds": [],
+      "folders": [
+        "MiSide Zero"
+      ]
+    },
+    "modulus-factory-automation": {
+      "appIds": [
+        "2779120"
+      ],
+      "folders": [
+        "Modulus"
+      ]
+    },
+    "monster-train-2": {
+      "appIds": [
+        "2742830"
+      ],
+      "folders": [
+        "Monster Train 2"
+      ]
+    },
+    "moonlighter": {
+      "appIds": [
+        "606150"
+      ],
+      "folders": [
+        "Moonlighter"
+      ]
+    },
+    "muck": {
+      "appIds": [
+        "1625450"
+      ],
+      "folders": [
+        "Muck"
+      ]
+    },
+    "my-dream-setup": {
+      "appIds": [
+        "2200780"
+      ],
+      "folders": [
+        "My dream setup"
+      ]
+    },
+    "mycopunk": {
+      "appIds": [
+        "3247750"
+      ],
+      "folders": [
+        "Mycopunk"
+      ]
+    },
+    "nasb": {
+      "appIds": [
+        "1414850"
+      ],
+      "folders": [
+        "Nickelodeon All-Star Brawl"
+      ]
+    },
+    "nearly-dead": {
+      "appIds": [
+        "1268900"
+      ],
+      "folders": [
+        "Nearly Dead"
+      ]
+    },
+    "necropolis": {
+      "appIds": [
+        "384490"
+      ],
+      "folders": [
+        "Necropolis"
+      ]
+    },
+    "nine-sols": {
+      "appIds": [
+        "1809540"
+      ],
+      "folders": [
+        "Nine Sols"
+      ]
+    },
+    "nivalis-nights": {
+      "appIds": [
+        "1488490"
+      ],
+      "folders": [
+        "Nivalis Nights"
+      ]
+    },
+    "northstar": {
+      "appIds": [
+        "1237970"
+      ],
+      "folders": [
+        "Titanfall2"
+      ]
+    },
+    "nuclear-option": {
+      "appIds": [
+        "2168680"
+      ],
+      "folders": [
+        "Nuclear Option"
+      ]
+    },
+    "nucleares": {
+      "appIds": [
+        "1428420"
+      ],
+      "folders": [
+        "Nuclear Last Darkness"
+      ]
+    },
+    "odd-remedy": {
+      "appIds": [
+        "1745680"
+      ],
+      "folders": [
+        "OddRemedy"
+      ]
+    },
+    "offscreen": {
+      "appIds": [
+        "3702990"
+      ],
+      "folders": [
+        "Offscreen Demo"
+      ]
+    },
+    "old-market-simulator": {
+      "appIds": [
+        "2878420"
+      ],
+      "folders": [
+        "Old Market Simulator"
+      ]
+    },
+    "on-together": {
+      "appIds": [
+        "3707400"
+      ],
+      "folders": [
+        "On-Together"
+      ]
+    },
+    "ostranauts": {
+      "appIds": [
+        "1022980"
+      ],
+      "folders": [
+        "Ostranauts"
+      ]
+    },
+    "outward": {
+      "appIds": [
+        "1758860",
+        "794260"
+      ],
+      "folders": [
+        "Outward"
+      ]
+    },
+    "over-the-hill": {
+      "appIds": [
+        "2929250"
+      ],
+      "folders": [
+        "over the hill"
+      ]
+    },
+    "pac-man-world-re-pac": {
+      "appIds": [
+        "1859470"
+      ],
+      "folders": [
+        "PAC-MAN WORLD Re-PAC"
+      ]
+    },
+    "painting-vr": {
+      "appIds": [
+        "1905940"
+      ],
+      "folders": [
+        "Painting VR"
+      ]
+    },
+    "pair-a-dice": {
+      "appIds": [
+        "2842150"
+      ],
+      "folders": [
+        "PairADice"
+      ]
+    },
+    "palworld": {
+      "appIds": [
+        "1623730"
+      ],
+      "folders": [
+        "Palworld"
+      ]
+    },
+    "panicore": {
+      "appIds": [
+        "2695940"
+      ],
+      "folders": [
+        "Panicore"
+      ]
+    },
+    "paper-animal-adventure": {
+      "appIds": [
+        "1982120"
+      ],
+      "folders": [
+        "Paper Animal Adventure"
+      ]
+    },
+    "papers-please": {
+      "appIds": [
+        "239030"
+      ],
+      "folders": [
+        "PapersPlease"
+      ]
+    },
+    "paquerette-down-the-bunburrows": {
+      "appIds": [
+        "1628610"
+      ],
+      "folders": [
+        "Paquerette Down the Bunburrows"
+      ]
+    },
+    "paralives": {
+      "appIds": [
+        "1118520"
+      ],
+      "folders": [
+        "Paralives"
+      ]
+    },
+    "patapon-1-2-replay": {
+      "appIds": [
+        "2383200"
+      ],
+      "folders": [
+        "PATAPON12_REPLAY"
+      ]
+    },
+    "patch-quest": {
+      "appIds": [
+        "1347970"
+      ],
+      "folders": [
+        "Patch Quest"
+      ]
+    },
+    "peak": {
+      "appIds": [
+        "3527290"
+      ],
+      "folders": [
+        "PEAK"
+      ]
+    },
+    "peaks-of-yore": {
+      "appIds": [
+        "2236070"
+      ],
+      "folders": [
+        "Peaks of Yore"
+      ]
+    },
+    "peglin": {
+      "appIds": [
+        "1296610"
+      ],
+      "folders": [
+        "Peglin"
+      ]
+    },
+    "pigface": {
+      "appIds": [
+        "3341650"
+      ],
+      "folders": [
+        "PIGFACE"
+      ]
+    },
+    "pikuniku": {
+      "appIds": [
+        "572890"
+      ],
+      "folders": [
+        "Pikuniku"
+      ]
+    },
+    "pit-of-goblin": {
+      "appIds": [
+        "3253530"
+      ],
+      "folders": [
+        "Pit of Goblin"
+      ]
+    },
+    "plasma": {
+      "appIds": [
+        "1409160"
+      ],
+      "folders": [
+        "Plasma"
+      ]
+    },
+    "potion-craft": {
+      "appIds": [
+        "1210320"
+      ],
+      "folders": [
+        "Potion Craft"
+      ]
+    },
+    "project-arrhythmia": {
+      "appIds": [
+        "440310"
+      ],
+      "folders": [
+        "Project Arrhythmia"
+      ]
+    },
+    "project-gorgon": {
+      "appIds": [
+        "342940"
+      ],
+      "folders": [
+        "Project Gorgon"
+      ]
+    },
+    "pulsar-lost-colony": {
+      "appIds": [
+        "252870"
+      ],
+      "folders": [
+        "PULSARLostColony"
+      ]
+    },
+    "pummel-party": {
+      "appIds": [
+        "880940"
+      ],
+      "folders": [
+        "Pummel Party"
+      ]
+    },
+    "pushing-it-together-sisyphus": {
+      "appIds": [
+        "3298460"
+      ],
+      "folders": [
+        "Pushing It! Together Sisyphus Co-op"
+      ]
+    },
+    "puttler": {
+      "appIds": [
+        "3198680"
+      ],
+      "folders": [
+        "Puttler"
+      ]
+    },
+    "raft": {
+      "appIds": [
+        "648800"
+      ],
+      "folders": [
+        "Raft"
+      ]
+    },
+    "random-access-mayhem": {
+      "appIds": [
+        "2256450"
+      ],
+      "folders": [
+        "RAM Random Access Mayhem"
+      ]
+    },
+    "ravenfield": {
+      "appIds": [
+        "636480"
+      ],
+      "folders": [
+        "Ravenfield"
+      ]
+    },
+    "re-legend": {
+      "appIds": [
+        "823950"
+      ],
+      "folders": [
+        "Re-Legend"
+      ]
+    },
+    "receiver-2": {
+      "appIds": [
+        "1129310"
+      ],
+      "folders": [
+        "Receiver 2"
+      ]
+    },
+    "repo": {
+      "appIds": [
+        "3241660"
+      ],
+      "folders": [
+        "REPO"
+      ]
+    },
+    "resonite": {
+      "appIds": [
+        "2519830"
+      ],
+      "folders": [
+        "Resonite"
+      ]
+    },
+    "return-from-core": {
+      "appIds": [
+        "2171630"
+      ],
+      "folders": [
+        "Return From Core"
+      ]
+    },
+    "return-of-the-obra-dinn": {
+      "appIds": [
+        "653530"
+      ],
+      "folders": [
+        "ObraDinn"
+      ]
+    },
+    "rhythm-doctor": {
+      "appIds": [
+        "774181"
+      ],
+      "folders": [
+        "Rhythm Doctor"
+      ]
+    },
+    "risk-of-rain-returns": {
+      "appIds": [
+        "1337520"
+      ],
+      "folders": [
+        "Risk of Rain Returns"
+      ]
+    },
+    "riskofrain2": {
+      "appIds": [
+        "632360"
+      ],
+      "folders": [
+        "Risk of Rain 2"
+      ]
+    },
+    "roadside-research": {
+      "appIds": [
+        "3643170"
+      ],
+      "folders": [
+        "Roadside Research"
+      ]
+    },
+    "rogue-genesia": {
+      "appIds": [
+        "2067920"
+      ],
+      "folders": [
+        "Rogue Genesia"
+      ]
+    },
+    "rogue-tower": {
+      "appIds": [
+        "1843760"
+      ],
+      "folders": [
+        "Rogue Tower"
+      ]
+    },
+    "romestead": {
+      "appIds": [
+        "1805320"
+      ],
+      "folders": [
+        "romestead"
+      ]
+    },
+    "rounds": {
+      "appIds": [
+        "1557740"
+      ],
+      "folders": [
+        "ROUNDS"
+      ]
+    },
+    "rumble": {
+      "appIds": [
+        "890550"
+      ],
+      "folders": [
+        "RUMBLE"
+      ]
+    },
+    "rv-there-yet": {
+      "appIds": [
+        "3949040"
+      ],
+      "folders": [
+        "Ride"
+      ]
+    },
+    "sailwind": {
+      "appIds": [
+        "1764530"
+      ],
+      "folders": [
+        "Sailwind"
+      ]
+    },
+    "scam-with-your-friends": {
+      "appIds": [
+        "4954910"
+      ],
+      "folders": [
+        "Scam With Your Friends"
+      ]
+    },
+    "schedule-i": {
+      "appIds": [
+        "3164500"
+      ],
+      "folders": [
+        "Schedule I"
+      ]
+    },
+    "scrap-mechanic": {
+      "appIds": [
+        "387990"
+      ],
+      "folders": [
+        "Scrap Mechanic"
+      ]
+    },
+    "screw-drivers": {
+      "appIds": [
+        "1279510"
+      ],
+      "folders": [
+        "Screw Drivers"
+      ]
+    },
+    "shadows-of-doubt": {
+      "appIds": [
+        "986130"
+      ],
+      "folders": [
+        "Shadows of Doubt"
+      ]
+    },
+    "shadows-over-loathing": {
+      "appIds": [
+        "1939160"
+      ],
+      "folders": [
+        "Shadows Over Loathing"
+      ]
+    },
+    "shapez-2": {
+      "appIds": [
+        "2162800"
+      ],
+      "folders": [
+        "shapez 2"
+      ]
+    },
+    "shift-at-midnight": {
+      "appIds": [
+        "3722330"
+      ],
+      "folders": [
+        "Shift At Midnight"
+      ]
+    },
+    "side-effects": {
+      "appIds": [
+        "3799100"
+      ],
+      "folders": [
+        "Side Effects"
+      ]
+    },
+    "sineus-arena-survivors": {
+      "appIds": [
+        "4227400"
+      ],
+      "folders": [
+        "Sineus Arena"
+      ]
+    },
+    "skul-the-hero-slayer": {
+      "appIds": [
+        "1147560"
+      ],
+      "folders": [
+        "Skul"
+      ]
+    },
+    "slashers-keep": {
+      "appIds": [
+        "598060"
+      ],
+      "folders": [
+        "Slasher's Keep"
+      ]
+    },
+    "sledding-game": {
+      "appIds": [
+        "3438850"
+      ],
+      "folders": [
+        "Sledding Game"
+      ]
+    },
+    "slip-skid": {
+      "appIds": [
+        "2651350"
+      ],
+      "folders": [
+        "Slip & Skid"
+      ]
+    },
+    "slipstream-rogue-space": {
+      "appIds": [
+        "2765860"
+      ],
+      "folders": [
+        "Slipstream Rogue Space"
+      ]
+    },
+    "smushi-come-home": {
+      "appIds": [
+        "1740300"
+      ],
+      "folders": [
+        "Smushi Come Home"
+      ]
+    },
+    "songs-of-conquest": {
+      "appIds": [
+        "867210"
+      ],
+      "folders": [
+        "SongsOfConquest"
+      ]
+    },
+    "sons-of-the-forest": {
+      "appIds": [
+        "1326470"
+      ],
+      "folders": [
+        "Sons Of The Forest"
+      ]
+    },
+    "soulcalibur-vi": {
+      "appIds": [
+        "544750"
+      ],
+      "folders": [
+        "SoulcaliburVI"
+      ]
+    },
+    "soulstone-survivors": {
+      "appIds": [
+        "2066020"
+      ],
+      "folders": [
+        "Soulstone Survivors"
+      ]
+    },
+    "space-cat-digger": {
+      "appIds": [
+        "5291170"
+      ],
+      "folders": [
+        "Space Cat Digger Demo"
+      ]
+    },
+    "stacklands": {
+      "appIds": [
+        "1948280"
+      ],
+      "folders": [
+        "Stacklands"
+      ]
+    },
+    "starsand": {
+      "appIds": [
+        "1380220"
+      ],
+      "folders": [
+        "Starsand"
+      ]
+    },
+    "stick-fight-the-game": {
+      "appIds": [
+        "674940"
+      ],
+      "folders": [
+        "StickFightTheGame"
+      ]
+    },
+    "stolen-realm": {
+      "appIds": [
+        "1330000"
+      ],
+      "folders": [
+        "Stolen Realm"
+      ]
+    },
+    "stonewards": {
+      "appIds": [
+        "4502710"
+      ],
+      "folders": [
+        "Stonewards"
+      ]
+    },
+    "straftat": {
+      "appIds": [
+        "2386720"
+      ],
+      "folders": [
+        "STRAFTAT"
+      ]
+    },
+    "subnautica": {
+      "appIds": [
+        "264710"
+      ],
+      "folders": [
+        "Subnautica"
+      ]
+    },
+    "subnautica-below-zero": {
+      "appIds": [
+        "848450"
+      ],
+      "folders": [
+        "SubnauticaZero"
+      ]
+    },
+    "subterranauts": {
+      "appIds": [
+        "3075800"
+      ],
+      "folders": [
+        "Subterranauts"
+      ]
+    },
+    "subterror": {
+      "appIds": [
+        "2846060"
+      ],
+      "folders": [
+        "Subterror"
+      ]
+    },
+    "sulfur": {
+      "appIds": [
+        "2124120"
+      ],
+      "folders": [
+        "Sulfur"
+      ]
+    },
+    "sun-haven": {
+      "appIds": [
+        "1432860"
+      ],
+      "folders": [
+        "Sun Haven"
+      ]
+    },
+    "sunkenland": {
+      "appIds": [
+        "2080690"
+      ],
+      "folders": [
+        "Sunkenland"
+      ]
+    },
+    "super-battle-golf": {
+      "appIds": [
+        "4069520"
+      ],
+      "folders": [
+        "Super Battle Golf"
+      ]
+    },
+    "super-fantasy-kingdom": {
+      "appIds": [
+        "2289750"
+      ],
+      "folders": [
+        "Super Fantasy Kingdom"
+      ]
+    },
+    "super-psycho-baseball": {
+      "appIds": [
+        "2216960"
+      ],
+      "folders": [
+        "Super Psycho Baseball"
+      ]
+    },
+    "superhot": {
+      "appIds": [],
+      "folders": [
+        "SUPERHOT"
+      ]
+    },
+    "superhot-mind-control-delete": {
+      "appIds": [],
+      "folders": [
+        "SUPERHOTMCD"
+      ]
+    },
+    "superhot-vr": {
+      "appIds": [
+        "617830"
+      ],
+      "folders": [
+        "SUPERHOT VR"
+      ]
+    },
+    "supermarket-together": {
+      "appIds": [
+        "2709570"
+      ],
+      "folders": [
+        "Supermarket Together"
+      ]
+    },
+    "survival-fountain-of-youth": {
+      "appIds": [
+        "1967630"
+      ],
+      "folders": [
+        "Survival Fountain of Youth"
+      ]
+    },
+    "talespire": {
+      "appIds": [
+        "720620"
+      ],
+      "folders": [
+        "TaleSpire"
+      ]
+    },
+    "tank-team": {
+      "appIds": [
+        "2587450"
+      ],
+      "folders": [
+        "Tank Team"
+      ]
+    },
+    "tcg-card-shop-simulator": {
+      "appIds": [
+        "3070070"
+      ],
+      "folders": [
+        "TCG Card Shop Simulator"
+      ]
+    },
+    "techtonica": {
+      "appIds": [
+        "1457320"
+      ],
+      "folders": [
+        "Techtonica"
+      ]
+    },
+    "the-alto-collection": {
+      "appIds": [
+        "2837600"
+      ],
+      "folders": [
+        "The Alto Collection"
+      ]
+    },
+    "the-farmer-was-replaced": {
+      "appIds": [
+        "2060160"
+      ],
+      "folders": [
+        "The Farmer Was Replaced"
+      ]
+    },
+    "the-lab": {
+      "appIds": [
+        "450390"
+      ],
+      "folders": [
+        "The Lab"
+      ]
+    },
+    "the-message-from-deep-space": {
+      "appIds": [
+        "4080030"
+      ],
+      "folders": [
+        "The Message from Deep Space"
+      ]
+    },
+    "the-ouroboros-king": {
+      "appIds": [
+        "2096510"
+      ],
+      "folders": [
+        "The Ouroboros King"
+      ]
+    },
+    "the-planet-crafter": {
+      "appIds": [
+        "1284190"
+      ],
+      "folders": [
+        "The Planet Crafter"
+      ]
+    },
+    "the-sexy-brutale": {
+      "appIds": [
+        "552590"
+      ],
+      "folders": [
+        "The Sexy Brutale"
+      ]
+    },
+    "the-spell-brigade": {
+      "appIds": [
+        "2904000"
+      ],
+      "folders": [
+        "The Spell Brigade"
+      ]
+    },
+    "thronefall": {
+      "appIds": [
+        "2239150"
+      ],
+      "folders": [
+        "Thronefall"
+      ]
+    },
+    "timberborn": {
+      "appIds": [
+        "1062090"
+      ],
+      "folders": [
+        "Timberborn"
+      ]
+    },
+    "tiny-rogues": {
+      "appIds": [
+        "2088570"
+      ],
+      "folders": [
+        "Tiny Rogues"
+      ]
+    },
+    "tiny-terrys-turbo-trip": {
+      "appIds": [
+        "2238040"
+      ],
+      "folders": [
+        "Tiny Terry's Turbo Trip"
+      ]
+    },
+    "totally-accurate-battle-simulator": {
+      "appIds": [
+        "508440"
+      ],
+      "folders": [
+        "Totally Accurate Battle Simulator"
+      ]
+    },
+    "touhou-lost-branch-of-legend": {
+      "appIds": [
+        "1140150"
+      ],
+      "folders": [
+        "LBoL"
+      ]
+    },
+    "trash-day": {
+      "appIds": [
+        "3314580"
+      ],
+      "folders": [
+        "TrashDay"
+      ]
+    },
+    "trombone-champ": {
+      "appIds": [
+        "1059990"
+      ],
+      "folders": [
+        "TromboneChamp"
+      ]
+    },
+    "tunguska-the-visitation": {
+      "appIds": [
+        "1601970"
+      ],
+      "folders": [
+        "Tunguska The Visitation"
+      ]
+    },
+    "ultimate-chicken-horse": {
+      "appIds": [
+        "386940"
+      ],
+      "folders": [
+        "Ultimate Chicken Horse"
+      ]
+    },
+    "ultrakill": {
+      "appIds": [
+        "1229490"
+      ],
+      "folders": [
+        "ULTRAKILL"
+      ]
+    },
+    "unfair-flips": {
+      "appIds": [
+        "3925760"
+      ],
+      "folders": [
+        "Unfair Flips"
+      ]
+    },
+    "v-rising": {
+      "appIds": [
+        "1604030"
+      ],
+      "folders": [
+        "VRising"
+      ]
+    },
+    "valheim": {
+      "appIds": [
+        "892970"
+      ],
+      "folders": [
+        "Valheim"
+      ]
+    },
+    "vampire-crawlers": {
+      "appIds": [
+        "3265700"
+      ],
+      "folders": [
+        "Vampire Crawlers"
+      ]
+    },
+    "vellum": {
+      "appIds": [
+        "917950"
+      ],
+      "folders": [
+        "Vellum"
+      ]
+    },
+    "vertigo-2": {
+      "appIds": [
+        "843390"
+      ],
+      "folders": [
+        "Vertigo 2"
+      ]
+    },
+    "very-very-valet": {
+      "appIds": [
+        "1448840"
+      ],
+      "folders": [
+        "Very Very Valet"
+      ]
+    },
+    "vigil": {
+      "appIds": [
+        "3817090"
+      ],
+      "folders": [
+        "Vigil"
+      ]
+    },
+    "void-crew": {
+      "appIds": [
+        "1063420"
+      ],
+      "folders": [
+        "Void Crew"
+      ]
+    },
+    "voodoo-fishin": {
+      "appIds": [
+        "3071240"
+      ],
+      "folders": [
+        "Voodoo Voyage"
+      ]
+    },
+    "vtol-vr": {
+      "appIds": [
+        "667970"
+      ],
+      "folders": [
+        "VTOL VR"
+      ]
+    },
+    "wanderburg": {
+      "appIds": [
+        "3624140"
+      ],
+      "folders": [
+        "Wanderburg Game"
+      ]
+    },
+    "waterpark-simulator": {
+      "appIds": [
+        "3293260"
+      ],
+      "folders": [
+        "WaterPark Simulator"
+      ]
+    },
+    "we-love-katamari-reroll-royal-reverie": {
+      "appIds": [
+        "1730700"
+      ],
+      "folders": [
+        "WLKRR"
+      ]
+    },
+    "webfishing": {
+      "appIds": [
+        "3146520"
+      ],
+      "folders": [
+        "WEBFISHING"
+      ]
+    },
+    "west-of-loathing": {
+      "appIds": [
+        "597220"
+      ],
+      "folders": [
+        "West of Loathing"
+      ]
+    },
+    "whisper-of-the-house": {
+      "appIds": [
+        "2589500"
+      ],
+      "folders": [
+        "Whisper of the House"
+      ]
+    },
+    "white-knuckle": {
+      "appIds": [
+        "3195790"
+      ],
+      "folders": [
+        "White Knuckle"
+      ]
+    },
+    "wildfrost": {
+      "appIds": [
+        "1811990"
+      ],
+      "folders": [
+        "Wildfrost"
+      ]
+    },
+    "windrose": {
+      "appIds": [
+        "3041230"
+      ],
+      "folders": [
+        "Windrose"
+      ]
+    },
+    "wizard-of-legend": {
+      "appIds": [
+        "445980"
+      ],
+      "folders": [
+        "Wizard of Legend"
+      ]
+    },
+    "wizard-with-a-gun": {
+      "appIds": [
+        "1150530"
+      ],
+      "folders": [
+        "Wizard With A Gun"
+      ]
+    },
+    "wobbly-life": {
+      "appIds": [
+        "1211020"
+      ],
+      "folders": [
+        "Wobbly Life"
+      ]
+    },
+    "word-play": {
+      "appIds": [
+        "3586660"
+      ],
+      "folders": [
+        "Word Play"
+      ]
+    },
+    "wrestling-empire": {
+      "appIds": [
+        "1620340"
+      ],
+      "folders": [
+        "Wrestling Empire"
+      ]
+    },
+    "yapyap": {
+      "appIds": [
+        "3834090"
+      ],
+      "folders": [
+        "YAPYAP"
+      ]
+    },
+    "zort": {
+      "appIds": [
+        "3121110"
+      ],
+      "folders": [
+        "Zort"
+      ]
+    }
   }
 }

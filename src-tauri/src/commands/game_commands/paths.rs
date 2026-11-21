@@ -105,41 +105,152 @@ fn is_leftover_of_loose_matching(game_identifier: &str, path: &std::path::Path) 
         && folder_match_normalized(&folder, &id).is_none()
 }
 
-/// [`find_game_in_steam_roots`] for library folders already known.
+/// What one Steam library holds, read once: the folders under
+/// `steamapps/common` (with their names reduced for comparing) and the app ids
+/// Steam has a manifest for.
+struct LibraryIndex {
+    library: std::path::PathBuf,
+    folders: Vec<(String, std::path::PathBuf)>,
+    manifest_ids: HashSet<String>,
+}
+
+fn index_libraries(libraries: &[std::path::PathBuf]) -> Vec<LibraryIndex> {
+    libraries
+        .iter()
+        .map(|library| {
+            let steamapps = library.join("steamapps");
+            let folders = fs::read_dir(steamapps.join("common"))
+                .map(|entries| {
+                    entries
+                        .filter_map(|entry| entry.ok())
+                        .map(|entry| {
+                            (
+                                normalize_for_matching(&entry.file_name().to_string_lossy()),
+                                entry.path(),
+                            )
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            let manifest_ids = fs::read_dir(&steamapps)
+                .map(|entries| {
+                    entries
+                        .filter_map(|entry| entry.ok())
+                        .filter_map(|entry| {
+                            let name = entry.file_name().to_string_lossy().to_string();
+                            name.strip_prefix("appmanifest_")
+                                .and_then(|rest| rest.strip_suffix(".acf"))
+                                .map(str::to_string)
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            LibraryIndex {
+                library: library.clone(),
+                folders,
+                manifest_ids,
+            }
+        })
+        .collect()
+}
+
+/// The folder Steam recorded for an app, when the app is in this library.
+fn installed_folder_for_app(index: &LibraryIndex, app_id: &str) -> Option<std::path::PathBuf> {
+    if !index.manifest_ids.contains(app_id) {
+        return None;
+    }
+    let manifest = index
+        .library
+        .join("steamapps")
+        .join(format!("appmanifest_{app_id}.acf"));
+    let install_dir = parse_manifest_value(&fs::read_to_string(manifest).ok()?, "installdir")?;
+    let folder = index
+        .library
+        .join("steamapps")
+        .join("common")
+        .join(install_dir);
+    folder.is_dir().then_some(folder)
+}
+
+/// Where a game's folder could be in these libraries, from the surest way of
+/// knowing to the least sure:
 ///
-/// Folders named exactly like the game are looked at in every library before
-/// any approximate match is considered, so a close name in an earlier library
-/// never wins over the right folder in a later one.
+/// 1. the app id: Steam's own record of where it put the game;
+/// 2. the install folder the ecosystem schema names for the game;
+/// 3. a folder named exactly like the game;
+/// 4. a folder whose name is mostly the game's name.
+///
+/// Each step looks in every library before the next one is tried, so a close
+/// name in an earlier library never beats the right folder in a later one.
+fn game_folder_tiers(
+    index: &[LibraryIndex],
+    game_identifier: &str,
+) -> [Vec<std::path::PathBuf>; 4] {
+    let normalized_id = normalize_for_matching(game_identifier);
+    let steam = crate::models::loaders::steam_game(game_identifier);
+
+    let mut by_app_id: Vec<std::path::PathBuf> = Vec::new();
+    let mut by_schema_folder: Vec<std::path::PathBuf> = Vec::new();
+    if let Some(steam) = &steam {
+        for library in index {
+            for app_id in &steam.app_ids {
+                if let Some(folder) = installed_folder_for_app(library, app_id) {
+                    if !by_app_id.contains(&folder) {
+                        by_app_id.push(folder);
+                    }
+                }
+            }
+        }
+        let wanted: Vec<String> = steam
+            .folders
+            .iter()
+            .map(|folder| normalize_for_matching(folder))
+            .filter(|folder| !folder.is_empty())
+            .collect();
+        for library in index {
+            for (name, path) in &library.folders {
+                if wanted.contains(name) && !by_schema_folder.contains(path) {
+                    by_schema_folder.push(path.clone());
+                }
+            }
+        }
+    }
+
+    let named = |wanted: FolderMatch| -> Vec<std::path::PathBuf> {
+        index
+            .iter()
+            .flat_map(|library| library.folders.iter())
+            .filter(|(name, _)| folder_match_normalized(name, &normalized_id) == Some(wanted))
+            .map(|(_, path)| path.clone())
+            .collect()
+    };
+    [
+        by_app_id,
+        by_schema_folder,
+        named(FolderMatch::Exact),
+        named(FolderMatch::Partial),
+    ]
+}
+
+/// [`find_game_in_steam_roots`] for library folders already known.
 fn find_game_in_libraries(
     libraries: &[std::path::PathBuf],
     game_identifier: &str,
     accept: impl Fn(&std::path::Path) -> bool,
 ) -> Option<String> {
-    let normalized_id = normalize_for_matching(game_identifier);
-    for wanted in [FolderMatch::Exact, FolderMatch::Partial] {
-        for lib_folder in libraries {
-            let common_path = lib_folder.join("steamapps").join("common");
-            let Ok(entries) = fs::read_dir(&common_path) else {
+    let index = index_libraries(libraries);
+    for tier in game_folder_tiers(&index, game_identifier) {
+        for folder in tier {
+            let game_path = resolve_game_runtime_path(game_identifier, &folder);
+            if !accept(&game_path) {
                 continue;
-            };
-            for entry in entries.filter_map(|e| e.ok()) {
-                let folder_name = entry.file_name().to_string_lossy().to_string();
-                let normalized_folder = normalize_for_matching(&folder_name);
-                if folder_match_normalized(&normalized_folder, &normalized_id) != Some(wanted) {
-                    continue;
-                }
-
-                let game_path = resolve_game_runtime_path(game_identifier, &entry.path());
-                if !accept(&game_path) {
-                    continue;
-                }
-                log::debug!(
-                    "[get_game_path] Found match: {} -> {}",
-                    folder_name,
-                    game_path.display()
-                );
-                return Some(game_path.to_string_lossy().to_string());
             }
+            log::debug!(
+                "[get_game_path] Found {} at {}",
+                game_identifier,
+                game_path.display()
+            );
+            return Some(game_path.to_string_lossy().to_string());
         }
     }
     None
@@ -458,38 +569,26 @@ fn installed_games_among(
     libraries: &[std::path::PathBuf],
     identifiers: Vec<String>,
 ) -> Vec<InstalledGame> {
-    let mut folders: Vec<(String, std::path::PathBuf)> = Vec::new();
-    for library in libraries {
-        let Ok(entries) = fs::read_dir(library.join("steamapps").join("common")) else {
-            continue;
-        };
-        for entry in entries.filter_map(|entry| entry.ok()) {
-            folders.push((
-                normalize_for_matching(&entry.file_name().to_string_lossy()),
-                entry.path(),
-            ));
-        }
-    }
-    if folders.is_empty() {
+    let index = index_libraries(libraries);
+    if index.iter().all(|library| library.folders.is_empty()) {
         return Vec::new();
     }
 
     identifiers
         .into_iter()
         .filter_map(|identifier| {
-            let normalized = normalize_for_matching(&identifier);
+            // The surest way of knowing that finds anything decides: the
+            // folders of one step, in every library, are the game's builds.
+            let folders = game_folder_tiers(&index, &identifier)
+                .into_iter()
+                .find(|tier| !tier.is_empty())?;
             let mut builds = InstalledBuilds::default();
-            let mut found = false;
-            for (name, path) in &folders {
-                if folder_match_normalized(name, &normalized).is_none() {
-                    continue;
-                }
-                found = true;
-                let here = builds_in_folder(&resolve_game_runtime_path(&identifier, path));
+            for folder in folders {
+                let here = builds_in_folder(&resolve_game_runtime_path(&identifier, &folder));
                 builds.mac |= here.mac;
                 builds.windows |= here.windows;
             }
-            found.then_some(InstalledGame { identifier, builds })
+            Some(InstalledGame { identifier, builds })
         })
         .collect()
 }
@@ -1142,6 +1241,72 @@ mod game_folder_matching_tests {
             "rv-there-yet",
             Path::new("/steam/steamapps/common/Ride")
         ));
+    }
+
+    /// Steam's own record of where it put an app.
+    fn with_manifest(library: &PathBuf, app_id: &str, install_dir: &str) {
+        let steamapps = library.join("steamapps");
+        fs::create_dir_all(&steamapps).unwrap();
+        fs::write(
+            steamapps.join(format!("appmanifest_{app_id}.acf")),
+            format!("\"AppState\"\n{{\n\t\"appid\"\t\t\"{app_id}\"\n\t\"installdir\"\t\t\"{install_dir}\"\n}}\n"),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn a_folder_that_looks_nothing_like_the_name_is_found_through_the_schema() {
+        // RV There Yet? is installed in "Ride".
+        let libraries = [library("schema-folder", &["Ride", "OMORI"])];
+        assert_eq!(found(&libraries, "rv-there-yet").as_deref(), Some("Ride"));
+
+        // 20 Minutes Till Dawn is in "20MinuteTillDawn": no name comparison gets there.
+        let libraries = [library("schema-typo", &["20MinuteTillDawn"])];
+        assert_eq!(
+            found(&libraries, "20-minutes-till-dawn").as_deref(),
+            Some("20MinuteTillDawn")
+        );
+    }
+
+    #[test]
+    fn steams_own_record_of_the_folder_wins() {
+        let libraries = [library("app-id", &["Ride", "Strange Dir"])];
+        with_manifest(&libraries[0], "3949040", "Strange Dir");
+
+        assert_eq!(
+            found(&libraries, "rv-there-yet").as_deref(),
+            Some("Strange Dir")
+        );
+    }
+
+    #[test]
+    fn a_game_whose_schema_folder_is_absent_is_still_found_by_name() {
+        // The schema says "AGAINST_steam"; the folder on disk is just "AGAINST".
+        let libraries = [library("fallback", &["AGAINST"])];
+
+        assert_eq!(found(&libraries, "against").as_deref(), Some("AGAINST"));
+    }
+
+    #[test]
+    fn the_installed_list_uses_the_same_knowledge() {
+        let library_path = library("installed", &["Ride", "OMORI"]);
+        fs::write(library_path.join("steamapps/common/Ride/Ride.exe"), b"").unwrap();
+
+        let installed = super::installed_games_among(
+            &[library_path],
+            vec!["rv-there-yet".into(), "gladio-mori".into(), "omori".into()],
+        );
+        let names: Vec<&str> = installed
+            .iter()
+            .map(|game| game.identifier.as_str())
+            .collect();
+
+        assert_eq!(
+            names,
+            vec!["rv-there-yet", "omori"],
+            "Gladio Mori is not installed"
+        );
+        assert!(installed[0].builds.windows && !installed[0].builds.mac);
     }
 
     #[test]

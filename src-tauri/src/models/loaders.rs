@@ -64,10 +64,28 @@ pub struct ShimloaderGame {
     pub pak_extensions: Vec<String>,
 }
 
+/// Where a game lives in a Steam library, as the ecosystem schema states it.
+///
+/// Matching a game to a folder by name only works while the two look alike:
+/// RV There Yet? is in `Ride` and 20 Minutes Till Dawn in `20MinuteTillDawn`.
+/// The app id and the folder name are exact, and also keep one game from
+/// being taken for another whose name sits inside its own.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+pub struct SteamGame {
+    /// Steam app ids. More than one when a community covers several games.
+    #[serde(default, rename = "appIds")]
+    pub app_ids: Vec<String>,
+    /// Install folders under `steamapps/common`.
+    #[serde(default)]
+    pub folders: Vec<String>,
+}
+
 #[derive(Debug, Clone, Default, Deserialize)]
 struct LoaderMap {
     #[serde(default)]
     communities: HashMap<String, String>,
+    #[serde(default, rename = "steamGames")]
+    steam_games: HashMap<String, SteamGame>,
     #[serde(default, rename = "loaderPackages")]
     loader_packages: HashMap<String, Vec<LoaderPackage>>,
     #[serde(default, rename = "shimloaderGames")]
@@ -316,6 +334,24 @@ pub const SHIMLOADER_DLL_OVERRIDE: &str = "dwmapi=n,b";
 
 pub const SHIMLOADER_RUNTIME_FILES: [&str; 3] = ["dwmapi.dll", "ue4ss.dll", "UE4SS-settings.ini"];
 
+/// Where the schema says this game is installed in a Steam library, if it says.
+pub fn steam_game(game_identifier: &str) -> Option<SteamGame> {
+    let key = community_key(game_identifier);
+    let normalized = normalized_community_key(game_identifier);
+    with_maps(|map| {
+        map.steam_games
+            .get(&key)
+            .or_else(|| {
+                map.steam_games
+                    .iter()
+                    .find(|(slug, _)| normalize_slug(slug) == normalized)
+                    .map(|(_, game)| game)
+            })
+            .filter(|game| !game.app_ids.is_empty() || !game.folders.is_empty())
+            .cloned()
+    })
+}
+
 /// The shimloader facts the schema states for a community, if it is one.
 pub fn shimloader_game(game_identifier: &str) -> Option<ShimloaderGame> {
     let key = community_key(game_identifier);
@@ -387,21 +423,26 @@ fn parse_ecosystem_schema(raw: &str) -> Result<LoaderMap, String> {
 
     let mut communities = HashMap::new();
     let mut shimloader_games: HashMap<String, ShimloaderGame> = HashMap::new();
+    let mut steam_games: HashMap<String, SteamGame> = HashMap::new();
     if let Some(games) = schema.get("games").and_then(|value| value.as_object()) {
         for (game_key, game) in games {
             let Some(entries) = game.get("r2modman").and_then(|value| value.as_array()) else {
                 continue;
             };
             for entry in entries {
-                let Some(loader) = entry.get("packageLoader").and_then(|value| value.as_str())
-                else {
-                    continue;
-                };
                 let community = entry
                     .get("packageIndex")
                     .and_then(|value| value.as_str())
                     .and_then(community_from_package_index)
                     .unwrap_or_else(|| game_key.clone());
+
+                // A game with no loader still lives somewhere in a Steam library.
+                add_steam_entry(&mut steam_games, &community, entry);
+
+                let Some(loader) = entry.get("packageLoader").and_then(|value| value.as_str())
+                else {
+                    continue;
+                };
                 if loader == "shimloader" {
                     shimloader_games.insert(community.clone(), shimloader_game_from_entry(entry));
                 }
@@ -442,9 +483,62 @@ fn parse_ecosystem_schema(raw: &str) -> Result<LoaderMap, String> {
 
     Ok(LoaderMap {
         communities,
+        steam_games,
         loader_packages,
         shimloader_games,
     })
+}
+
+/// Record where one schema entry's game is installed on Steam.
+///
+/// Dedicated servers have their own entry and app id; the game is what a
+/// profile launches. Some entries name a folder inside the install
+/// (`Hades II/Ship`), and the install folder is the first part.
+fn add_steam_entry(
+    steam_games: &mut HashMap<String, SteamGame>,
+    community: &str,
+    entry: &serde_json::Value,
+) {
+    let instance_type = entry
+        .get("gameInstanceType")
+        .and_then(|value| value.as_str())
+        .unwrap_or("game");
+    if instance_type != "game" {
+        return;
+    }
+
+    let steam = steam_games.entry(community.to_string()).or_default();
+    if let Some(distributions) = entry
+        .get("distributions")
+        .and_then(|value| value.as_array())
+    {
+        for distribution in distributions {
+            if distribution
+                .get("platform")
+                .and_then(|value| value.as_str())
+                != Some("steam")
+            {
+                continue;
+            }
+            let app_id = distribution
+                .get("identifier")
+                .and_then(|value| value.as_str())
+                .unwrap_or_default()
+                .trim();
+            if !app_id.is_empty() && !steam.app_ids.iter().any(|known| known == app_id) {
+                steam.app_ids.push(app_id.to_string());
+            }
+        }
+    }
+    let folder = entry
+        .get("steamFolderName")
+        .and_then(|value| value.as_str())
+        .and_then(|name| name.split(['/', '\\']).next())
+        .unwrap_or_default()
+        .trim();
+    if !folder.is_empty() && !steam.folders.iter().any(|known| known == folder) {
+        steam.folders.push(folder.to_string());
+    }
 }
 
 fn shimloader_game_from_entry(entry: &serde_json::Value) -> ShimloaderGame {
@@ -543,6 +637,67 @@ pub async fn refresh_loader_map(app: tauri::AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn steam_games_carry_the_app_id_and_folder_the_schema_states() {
+        // A folder that looks nothing like the game's name.
+        let ride = steam_game("rv-there-yet").unwrap();
+        assert_eq!(ride.app_ids, vec!["3949040"]);
+        assert_eq!(ride.folders, vec!["Ride"]);
+
+        // The schema names a folder inside the install: the install is the first part.
+        assert_eq!(steam_game("hades-ii").unwrap().folders, vec!["Hades II"]);
+
+        // One community, two games.
+        assert_eq!(steam_game("outward").unwrap().app_ids.len(), 2);
+
+        assert!(steam_game("not-a-game-at-all").is_none());
+    }
+
+    #[test]
+    fn a_dedicated_server_is_not_the_game() {
+        let ror2 = steam_game("riskofrain2").unwrap();
+        assert_eq!(
+            ror2.app_ids,
+            vec!["632360"],
+            "the server's app id leaked in"
+        );
+        assert_eq!(ror2.folders, vec!["Risk of Rain 2"]);
+    }
+
+    #[test]
+    fn a_refreshed_schema_is_read_for_steam_games_too() {
+        let schema = r#"{
+            "games": {
+                "alpha": { "r2modman": [
+                    { "packageIndex": "https://x/c/alpha/api/v1/package-listing-index/",
+                      "gameInstanceType": "game",
+                      "steamFolderName": "Alpha/Bin",
+                      "distributions": [
+                          { "platform": "steam", "identifier": "111" },
+                          { "platform": "epic-games-store", "identifier": "ep" } ] },
+                    { "packageIndex": "https://x/c/alpha/api/v1/package-listing-index/",
+                      "gameInstanceType": "server",
+                      "steamFolderName": "Alpha Server",
+                      "distributions": [ { "platform": "steam", "identifier": "222" } ] }
+                ] },
+                "gamma": { "r2modman": [
+                    { "packageIndex": "https://x/c/gamma/api/v1/package-listing-index/",
+                      "packageLoader": "bepinex",
+                      "steamFolderName": "Gamma Folder",
+                      "distributions": [ { "platform": "steam", "identifier": "333" } ] }
+                ] }
+            }
+        }"#;
+        let map = parse_ecosystem_schema(schema).unwrap();
+
+        // No loader on `alpha`, yet its Steam facts are kept.
+        let alpha = &map.steam_games["alpha"];
+        assert_eq!(alpha.app_ids, vec!["111"]);
+        assert_eq!(alpha.folders, vec!["Alpha"]);
+        assert_eq!(map.steam_games["gamma"].app_ids, vec!["333"]);
+        assert_eq!(map.steam_games["gamma"].folders, vec!["Gamma Folder"]);
+    }
 
     #[test]
     fn embedded_map_names_the_loader_for_known_communities() {
