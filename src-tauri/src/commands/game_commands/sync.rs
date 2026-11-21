@@ -1331,6 +1331,13 @@ pub async fn sync_profile_to_game(
         let installed_keys = manifests_to_keep
             .iter()
             .filter(|entry| manifest_files_exist(&profile_dir, &entry.manifest.files))
+            // An install from the older layout counts as missing: installing
+            // it again puts the mod where UE4SS looks for it.
+            .filter(|entry| {
+                !crate::commands::legacy_mod_commands::shimloader_manifest_is_outdated(
+                    &entry.manifest,
+                )
+            })
             .map(|entry| entry.manifest.mod_key.clone())
             .collect::<std::collections::HashSet<_>>();
         let mut to_install = desired_key_set

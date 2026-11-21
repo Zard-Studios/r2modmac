@@ -12,6 +12,13 @@ pub const GAME_MANIFEST_SCOPE: &str = "game";
 /// For loaders that install into the profile instead of the game folder.
 pub const PROFILE_MANIFEST_SCOPE: &str = "profile";
 
+/// Version written into new manifests.
+///
+/// 2: a shimloader package keeps the folder names UE4SS and the Blueprint
+/// loader look for, instead of nesting them under `Author-Name`. Manifests
+/// without it (0 or 1) came from the older layout.
+pub const CURRENT_MANIFEST_VERSION: u32 = 2;
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ModOwnershipManifest {
     #[serde(default)]
@@ -238,7 +245,7 @@ pub fn save_owned_mod_manifest(
     backup_strings.dedup();
 
     let manifest = ModOwnershipManifest {
-        manifest_version: 1,
+        manifest_version: CURRENT_MANIFEST_VERSION,
         mod_full_name: mod_full_name.to_string(),
         mod_key: mod_key_from_full_name(mod_full_name),
         match_terms: build_match_terms(mod_full_name, &file_strings),

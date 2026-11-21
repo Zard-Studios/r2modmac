@@ -3,7 +3,8 @@ use crate::models::shared::*;
 use crate::tracing::{perfetto_te_ns, scoped_track_event, EventContext, TrackEventDebugArg};
 use crate::utils::file_ops::*;
 use crate::utils::mod_manifest::{
-    backup_existing_mod_files, save_owned_mod_manifest, GAME_MANIFEST_SCOPE, PROFILE_MANIFEST_SCOPE,
+    backup_existing_mod_files, cleanup_owned_mod_manifests, load_owned_mod_manifests,
+    save_owned_mod_manifest, GAME_MANIFEST_SCOPE, PROFILE_MANIFEST_SCOPE,
 };
 use crate::utils::persistent_download::{
     download_persistent, DownloadProgress, DOWNLOAD_CANCELLED,
@@ -1617,6 +1618,104 @@ fn shimloader_folder_name(full_name: &str) -> String {
 /// The directories shimloader is handed on the command line.
 const SHIMLOADER_ROUTES: [&str; 4] = ["mod", "pak", "cfg", "overlay"];
 
+/// Which top-level folders of a shimloader package are mods in their own right.
+///
+/// Most packages follow the documented layout (`mod/`, `pak/`, `cfg/`), where
+/// the package name is the mod folder. Others ship the folder UE4SS or the
+/// Blueprint loader expects, such as `RVChat/Scripts/main.lua` or
+/// `UpAndAwayBalloons/config.lua`. Those folders must reach `shimloader/mod`
+/// or `shimloader/pak` under their own name: UE4SS looks for
+/// `Mods/<name>/enabled.txt` one level down, and putting an `Author-Name`
+/// folder around them hides the mod from it.
+#[derive(Default, Debug, PartialEq, Eq)]
+struct ShimloaderLayout {
+    /// Lowercased folder names that hold a UE4SS mod.
+    mod_roots: std::collections::HashSet<String>,
+    /// Lowercased folder names that hold a pak bundle and no UE4SS mod.
+    pak_roots: std::collections::HashSet<String>,
+}
+
+fn is_shimloader_route_name(name: &str) -> bool {
+    SHIMLOADER_ROUTES
+        .iter()
+        .any(|route| route.eq_ignore_ascii_case(name))
+}
+
+fn shimloader_layout_from_paths(paths: &[Vec<String>]) -> ShimloaderLayout {
+    let mut mod_roots = std::collections::HashSet::new();
+    let mut pak_roots = std::collections::HashSet::new();
+
+    for components in paths {
+        if components.len() < 2 {
+            continue;
+        }
+        let root = components[0].to_ascii_lowercase();
+        // Folders with their own meaning are handled by their own rules.
+        if is_shimloader_route_name(&root)
+            || matches!(root.as_str(), "ue4ss" | "mods" | "logicmods")
+        {
+            continue;
+        }
+
+        let rest = &components[1..];
+        let is_ue4ss_marker = match rest {
+            [name] => name.eq_ignore_ascii_case("enabled.txt"),
+            [dir, name] => {
+                (dir.eq_ignore_ascii_case("scripts") && name.eq_ignore_ascii_case("main.lua"))
+                    || ((dir.eq_ignore_ascii_case("dlls") || dir.eq_ignore_ascii_case("dll"))
+                        && name.eq_ignore_ascii_case("main.dll"))
+            }
+            _ => false,
+        };
+        if is_ue4ss_marker {
+            mod_roots.insert(root);
+            continue;
+        }
+
+        let file = components[components.len() - 1].to_ascii_lowercase();
+        if [".pak", ".utoc", ".ucas"]
+            .iter()
+            .any(|extension| file.ends_with(extension))
+        {
+            pak_roots.insert(root);
+        }
+    }
+
+    // A folder that is a UE4SS mod stays a mod, even if it also ships a pak.
+    pak_roots.retain(|root| !mod_roots.contains(root));
+    ShimloaderLayout {
+        mod_roots,
+        pak_roots,
+    }
+}
+
+fn scan_shimloader_layout<R: std::io::Read + std::io::Seek>(
+    archive: &mut zip::ZipArchive<R>,
+) -> Result<ShimloaderLayout, String> {
+    let mut paths = Vec::new();
+    for index in 0..archive.len() {
+        let file = archive.by_index(index).map_err(|error| error.to_string())?;
+        if zip_entry_is_dir(file.name()) {
+            continue;
+        }
+        let Some(entry) = normalize_zip_entry_path(file.name()) else {
+            continue;
+        };
+        paths.push(
+            entry
+                .components()
+                .filter_map(|component| match component {
+                    std::path::Component::Normal(value) => {
+                        Some(value.to_string_lossy().to_string())
+                    }
+                    _ => None,
+                })
+                .collect(),
+        );
+    }
+    Ok(shimloader_layout_from_paths(&paths))
+}
+
 /// Where a file from a shimloader package lands inside the profile.
 ///
 /// The routes are the ecosystem schema's `installRules`, which all ten
@@ -1626,10 +1725,16 @@ const SHIMLOADER_ROUTES: [&str; 4] = ["mod", "pak", "cfg", "overlay"];
 /// under one of those folders is a loose package file and goes to the default
 /// route, `shimloader/mod`, unless its extension is one the community's `pak`
 /// rule claims (only Astroneer declares one).
+///
+/// Folders that `layout` identifies as UE4SS mods or pak bundles keep their own
+/// name and skip the `Author-Name` folder, so UE4SS and the Blueprint loader
+/// find them where they look. `Mods/<name>/...` and `LogicMods/<name>/...`, the
+/// folder names of the game itself, are treated the same way.
 fn normalize_shimloader_entry(
     entry: &std::path::Path,
     mod_name: &str,
     pak_extensions: &[String],
+    layout: &ShimloaderLayout,
 ) -> Option<std::path::PathBuf> {
     let components = entry
         .components()
@@ -1656,6 +1761,31 @@ fn normalize_shimloader_entry(
             target.push(component);
         }
         return Some(target);
+    }
+
+    let root = components[0].to_ascii_lowercase();
+    if components.len() > 1 {
+        let own_folder = |route: &str, skip: usize| {
+            let mut target = std::path::PathBuf::from("shimloader").join(route);
+            for component in components.iter().skip(skip) {
+                target.push(component);
+            }
+            target
+        };
+        if layout.mod_roots.contains(&root) {
+            return Some(own_folder("mod", 0));
+        }
+        if layout.pak_roots.contains(&root) {
+            return Some(own_folder("pak", 0));
+        }
+        // `Mods/<name>/...` and `LogicMods/<name>/...` name the mod folder
+        // themselves; a file directly inside them has no folder to keep.
+        if components.len() > 2 && root == "mods" {
+            return Some(own_folder("mod", 1));
+        }
+        if components.len() > 2 && root == "logicmods" {
+            return Some(own_folder("pak", 1));
+        }
     }
 
     let name = components.last()?.to_ascii_lowercase();
@@ -1723,6 +1853,7 @@ fn collect_shimloader_files<R: std::io::Read + std::io::Seek>(
     mod_name: &str,
     pak_extensions: &[String],
 ) -> Result<Vec<std::path::PathBuf>, String> {
+    let layout = scan_shimloader_layout(archive)?;
     let mut files = Vec::new();
     for index in 0..archive.len() {
         let file = archive.by_index(index).map_err(|error| error.to_string())?;
@@ -1732,7 +1863,8 @@ fn collect_shimloader_files<R: std::io::Read + std::io::Seek>(
         let Some(entry) = normalize_zip_entry_path(file.name()) else {
             continue;
         };
-        if let Some(target) = normalize_shimloader_entry(&entry, mod_name, pak_extensions) {
+        if let Some(target) = normalize_shimloader_entry(&entry, mod_name, pak_extensions, &layout)
+        {
             if is_shimloader_config(&target) {
                 continue;
             }
@@ -1750,12 +1882,14 @@ fn extract_shimloader_to_profile<R: std::io::Read + std::io::Seek>(
     mod_name: &str,
     pak_extensions: &[String],
 ) -> Result<(), String> {
+    let layout = scan_shimloader_layout(archive)?;
     for index in 0..archive.len() {
         let mut file = archive.by_index(index).map_err(|error| error.to_string())?;
         let Some(entry) = normalize_zip_entry_path(file.name()) else {
             continue;
         };
-        let Some(relative_target) = normalize_shimloader_entry(&entry, mod_name, pak_extensions)
+        let Some(relative_target) =
+            normalize_shimloader_entry(&entry, mod_name, pak_extensions, &layout)
         else {
             continue;
         };
@@ -1801,6 +1935,402 @@ fn shimloader_mod_folders(
         .iter()
         .map(|route| profile_dir.join("shimloader").join(route).join(&folder))
         .collect()
+}
+
+/// The ownership manifests of a mod that was installed into a shimloader profile.
+fn shimloader_manifests(
+    manifests: &[crate::utils::mod_manifest::StoredModOwnershipManifest],
+    mod_name: &str,
+) -> Vec<crate::utils::mod_manifest::StoredModOwnershipManifest> {
+    let key = extract_mod_key(mod_name);
+    manifests
+        .iter()
+        .filter(|entry| {
+            entry.manifest.mod_key == key
+                && entry
+                    .manifest
+                    .files
+                    .iter()
+                    .any(|file| file.starts_with("shimloader/"))
+        })
+        .cloned()
+        .collect()
+}
+
+/// Every folder a shimloader mod owns in the profile: the `Author-Name`
+/// folder, and the folders it was installed under their own name.
+///
+/// `cfg` is left out on purpose, as in [`shimloader_mod_folders`].
+fn shimloader_installed_folders(
+    app: &AppHandle,
+    profile_id: &str,
+    profile_dir: &std::path::Path,
+    mod_name: &str,
+) -> Vec<std::path::PathBuf> {
+    let mut folders = shimloader_mod_folders(profile_dir, mod_name);
+    let stored =
+        load_owned_mod_manifests(app, profile_id, PROFILE_MANIFEST_SCOPE).unwrap_or_default();
+    for entry in shimloader_manifests(&stored, mod_name) {
+        for file in &entry.manifest.files {
+            let parts: Vec<&str> = file.split('/').collect();
+            if parts.len() > 3
+                && parts[0] == "shimloader"
+                && matches!(parts[1], "mod" | "pak" | "overlay")
+            {
+                let folder = profile_dir.join(parts[0]).join(parts[1]).join(parts[2]);
+                if !folders.contains(&folder) {
+                    folders.push(folder);
+                }
+            }
+        }
+    }
+    folders
+}
+
+/// True for a shimloader install made before packages kept their own folder
+/// names: the manifest is from an older layout and the package would now be
+/// laid out differently. Reinstalling it fixes the nesting.
+pub(crate) fn shimloader_manifest_is_outdated(
+    manifest: &crate::utils::mod_manifest::ModOwnershipManifest,
+) -> bool {
+    if manifest.manifest_version >= crate::utils::mod_manifest::CURRENT_MANIFEST_VERSION {
+        return false;
+    }
+    let wrapper = shimloader_folder_name(&manifest.mod_full_name);
+    let inside_wrapper: Vec<Vec<String>> = manifest
+        .files
+        .iter()
+        .filter_map(|file| {
+            let parts: Vec<&str> = file.split('/').collect();
+            (parts.len() > 3
+                && parts[0] == "shimloader"
+                && matches!(parts[1], "mod" | "pak")
+                && parts[2].eq_ignore_ascii_case(&wrapper))
+            .then(|| parts[3..].iter().map(|part| part.to_string()).collect())
+        })
+        .collect();
+    let layout = shimloader_layout_from_paths(&inside_wrapper);
+    !layout.mod_roots.is_empty() || !layout.pak_roots.is_empty()
+}
+
+/// Removes what an outdated install left in the profile, so that installing
+/// the package again does not leave the nested copy behind.
+fn remove_outdated_shimloader_install(
+    app: &AppHandle,
+    profile_id: &str,
+    profile_dir: &std::path::Path,
+    mod_name: &str,
+) -> Result<(), String> {
+    let stored = load_owned_mod_manifests(app, profile_id, PROFILE_MANIFEST_SCOPE)?;
+    let (outdated, keep): (Vec<_>, Vec<_>) = stored.into_iter().partition(|entry| {
+        entry.manifest.mod_key == extract_mod_key(mod_name)
+            && shimloader_manifest_is_outdated(&entry.manifest)
+    });
+    if !outdated.is_empty() {
+        log::info!(
+            "[install_mod] Replacing the older shimloader layout of {}",
+            mod_name
+        );
+        cleanup_owned_mod_manifests(profile_dir, &outdated, &keep)?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod shimloader_layout_tests {
+    use super::*;
+    use crate::utils::mod_manifest::{ModOwnershipManifest, StoredModOwnershipManifest};
+    use std::io::{Cursor, Write};
+
+    const RV_CHAT: &str = "siko-RVChat-0.3.0";
+    const UP_AND_AWAY: &str = "ShchetnikovMods-UpAndAway-0.5.45";
+
+    fn zip_of(entries: &[&str]) -> zip::ZipArchive<Cursor<Vec<u8>>> {
+        let mut bytes = Cursor::new(Vec::new());
+        {
+            let mut writer = zip::ZipWriter::new(&mut bytes);
+            let options = zip::write::FileOptions::default();
+            for name in entries {
+                writer.start_file(*name, options).unwrap();
+                writer.write_all(b"x").unwrap();
+            }
+            writer.finish().unwrap();
+        }
+        zip::ZipArchive::new(Cursor::new(bytes.into_inner())).unwrap()
+    }
+
+    fn targets(mod_name: &str, entries: &[&str]) -> Vec<String> {
+        let mut archive = zip_of(entries);
+        collect_shimloader_files(&mut archive, mod_name, &[])
+            .unwrap()
+            .iter()
+            .map(|path| path.to_string_lossy().replace('\\', "/"))
+            .collect()
+    }
+
+    fn temp_root(label: &str) -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "r2modmac-layout-{}-{}-{}",
+            label,
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    #[test]
+    fn a_ue4ss_mod_folder_keeps_its_own_name() {
+        // siko-RVChat: the mod is the `RVChat` folder, so UE4SS must see
+        // `Mods/RVChat/enabled.txt`, not `Mods/siko-RVChat/RVChat/enabled.txt`.
+        let found = targets(
+            RV_CHAT,
+            &[
+                "manifest.json",
+                "README.md",
+                "icon.png",
+                "RVChat/enabled.txt",
+                "RVChat/config.ini",
+                "RVChat/Scripts/main.lua",
+            ],
+        );
+        assert!(found.contains(&"shimloader/mod/RVChat/enabled.txt".to_string()));
+        assert!(found.contains(&"shimloader/mod/RVChat/Scripts/main.lua".to_string()));
+        // The package's own files stay under Author-Name, as r2modmanPlus does.
+        assert!(found.contains(&"shimloader/mod/siko-RVChat/manifest.json".to_string()));
+        assert!(!found.iter().any(|path| path.contains("siko-RVChat/RVChat")));
+    }
+
+    #[test]
+    fn a_pak_bundle_goes_to_the_pak_folder_under_its_own_name() {
+        // UpAndAway: BPModLoaderMod reads `LogicMods/<name>/config.lua`.
+        let found = targets(
+            UP_AND_AWAY,
+            &[
+                "manifest.json",
+                "UpAndAway/enabled.txt",
+                "UpAndAway/mod.json",
+                "UpAndAway/scripts/main.lua",
+                "UpAndAwayBalloons/config.lua",
+                "UpAndAwayBalloons/UpAndAwayBalloons.pak",
+                "UpAndAwayBalloons/UpAndAwayBalloons.utoc",
+                "UpAndAwayBalloons/UpAndAwayBalloons.ucas",
+            ],
+        );
+        assert!(found.contains(&"shimloader/mod/UpAndAway/scripts/main.lua".to_string()));
+        for name in [
+            "config.lua",
+            "UpAndAwayBalloons.pak",
+            "UpAndAwayBalloons.utoc",
+            "UpAndAwayBalloons.ucas",
+        ] {
+            assert!(
+                found.contains(&format!("shimloader/pak/UpAndAwayBalloons/{name}")),
+                "{name} is not under shimloader/pak/UpAndAwayBalloons: {found:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_documented_layout_is_unchanged() {
+        let found = targets(
+            "darkharasho-RVAdminMenu-0.2.14",
+            &[
+                "manifest.json",
+                "mod/enabled.txt",
+                "mod/scripts/main.lua",
+                "pak/blueprint.pak",
+                "cfg/package.cfg",
+            ],
+        );
+        assert!(found.contains(&"shimloader/mod/darkharasho-RVAdminMenu/enabled.txt".to_string()));
+        assert!(
+            found.contains(&"shimloader/mod/darkharasho-RVAdminMenu/scripts/main.lua".to_string())
+        );
+        assert!(found.contains(&"shimloader/pak/darkharasho-RVAdminMenu/blueprint.pak".to_string()));
+    }
+
+    #[test]
+    fn loose_files_at_the_package_root_are_unchanged() {
+        let found = targets(
+            "author-RootMod-1.0.0",
+            &[
+                "manifest.json",
+                "enabled.txt",
+                "scripts/main.lua",
+                "scripts/lib/util.lua",
+            ],
+        );
+        assert!(found.contains(&"shimloader/mod/author-RootMod/enabled.txt".to_string()));
+        assert!(found.contains(&"shimloader/mod/author-RootMod/scripts/lib/util.lua".to_string()));
+    }
+
+    #[test]
+    fn folder_names_match_whatever_their_case() {
+        // Linux file systems tell `Scripts` from `scripts`; authors mix them.
+        let found = targets(
+            "author-Mixed-1.0.0",
+            &[
+                "Mixed/ENABLED.TXT",
+                "Mixed/scripts/Main.lua",
+                "Sounds/hit.PAK",
+            ],
+        );
+        assert!(found.contains(&"shimloader/mod/Mixed/scripts/Main.lua".to_string()));
+        assert!(found.contains(&"shimloader/pak/Sounds/hit.PAK".to_string()));
+    }
+
+    #[test]
+    fn a_native_ue4ss_mod_is_recognised_by_its_dll() {
+        let found = targets(
+            "author-Native-1.0.0",
+            &["Native/dlls/main.dll", "Native/enabled.txt"],
+        );
+        assert!(found.contains(&"shimloader/mod/Native/dlls/main.dll".to_string()));
+    }
+
+    #[test]
+    fn game_style_folders_name_the_mod_themselves() {
+        let found = targets(
+            "author-Mirror-1.0.0",
+            &[
+                "Mods/Mirror/Scripts/main.lua",
+                "LogicMods/MirrorBP/MirrorBP.pak",
+            ],
+        );
+        assert!(found.contains(&"shimloader/mod/Mirror/Scripts/main.lua".to_string()));
+        assert!(found.contains(&"shimloader/pak/MirrorBP/MirrorBP.pak".to_string()));
+    }
+
+    #[test]
+    fn a_folder_that_is_a_mod_stays_a_mod_even_with_a_pak_inside() {
+        let found = targets("author-Both-1.0.0", &["Both/enabled.txt", "Both/Both.pak"]);
+        assert!(found.contains(&"shimloader/mod/Both/Both.pak".to_string()));
+        assert!(!found.iter().any(|path| path.starts_with("shimloader/pak")));
+    }
+
+    fn outdated_manifest(version: u32, files: &[&str]) -> ModOwnershipManifest {
+        ModOwnershipManifest {
+            manifest_version: version,
+            mod_full_name: RV_CHAT.to_string(),
+            mod_key: "siko-rvchat".to_string(),
+            files: files.iter().map(|file| file.to_string()).collect(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn an_install_with_the_nested_layout_is_reinstalled_once() {
+        let nested = [
+            "shimloader/mod/siko-RVChat/manifest.json",
+            "shimloader/mod/siko-RVChat/RVChat/enabled.txt",
+            "shimloader/mod/siko-RVChat/RVChat/Scripts/main.lua",
+        ];
+        assert!(shimloader_manifest_is_outdated(&outdated_manifest(
+            1, &nested
+        )));
+        // Once reinstalled the manifest carries the current version.
+        assert!(!shimloader_manifest_is_outdated(&outdated_manifest(
+            crate::utils::mod_manifest::CURRENT_MANIFEST_VERSION,
+            &nested
+        )));
+    }
+
+    #[test]
+    fn the_documented_layout_is_never_reinstalled() {
+        let documented = [
+            "shimloader/mod/siko-RVChat/manifest.json",
+            "shimloader/mod/siko-RVChat/enabled.txt",
+            "shimloader/mod/siko-RVChat/scripts/main.lua",
+            "shimloader/pak/siko-RVChat/blueprint.pak",
+        ];
+        assert!(!shimloader_manifest_is_outdated(&outdated_manifest(
+            1,
+            &documented
+        )));
+    }
+
+    fn stored(root: &std::path::Path, name: &str, files: &[String]) -> StoredModOwnershipManifest {
+        StoredModOwnershipManifest {
+            manifest_path: root.join(format!("{name}.json")),
+            backup_dir: root.join(format!("{name}_backup")),
+            manifest: ModOwnershipManifest {
+                manifest_version: crate::utils::mod_manifest::CURRENT_MANIFEST_VERSION,
+                mod_full_name: name.to_string(),
+                mod_key: extract_mod_key(name),
+                files: files.to_vec(),
+                ..Default::default()
+            },
+        }
+    }
+
+    fn install(profile: &std::path::Path, mod_name: &str, entries: &[&str]) -> Vec<String> {
+        let mut archive = zip_of(entries);
+        extract_shimloader_to_profile(&mut archive, profile, mod_name, &[]).unwrap();
+        let mut archive = zip_of(entries);
+        collect_shimloader_files(&mut archive, mod_name, &[])
+            .unwrap()
+            .iter()
+            .map(|path| path.to_string_lossy().replace('\\', "/"))
+            .collect()
+    }
+
+    #[test]
+    fn disabling_a_mod_removes_only_its_files_and_enabling_brings_them_back() {
+        let profile = temp_root("toggle");
+        let chat_entries = [
+            "manifest.json",
+            "RVChat/enabled.txt",
+            "RVChat/Scripts/main.lua",
+        ];
+        let up_entries = [
+            "manifest.json",
+            "UpAndAway/enabled.txt",
+            "UpAndAwayBalloons/config.lua",
+            "UpAndAwayBalloons/UpAndAwayBalloons.pak",
+        ];
+
+        let chat_files = install(&profile, RV_CHAT, &chat_entries);
+        let up_files = install(&profile, UP_AND_AWAY, &up_entries);
+        let chat = stored(&profile, "siko-RVChat-0.3.0", &chat_files);
+        let up = stored(&profile, "ShchetnikovMods-UpAndAway-0.5.45", &up_files);
+
+        assert!(profile
+            .join("shimloader/mod/RVChat/Scripts/main.lua")
+            .is_file());
+        assert!(profile
+            .join("shimloader/pak/UpAndAwayBalloons/config.lua")
+            .is_file());
+
+        // Disable RVChat: applying the profile removes what its manifest owns.
+        cleanup_owned_mod_manifests(&profile, &[chat], &[up.clone()]).unwrap();
+        assert!(!profile.join("shimloader/mod/RVChat").exists());
+        assert!(profile
+            .join("shimloader/mod/UpAndAway/enabled.txt")
+            .is_file());
+        assert!(profile
+            .join("shimloader/pak/UpAndAwayBalloons/UpAndAwayBalloons.pak")
+            .is_file());
+
+        // Enable it again: the same install puts it back in place.
+        install(&profile, RV_CHAT, &chat_entries);
+        assert!(profile.join("shimloader/mod/RVChat/enabled.txt").is_file());
+        assert!(profile
+            .join("shimloader/mod/RVChat/Scripts/main.lua")
+            .is_file());
+
+        // Removing UpAndAway takes the mod and its pak bundle, nothing else.
+        let chat = stored(&profile, "siko-RVChat-0.3.0", &chat_files);
+        cleanup_owned_mod_manifests(&profile, &[up], &[chat]).unwrap();
+        assert!(!profile.join("shimloader/mod/UpAndAway").exists());
+        assert!(!profile.join("shimloader/pak/UpAndAwayBalloons").exists());
+        assert!(profile.join("shimloader/mod/RVChat/enabled.txt").is_file());
+
+        let _ = fs::remove_dir_all(&profile);
+    }
 }
 
 #[cfg(test)]
@@ -4919,6 +5449,7 @@ async fn install_mod_bytes(
         if managed_files.is_empty() {
             return Err(format!("{} has no shimloader payload", mod_name));
         }
+        remove_outdated_shimloader_install(&app, &profile_id, &profile_dir, &mod_name)?;
 
         let backed_up_files = backup_existing_mod_files(
             &app,
@@ -5635,7 +6166,25 @@ pub async fn remove_mod(
         .join(&profile_id);
     let plugins_dir = profile_dir.join("BepInEx").join("plugins");
 
+    // A shimloader mod is removed file by file from what it installed, since
+    // the folders it owns may carry any name. Whatever was installed under the
+    // old `Author-Name` folder goes too.
     let mut removed_shimloader_folders = false;
+    let stored =
+        load_owned_mod_manifests(&app, &profile_id, PROFILE_MANIFEST_SCOPE).unwrap_or_default();
+    let owned = shimloader_manifests(&stored, &mod_name);
+    if !owned.is_empty() {
+        let keep: Vec<_> = stored
+            .into_iter()
+            .filter(|entry| {
+                !owned
+                    .iter()
+                    .any(|mine| mine.manifest_path == entry.manifest_path)
+            })
+            .collect();
+        cleanup_owned_mod_manifests(&profile_dir, &owned, &keep)?;
+        removed_shimloader_folders = true;
+    }
     for folder in shimloader_mod_folders(&profile_dir, &mod_name) {
         if folder.is_dir() {
             fs::remove_dir_all(&folder).map_err(|error| error.to_string())?;
@@ -5773,7 +6322,7 @@ pub async fn open_mod_folder(
                 .map_err(|error| format!("Failed to open profile folder: {error}"))?;
             return Ok(());
         }
-        let target = shimloader_mod_folders(&profile_dir, &mod_name)
+        let target = shimloader_installed_folders(&app, &profile_id, &profile_dir, &mod_name)
             .into_iter()
             .find(|folder| folder.is_dir())
             .ok_or_else(|| "MOD_NOT_INSTALLED".to_string())?;
@@ -6138,7 +6687,7 @@ pub async fn copy_mod_from_cache(
     if crate::models::loaders::uses_shimloader(
         &get_profile_game_identifier(&app, &profile_id).unwrap_or_default(),
     ) {
-        let present = shimloader_mod_folders(&profile_dir, &mod_name)
+        let present = shimloader_installed_folders(&app, &profile_id, &profile_dir, &mod_name)
             .iter()
             .any(|folder| folder.is_dir())
             || (is_shimloader_loader(&mod_name) && profile_dir.join("dwmapi.dll").is_file());
