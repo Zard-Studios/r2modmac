@@ -3017,7 +3017,9 @@ pub(crate) fn doorstop_target_seen_by_game(
 pub(crate) fn host_path_for_doorstop(path: &std::path::Path) -> String {
     let native = path.to_string_lossy().to_string();
     if cfg!(windows) {
-        native
+        // A path built with `join("profiles/abc")` mixes separators; Doorstop's
+        // file is written with backslashes, so this is too.
+        native.replace('/', "\\")
     } else {
         format!("Z:{}", native.replace('/', "\\"))
     }
@@ -10797,7 +10799,9 @@ mod game_ini_follows_tree_tests {
     }
 }
 
-#[cfg(test)]
+// macOS and Wine launching only runs on a Unix host (it writes shell
+// scripts and Unix links), so these tests do not apply to Windows.
+#[cfg(all(test, unix))]
 mod fresh_lethal_company_bottle_tests {
     use super::*;
     use crate::commands::game_commands::choose_bepinex_root;

@@ -81,10 +81,13 @@ pub fn create_dir_link(source: &Path, link: &Path) -> io::Result<()> {
     {
         // A junction needs no administrator rights or Developer Mode, which a
         // directory symlink does, and every program reads it as a folder.
+        // mklink takes a "/" in a path for one of its switches, and paths built
+        // with `join("BepInEx/plugins")` carry one, so it gets backslashes only.
+        let backslashes = |path: &Path| path.to_string_lossy().replace('/', "\\");
         let status = std::process::Command::new("cmd")
             .args(["/C", "mklink", "/J"])
-            .arg(link)
-            .arg(source)
+            .arg(backslashes(link))
+            .arg(backslashes(source))
             .status()?;
         if status.success() {
             Ok(())
@@ -106,11 +109,18 @@ pub fn plugin_folder_of(relative: &str) -> Option<PathBuf> {
         .filter(|part| !part.is_empty())
         .collect::<Vec<_>>();
     let lower = |index: usize| parts.get(index).map(|part| part.to_ascii_lowercase());
+    // The trees have fixed names. A path can spell them in any case, but on
+    // Linux the disk does not forgive that, so the real names are used.
     match (lower(0).as_deref(), lower(1).as_deref()) {
-        (Some("bepinex" | "bepinex_disabled"), Some("plugins")) if parts.len() >= 3 => {
-            Some([parts[0], parts[1], parts[2]].iter().collect())
+        (Some(tree @ ("bepinex" | "bepinex_disabled")), Some("plugins")) if parts.len() >= 3 => {
+            let tree = if tree == "bepinex" {
+                "BepInEx"
+            } else {
+                "BepInEx_DISABLED"
+            };
+            Some([tree, "plugins", parts[2]].iter().collect())
         }
-        (Some("plugins"), Some(_)) => Some([parts[0], parts[1]].iter().collect()),
+        (Some("plugins"), Some(_)) => Some(["plugins", parts[1]].iter().collect()),
         _ => None,
     }
 }
