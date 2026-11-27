@@ -78,6 +78,12 @@ pub struct SteamGame {
     /// Install folders under `steamapps/common`.
     #[serde(default)]
     pub folders: Vec<String>,
+    /// The game's executables as the schema names them, relative to the
+    /// install folder. They tell a real install from a folder that only kept
+    /// saves or mod files, and they keep working for games added later, since
+    /// the schema is refreshed at every start.
+    #[serde(default, rename = "exeNames")]
+    pub exe_names: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -347,7 +353,9 @@ pub fn steam_game(game_identifier: &str) -> Option<SteamGame> {
                     .find(|(slug, _)| normalize_slug(slug) == normalized)
                     .map(|(_, game)| game)
             })
-            .filter(|game| !game.app_ids.is_empty() || !game.folders.is_empty())
+            .filter(|game| {
+                !game.app_ids.is_empty() || !game.folders.is_empty() || !game.exe_names.is_empty()
+            })
             .cloned()
     })
 }
@@ -539,6 +547,14 @@ fn add_steam_entry(
     if !folder.is_empty() && !steam.folders.iter().any(|known| known == folder) {
         steam.folders.push(folder.to_string());
     }
+    if let Some(exe_names) = entry.get("exeNames").and_then(|value| value.as_array()) {
+        for exe in exe_names.iter().filter_map(|value| value.as_str()) {
+            let exe = exe.trim();
+            if !exe.is_empty() && !steam.exe_names.iter().any(|known| known == exe) {
+                steam.exe_names.push(exe.to_string());
+            }
+        }
+    }
 }
 
 fn shimloader_game_from_entry(entry: &serde_json::Value) -> ShimloaderGame {
@@ -673,6 +689,7 @@ mod tests {
                     { "packageIndex": "https://x/c/alpha/api/v1/package-listing-index/",
                       "gameInstanceType": "game",
                       "steamFolderName": "Alpha/Bin",
+                      "exeNames": ["Alpha.exe", "Alpha.app"],
                       "distributions": [
                           { "platform": "steam", "identifier": "111" },
                           { "platform": "epic-games-store", "identifier": "ep" } ] },
@@ -695,6 +712,8 @@ mod tests {
         let alpha = &map.steam_games["alpha"];
         assert_eq!(alpha.app_ids, vec!["111"]);
         assert_eq!(alpha.folders, vec!["Alpha"]);
+        // A game added to the schema later brings its executables with it.
+        assert_eq!(alpha.exe_names, vec!["Alpha.exe", "Alpha.app"]);
         assert_eq!(map.steam_games["gamma"].app_ids, vec!["333"]);
         assert_eq!(map.steam_games["gamma"].folders, vec!["Gamma Folder"]);
     }

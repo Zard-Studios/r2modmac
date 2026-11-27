@@ -751,6 +751,9 @@
       ],
       "folders": [
         "20MinuteTillDawn"
+      ],
+      "exeNames": [
+        "MinutesTillDawn.exe"
       ]
     },
     "9-kings": {
@@ -759,6 +762,9 @@
       ],
       "folders": [
         "9 Kings"
+      ],
+      "exeNames": [
+        "9Kings.exe"
       ]
     },
     "a-dance-of-fire-and-ice": {
@@ -767,6 +773,9 @@
       ],
       "folders": [
         "A Dance of Fire and Ice"
+      ],
+      "exeNames": [
+        "A Dance of Fire and Ice.exe"
       ]
     },
     "a-gentlemens-dispute": {
@@ -775,6 +784,10 @@
       ],
       "folders": [
         "A Gentlemen's Dispute"
+      ],
+      "exeNames": [
+        "A Gentlemen's Dispute.exe",
+        "AGentlemensDispute.app"
       ]
     },
     "a-little-to-the-left": {
@@ -783,6 +796,10 @@
       ],
       "folders": [
         "A Little To The Left"
+      ],
+      "exeNames": [
+        "A Little To The Left.exe",
+        "A Little To The Left.app"
       ]
     },
     "a-webbing-journey": {
@@ -791,6 +808,11 @@
       ],
       "folders": [
         "A Webbing Journey"
+      ],
+      "exeNames": [
+        "A Webbing Journey.exe",
+        "A Webbing Journey.app",
+        "A Webbing Journey.x86_64"
       ]
     },
     "across-the-obelisk": {
@@ -799,6 +821,9 @@
       ],
       "folders": [
         "Across the Obelisk"
+      ],
+      "exeNames": [
+        "AcrossTheObelisk.exe"
       ]
     },
     "aeruta": {
@@ -807,6 +832,9 @@
       ],
       "folders": [
         "Aeruta"
+      ],
+      "exeNames": [
+        "Aeruta.exe"
       ]
     },
     "against": {
@@ -815,6 +843,9 @@
       ],
       "folders": [
         "AGAINST_steam"
+      ],
+      "exeNames": [
+        "AGAINST.exe"
       ]
     },
     "against-the-storm": {
@@ -823,6 +854,9 @@
       ],
       "folders": [
         "Against the Storm"
+      ],
+      "exeNames": [
+        "Against the Storm.exe"
       ]
     },
     "ai-limit": {
@@ -831,6 +865,9 @@
       ],
       "folders": [
         "AI Limit"
+      ],
+      "exeNames": [
+        "AI-LIMIT.exe"
       ]
     },
     "airframe-ultra": {
@@ -839,6 +876,9 @@
       ],
       "folders": [
         "Airframe Ultra"
+      ],
+      "exeNames": [
+        "AirframeUltra.exe"
       ]
     },
     "airport-security-sucks": {
@@ -847,6 +887,9 @@
       ],
       "folders": [
         "Airport Security Sucks!"
+      ],
+      "exeNames": [
+        "Airport Security Sucks!.exe"
       ]
     },
     "ale-and-tale-tavern": {
@@ -855,6 +898,9 @@
       ],
       "folders": [
         "Ale & Tale Tavern"
+      ],
+      "exeNames": [
+        "Ale and Tale Tavern.exe"
       ]
     },
     "aloft": {
@@ -863,6 +909,20 @@
       ],
       "folders": [
         "Aloft Demo"
+      ],
+      "exeNames": [
+        "Aloft.exe"
+      ]
+    },
+    "alterum": {
+      "appIds": [
+        "4424420"
+      ],
+      "folders": [
+        "Alterum"
+      ],
+      "exeNames": [
+        "Alterum.exe"
       ]
     },
     "among-us": {
@@ -871,6 +931,9 @@
       ],
       "folders": [
         "Among Us"
+      ],
+      "exeNames": [
+        "Among Us.exe"
       ]
     },
     "among-us-3d": {
@@ -879,6 +942,9 @@
       ],
       "folders": [
         "Among Us 3D"
+      ],
+      "exeNames": [
+        "AmongUs3D.exe"
       ]
     },
     "an-unfinished-game": {
@@ -887,6 +953,9 @@
       ],
       "folders": [
         "An Unfinished Game"
+      ],
+      "exeNames": [
+        "UnfinishedGame.exe"
       ]
     },
     "ancient-dungeon-vr": {
@@ -895,6 +964,9 @@
       ],
       "folders": [
         "Ancient Dungeon VR"
+      ],
+      "exeNames": [
+        "Ancient_Dungeon.exe"
       ]
     },
     "aneurism-iv": {
@@ -903,6 +975,9 @@
       ],
       "folders": [
         "ANEURISMIV"
+      ],
+      "exeNames": [
+        "ANEURISM IV.exe"
       ]
     },
     "angry-birds-vr-isle-of-pigs": {
@@ -911,6 +986,9 @@
       ],
       "folders": [
         "Angry Birds VR Isle of Pigs"
+      ],
+      "exeNames": [
+        "angry-birds-vr-isle-of-pigs.exe"
       ]
     },
     "another-crabs-treasure": {
@@ -919,6 +997,9 @@
       ],
       "folders": [
         "AnotherCrabsTreasure"
+      ],
+      "exeNames": [
+        "AnotherCrabsTreasure.exe"
       ]
     },
     "approximately-up": {
@@ -927,6 +1008,9 @@
       ],
       "folders": [
         "Approximately Up"
+      ],
+      "exeNames": [
+        "ApproximatelyUp.exe"
       ]
     },
     "arcus-chroma": {
@@ -935,6 +1019,9 @@
       ],
       "folders": [
         "Arcus Chroma"
+      ],
+      "exeNames": [
+        "Arcus Chroma.exe"
       ]
     },
     "aska": {
@@ -943,6 +1030,9 @@
       ],
       "folders": [
         "ASKA"
+      ],
+      "exeNames": [
+        "Aska.exe"
       ]
     },
     "astroneer": {
@@ -951,6 +1041,9 @@
       ],
       "folders": [
         "ASTRONEER"
+      ],
+      "exeNames": [
+        "Astro.exe"
       ]
     },
     "atlyss": {
@@ -959,6 +1052,9 @@
       ],
       "folders": [
         "ATLYSS"
+      ],
+      "exeNames": [
+        "ATLYSS.exe"
       ]
     },
     "atomicrops": {
@@ -967,6 +1063,9 @@
       ],
       "folders": [
         "Atomicrops"
+      ],
+      "exeNames": [
+        "Atomicrops.exe"
       ]
     },
     "atrio-the-dark-wild": {
@@ -975,6 +1074,9 @@
       ],
       "folders": [
         "Atrio The Dark Wild"
+      ],
+      "exeNames": [
+        "Atrio.exe"
       ]
     },
     "baby-steps": {
@@ -983,6 +1085,9 @@
       ],
       "folders": [
         "Baby Steps"
+      ],
+      "exeNames": [
+        "BabySteps.exe"
       ]
     },
     "back-to-the-dawn": {
@@ -991,6 +1096,9 @@
       ],
       "folders": [
         "MetalHeadGames"
+      ],
+      "exeNames": [
+        "Back To The Dawn.exe"
       ]
     },
     "backpack-hero": {
@@ -999,6 +1107,10 @@
       ],
       "folders": [
         "Backpack Hero"
+      ],
+      "exeNames": [
+        "Backpack Hero.exe",
+        "linux.x86_64"
       ]
     },
     "bad-north": {
@@ -1007,6 +1119,9 @@
       ],
       "folders": [
         "BadNorth"
+      ],
+      "exeNames": [
+        "BadNorth.exe"
       ]
     },
     "balatro": {
@@ -1015,6 +1130,9 @@
       ],
       "folders": [
         "Balatro"
+      ],
+      "exeNames": [
+        "Balatro.exe"
       ]
     },
     "beetleball": {
@@ -1023,6 +1141,9 @@
       ],
       "folders": [
         "BeetleBall"
+      ],
+      "exeNames": [
+        "Beetleball.exe"
       ]
     },
     "below-the-stone": {
@@ -1031,6 +1152,9 @@
       ],
       "folders": [
         "Below The Stone"
+      ],
+      "exeNames": [
+        "Below The Stone.exe"
       ]
     },
     "bendy-and-the-ink-machine": {
@@ -1039,6 +1163,9 @@
       ],
       "folders": [
         "Bendy and the Ink Machine"
+      ],
+      "exeNames": [
+        "Bendy and the Ink Machine.exe"
       ]
     },
     "berry-bury-berry": {
@@ -1047,6 +1174,9 @@
       ],
       "folders": [
         "BerryBerryBerry"
+      ],
+      "exeNames": [
+        "BerryBerryBerryBerryBerryBerryBerryBerryBerry.exe"
       ]
     },
     "beton-brutal": {
@@ -1055,6 +1185,9 @@
       ],
       "folders": [
         "BETON BRUTAL"
+      ],
+      "exeNames": [
+        "BetonBrutal.exe"
       ]
     },
     "betrayal-beach": {
@@ -1063,6 +1196,9 @@
       ],
       "folders": [
         "Betrayal Beach"
+      ],
+      "exeNames": [
+        "Betrayal Beach.exe"
       ]
     },
     "big-ambitions": {
@@ -1071,6 +1207,10 @@
       ],
       "folders": [
         "Big Ambitions"
+      ],
+      "exeNames": [
+        "Big Ambitions.exe",
+        "Big Ambitions.app"
       ]
     },
     "big-walk": {
@@ -1079,6 +1219,10 @@
       ],
       "folders": [
         "Big Walk"
+      ],
+      "exeNames": [
+        "Big Walk.exe",
+        "Big Walk.app"
       ]
     },
     "block-story": {
@@ -1087,6 +1231,9 @@
       ],
       "folders": [
         "BlockStory"
+      ],
+      "exeNames": [
+        "Block Story.exe"
       ]
     },
     "bloons-td-6": {
@@ -1095,6 +1242,9 @@
       ],
       "folders": [
         "BloonsTD6"
+      ],
+      "exeNames": [
+        "BloonsTD6.exe"
       ]
     },
     "blue-prince": {
@@ -1103,6 +1253,10 @@
       ],
       "folders": [
         "Blue Prince"
+      ],
+      "exeNames": [
+        "BLUE PRINCE.exe",
+        "BLUE PRINCE.app"
       ]
     },
     "bomb-rush-cyberfunk": {
@@ -1111,6 +1265,9 @@
       ],
       "folders": [
         "BombRushCyberfunk"
+      ],
+      "exeNames": [
+        "Bomb Rush Cyberfunk.exe"
       ]
     },
     "bombanana": {
@@ -1119,6 +1276,10 @@
       ],
       "folders": [
         "BOMBANANA!"
+      ],
+      "exeNames": [
+        "BOMBANANA.exe",
+        "BOMBANANA.app"
       ]
     },
     "bonelab": {
@@ -1127,6 +1288,10 @@
       ],
       "folders": [
         "BONELAB"
+      ],
+      "exeNames": [
+        "BONELAB_Steam_Windows64.exe",
+        "BONELAB_Oculus_Windows64.exe"
       ]
     },
     "boneworks": {
@@ -1135,6 +1300,10 @@
       ],
       "folders": [
         "BONEWORKS"
+      ],
+      "exeNames": [
+        "BONEWORKS.exe",
+        "Boneworks_Oculus_Windows64.exe"
       ]
     },
     "book-of-travels": {
@@ -1143,6 +1312,11 @@
       ],
       "folders": [
         "Book of Travels"
+      ],
+      "exeNames": [
+        "BookOfTravels.exe",
+        "BookOfTravels.app",
+        "BookOfTravels.x86_64"
       ]
     },
     "bopl-battle": {
@@ -1151,6 +1325,9 @@
       ],
       "folders": [
         "Bopl Battle"
+      ],
+      "exeNames": [
+        "BoplBattle.exe"
       ]
     },
     "broforce": {
@@ -1159,6 +1336,9 @@
       ],
       "folders": [
         "Broforce"
+      ],
+      "exeNames": [
+        "Broforce_beta.exe"
       ]
     },
     "brotato": {
@@ -1167,6 +1347,9 @@
       ],
       "folders": [
         "Brotato"
+      ],
+      "exeNames": [
+        "Brotato.exe"
       ]
     },
     "brutalistick-vr": {
@@ -1175,6 +1358,9 @@
       ],
       "folders": [
         "BRUTALISTICK VR"
+      ],
+      "exeNames": [
+        "BrutalistickVR.exe"
       ]
     },
     "burglin-gnomes": {
@@ -1183,6 +1369,9 @@
       ],
       "folders": [
         "Burglin' Gnomes"
+      ],
+      "exeNames": [
+        "Gnomium.exe"
       ]
     },
     "cairn": {
@@ -1191,6 +1380,9 @@
       ],
       "folders": [
         "Cairn"
+      ],
+      "exeNames": [
+        "Cairn.exe"
       ]
     },
     "carrier-deck": {
@@ -1199,6 +1391,9 @@
       ],
       "folders": [
         "Carrier Deck"
+      ],
+      "exeNames": [
+        "CD.exe"
       ]
     },
     "cast-n-chill": {
@@ -1207,12 +1402,19 @@
       ],
       "folders": [
         "Cast n Chill"
+      ],
+      "exeNames": [
+        "castnchill.exe",
+        "Cast n Chill.app"
       ]
     },
     "castle-story": {
       "appIds": [],
       "folders": [
         "Castle Story"
+      ],
+      "exeNames": [
+        "Castle Story.exe"
       ]
     },
     "casualties-unknown": {
@@ -1221,6 +1423,9 @@
       ],
       "folders": [
         "Casualties Unknown"
+      ],
+      "exeNames": [
+        "CasualtiesUnknown.exe"
       ]
     },
     "cat-mail-co": {
@@ -1229,6 +1434,10 @@
       ],
       "folders": [
         "CatMailCo"
+      ],
+      "exeNames": [
+        "CatMailCo.exe",
+        "CatMailCo-OSX-Universal.app"
       ]
     },
     "cats-are-liquid": {
@@ -1237,6 +1446,11 @@
       ],
       "folders": [
         "Cats are Liquid - A Better Place"
+      ],
+      "exeNames": [
+        "CaL-ABP-Windows.exe",
+        "CaL-ABP-Linux.x86_64",
+        "CaL-ABP-macOS.app"
       ]
     },
     "cave-crawlers": {
@@ -1245,6 +1459,9 @@
       ],
       "folders": [
         "Cave Crawlers"
+      ],
+      "exeNames": [
+        "Cave Crawlers.exe"
       ]
     },
     "chill-with-you": {
@@ -1253,6 +1470,9 @@
       ],
       "folders": [
         "Chill with You Lo-Fi Story"
+      ],
+      "exeNames": [
+        "Chill With You.exe"
       ]
     },
     "chrono-ark": {
@@ -1261,6 +1481,9 @@
       ],
       "folders": [
         "Chrono Ark"
+      ],
+      "exeNames": [
+        "ChronoArk.exe"
       ]
     },
     "cities-skylines-ii": {
@@ -1269,6 +1492,9 @@
       ],
       "folders": [
         "Cities Skylines II"
+      ],
+      "exeNames": [
+        "Cities2.exe"
       ]
     },
     "clover-pit": {
@@ -1277,6 +1503,9 @@
       ],
       "folders": [
         "CloverPit"
+      ],
+      "exeNames": [
+        "CloverPit.exe"
       ]
     },
     "content-warning": {
@@ -1285,6 +1514,9 @@
       ],
       "folders": [
         "Content Warning"
+      ],
+      "exeNames": [
+        "Content Warning.exe"
       ]
     },
     "core-keeper": {
@@ -1293,6 +1525,9 @@
       ],
       "folders": [
         "Core Keeper"
+      ],
+      "exeNames": [
+        "CoreKeeper.exe"
       ]
     },
     "crab-game": {
@@ -1301,6 +1536,10 @@
       ],
       "folders": [
         "Crab Game"
+      ],
+      "exeNames": [
+        "Crab Game.exe",
+        "Crab Game.x86_64"
       ]
     },
     "crack": {
@@ -1309,6 +1548,11 @@
       ],
       "folders": [
         "CRACK"
+      ],
+      "exeNames": [
+        "CRACK.exe",
+        "CRACK.app",
+        "CRACK.x86_64"
       ]
     },
     "crashout-crew": {
@@ -1317,6 +1561,9 @@
       ],
       "folders": [
         "CrashoutCrew"
+      ],
+      "exeNames": [
+        "CrashoutCrew.exe"
       ]
     },
     "crawl": {
@@ -1325,6 +1572,12 @@
       ],
       "folders": [
         "Crawl"
+      ],
+      "exeNames": [
+        "Crawl.exe",
+        "Crawl.x86",
+        "Crawl.x86_64",
+        "Crawl.app"
       ]
     },
     "crawlspace": {
@@ -1333,6 +1586,9 @@
       ],
       "folders": [
         "Crawlspace"
+      ],
+      "exeNames": [
+        "Crawlspace.exe"
       ]
     },
     "crawlspace-2": {
@@ -1341,6 +1597,9 @@
       ],
       "folders": [
         "Crawlspace 2"
+      ],
+      "exeNames": [
+        "VRFighter.exe"
       ]
     },
     "crime-simulator": {
@@ -1349,6 +1608,9 @@
       ],
       "folders": [
         "Crime Simulator"
+      ],
+      "exeNames": [
+        "Crime Simulator.exe"
       ]
     },
     "cryo": {
@@ -1357,6 +1619,9 @@
       ],
       "folders": [
         "CRYO"
+      ],
+      "exeNames": [
+        "Cryo.exe"
       ]
     },
     "cult-of-pin": {
@@ -1365,6 +1630,11 @@
       ],
       "folders": [
         "CultOfPiN"
+      ],
+      "exeNames": [
+        "CultOfPin.exe",
+        "CultOfPin.x86_64",
+        "CultOfPin.app"
       ]
     },
     "cult-of-the-lamb": {
@@ -1373,6 +1643,9 @@
       ],
       "folders": [
         "Cult of the Lamb"
+      ],
+      "exeNames": [
+        "Cult Of The Lamb.exe"
       ]
     },
     "cuphead": {
@@ -1381,6 +1654,10 @@
       ],
       "folders": [
         "Cuphead"
+      ],
+      "exeNames": [
+        "Cuphead.exe",
+        "Cuphead.app"
       ]
     },
     "cursed-words": {
@@ -1389,6 +1666,9 @@
       ],
       "folders": [
         "Cursed Words"
+      ],
+      "exeNames": [
+        "Cursed Words.exe"
       ]
     },
     "dale-dawson-stationery-supplies": {
@@ -1397,6 +1677,9 @@
       ],
       "folders": [
         "Dale&Dawson"
+      ],
+      "exeNames": [
+        "DDSS.exe"
       ]
     },
     "darkwater": {
@@ -1405,6 +1688,9 @@
       ],
       "folders": [
         "Darkwater"
+      ],
+      "exeNames": [
+        "Darkwater.exe"
       ]
     },
     "deadly-delivery": {
@@ -1413,6 +1699,9 @@
       ],
       "folders": [
         "Deadly Delivery"
+      ],
+      "exeNames": [
+        "Deadly Delivery.exe"
       ]
     },
     "deep-rock-galactic-survivor": {
@@ -1421,6 +1710,9 @@
       ],
       "folders": [
         "Deep Rock Survivor"
+      ],
+      "exeNames": [
+        "DRG Survivor.exe"
       ]
     },
     "depo": {
@@ -1429,6 +1721,9 @@
       ],
       "folders": [
         "DEPO"
+      ],
+      "exeNames": [
+        "DEPO.exe"
       ]
     },
     "dice-kingdoms": {
@@ -1437,6 +1732,9 @@
       ],
       "folders": [
         "Dice-Kingdoms"
+      ],
+      "exeNames": [
+        "Dice-Kingdoms.exe"
       ]
     },
     "disco-elysium": {
@@ -1445,6 +1743,9 @@
       ],
       "folders": [
         "Disco Elysium"
+      ],
+      "exeNames": [
+        "disco.exe"
       ]
     },
     "distance": {
@@ -1453,6 +1754,9 @@
       ],
       "folders": [
         "Distance"
+      ],
+      "exeNames": [
+        "Distance.exe"
       ]
     },
     "dome-keeper": {
@@ -1461,6 +1765,9 @@
       ],
       "folders": [
         "Dome Keeper"
+      ],
+      "exeNames": [
+        "domekeeper.exe"
       ]
     },
     "dread-hunger": {
@@ -1469,6 +1776,9 @@
       ],
       "folders": [
         "Dread Hunger"
+      ],
+      "exeNames": [
+        "DreadHunger.exe"
       ]
     },
     "dredge": {
@@ -1477,6 +1787,9 @@
       ],
       "folders": [
         "DREDGE"
+      ],
+      "exeNames": [
+        "DREDGE.exe"
       ]
     },
     "ducks-can-drive": {
@@ -1485,6 +1798,11 @@
       ],
       "folders": [
         "Ducks Can Drive"
+      ],
+      "exeNames": [
+        "Ducks Can Drive.exe",
+        "DuckDrive.x86_64",
+        "Ducks Can Drive.app"
       ]
     },
     "dusk": {
@@ -1493,6 +1811,9 @@
       ],
       "folders": [
         "Dusk"
+      ],
+      "exeNames": [
+        "Dusk.exe"
       ]
     },
     "dyson-sphere-program": {
@@ -1501,6 +1822,9 @@
       ],
       "folders": [
         "Dyson Sphere Program"
+      ],
+      "exeNames": [
+        "DSPGAME.exe"
       ]
     },
     "easy-delivery-co": {
@@ -1509,6 +1833,9 @@
       ],
       "folders": [
         "Easy Delivery Co"
+      ],
+      "exeNames": [
+        "EasyDeliveryCo.exe"
       ]
     },
     "electoral-carnage": {
@@ -1517,6 +1844,10 @@
       ],
       "folders": [
         "Electoral Carnage"
+      ],
+      "exeNames": [
+        "Electoral Carnage.exe",
+        "Electoral Carnage.app"
       ]
     },
     "ena-dream-bbq": {
@@ -1525,6 +1856,9 @@
       ],
       "folders": [
         "ENA-4-DreamBBQ"
+      ],
+      "exeNames": [
+        "ENA-4-DreamBBQ.exe"
       ]
     },
     "enter-the-gungeon": {
@@ -1533,6 +1867,9 @@
       ],
       "folders": [
         "Enter the Gungeon"
+      ],
+      "exeNames": [
+        "EtG.exe"
       ]
     },
     "erenshor": {
@@ -1541,6 +1878,9 @@
       ],
       "folders": [
         "Erenshor"
+      ],
+      "exeNames": [
+        "Erenshor.exe"
       ]
     },
     "escape-from-playtime": {
@@ -1549,6 +1889,9 @@
       ],
       "folders": [
         "Escape From Playtime"
+      ],
+      "exeNames": [
+        "EscapeFromPlaytime.exe"
       ]
     },
     "everything-is-crab": {
@@ -1557,6 +1900,9 @@
       ],
       "folders": [
         "Everything is Crab"
+      ],
+      "exeNames": [
+        "Everything is Crab.exe"
       ]
     },
     "factory-planner": {
@@ -1565,6 +1911,9 @@
       ],
       "folders": [
         "Factory Planner"
+      ],
+      "exeNames": [
+        "Factory Planner.exe"
       ]
     },
     "fate-reawakened": {
@@ -1573,6 +1922,10 @@
       ],
       "folders": [
         "FATE Reawakened"
+      ],
+      "exeNames": [
+        "FateReawakened.exe",
+        "fate.app"
       ]
     },
     "five-nights-at-freddys-into-the-pit": {
@@ -1581,6 +1934,10 @@
       ],
       "folders": [
         "Five Nights at Freddy's Into the Pit"
+      ],
+      "exeNames": [
+        "Five Nights at Freddy's Into the Pit.exe",
+        "FNaFIntoThePit.exe"
       ]
     },
     "flipping-is-hard": {
@@ -1589,6 +1946,9 @@
       ],
       "folders": [
         "Flipping is Hard"
+      ],
+      "exeNames": [
+        "Flipping is Hard.exe"
       ]
     },
     "football-manager-26": {
@@ -1597,6 +1957,9 @@
       ],
       "folders": [
         "Football Manager 26"
+      ],
+      "exeNames": [
+        "fm.exe"
       ]
     },
     "for-the-king": {
@@ -1605,6 +1968,9 @@
       ],
       "folders": [
         "For The King"
+      ],
+      "exeNames": [
+        "FTK.exe"
       ]
     },
     "forsaken-frontiers": {
@@ -1613,6 +1979,9 @@
       ],
       "folders": [
         "Forsaken Frontiers"
+      ],
+      "exeNames": [
+        "Forsaken Frontiers.exe"
       ]
     },
     "frozen-ship": {
@@ -1621,6 +1990,9 @@
       ],
       "folders": [
         "Frozen Ship"
+      ],
+      "exeNames": [
+        "FrozenShip.exe"
       ]
     },
     "frukt": {
@@ -1629,6 +2001,9 @@
       ],
       "folders": [
         "FRUKT"
+      ],
+      "exeNames": [
+        "FRUKT.exe"
       ]
     },
     "gamble-with-your-friends": {
@@ -1637,6 +2012,9 @@
       ],
       "folders": [
         "Gamble With Your Friends"
+      ],
+      "exeNames": [
+        "Gamble With Your Friends.exe"
       ]
     },
     "gang-beasts": {
@@ -1645,6 +2023,9 @@
       ],
       "folders": [
         "Gang Beasts"
+      ],
+      "exeNames": [
+        "Gang Beasts.exe"
       ]
     },
     "garfield-kart-furious-racing": {
@@ -1653,6 +2034,9 @@
       ],
       "folders": [
         "Garfield Kart - Furious Racing"
+      ],
+      "exeNames": [
+        "Garfield Kart Furious Racing.exe"
       ]
     },
     "gatekeeper": {
@@ -1661,6 +2045,9 @@
       ],
       "folders": [
         "Gatekeeper"
+      ],
+      "exeNames": [
+        "Gatekeeper.exe"
       ]
     },
     "getting-over-it": {
@@ -1669,6 +2056,11 @@
       ],
       "folders": [
         "Getting Over It"
+      ],
+      "exeNames": [
+        "GettingOverIt.exe",
+        "GettingOverIt.app",
+        "GettingOverIt.x86_64"
       ]
     },
     "gladio-mori": {
@@ -1677,6 +2069,9 @@
       ],
       "folders": [
         "Gladio Mori"
+      ],
+      "exeNames": [
+        "Gladio Mori.exe"
       ]
     },
     "gloomwood": {
@@ -1685,6 +2080,20 @@
       ],
       "folders": [
         "Gloomwood"
+      ],
+      "exeNames": [
+        "Gloomwood.exe"
+      ]
+    },
+    "goat-simulator-3": {
+      "appIds": [
+        "850190"
+      ],
+      "folders": [
+        "Goat Simulator 3"
+      ],
+      "exeNames": [
+        "Goat2.exe"
       ]
     },
     "goblin-buster": {
@@ -1693,6 +2102,9 @@
       ],
       "folders": [
         "Goblin Buster"
+      ],
+      "exeNames": [
+        "Goblin Buster.exe"
       ]
     },
     "goblin-cleanup": {
@@ -1701,6 +2113,9 @@
       ],
       "folders": [
         "Goblin Cleanup"
+      ],
+      "exeNames": [
+        "Goblin Cleanup.exe"
       ]
     },
     "goodbye-volcano-high": {
@@ -1709,6 +2124,9 @@
       ],
       "folders": [
         "Goodbye Volcano High"
+      ],
+      "exeNames": [
+        "Goodbye Volcano High.exe"
       ]
     },
     "gorebox": {
@@ -1717,6 +2135,9 @@
       ],
       "folders": [
         "GoreBox"
+      ],
+      "exeNames": [
+        "GoreBox.exe"
       ]
     },
     "gorilla-tag": {
@@ -1725,6 +2146,9 @@
       ],
       "folders": [
         "Gorilla Tag"
+      ],
+      "exeNames": [
+        "Gorilla Tag.exe"
       ]
     },
     "grain-rot": {
@@ -1733,6 +2157,9 @@
       ],
       "folders": [
         "Grain Rot"
+      ],
+      "exeNames": [
+        "Helden.exe"
       ]
     },
     "granny-chapter-two": {
@@ -1741,6 +2168,9 @@
       ],
       "folders": [
         "Granny Chapter Two"
+      ],
+      "exeNames": [
+        "Granny Chapter Two.exe"
       ]
     },
     "graveyard-keeper-2": {
@@ -1749,6 +2179,9 @@
       ],
       "folders": [
         "Graveyard Keeper 2"
+      ],
+      "exeNames": [
+        "GraveyardKeeper2.exe"
       ]
     },
     "green-hell-vr": {
@@ -1757,6 +2190,9 @@
       ],
       "folders": [
         "Green Hell VR"
+      ],
+      "exeNames": [
+        "GHVR.exe"
       ]
     },
     "grey-hack": {
@@ -1765,6 +2201,9 @@
       ],
       "folders": [
         "Grey Hack"
+      ],
+      "exeNames": [
+        "Grey Hack.exe"
       ]
     },
     "grilluminati": {
@@ -1773,6 +2212,9 @@
       ],
       "folders": [
         "Grilluminati Demo"
+      ],
+      "exeNames": [
+        "grilluminati.exe"
       ]
     },
     "grime": {
@@ -1781,6 +2223,10 @@
       ],
       "folders": [
         "GRIME"
+      ],
+      "exeNames": [
+        "GRIME.exe",
+        "GRIME.app"
       ]
     },
     "gtfo": {
@@ -1789,6 +2235,9 @@
       ],
       "folders": [
         "GTFO"
+      ],
+      "exeNames": [
+        "GTFO.exe"
       ]
     },
     "guilty-as-sock": {
@@ -1797,6 +2246,9 @@
       ],
       "folders": [
         "Guilty as Sock!"
+      ],
+      "exeNames": [
+        "StandaloneWindows64.exe"
       ]
     },
     "gunman-contracts-stand-alone": {
@@ -1805,6 +2257,9 @@
       ],
       "folders": [
         "Gunman Contracts - Stand Alone"
+      ],
+      "exeNames": [
+        "GunmanContracts.exe"
       ]
     },
     "h3vr": {
@@ -1813,6 +2268,9 @@
       ],
       "folders": [
         "H3VR"
+      ],
+      "exeNames": [
+        "h3vr.exe"
       ]
     },
     "hades-ii": {
@@ -1821,6 +2279,9 @@
       ],
       "folders": [
         "Hades II"
+      ],
+      "exeNames": [
+        "Hades2.exe"
       ]
     },
     "hard-bullet": {
@@ -1829,6 +2290,9 @@
       ],
       "folders": [
         "Hard Bullet"
+      ],
+      "exeNames": [
+        "Hard Bullet.exe"
       ]
     },
     "hard-time-3": {
@@ -1837,6 +2301,9 @@
       ],
       "folders": [
         "Hard Time III"
+      ],
+      "exeNames": [
+        "Hard Time III.exe"
       ]
     },
     "holdfast-nations-at-war": {
@@ -1845,6 +2312,9 @@
       ],
       "folders": [
         "Holdfast Nations At War"
+      ],
+      "exeNames": [
+        "Holdfast NaW.exe"
       ]
     },
     "hollow-knight-silksong": {
@@ -1852,6 +2322,11 @@
         "1030300"
       ],
       "folders": [
+        "Hollow Knight Silksong"
+      ],
+      "exeNames": [
+        "Hollow Knight Silksong.exe",
+        "Hollow Knight Silksong.app",
         "Hollow Knight Silksong"
       ]
     },
@@ -1861,6 +2336,9 @@
       ],
       "folders": [
         "Home Safety Hotline"
+      ],
+      "exeNames": [
+        "Home Safety Hotline.exe"
       ]
     },
     "hot-lava": {
@@ -1869,6 +2347,9 @@
       ],
       "folders": [
         "Hot Lava"
+      ],
+      "exeNames": [
+        "hotlava.exe"
       ]
     },
     "hotds": {
@@ -1877,6 +2358,9 @@
       ],
       "folders": [
         "DyingSun"
+      ],
+      "exeNames": [
+        "dyingsun.exe"
       ]
     },
     "house-of-legacy": {
@@ -1885,6 +2369,9 @@
       ],
       "folders": [
         "吾今有世家"
+      ],
+      "exeNames": [
+        "House of Legacy.exe"
       ]
     },
     "how-to-fish": {
@@ -1893,6 +2380,9 @@
       ],
       "folders": [
         "How to Fish"
+      ],
+      "exeNames": [
+        "How to Fish.exe"
       ]
     },
     "human-fall-flat": {
@@ -1901,6 +2391,9 @@
       ],
       "folders": [
         "Human Fall Flat"
+      ],
+      "exeNames": [
+        "Human.exe"
       ]
     },
     "i-am-your-beast": {
@@ -1909,6 +2402,9 @@
       ],
       "folders": [
         "I Am Your Beast"
+      ],
+      "exeNames": [
+        "I Am Your Beast.exe"
       ]
     },
     "in-falsus": {
@@ -1917,6 +2413,9 @@
       ],
       "folders": [
         "In Falsus"
+      ],
+      "exeNames": [
+        "infalsus.exe"
       ]
     },
     "inferno-protocol": {
@@ -1925,6 +2424,9 @@
       ],
       "folders": [
         "Inferno Protocol"
+      ],
+      "exeNames": [
+        "Inferno Protocol.exe"
       ]
     },
     "inscryption": {
@@ -1933,6 +2435,9 @@
       ],
       "folders": [
         "Inscryption"
+      ],
+      "exeNames": [
+        "Inscryption.exe"
       ]
     },
     "inside-the-backrooms": {
@@ -1941,6 +2446,9 @@
       ],
       "folders": [
         "Inside The Backrooms"
+      ],
+      "exeNames": [
+        "Inside the Backrooms.exe"
       ]
     },
     "iron-nest": {
@@ -1949,6 +2457,9 @@
       ],
       "folders": [
         "Iron Nest Heavy Turret Simulator"
+      ],
+      "exeNames": [
+        "Iron Nest Heavy Turret Simulator.exe"
       ]
     },
     "ironstrike": {
@@ -1957,6 +2468,9 @@
       ],
       "folders": [
         "IRONSTRIKE"
+      ],
+      "exeNames": [
+        "Ironstrike.exe"
       ]
     },
     "island-market-simulator": {
@@ -1965,6 +2479,23 @@
       ],
       "folders": [
         "Island Market Simulator"
+      ],
+      "exeNames": [
+        "Island Market Simulator.exe",
+        "IslandMarketSimulator.x86_64"
+      ]
+    },
+    "jousting-around": {
+      "appIds": [
+        "4983950"
+      ],
+      "folders": [
+        "Jousting Around"
+      ],
+      "exeNames": [
+        "Jousting Around.exe",
+        "Jousting Around.app",
+        "Jousting Around.x86_64"
       ]
     },
     "jump-scare-mansion": {
@@ -1973,6 +2504,10 @@
       ],
       "folders": [
         "Spooky's Jump Scare Mansion HD Renovation"
+      ],
+      "exeNames": [
+        "SpookyUnity.exe",
+        "SpookyUnity.app"
       ]
     },
     "jump-space": {
@@ -1981,6 +2516,9 @@
       ],
       "folders": [
         "JumpSpace"
+      ],
+      "exeNames": [
+        "Jump Space.exe"
       ]
     },
     "keywe": {
@@ -1989,6 +2527,9 @@
       ],
       "folders": [
         "KeyWe"
+      ],
+      "exeNames": [
+        "KeyWe.exe"
       ]
     },
     "labyrinthine": {
@@ -1997,6 +2538,9 @@
       ],
       "folders": [
         "Labyrinthine"
+      ],
+      "exeNames": [
+        "Labyrinthine.exe"
       ]
     },
     "last-pirates-die-together": {
@@ -2005,6 +2549,9 @@
       ],
       "folders": [
         "Last Pirates Die Together"
+      ],
+      "exeNames": [
+        "Last Pirates Die Together.exe"
       ]
     },
     "last-train-outta-wormtown": {
@@ -2013,6 +2560,9 @@
       ],
       "folders": [
         "Last Train Outta' Wormtown"
+      ],
+      "exeNames": [
+        "Last Train Out Of WormTown.exe"
       ]
     },
     "lazy-witchs-factory": {
@@ -2021,6 +2571,9 @@
       ],
       "folders": [
         "Lazy Witch's Factory"
+      ],
+      "exeNames": [
+        "LazyWitchsFactory.exe"
       ]
     },
     "lens-island": {
@@ -2029,6 +2582,9 @@
       ],
       "folders": [
         "Len's Island"
+      ],
+      "exeNames": [
+        "Len's Island.exe"
       ]
     },
     "lethal-company": {
@@ -2037,6 +2593,9 @@
       ],
       "folders": [
         "Lethal Company"
+      ],
+      "exeNames": [
+        "Lethal Company.exe"
       ]
     },
     "lethal-league-blaze": {
@@ -2045,6 +2604,12 @@
       ],
       "folders": [
         "LLBlaze"
+      ],
+      "exeNames": [
+        "LLBlaze.exe",
+        "LLBlaze.x86_64",
+        "LLBlaze.x86",
+        "LLBlaze.app"
       ]
     },
     "limitless-survivor": {
@@ -2053,6 +2618,9 @@
       ],
       "folders": [
         "Limitless Survivor"
+      ],
+      "exeNames": [
+        "Limitless Survivor.exe"
       ]
     },
     "logic-world": {
@@ -2061,6 +2629,9 @@
       ],
       "folders": [
         "Logic World"
+      ],
+      "exeNames": [
+        "Logic_World.exe"
       ]
     },
     "lootun": {
@@ -2069,6 +2640,9 @@
       ],
       "folders": [
         "Lootun"
+      ],
+      "exeNames": [
+        "Lootun.exe"
       ]
     },
     "lost-skies": {
@@ -2077,6 +2651,9 @@
       ],
       "folders": [
         "Wild Skies"
+      ],
+      "exeNames": [
+        "LostSkies.exe"
       ]
     },
     "lost-skies-ic": {
@@ -2085,6 +2662,9 @@
       ],
       "folders": [
         "Lost Skies Island Creator"
+      ],
+      "exeNames": [
+        "IslandCreator.exe"
       ]
     },
     "lucid-cats": {
@@ -2093,6 +2673,9 @@
       ],
       "folders": [
         "Lucid Cats"
+      ],
+      "exeNames": [
+        "LucidCats.exe"
       ]
     },
     "lucky-shot": {
@@ -2101,6 +2684,10 @@
       ],
       "folders": [
         "Lucky Shot"
+      ],
+      "exeNames": [
+        "LuckyShot.exe",
+        "LuckyShot.app"
       ]
     },
     "lumentale-memories-of-trey": {
@@ -2109,6 +2696,9 @@
       ],
       "folders": [
         "LumenTale Memories of Trey"
+      ],
+      "exeNames": [
+        "LumenTale Memories of Trey.exe"
       ]
     },
     "lycans": {
@@ -2117,12 +2707,18 @@
       ],
       "folders": [
         "Lycans"
+      ],
+      "exeNames": [
+        "Lycans.exe"
       ]
     },
     "madness-melee": {
       "appIds": [],
       "folders": [
         "Madness Melee"
+      ],
+      "exeNames": [
+        "MadnessMelee.exe"
       ]
     },
     "mage-arena": {
@@ -2131,6 +2727,9 @@
       ],
       "folders": [
         "Mage Arena"
+      ],
+      "exeNames": [
+        "MageArena.exe"
       ]
     },
     "magicite": {
@@ -2139,6 +2738,9 @@
       ],
       "folders": [
         "Magicite"
+      ],
+      "exeNames": [
+        "Magicite.exe"
       ]
     },
     "magicraft": {
@@ -2147,6 +2749,9 @@
       ],
       "folders": [
         "Magicraft"
+      ],
+      "exeNames": [
+        "Magicraft.exe"
       ]
     },
     "make-way": {
@@ -2155,6 +2760,9 @@
       ],
       "folders": [
         "Make Way"
+      ],
+      "exeNames": [
+        "Make Way.exe"
       ]
     },
     "malteses-fluffy-onsen": {
@@ -2163,6 +2771,9 @@
       ],
       "folders": [
         "Animal Spa"
+      ],
+      "exeNames": [
+        "AnimalSpa.exe"
       ]
     },
     "meccha-chameleon": {
@@ -2171,6 +2782,9 @@
       ],
       "folders": [
         "MECCHA CHAMELEON"
+      ],
+      "exeNames": [
+        "PenguinHotel.exe"
       ]
     },
     "mechanica": {
@@ -2179,6 +2793,9 @@
       ],
       "folders": [
         "Mechanica"
+      ],
+      "exeNames": [
+        "Mechanica.exe"
       ]
     },
     "meeple-station": {
@@ -2187,6 +2804,9 @@
       ],
       "folders": [
         "Meeple Station"
+      ],
+      "exeNames": [
+        "Meeple Station.exe"
       ]
     },
     "megabonk": {
@@ -2195,6 +2815,10 @@
       ],
       "folders": [
         "Megabonk"
+      ],
+      "exeNames": [
+        "Megabonk.exe",
+        "Megabonk.x86_64"
       ]
     },
     "mimesis": {
@@ -2203,6 +2827,9 @@
       ],
       "folders": [
         "MIMESIS"
+      ],
+      "exeNames": [
+        "MIMESIS.exe"
       ]
     },
     "mine-mogul": {
@@ -2211,6 +2838,9 @@
       ],
       "folders": [
         "MineMogul"
+      ],
+      "exeNames": [
+        "MineMogul.exe"
       ]
     },
     "minigunner": {
@@ -2219,6 +2849,9 @@
       ],
       "folders": [
         "Minigunner"
+      ],
+      "exeNames": [
+        "Minigunner.exe"
       ]
     },
     "minos": {
@@ -2227,6 +2860,9 @@
       ],
       "folders": [
         "Minos"
+      ],
+      "exeNames": [
+        "Minos.exe"
       ]
     },
     "mio-memories-in-orbit": {
@@ -2235,6 +2871,9 @@
       ],
       "folders": [
         "MIO"
+      ],
+      "exeNames": [
+        "mio.exe"
       ]
     },
     "miside": {
@@ -2243,12 +2882,18 @@
       ],
       "folders": [
         "MiSide"
+      ],
+      "exeNames": [
+        "MiSideFull.exe"
       ]
     },
     "miside-zero": {
       "appIds": [],
       "folders": [
         "MiSide Zero"
+      ],
+      "exeNames": [
+        "MiSide Zero.exe"
       ]
     },
     "modulus-factory-automation": {
@@ -2257,6 +2902,9 @@
       ],
       "folders": [
         "Modulus"
+      ],
+      "exeNames": [
+        "Modulus.exe"
       ]
     },
     "monster-train-2": {
@@ -2265,6 +2913,9 @@
       ],
       "folders": [
         "Monster Train 2"
+      ],
+      "exeNames": [
+        "MonsterTrain2.exe"
       ]
     },
     "moonlighter": {
@@ -2273,6 +2924,12 @@
       ],
       "folders": [
         "Moonlighter"
+      ],
+      "exeNames": [
+        "Moonlighter.exe",
+        "Moonlighter.app",
+        "Moonlighter.x86",
+        "Moonlighter.x86_64"
       ]
     },
     "muck": {
@@ -2281,6 +2938,10 @@
       ],
       "folders": [
         "Muck"
+      ],
+      "exeNames": [
+        "Muck.exe",
+        "Muck.x86_64"
       ]
     },
     "my-dream-setup": {
@@ -2289,6 +2950,9 @@
       ],
       "folders": [
         "My dream setup"
+      ],
+      "exeNames": [
+        "MDS.exe"
       ]
     },
     "mycopunk": {
@@ -2297,6 +2961,9 @@
       ],
       "folders": [
         "Mycopunk"
+      ],
+      "exeNames": [
+        "Mycopunk.exe"
       ]
     },
     "nasb": {
@@ -2305,6 +2972,9 @@
       ],
       "folders": [
         "Nickelodeon All-Star Brawl"
+      ],
+      "exeNames": [
+        "Nickelodeon All-Star Brawl.exe"
       ]
     },
     "nearly-dead": {
@@ -2313,6 +2983,9 @@
       ],
       "folders": [
         "Nearly Dead"
+      ],
+      "exeNames": [
+        "Nearly Dead.exe"
       ]
     },
     "necropolis": {
@@ -2321,6 +2994,9 @@
       ],
       "folders": [
         "Necropolis"
+      ],
+      "exeNames": [
+        "Necropolis.exe"
       ]
     },
     "nine-sols": {
@@ -2329,6 +3005,9 @@
       ],
       "folders": [
         "Nine Sols"
+      ],
+      "exeNames": [
+        "NineSols.exe"
       ]
     },
     "nivalis-nights": {
@@ -2337,6 +3016,9 @@
       ],
       "folders": [
         "Nivalis Nights"
+      ],
+      "exeNames": [
+        "Nivalis Nights.exe"
       ]
     },
     "northstar": {
@@ -2345,6 +3027,10 @@
       ],
       "folders": [
         "Titanfall2"
+      ],
+      "exeNames": [
+        "NorthstarLauncher.exe",
+        "Titanfall2.exe"
       ]
     },
     "nuclear-option": {
@@ -2353,6 +3039,9 @@
       ],
       "folders": [
         "Nuclear Option"
+      ],
+      "exeNames": [
+        "NuclearOption.exe"
       ]
     },
     "nucleares": {
@@ -2361,6 +3050,9 @@
       ],
       "folders": [
         "Nuclear Last Darkness"
+      ],
+      "exeNames": [
+        "Nucleares.exe"
       ]
     },
     "odd-remedy": {
@@ -2369,6 +3061,9 @@
       ],
       "folders": [
         "OddRemedy"
+      ],
+      "exeNames": [
+        "OddRemedy.exe"
       ]
     },
     "offscreen": {
@@ -2377,6 +3072,9 @@
       ],
       "folders": [
         "Offscreen Demo"
+      ],
+      "exeNames": [
+        "Offscreen.exe"
       ]
     },
     "old-market-simulator": {
@@ -2385,6 +3083,9 @@
       ],
       "folders": [
         "Old Market Simulator"
+      ],
+      "exeNames": [
+        "Old Market Simulator.exe"
       ]
     },
     "on-together": {
@@ -2393,6 +3094,10 @@
       ],
       "folders": [
         "On-Together"
+      ],
+      "exeNames": [
+        "On-Together.exe",
+        "OnTogether.exe"
       ]
     },
     "ostranauts": {
@@ -2401,6 +3106,9 @@
       ],
       "folders": [
         "Ostranauts"
+      ],
+      "exeNames": [
+        "Ostranauts.exe"
       ]
     },
     "outward": {
@@ -2410,6 +3118,10 @@
       ],
       "folders": [
         "Outward"
+      ],
+      "exeNames": [
+        "Outward.exe",
+        "Outward Definitive Edition.exe"
       ]
     },
     "over-the-hill": {
@@ -2418,6 +3130,10 @@
       ],
       "folders": [
         "over the hill"
+      ],
+      "exeNames": [
+        "over the hill.exe",
+        "over the hill.x86_64"
       ]
     },
     "pac-man-world-re-pac": {
@@ -2426,6 +3142,9 @@
       ],
       "folders": [
         "PAC-MAN WORLD Re-PAC"
+      ],
+      "exeNames": [
+        "PAC-MAN WORLD Re-PAC.exe"
       ]
     },
     "painting-vr": {
@@ -2434,6 +3153,9 @@
       ],
       "folders": [
         "Painting VR"
+      ],
+      "exeNames": [
+        "PaintingVr.exe"
       ]
     },
     "pair-a-dice": {
@@ -2442,6 +3164,9 @@
       ],
       "folders": [
         "PairADice"
+      ],
+      "exeNames": [
+        "PairADice.exe"
       ]
     },
     "palworld": {
@@ -2450,6 +3175,9 @@
       ],
       "folders": [
         "Palworld"
+      ],
+      "exeNames": [
+        "Palworld.exe"
       ]
     },
     "panicore": {
@@ -2458,6 +3186,9 @@
       ],
       "folders": [
         "Panicore"
+      ],
+      "exeNames": [
+        "Panicore.exe"
       ]
     },
     "paper-animal-adventure": {
@@ -2466,6 +3197,9 @@
       ],
       "folders": [
         "Paper Animal Adventure"
+      ],
+      "exeNames": [
+        "Paper Animal Adventure.exe"
       ]
     },
     "papers-please": {
@@ -2473,6 +3207,11 @@
         "239030"
       ],
       "folders": [
+        "PapersPlease"
+      ],
+      "exeNames": [
+        "PapersPlease.exe",
+        "PapersPlease.app",
         "PapersPlease"
       ]
     },
@@ -2482,6 +3221,9 @@
       ],
       "folders": [
         "Paquerette Down the Bunburrows"
+      ],
+      "exeNames": [
+        "Paquerette Down the Bunburrows.exe"
       ]
     },
     "paralives": {
@@ -2490,6 +3232,10 @@
       ],
       "folders": [
         "Paralives"
+      ],
+      "exeNames": [
+        "Paralives.exe",
+        "Paralives.app"
       ]
     },
     "patapon-1-2-replay": {
@@ -2498,6 +3244,9 @@
       ],
       "folders": [
         "PATAPON12_REPLAY"
+      ],
+      "exeNames": [
+        "PATAPON12_REPLAY.exe"
       ]
     },
     "patch-quest": {
@@ -2506,6 +3255,9 @@
       ],
       "folders": [
         "Patch Quest"
+      ],
+      "exeNames": [
+        "Patch Quest.exe"
       ]
     },
     "peak": {
@@ -2514,6 +3266,9 @@
       ],
       "folders": [
         "PEAK"
+      ],
+      "exeNames": [
+        "PEAK.exe"
       ]
     },
     "peaks-of-yore": {
@@ -2522,6 +3277,9 @@
       ],
       "folders": [
         "Peaks of Yore"
+      ],
+      "exeNames": [
+        "Peaks of Yore.exe"
       ]
     },
     "peglin": {
@@ -2530,6 +3288,9 @@
       ],
       "folders": [
         "Peglin"
+      ],
+      "exeNames": [
+        "Peglin.exe"
       ]
     },
     "pigface": {
@@ -2538,6 +3299,9 @@
       ],
       "folders": [
         "PIGFACE"
+      ],
+      "exeNames": [
+        "Pigface.exe"
       ]
     },
     "pikuniku": {
@@ -2546,6 +3310,12 @@
       ],
       "folders": [
         "Pikuniku"
+      ],
+      "exeNames": [
+        "Pikuniku.exe",
+        "Pikuniku.app",
+        "Pikuniku.x86_64",
+        "Pikuniku.x86"
       ]
     },
     "pit-of-goblin": {
@@ -2554,6 +3324,9 @@
       ],
       "folders": [
         "Pit of Goblin"
+      ],
+      "exeNames": [
+        "Pit of Goblin.exe"
       ]
     },
     "plasma": {
@@ -2562,6 +3335,9 @@
       ],
       "folders": [
         "Plasma"
+      ],
+      "exeNames": [
+        "Plasma.exe"
       ]
     },
     "potion-craft": {
@@ -2570,6 +3346,9 @@
       ],
       "folders": [
         "Potion Craft"
+      ],
+      "exeNames": [
+        "Potion Craft.exe"
       ]
     },
     "project-arrhythmia": {
@@ -2578,6 +3357,9 @@
       ],
       "folders": [
         "Project Arrhythmia"
+      ],
+      "exeNames": [
+        "Project Arrhythmia.exe"
       ]
     },
     "project-gorgon": {
@@ -2586,6 +3368,10 @@
       ],
       "folders": [
         "Project Gorgon"
+      ],
+      "exeNames": [
+        "WindowsPlayer.exe",
+        "ProjectGorgon"
       ]
     },
     "pulsar-lost-colony": {
@@ -2594,6 +3380,9 @@
       ],
       "folders": [
         "PULSARLostColony"
+      ],
+      "exeNames": [
+        "PULSAR_LostColony.exe"
       ]
     },
     "pummel-party": {
@@ -2602,6 +3391,9 @@
       ],
       "folders": [
         "Pummel Party"
+      ],
+      "exeNames": [
+        "PummelParty.exe"
       ]
     },
     "pushing-it-together-sisyphus": {
@@ -2610,6 +3402,9 @@
       ],
       "folders": [
         "Pushing It! Together Sisyphus Co-op"
+      ],
+      "exeNames": [
+        "Pushing it! Together.exe"
       ]
     },
     "puttler": {
@@ -2618,6 +3413,9 @@
       ],
       "folders": [
         "Puttler"
+      ],
+      "exeNames": [
+        "Puttler.exe"
       ]
     },
     "raft": {
@@ -2626,6 +3424,9 @@
       ],
       "folders": [
         "Raft"
+      ],
+      "exeNames": [
+        "Raft.exe"
       ]
     },
     "random-access-mayhem": {
@@ -2634,6 +3435,9 @@
       ],
       "folders": [
         "RAM Random Access Mayhem"
+      ],
+      "exeNames": [
+        "RAM.exe"
       ]
     },
     "ravenfield": {
@@ -2642,6 +3446,9 @@
       ],
       "folders": [
         "Ravenfield"
+      ],
+      "exeNames": [
+        "ravenfield.exe"
       ]
     },
     "re-legend": {
@@ -2650,6 +3457,9 @@
       ],
       "folders": [
         "Re-Legend"
+      ],
+      "exeNames": [
+        "ReLegend.exe"
       ]
     },
     "receiver-2": {
@@ -2658,6 +3468,9 @@
       ],
       "folders": [
         "Receiver 2"
+      ],
+      "exeNames": [
+        "Receiver2.exe"
       ]
     },
     "repo": {
@@ -2666,6 +3479,9 @@
       ],
       "folders": [
         "REPO"
+      ],
+      "exeNames": [
+        "REPO.exe"
       ]
     },
     "resonite": {
@@ -2674,6 +3490,9 @@
       ],
       "folders": [
         "Resonite"
+      ],
+      "exeNames": [
+        "Resonite.exe"
       ]
     },
     "return-from-core": {
@@ -2682,6 +3501,9 @@
       ],
       "folders": [
         "Return From Core"
+      ],
+      "exeNames": [
+        "Return From Core.exe"
       ]
     },
     "return-of-the-obra-dinn": {
@@ -2690,6 +3512,9 @@
       ],
       "folders": [
         "ObraDinn"
+      ],
+      "exeNames": [
+        "ObraDinn.exe"
       ]
     },
     "rhythm-doctor": {
@@ -2697,6 +3522,11 @@
         "774181"
       ],
       "folders": [
+        "Rhythm Doctor"
+      ],
+      "exeNames": [
+        "Rhythm Doctor.exe",
+        "Rhythm Doctor.app",
         "Rhythm Doctor"
       ]
     },
@@ -2706,6 +3536,9 @@
       ],
       "folders": [
         "Risk of Rain Returns"
+      ],
+      "exeNames": [
+        "Risk of Rain Returns.exe"
       ]
     },
     "riskofrain2": {
@@ -2714,6 +3547,9 @@
       ],
       "folders": [
         "Risk of Rain 2"
+      ],
+      "exeNames": [
+        "Risk of Rain 2.exe"
       ]
     },
     "roadside-research": {
@@ -2722,6 +3558,9 @@
       ],
       "folders": [
         "Roadside Research"
+      ],
+      "exeNames": [
+        "Roadside Research.exe"
       ]
     },
     "rogue-genesia": {
@@ -2730,6 +3569,9 @@
       ],
       "folders": [
         "Rogue Genesia"
+      ],
+      "exeNames": [
+        "Rogue Genesia.exe"
       ]
     },
     "rogue-tower": {
@@ -2738,6 +3580,9 @@
       ],
       "folders": [
         "Rogue Tower"
+      ],
+      "exeNames": [
+        "Rogue Tower.exe"
       ]
     },
     "romestead": {
@@ -2746,6 +3591,9 @@
       ],
       "folders": [
         "romestead"
+      ],
+      "exeNames": [
+        "Romestead.exe"
       ]
     },
     "rounds": {
@@ -2754,6 +3602,9 @@
       ],
       "folders": [
         "ROUNDS"
+      ],
+      "exeNames": [
+        "Rounds.exe"
       ]
     },
     "rumble": {
@@ -2762,6 +3613,9 @@
       ],
       "folders": [
         "RUMBLE"
+      ],
+      "exeNames": [
+        "RUMBLE.exe"
       ]
     },
     "rv-there-yet": {
@@ -2770,6 +3624,9 @@
       ],
       "folders": [
         "Ride"
+      ],
+      "exeNames": [
+        "Ride.exe"
       ]
     },
     "sailwind": {
@@ -2778,6 +3635,9 @@
       ],
       "folders": [
         "Sailwind"
+      ],
+      "exeNames": [
+        "Sailwind.exe"
       ]
     },
     "scam-with-your-friends": {
@@ -2786,6 +3646,9 @@
       ],
       "folders": [
         "Scam With Your Friends"
+      ],
+      "exeNames": [
+        "Scam With Your Friends.exe"
       ]
     },
     "schedule-i": {
@@ -2794,6 +3657,9 @@
       ],
       "folders": [
         "Schedule I"
+      ],
+      "exeNames": [
+        "Schedule I.exe"
       ]
     },
     "scrap-mechanic": {
@@ -2802,6 +3668,9 @@
       ],
       "folders": [
         "Scrap Mechanic"
+      ],
+      "exeNames": [
+        "ScrapMechanic.exe"
       ]
     },
     "screw-drivers": {
@@ -2810,6 +3679,9 @@
       ],
       "folders": [
         "Screw Drivers"
+      ],
+      "exeNames": [
+        "Screw Drivers.exe"
       ]
     },
     "shadows-of-doubt": {
@@ -2818,6 +3690,9 @@
       ],
       "folders": [
         "Shadows of Doubt"
+      ],
+      "exeNames": [
+        "Shadows of Doubt.exe"
       ]
     },
     "shadows-over-loathing": {
@@ -2826,6 +3701,9 @@
       ],
       "folders": [
         "Shadows Over Loathing"
+      ],
+      "exeNames": [
+        "Shadows Over Loathing.exe"
       ]
     },
     "shapez-2": {
@@ -2834,6 +3712,9 @@
       ],
       "folders": [
         "shapez 2"
+      ],
+      "exeNames": [
+        "shapez 2.exe"
       ]
     },
     "shift-at-midnight": {
@@ -2842,6 +3723,9 @@
       ],
       "folders": [
         "Shift At Midnight"
+      ],
+      "exeNames": [
+        "ShiftAtMidnight.exe"
       ]
     },
     "side-effects": {
@@ -2850,6 +3734,9 @@
       ],
       "folders": [
         "Side Effects"
+      ],
+      "exeNames": [
+        "Side Effects.exe"
       ]
     },
     "sineus-arena-survivors": {
@@ -2858,6 +3745,9 @@
       ],
       "folders": [
         "Sineus Arena"
+      ],
+      "exeNames": [
+        "SineusArena.exe"
       ]
     },
     "skul-the-hero-slayer": {
@@ -2866,6 +3756,9 @@
       ],
       "folders": [
         "Skul"
+      ],
+      "exeNames": [
+        "Skul.exe"
       ]
     },
     "slashers-keep": {
@@ -2874,6 +3767,9 @@
       ],
       "folders": [
         "Slasher's Keep"
+      ],
+      "exeNames": [
+        "SlashersKeep.exe"
       ]
     },
     "sledding-game": {
@@ -2882,6 +3778,9 @@
       ],
       "folders": [
         "Sledding Game"
+      ],
+      "exeNames": [
+        "Sledding Game.exe"
       ]
     },
     "slip-skid": {
@@ -2889,6 +3788,10 @@
         "2651350"
       ],
       "folders": [
+        "Slip & Skid"
+      ],
+      "exeNames": [
+        "Slip & Skid.exe",
         "Slip & Skid"
       ]
     },
@@ -2898,6 +3801,9 @@
       ],
       "folders": [
         "Slipstream Rogue Space"
+      ],
+      "exeNames": [
+        "Slipstream_Win.exe"
       ]
     },
     "smushi-come-home": {
@@ -2906,6 +3812,9 @@
       ],
       "folders": [
         "Smushi Come Home"
+      ],
+      "exeNames": [
+        "Smushi Come Home.exe"
       ]
     },
     "songs-of-conquest": {
@@ -2914,6 +3823,9 @@
       ],
       "folders": [
         "SongsOfConquest"
+      ],
+      "exeNames": [
+        "SongsOfConquest.exe"
       ]
     },
     "sons-of-the-forest": {
@@ -2922,6 +3834,9 @@
       ],
       "folders": [
         "Sons Of The Forest"
+      ],
+      "exeNames": [
+        "SonsOfTheForest.exe"
       ]
     },
     "soulcalibur-vi": {
@@ -2930,6 +3845,9 @@
       ],
       "folders": [
         "SoulcaliburVI"
+      ],
+      "exeNames": [
+        "SoulcaliburVI.exe"
       ]
     },
     "soulstone-survivors": {
@@ -2938,6 +3856,11 @@
       ],
       "folders": [
         "Soulstone Survivors"
+      ],
+      "exeNames": [
+        "Soulstone Survivors.exe",
+        "Soulstone-Survivors.x86_64",
+        "Soulstone-Survivors.app"
       ]
     },
     "space-cat-digger": {
@@ -2946,6 +3869,9 @@
       ],
       "folders": [
         "Space Cat Digger Demo"
+      ],
+      "exeNames": [
+        "Space Cat Digger Demo.exe"
       ]
     },
     "stacklands": {
@@ -2954,6 +3880,9 @@
       ],
       "folders": [
         "Stacklands"
+      ],
+      "exeNames": [
+        "Stacklands.exe"
       ]
     },
     "starsand": {
@@ -2962,6 +3891,9 @@
       ],
       "folders": [
         "Starsand"
+      ],
+      "exeNames": [
+        "Starsand.exe"
       ]
     },
     "stick-fight-the-game": {
@@ -2970,6 +3902,9 @@
       ],
       "folders": [
         "StickFightTheGame"
+      ],
+      "exeNames": [
+        "StickFight.exe"
       ]
     },
     "stolen-realm": {
@@ -2978,6 +3913,9 @@
       ],
       "folders": [
         "Stolen Realm"
+      ],
+      "exeNames": [
+        "Stolen Realm.exe"
       ]
     },
     "stonewards": {
@@ -2986,6 +3924,9 @@
       ],
       "folders": [
         "Stonewards"
+      ],
+      "exeNames": [
+        "Stonewards.exe"
       ]
     },
     "straftat": {
@@ -2994,6 +3935,9 @@
       ],
       "folders": [
         "STRAFTAT"
+      ],
+      "exeNames": [
+        "STRAFTAT.exe"
       ]
     },
     "subnautica": {
@@ -3002,6 +3946,9 @@
       ],
       "folders": [
         "Subnautica"
+      ],
+      "exeNames": [
+        "Subnautica.exe"
       ]
     },
     "subnautica-below-zero": {
@@ -3010,6 +3957,9 @@
       ],
       "folders": [
         "SubnauticaZero"
+      ],
+      "exeNames": [
+        "SubnauticaZero.exe"
       ]
     },
     "subterranauts": {
@@ -3018,6 +3968,9 @@
       ],
       "folders": [
         "Subterranauts"
+      ],
+      "exeNames": [
+        "Subterranauts.exe"
       ]
     },
     "subterror": {
@@ -3026,6 +3979,9 @@
       ],
       "folders": [
         "Subterror"
+      ],
+      "exeNames": [
+        "Subterror.exe"
       ]
     },
     "sulfur": {
@@ -3034,6 +3990,9 @@
       ],
       "folders": [
         "Sulfur"
+      ],
+      "exeNames": [
+        "Sulfur.exe"
       ]
     },
     "sun-haven": {
@@ -3042,6 +4001,9 @@
       ],
       "folders": [
         "Sun Haven"
+      ],
+      "exeNames": [
+        "Sun Haven.exe"
       ]
     },
     "sunkenland": {
@@ -3050,6 +4012,9 @@
       ],
       "folders": [
         "Sunkenland"
+      ],
+      "exeNames": [
+        "Sunkenland.exe"
       ]
     },
     "super-battle-golf": {
@@ -3058,6 +4023,9 @@
       ],
       "folders": [
         "Super Battle Golf"
+      ],
+      "exeNames": [
+        "Super Battle Golf.exe"
       ]
     },
     "super-fantasy-kingdom": {
@@ -3066,6 +4034,9 @@
       ],
       "folders": [
         "Super Fantasy Kingdom"
+      ],
+      "exeNames": [
+        "Super Fantasy Kingdom.exe"
       ]
     },
     "super-psycho-baseball": {
@@ -3074,18 +4045,27 @@
       ],
       "folders": [
         "Super Psycho Baseball"
+      ],
+      "exeNames": [
+        "SuperPsychoBaseball.exe"
       ]
     },
     "superhot": {
       "appIds": [],
       "folders": [
         "SUPERHOT"
+      ],
+      "exeNames": [
+        "SH.exe"
       ]
     },
     "superhot-mind-control-delete": {
       "appIds": [],
       "folders": [
         "SUPERHOTMCD"
+      ],
+      "exeNames": [
+        "SHMCD.exe"
       ]
     },
     "superhot-vr": {
@@ -3094,6 +4074,10 @@
       ],
       "folders": [
         "SUPERHOT VR"
+      ],
+      "exeNames": [
+        "SUPERHOT_VR.exe",
+        "SUPERHOTVR.exe"
       ]
     },
     "supermarket-together": {
@@ -3102,6 +4086,9 @@
       ],
       "folders": [
         "Supermarket Together"
+      ],
+      "exeNames": [
+        "Supermarket Together.exe"
       ]
     },
     "survival-fountain-of-youth": {
@@ -3110,6 +4097,9 @@
       ],
       "folders": [
         "Survival Fountain of Youth"
+      ],
+      "exeNames": [
+        "Survival Fountain of Youth.exe"
       ]
     },
     "talespire": {
@@ -3118,6 +4108,9 @@
       ],
       "folders": [
         "TaleSpire"
+      ],
+      "exeNames": [
+        "TaleSpire.exe"
       ]
     },
     "tank-team": {
@@ -3126,6 +4119,9 @@
       ],
       "folders": [
         "Tank Team"
+      ],
+      "exeNames": [
+        "Tank Team.exe"
       ]
     },
     "tcg-card-shop-simulator": {
@@ -3134,6 +4130,9 @@
       ],
       "folders": [
         "TCG Card Shop Simulator"
+      ],
+      "exeNames": [
+        "Card Shop Simulator.exe"
       ]
     },
     "techtonica": {
@@ -3142,6 +4141,9 @@
       ],
       "folders": [
         "Techtonica"
+      ],
+      "exeNames": [
+        "Techtonica.exe"
       ]
     },
     "the-alto-collection": {
@@ -3150,6 +4152,10 @@
       ],
       "folders": [
         "The Alto Collection"
+      ],
+      "exeNames": [
+        "The Alto Collection.exe",
+        "The Alto Collection.app"
       ]
     },
     "the-farmer-was-replaced": {
@@ -3158,6 +4164,9 @@
       ],
       "folders": [
         "The Farmer Was Replaced"
+      ],
+      "exeNames": [
+        "TheFarmerWasReplaced.exe"
       ]
     },
     "the-lab": {
@@ -3166,6 +4175,9 @@
       ],
       "folders": [
         "The Lab"
+      ],
+      "exeNames": [
+        "TheLab.exe"
       ]
     },
     "the-message-from-deep-space": {
@@ -3174,6 +4186,10 @@
       ],
       "folders": [
         "The Message from Deep Space"
+      ],
+      "exeNames": [
+        "The Message From Deep Space.exe",
+        "TMFDS.app"
       ]
     },
     "the-ouroboros-king": {
@@ -3182,6 +4198,9 @@
       ],
       "folders": [
         "The Ouroboros King"
+      ],
+      "exeNames": [
+        "The Ouroboros King.exe"
       ]
     },
     "the-planet-crafter": {
@@ -3190,6 +4209,9 @@
       ],
       "folders": [
         "The Planet Crafter"
+      ],
+      "exeNames": [
+        "Planet Crafter.exe"
       ]
     },
     "the-sexy-brutale": {
@@ -3198,6 +4220,9 @@
       ],
       "folders": [
         "The Sexy Brutale"
+      ],
+      "exeNames": [
+        "game.exe"
       ]
     },
     "the-spell-brigade": {
@@ -3206,6 +4231,9 @@
       ],
       "folders": [
         "The Spell Brigade"
+      ],
+      "exeNames": [
+        "TheSpellBrigade.exe"
       ]
     },
     "thronefall": {
@@ -3214,6 +4242,9 @@
       ],
       "folders": [
         "Thronefall"
+      ],
+      "exeNames": [
+        "Thronefall.exe"
       ]
     },
     "timberborn": {
@@ -3222,6 +4253,9 @@
       ],
       "folders": [
         "Timberborn"
+      ],
+      "exeNames": [
+        "Timberborn.exe"
       ]
     },
     "tiny-rogues": {
@@ -3230,6 +4264,9 @@
       ],
       "folders": [
         "Tiny Rogues"
+      ],
+      "exeNames": [
+        "Tiny Rogues.exe"
       ]
     },
     "tiny-terrys-turbo-trip": {
@@ -3238,6 +4275,9 @@
       ],
       "folders": [
         "Tiny Terry's Turbo Trip"
+      ],
+      "exeNames": [
+        "Tiny Terry's Turbo Trip.exe"
       ]
     },
     "totally-accurate-battle-simulator": {
@@ -3246,6 +4286,9 @@
       ],
       "folders": [
         "Totally Accurate Battle Simulator"
+      ],
+      "exeNames": [
+        "TotallyAccurateBattleSimulator.exe"
       ]
     },
     "touhou-lost-branch-of-legend": {
@@ -3254,6 +4297,9 @@
       ],
       "folders": [
         "LBoL"
+      ],
+      "exeNames": [
+        "LBoL.exe"
       ]
     },
     "trash-day": {
@@ -3262,6 +4308,9 @@
       ],
       "folders": [
         "TrashDay"
+      ],
+      "exeNames": [
+        "Trash.exe"
       ]
     },
     "trombone-champ": {
@@ -3270,6 +4319,9 @@
       ],
       "folders": [
         "TromboneChamp"
+      ],
+      "exeNames": [
+        "TromboneChamp.exe"
       ]
     },
     "tunguska-the-visitation": {
@@ -3278,6 +4330,9 @@
       ],
       "folders": [
         "Tunguska The Visitation"
+      ],
+      "exeNames": [
+        "Tunguska.exe"
       ]
     },
     "ultimate-chicken-horse": {
@@ -3286,6 +4341,9 @@
       ],
       "folders": [
         "Ultimate Chicken Horse"
+      ],
+      "exeNames": [
+        "UltimateChickenHorse.exe"
       ]
     },
     "ultrakill": {
@@ -3294,6 +4352,9 @@
       ],
       "folders": [
         "ULTRAKILL"
+      ],
+      "exeNames": [
+        "ULTRAKILL.exe"
       ]
     },
     "unfair-flips": {
@@ -3302,6 +4363,9 @@
       ],
       "folders": [
         "Unfair Flips"
+      ],
+      "exeNames": [
+        "Unfair Flips.exe"
       ]
     },
     "v-rising": {
@@ -3310,6 +4374,9 @@
       ],
       "folders": [
         "VRising"
+      ],
+      "exeNames": [
+        "VRising.exe"
       ]
     },
     "valheim": {
@@ -3318,6 +4385,10 @@
       ],
       "folders": [
         "Valheim"
+      ],
+      "exeNames": [
+        "valheim.exe",
+        "valheim.x86_64"
       ]
     },
     "vampire-crawlers": {
@@ -3326,6 +4397,10 @@
       ],
       "folders": [
         "Vampire Crawlers"
+      ],
+      "exeNames": [
+        "Vampire Crawlers.exe",
+        "Vampire Crawlers.app"
       ]
     },
     "vellum": {
@@ -3334,6 +4409,9 @@
       ],
       "folders": [
         "Vellum"
+      ],
+      "exeNames": [
+        "Vellum.exe"
       ]
     },
     "vertigo-2": {
@@ -3342,6 +4420,9 @@
       ],
       "folders": [
         "Vertigo 2"
+      ],
+      "exeNames": [
+        "vertigo2.exe"
       ]
     },
     "very-very-valet": {
@@ -3350,6 +4431,9 @@
       ],
       "folders": [
         "Very Very Valet"
+      ],
+      "exeNames": [
+        "VeryVeryValet_Release.exe"
       ]
     },
     "vigil": {
@@ -3358,6 +4442,16 @@
       ],
       "folders": [
         "Vigil"
+      ],
+      "exeNames": [
+        "Vigil.exe"
+      ]
+    },
+    "voices-of-the-void": {
+      "appIds": [],
+      "folders": [],
+      "exeNames": [
+        "VotV.exe"
       ]
     },
     "void-crew": {
@@ -3366,6 +4460,9 @@
       ],
       "folders": [
         "Void Crew"
+      ],
+      "exeNames": [
+        "Void Crew.exe"
       ]
     },
     "voodoo-fishin": {
@@ -3374,6 +4471,9 @@
       ],
       "folders": [
         "Voodoo Voyage"
+      ],
+      "exeNames": [
+        "Voodoo Fishin'.exe"
       ]
     },
     "vtol-vr": {
@@ -3382,6 +4482,9 @@
       ],
       "folders": [
         "VTOL VR"
+      ],
+      "exeNames": [
+        "VTOLVR.exe"
       ]
     },
     "wanderburg": {
@@ -3390,6 +4493,9 @@
       ],
       "folders": [
         "Wanderburg Game"
+      ],
+      "exeNames": [
+        "Wanderburg.exe"
       ]
     },
     "waterpark-simulator": {
@@ -3398,6 +4504,9 @@
       ],
       "folders": [
         "WaterPark Simulator"
+      ],
+      "exeNames": [
+        "WaterparkSimulator.exe"
       ]
     },
     "we-love-katamari-reroll-royal-reverie": {
@@ -3406,6 +4515,9 @@
       ],
       "folders": [
         "WLKRR"
+      ],
+      "exeNames": [
+        "WLKRR.exe"
       ]
     },
     "webfishing": {
@@ -3414,6 +4526,9 @@
       ],
       "folders": [
         "WEBFISHING"
+      ],
+      "exeNames": [
+        "webfishing.exe"
       ]
     },
     "west-of-loathing": {
@@ -3422,6 +4537,9 @@
       ],
       "folders": [
         "West of Loathing"
+      ],
+      "exeNames": [
+        "West of Loathing.exe"
       ]
     },
     "whisper-of-the-house": {
@@ -3430,6 +4548,10 @@
       ],
       "folders": [
         "Whisper of the House"
+      ],
+      "exeNames": [
+        "Whisper of the House.exe",
+        "Whisper of the House.app"
       ]
     },
     "white-knuckle": {
@@ -3438,6 +4560,9 @@
       ],
       "folders": [
         "White Knuckle"
+      ],
+      "exeNames": [
+        "White Knuckle.exe"
       ]
     },
     "wildfrost": {
@@ -3446,6 +4571,9 @@
       ],
       "folders": [
         "Wildfrost"
+      ],
+      "exeNames": [
+        "Wildfrost.exe"
       ]
     },
     "windrose": {
@@ -3454,6 +4582,9 @@
       ],
       "folders": [
         "Windrose"
+      ],
+      "exeNames": [
+        "Windrose.exe"
       ]
     },
     "wizard-of-legend": {
@@ -3462,6 +4593,9 @@
       ],
       "folders": [
         "Wizard of Legend"
+      ],
+      "exeNames": [
+        "WizardOfLegend.exe"
       ]
     },
     "wizard-with-a-gun": {
@@ -3470,6 +4604,9 @@
       ],
       "folders": [
         "Wizard With A Gun"
+      ],
+      "exeNames": [
+        "wizardwithagun.exe"
       ]
     },
     "wobbly-life": {
@@ -3478,6 +4615,9 @@
       ],
       "folders": [
         "Wobbly Life"
+      ],
+      "exeNames": [
+        "Wobbly Life.exe"
       ]
     },
     "word-play": {
@@ -3486,6 +4626,9 @@
       ],
       "folders": [
         "Word Play"
+      ],
+      "exeNames": [
+        "Word Play.exe"
       ]
     },
     "wrestling-empire": {
@@ -3494,6 +4637,9 @@
       ],
       "folders": [
         "Wrestling Empire"
+      ],
+      "exeNames": [
+        "Wrestling Empire.exe"
       ]
     },
     "yapyap": {
@@ -3502,6 +4648,9 @@
       ],
       "folders": [
         "YAPYAP"
+      ],
+      "exeNames": [
+        "yapyap.exe"
       ]
     },
     "zort": {
@@ -3510,6 +4659,9 @@
       ],
       "folders": [
         "Zort"
+      ],
+      "exeNames": [
+        "Zort.exe"
       ]
     }
   }

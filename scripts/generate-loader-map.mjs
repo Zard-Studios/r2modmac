@@ -46,7 +46,7 @@ for (const [gameKey, game] of Object.entries(schema.games ?? {})) {
     // Dedicated servers have their own entry and their own app id; the game
     // is what a profile launches.
     if ((entry.gameInstanceType ?? 'game') === 'game') {
-      const steam = (steamGames[community] ??= { appIds: [], folders: [] });
+      const steam = (steamGames[community] ??= { appIds: [], folders: [], exeNames: [] });
       for (const distribution of entry.distributions ?? []) {
         const appId = String(distribution.identifier ?? '').trim();
         if (distribution.platform === 'steam' && appId && !steam.appIds.includes(appId)) {
@@ -57,6 +57,12 @@ for (const [gameKey, game] of Object.entries(schema.games ?? {})) {
       // install folder is the first part.
       const folder = String(entry.steamFolderName ?? '').split(/[\\/]/)[0].trim();
       if (folder && !steam.folders.includes(folder)) steam.folders.push(folder);
+      // The executables tell a real install from a folder that only kept
+      // saves or mod files after the game was uninstalled.
+      for (const exe of entry.exeNames ?? []) {
+        const name = String(exe).trim();
+        if (name && !steam.exeNames.includes(name)) steam.exeNames.push(name);
+      }
     }
 
     const loader = entry.packageLoader;
@@ -93,7 +99,9 @@ for (const entry of schema.modloaderPackages ?? []) {
 for (const [community, steam] of Object.entries(steamGames)) {
   steam.appIds.sort();
   steam.folders.sort((a, b) => a.localeCompare(b));
-  if (steam.appIds.length === 0 && steam.folders.length === 0) delete steamGames[community];
+  if (steam.appIds.length === 0 && steam.folders.length === 0 && steam.exeNames.length === 0) {
+    delete steamGames[community];
+  }
 }
 
 const sortObject = (value) => Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)));

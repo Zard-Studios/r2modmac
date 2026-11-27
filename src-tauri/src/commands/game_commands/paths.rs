@@ -69,10 +69,11 @@ enum FolderMatch {
 
 /// Compare two names already reduced by [`normalize_for_matching`].
 ///
-/// A name merely containing another is not enough. "gladiomori" contains
-/// "omori" and "superhotminddelete..." contains "control", and treating those
-/// as the same game launched Omori for Gladio Mori and Control for Superhot.
-/// So the shorter name must also make up most of the longer one.
+/// The folder must hold the whole name of the game. A folder named after only
+/// part of it is another game: "Hollow Knight" is not Hollow Knight: Silksong
+/// (#65), "OMORI" is not Gladio Mori, "Control" is not Superhot: Mind Control
+/// Delete. A longer folder, like "Lethal Company Beta" for Lethal Company, still
+/// counts when the game's name makes up most of it.
 fn folder_match_normalized(folder: &str, id: &str) -> Option<FolderMatch> {
     if folder.is_empty() || id.is_empty() {
         return None;
@@ -80,13 +81,8 @@ fn folder_match_normalized(folder: &str, id: &str) -> Option<FolderMatch> {
     if folder == id {
         return Some(FolderMatch::Exact);
     }
-    let (short, long) = if folder.chars().count() <= id.chars().count() {
-        (folder, id)
-    } else {
-        (id, folder)
-    };
-    let mostly_the_same = short.chars().count() * 5 >= long.chars().count() * 3;
-    (mostly_the_same && long.contains(short)).then_some(FolderMatch::Partial)
+    let mostly_the_same = id.chars().count() * 5 >= folder.chars().count() * 3;
+    (mostly_the_same && folder.contains(id)).then_some(FolderMatch::Partial)
 }
 
 /// A saved folder that only fits the game because the matching used to be
@@ -146,6 +142,79 @@ fn holds_a_game(path: &std::path::Path) -> bool {
         let extension = name.rsplit_once('.').map(|(_, ext)| ext).unwrap_or("");
         !LEFTOVER_FILE_EXTENSIONS.contains(&extension)
     })
+}
+
+/// The names an executable from the schema can have on disk. The schema mostly
+/// lists the Windows file (`Muck.exe`); the macOS and Linux builds of the same
+/// game are usually the same name as an app bundle or a bare binary
+/// (`Muck.app`, `Muck.x86_64`), and are accepted too.
+fn executable_candidates(exe: &str) -> Vec<String> {
+    let exe = exe.trim().replace('\\', "/");
+    let mut names = vec![exe.to_lowercase()];
+    let stem = exe
+        .strip_suffix(".exe")
+        .or_else(|| exe.strip_suffix(".EXE"))
+        .or_else(|| exe.strip_suffix(".app"))
+        .unwrap_or(&exe);
+    for variant in [
+        stem.to_string(),
+        format!("{stem}.exe"),
+        format!("{stem}.app"),
+        format!("{stem}.x86_64"),
+        format!("{stem}.x86"),
+    ] {
+        let variant = variant.to_lowercase();
+        if !names.contains(&variant) {
+            names.push(variant);
+        }
+    }
+    names
+}
+
+/// Whether a folder holds the game the schema describes: one of its
+/// executables, in the folder or one level down (Hades II keeps `Hades2.exe`
+/// in `Ship`). A macOS build is an app bundle, so any `.app` counts as well,
+/// in case the bundle is named differently from the Windows file. A folder with
+/// only saves, logs or a mod loader's files has none of these.
+fn holds_schema_executable(folder: &std::path::Path, exe_names: &[String]) -> bool {
+    let candidates: Vec<String> = exe_names
+        .iter()
+        .flat_map(|exe| executable_candidates(exe))
+        .collect();
+    let matches_in = |dir: &std::path::Path| -> bool {
+        let Ok(entries) = fs::read_dir(dir) else {
+            return false;
+        };
+        entries.filter_map(|entry| entry.ok()).any(|entry| {
+            let name = entry.file_name().to_string_lossy().to_lowercase();
+            let is_dir = entry.path().is_dir();
+            if name.ends_with(".app") {
+                return is_dir;
+            }
+            // A bare name must be the binary, not a folder of the same name.
+            !is_dir && candidates.contains(&name)
+        })
+    };
+    // Names with a folder in them (`Ship/Hades2.exe`) are checked as written.
+    if exe_names.iter().any(|exe| {
+        let exe = exe.replace('\\', "/");
+        exe.contains('/') && folder.join(&exe).is_file()
+    }) {
+        return true;
+    }
+    if matches_in(folder) {
+        return true;
+    }
+    fs::read_dir(folder)
+        .map(|entries| {
+            entries
+                .filter_map(|entry| entry.ok())
+                .filter(|entry| {
+                    entry.path().is_dir() && !entry.file_name().to_string_lossy().starts_with('.')
+                })
+                .any(|entry| matches_in(&entry.path()))
+        })
+        .unwrap_or(false)
 }
 
 /// What one Steam library holds, read once: the folders under
@@ -268,14 +337,32 @@ fn game_folder_tiers(
             .collect()
     };
     // A folder Steam left behind after an uninstall is not the game.
+    // When the schema knows the game's app id and folder, a name that merely
+    // looks alike is not a reason to take another folder for it.
+    let schema_knows_game = steam
+        .as_ref()
+        .is_some_and(|steam| !steam.app_ids.is_empty() || !steam.folders.is_empty());
     let mut tiers = [
         by_app_id,
         by_schema_folder,
         named(FolderMatch::Exact),
-        named(FolderMatch::Partial),
+        if schema_knows_game {
+            Vec::new()
+        } else {
+            named(FolderMatch::Partial)
+        },
     ];
     for tier in &mut tiers {
         tier.retain(|folder| holds_a_game(folder));
+    }
+    // Steam's own record (the first step) says the game is installed. A folder
+    // found any other way must also hold one of the game's executables, when
+    // the schema names them: a folder can outlive the game, or belong to
+    // another one.
+    if let Some(steam) = steam.as_ref().filter(|steam| !steam.exe_names.is_empty()) {
+        for tier in tiers.iter_mut().skip(1) {
+            tier.retain(|folder| holds_schema_executable(folder, &steam.exe_names));
+        }
     }
     tiers
 }
@@ -874,6 +961,16 @@ fn saved_game_folders(
         {
             continue;
         }
+        // A saved folder without the game's executable is a leftover too.
+        if path.is_dir() {
+            if let Some(steam) =
+                crate::models::loaders::steam_game(id).filter(|steam| !steam.exe_names.is_empty())
+            {
+                if !holds_schema_executable(path, &steam.exe_names) {
+                    continue;
+                }
+            }
+        }
         let here = match platform {
             Some("mac") => InstalledBuilds {
                 mac: true,
@@ -1271,10 +1368,21 @@ mod game_folder_matching_tests {
         for folder in folders {
             let game = root.join("steamapps/common").join(folder);
             fs::create_dir_all(&game).unwrap();
-            // A folder with nothing in it is a leftover, not an installed game.
-            fs::write(game.join("game.bin"), b"stub").unwrap();
+            // A folder with nothing in it is a leftover, not an installed
+            // game: put the game's executable in it, named like the folder.
+            fs::write(game.join(format!("{folder}.exe")), b"stub").unwrap();
         }
         root
+    }
+
+    /// Put a game's real executable in a test folder, when it isn't named
+    /// like the folder.
+    fn with_exe(library: &PathBuf, folder: &str, exe: &str) {
+        fs::write(
+            library.join("steamapps/common").join(folder).join(exe),
+            b"stub",
+        )
+        .unwrap();
     }
 
     fn found(libraries: &[PathBuf], identifier: &str) -> Option<String> {
@@ -1285,6 +1393,55 @@ mod game_folder_matching_tests {
                 .to_string_lossy()
                 .to_string()
         })
+    }
+
+    #[test]
+    fn a_sequel_is_not_taken_for_the_game_it_follows() {
+        // Issue #65: Hollow Knight installed, Silksong reported as installed.
+        let libraries = [library("sequel", &["Hollow Knight"])];
+        assert_eq!(found(&libraries, "hollow-knight-silksong"), None);
+        assert_eq!(
+            found(&libraries, "hollow-knight").as_deref(),
+            Some("Hollow Knight")
+        );
+        let installed = super::installed_games_among(
+            &libraries,
+            vec![
+                "hollow-knight-silksong".to_string(),
+                "hollow-knight".to_string(),
+            ],
+        );
+        let ids: Vec<&str> = installed
+            .iter()
+            .map(|game| game.identifier.as_str())
+            .collect();
+        assert_eq!(ids, vec!["hollow-knight"]);
+    }
+
+    #[test]
+    fn the_sequel_is_found_in_its_own_folder() {
+        let libraries = [library(
+            "sequel-own",
+            &["Hollow Knight", "Hollow Knight Silksong"],
+        )];
+        assert_eq!(
+            found(&libraries, "hollow-knight-silksong").as_deref(),
+            Some("Hollow Knight Silksong")
+        );
+    }
+
+    #[test]
+    fn a_shorter_folder_is_not_a_game_the_schema_does_not_know() {
+        // Same rule without schema data: the folder must hold the whole name.
+        // "foobar" makes up 60% of "foobarplus", which used to be enough.
+        let libraries = [library("unknown", &["Foo Bar"])];
+        assert_eq!(found(&libraries, "foo-bar-plus"), None);
+        // A longer folder that holds the whole name still counts.
+        let longer = [library("unknown-longer", &["Foo Bar Plus Beta"])];
+        assert_eq!(
+            found(&longer, "foo-bar-plus").as_deref(),
+            Some("Foo Bar Plus Beta")
+        );
     }
 
     #[test]
@@ -1331,6 +1488,7 @@ mod game_folder_matching_tests {
                 "20 Minutes Till Dawn",
             ],
         )];
+        with_exe(&libraries[0], "20 Minutes Till Dawn", "MinutesTillDawn.exe");
 
         assert_eq!(
             found(&libraries, "riskofrain2").as_deref(),
@@ -1402,6 +1560,7 @@ mod game_folder_matching_tests {
 
         // 20 Minutes Till Dawn is in "20MinuteTillDawn": no name comparison gets there.
         let libraries = [library("schema-typo", &["20MinuteTillDawn"])];
+        with_exe(&libraries[0], "20MinuteTillDawn", "MinutesTillDawn.exe");
         assert_eq!(
             found(&libraries, "20-minutes-till-dawn").as_deref(),
             Some("20MinuteTillDawn")
@@ -1576,12 +1735,21 @@ mod saved_folder_tests {
     #[test]
     fn a_folder_the_user_chose_still_counts() {
         let mut paths = BTreeMap::new();
-        paths.insert(
-            "gladio-mori::windows".to_string(),
-            folder("c", "Gladio Mori"),
-        );
+        let gladio = folder("c", "Gladio Mori");
+        fs::write(
+            std::path::Path::new(&gladio).join("Gladio Mori.exe"),
+            b"stub",
+        )
+        .unwrap();
+        paths.insert("gladio-mori::windows".to_string(), gladio);
         // An unrelated name: a game kept outside Steam, in a folder of its own.
-        paths.insert("tcg-card-shop-simulator".to_string(), folder("d", "bbb"));
+        let shop = folder("d", "bbb");
+        fs::write(
+            std::path::Path::new(&shop).join("Card Shop Simulator.exe"),
+            b"stub",
+        )
+        .unwrap();
+        paths.insert("tcg-card-shop-simulator".to_string(), shop);
         // A folder that is gone.
         paths.insert(
             "valheim::mac".to_string(),
@@ -1683,5 +1851,127 @@ mod leftover_folder_tests {
         let found = installed_games_among(&[library], vec!["crab-game".to_string()]);
 
         assert!(found.is_empty(), "{:?}", found.len());
+    }
+}
+
+#[cfg(test)]
+mod schema_executable_tests {
+    use super::{holds_schema_executable, installed_games_among};
+    use std::fs;
+    use std::path::PathBuf;
+
+    fn dir_with(label: &str, entries: &[&str]) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "r2modmac-exe-{}-{}-{}",
+            label,
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        for entry in entries {
+            let path = dir.join(entry.trim_end_matches('/'));
+            if entry.ends_with('/') {
+                fs::create_dir_all(path).unwrap();
+            } else {
+                if let Some(parent) = path.parent() {
+                    fs::create_dir_all(parent).unwrap();
+                }
+                fs::write(path, b"x").unwrap();
+            }
+        }
+        dir
+    }
+
+    fn names(list: &[&str]) -> Vec<String> {
+        list.iter().map(|name| name.to_string()).collect()
+    }
+
+    #[test]
+    fn the_executable_the_schema_names_is_found() {
+        // RV There Yet? lives in "Ride" and runs "Ride.exe".
+        assert!(holds_schema_executable(
+            &dir_with("ride", &["Ride.exe", "Ride/"]),
+            &names(&["Ride.exe"])
+        ));
+        // Case doesn't matter: the schema says "Rounds.exe".
+        assert!(holds_schema_executable(
+            &dir_with("rounds", &["ROUNDS.exe"]),
+            &names(&["Rounds.exe"])
+        ));
+    }
+
+    #[test]
+    fn the_macos_and_linux_builds_count_too() {
+        // The schema only lists Muck.exe and Muck.x86_64.
+        assert!(holds_schema_executable(
+            &dir_with("muck-mac", &["Muck.app/"]),
+            &names(&["Muck.exe", "Muck.x86_64"])
+        ));
+        assert!(holds_schema_executable(
+            &dir_with("muck-linux", &["Muck.x86_64"]),
+            &names(&["Muck.exe"])
+        ));
+        // A macOS bundle named differently is still a macOS build.
+        assert!(holds_schema_executable(
+            &dir_with("other-app", &["Something Else.app/"]),
+            &names(&["Game.exe"])
+        ));
+    }
+
+    #[test]
+    fn an_executable_one_level_down_is_found() {
+        // Hades II keeps Hades2.exe in "Ship".
+        assert!(holds_schema_executable(
+            &dir_with("hades", &["Ship/Hades2.exe"]),
+            &names(&["Hades2.exe"])
+        ));
+    }
+
+    #[test]
+    fn what_a_mod_loader_leaves_behind_is_not_the_game() {
+        // Balatro, uninstalled, with only Lovely's files left.
+        assert!(!holds_schema_executable(
+            &dir_with("balatro", &["liblovely.dylib", "run_lovely_macos.sh"]),
+            &names(&["Balatro.exe"])
+        ));
+        // Cult of the Lamb with only BepInEx's launcher left.
+        assert!(!holds_schema_executable(
+            &dir_with(
+                "cotl",
+                &[
+                    "doorstop_config.ini",
+                    "run_bepinex.sh",
+                    "icon.png",
+                    "BepInEx/core/BepInEx.dll"
+                ]
+            ),
+            &names(&["Cult Of The Lamb.exe"])
+        ));
+        // A folder named like the game is not its binary.
+        assert!(!holds_schema_executable(
+            &dir_with("same-name-dir", &["Ride/"]),
+            &names(&["Ride.exe"])
+        ));
+    }
+
+    #[test]
+    fn a_leftover_folder_of_a_known_game_is_not_installed() {
+        let library = dir_with("library", &[]);
+        let common = library.join("steamapps/common");
+        fs::create_dir_all(common.join("Balatro")).unwrap();
+        fs::write(common.join("Balatro/liblovely.dylib"), b"x").unwrap();
+        fs::write(common.join("Balatro/run_lovely_macos.sh"), b"x").unwrap();
+        fs::create_dir_all(common.join("Muck/Muck.app")).unwrap();
+        fs::write(common.join("Muck/run_bepinex.sh"), b"x").unwrap();
+
+        let found =
+            installed_games_among(&[library], vec!["balatro".to_string(), "muck".to_string()]);
+        let ids: Vec<&str> = found.iter().map(|game| game.identifier.as_str()).collect();
+
+        assert_eq!(ids, vec!["muck"]);
+        assert!(found[0].builds.mac && !found[0].builds.windows);
     }
 }
