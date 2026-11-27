@@ -126,6 +126,20 @@ jobs:
             console.log('Synchronized npm, Tauri, and Cargo versions to ' + version);
           " "$TAG_VERSION"
 
+      # The app is developed and tested on a Mac, but it ships on Windows and
+      # Linux too. The backend holds what differs between systems (paths, Steam
+      # libraries, executables), so its tests run here, once per system, and a
+      # release only goes out when they pass there as well: the release job
+      # below needs every build. They run only at release time to spare Actions
+      # minutes. The Tauri crate needs the frontend built, hence `npm run build`.
+      - name: Run backend tests (Windows and Linux)
+        if: matrix.settings.name == 'Windows x64' || matrix.settings.name == 'Linux x64'
+        shell: bash
+        run: |
+          npm run build
+          cd src-tauri
+          cargo test --lib
+
       - name: Install create-dmg
         if: matrix.settings.platform == 'macos-latest'
         run: brew install create-dmg
