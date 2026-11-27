@@ -6651,7 +6651,11 @@ pub async fn toggle_mod(
                         "[toggle_mod] Disabling mod - removing from game: {}",
                         folder_name
                     );
-                    if game_mod_path.is_symlink() || game_mod_path.is_file() {
+                    if crate::utils::mod_ignore::is_dir_link(&game_mod_path) {
+                        // A Windows junction refuses remove_file; only the link goes.
+                        crate::utils::mod_ignore::remove_dir_link(&game_mod_path)
+                            .map_err(|e| format!("Failed to remove mod link from game: {}", e))?;
+                    } else if game_mod_path.is_symlink() || game_mod_path.is_file() {
                         fs::remove_file(&game_mod_path).map_err(|e| {
                             format!("Failed to remove mod symlink/file from game: {}", e)
                         })?;

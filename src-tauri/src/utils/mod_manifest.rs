@@ -209,7 +209,11 @@ fn entry_matches_terms(name: &str, terms: &HashSet<String>) -> bool {
 }
 
 fn remove_path_if_present(path: &Path) -> std::io::Result<()> {
-    if path.is_symlink() || path.is_file() {
+    // A link to a folder, a Windows junction above all, can't go with
+    // remove_file: Windows answers "Access is denied". Only the link goes.
+    if crate::utils::mod_ignore::is_dir_link(path) {
+        crate::utils::mod_ignore::remove_dir_link(path)
+    } else if path.is_symlink() || path.is_file() {
         fs::remove_file(path)
     } else if path.is_dir() {
         fs::remove_dir_all(path)
@@ -615,7 +619,11 @@ pub fn deactivate_exact_owned_mod_manifests(
                 }
                 fs::copy(&backup, &target).map_err(|error| error.to_string())?;
             } else if target.exists() || target.is_symlink() {
-                if target.is_symlink() || target.is_file() {
+                if crate::utils::mod_ignore::is_dir_link(&target) {
+                    // A Windows junction refuses remove_file; only the link goes.
+                    crate::utils::mod_ignore::remove_dir_link(&target)
+                        .map_err(|error| error.to_string())?;
+                } else if target.is_symlink() || target.is_file() {
                     fs::remove_file(&target).map_err(|error| error.to_string())?;
                 } else if target.is_dir() {
                     fs::remove_dir(&target).map_err(|error| {

@@ -203,7 +203,11 @@ pub(super) fn game_mod_folder_is_auxiliary_payload(
 }
 
 pub(super) fn remove_plugin_entry(path: &std::path::Path) -> std::io::Result<()> {
-    if path.is_symlink() || path.is_file() {
+    // A link to a folder, a Windows junction above all, can't go with
+    // remove_file: Windows answers "Access is denied". Only the link goes.
+    if crate::utils::mod_ignore::is_dir_link(path) {
+        crate::utils::mod_ignore::remove_dir_link(path)
+    } else if path.is_symlink() || path.is_file() {
         fs::remove_file(path)
     } else if path.is_dir() {
         fs::remove_dir_all(path)
