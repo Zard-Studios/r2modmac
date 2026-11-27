@@ -171,11 +171,29 @@ fn executable_candidates(exe: &str) -> Vec<String> {
     names
 }
 
+/// Whether a `.app` folder is a real application: a bundle has its
+/// `Contents/Info.plist` and a program in `Contents/MacOS`. Steam can't remove
+/// a bundle that a mod loader wrote logs into, so after an uninstall it can
+/// linger with nothing but those logs.
+fn is_app_bundle(path: &std::path::Path) -> bool {
+    if !path.join("Contents/Info.plist").is_file() {
+        return false;
+    }
+    fs::read_dir(path.join("Contents/MacOS"))
+        .map(|entries| {
+            entries.filter_map(|entry| entry.ok()).any(|entry| {
+                let name = entry.file_name().to_string_lossy().to_lowercase();
+                entry.path().is_file() && !name.ends_with(".log") && !name.starts_with('.')
+            })
+        })
+        .unwrap_or(false)
+}
+
 /// Whether a folder holds the game the schema describes: one of its
 /// executables, in the folder or one level down (Hades II keeps `Hades2.exe`
-/// in `Ship`). A macOS build is an app bundle, so any `.app` counts as well,
-/// in case the bundle is named differently from the Windows file. A folder with
-/// only saves, logs or a mod loader's files has none of these.
+/// in `Ship`). A macOS build is an app bundle, so any real `.app` counts as
+/// well, in case the bundle is named differently from the Windows file. A
+/// folder with only saves, logs or a mod loader's files has none of these.
 fn holds_schema_executable(folder: &std::path::Path, exe_names: &[String]) -> bool {
     let candidates: Vec<String> = exe_names
         .iter()
@@ -189,7 +207,7 @@ fn holds_schema_executable(folder: &std::path::Path, exe_names: &[String]) -> bo
             let name = entry.file_name().to_string_lossy().to_lowercase();
             let is_dir = entry.path().is_dir();
             if name.ends_with(".app") {
-                return is_dir;
+                return is_dir && is_app_bundle(&entry.path());
             }
             // A bare name must be the binary, not a folder of the same name.
             !is_dir && candidates.contains(&name)
@@ -413,7 +431,11 @@ pub async fn get_game_path(
             if !path_obj.exists() {
                 continue;
             }
-            if !holds_a_game(path_obj) {
+            let missing_executable = path_obj.is_dir()
+                && crate::models::loaders::steam_game(&game_identifier)
+                    .filter(|steam| !steam.exe_names.is_empty())
+                    .is_some_and(|steam| !holds_schema_executable(path_obj, &steam.exe_names));
+            if !holds_a_game(path_obj) || missing_executable {
                 log::info!(
                     "[get_game_path] Ignoring the saved folder for {}: nothing of the game is in it ({})",
                     game_identifier,
@@ -1326,8 +1348,11 @@ mod installed_games_tests {
             fs::create_dir_all(lib_a.join("steamapps/common").join(dir)).unwrap();
         }
         fs::create_dir_all(lib_b.join("steamapps/common/Risk of Rain 2")).unwrap();
-        fs::create_dir_all(lib_a.join("steamapps/common/Lethal Company/Lethal Company.app"))
-            .unwrap();
+        // A real macOS build: a bundle with its Info.plist and its program.
+        let bundle = lib_a.join("steamapps/common/Lethal Company/Lethal Company.app/Contents");
+        fs::create_dir_all(bundle.join("MacOS")).unwrap();
+        fs::write(bundle.join("Info.plist"), b"").unwrap();
+        fs::write(bundle.join("MacOS/Lethal Company"), b"").unwrap();
         fs::write(
             lib_b.join("steamapps/common/Risk of Rain 2/Risk of Rain 2.exe"),
             b"",
@@ -1907,7 +1932,13 @@ mod schema_executable_tests {
     fn the_macos_and_linux_builds_count_too() {
         // The schema only lists Muck.exe and Muck.x86_64.
         assert!(holds_schema_executable(
-            &dir_with("muck-mac", &["Muck.app/"]),
+            &dir_with(
+                "muck-mac",
+                &[
+                    "Muck.app/Contents/Info.plist",
+                    "Muck.app/Contents/MacOS/Muck"
+                ]
+            ),
             &names(&["Muck.exe", "Muck.x86_64"])
         ));
         assert!(holds_schema_executable(
@@ -1916,7 +1947,13 @@ mod schema_executable_tests {
         ));
         // A macOS bundle named differently is still a macOS build.
         assert!(holds_schema_executable(
-            &dir_with("other-app", &["Something Else.app/"]),
+            &dir_with(
+                "other-app",
+                &[
+                    "Something Else.app/Contents/Info.plist",
+                    "Something Else.app/Contents/MacOS/Something Else"
+                ]
+            ),
             &names(&["Game.exe"])
         ));
     }
@@ -1958,13 +1995,46 @@ mod schema_executable_tests {
     }
 
     #[test]
+    fn an_app_shell_with_only_logs_is_not_the_game() {
+        // Silksong after Steam uninstalled it: BepInEx's preloader logs kept
+        // the bundle folder alive, with no Info.plist and no program.
+        let shell = dir_with(
+            "silksong-shell",
+            &[
+                "Hollow Knight Silksong.app/Contents/MacOS/preloader_20260415_203055_731.log",
+                "BepInEx/core/BepInEx.dll",
+                "run_bepinex.sh",
+                "libdoorstop.dylib",
+            ],
+        );
+        let exe = names(&[
+            "Hollow Knight Silksong.exe",
+            "Hollow Knight Silksong.app",
+            "Hollow Knight Silksong",
+        ]);
+        assert!(!holds_schema_executable(&shell, &exe));
+
+        // The same bundle when the game is there.
+        let real = dir_with(
+            "silksong-real",
+            &[
+                "Hollow Knight Silksong.app/Contents/Info.plist",
+                "Hollow Knight Silksong.app/Contents/MacOS/Hollow Knight Silksong",
+            ],
+        );
+        assert!(holds_schema_executable(&real, &exe));
+    }
+
+    #[test]
     fn a_leftover_folder_of_a_known_game_is_not_installed() {
         let library = dir_with("library", &[]);
         let common = library.join("steamapps/common");
         fs::create_dir_all(common.join("Balatro")).unwrap();
         fs::write(common.join("Balatro/liblovely.dylib"), b"x").unwrap();
         fs::write(common.join("Balatro/run_lovely_macos.sh"), b"x").unwrap();
-        fs::create_dir_all(common.join("Muck/Muck.app")).unwrap();
+        fs::create_dir_all(common.join("Muck/Muck.app/Contents/MacOS")).unwrap();
+        fs::write(common.join("Muck/Muck.app/Contents/Info.plist"), b"x").unwrap();
+        fs::write(common.join("Muck/Muck.app/Contents/MacOS/Muck"), b"x").unwrap();
         fs::write(common.join("Muck/run_bepinex.sh"), b"x").unwrap();
 
         let found =
