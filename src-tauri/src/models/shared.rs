@@ -227,6 +227,11 @@ pub struct Settings {
     /// not list (a drive that was re-added, or a copy made outside Steam).
     #[serde(default)]
     pub extra_steam_libraries: Vec<String>,
+    /// macOS only: which Steam runs a Windows game that both clients know,
+    /// `"macos"` (the macOS client through NotProton) or `"wine"` (the Steam in
+    /// a bottle). `None` keeps the old order, the bottle first.
+    #[serde(default)]
+    pub windows_games_steam: Option<String>,
 }
 
 impl Settings {
@@ -258,6 +263,7 @@ impl Settings {
             keybinds: BTreeMap::new(),
             profile_isolation: false,
             extra_steam_libraries: Vec::new(),
+            windows_games_steam: None,
         }
     }
 }

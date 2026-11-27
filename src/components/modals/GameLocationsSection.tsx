@@ -103,6 +103,44 @@ function PathRow({ title, detail, usualPath, value, detected = [], badge, wine, 
     );
 }
 
+type WindowsGamesSteam = 'macos' | 'wine';
+
+/**
+ * Which Steam plays a Windows game that both know: the macOS client through
+ * NotProton, or the Steam in a bottle. Only offered when both are there.
+ */
+function WindowsGamesSteamRow({ value, onChange }: { value: WindowsGamesSteam; onChange: (next: WindowsGamesSteam) => void }) {
+    const option = (id: WindowsGamesSteam, label: string) => (
+        <button
+            type="button"
+            role="radio"
+            aria-checked={value === id}
+            onClick={() => onChange(id)}
+            className={`relative z-10 w-20 rounded py-1.5 text-[13px] font-medium transition-colors ${value === id ? 'text-white' : 'text-gray-400 hover:text-white'}`}
+        >
+            {label}
+        </button>
+    );
+    return (
+        <div className="p-4 flex items-center justify-between gap-4">
+            <div className="min-w-0">
+                <p className="text-[15px] font-medium text-white">Play Windows games with</p>
+                <p className="text-[13px] text-gray-400 mt-0.5 leading-snug">
+                    {value === 'macos' ? 'Steam for macOS, through NotProton.' : 'The Steam inside your Wine bottle.'}
+                </p>
+            </div>
+            <div role="radiogroup" aria-label="Play Windows games with" className="relative flex shrink-0 bg-gray-900/60 rounded-lg p-1 border border-gray-700 overflow-hidden">
+                <div
+                    aria-hidden="true"
+                    className={`absolute top-1 bottom-1 w-[calc(50%-4px)] bg-gray-600 rounded-md transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${value === 'macos' ? 'left-1' : 'left-1/2'}`}
+                />
+                {option('macos', 'macOS')}
+                {option('wine', 'Wine')}
+            </div>
+        </div>
+    );
+}
+
 function LibrariesRow({ libraries, expanded, onToggle, onAdd, onRemove }: {
     libraries: SteamStatus['libraries'];
     expanded: boolean;
@@ -195,6 +233,8 @@ export function GameLocationsSection({ isOpen, revealed = false }: { isOpen: boo
     const [nativePath, setNativePath] = useState('');
     const [wineOrWindowsPath, setWineOrWindowsPath] = useState('');
     const [status, setStatus] = useState<SteamStatus | null>(null);
+    // Without a pick the bottle's Steam goes first, as it always has.
+    const [windowsGamesSteam, setWindowsGamesSteam] = useState<WindowsGamesSteam>('wine');
 
     useEffect(() => {
         if (!isOpen) return;
@@ -205,6 +245,7 @@ export function GameLocationsSection({ isOpen, revealed = false }: { isOpen: boo
             const legacyIsWine = /drive_c|crossover|wine/i.test(legacy);
             setNativePath(settings.mac_steam_path || (legacy && !legacyIsWine ? legacy : ''));
             setWineOrWindowsPath(settings.windows_steam_path || (legacyIsWine || !isMac ? legacy : ''));
+            setWindowsGamesSteam(settings.windows_games_steam === 'macos' ? 'macos' : 'wine');
         }).catch(error => console.error('Failed to load Steam settings', error));
         {
             window.ipcRenderer.getSteamSetupStatus()
@@ -262,6 +303,18 @@ export function GameLocationsSection({ isOpen, revealed = false }: { isOpen: boo
         }
     };
 
+    const changeWindowsGamesSteam = async (next: WindowsGamesSteam) => {
+        const previous = windowsGamesSteam;
+        setWindowsGamesSteam(next);
+        try {
+            const current = await window.ipcRenderer.getSettings();
+            await window.ipcRenderer.saveSettings({ ...current, windows_games_steam: next });
+        } catch (error) {
+            setWindowsGamesSteam(previous);
+            await window.ipcRenderer.alert('Could not save the choice', String(error));
+        }
+    };
+
     const pick = async (kind: 'native' | 'windows') => {
         const picked = await window.ipcRenderer.selectFolder().catch(() => null);
         if (!picked) return;
@@ -301,6 +354,9 @@ export function GameLocationsSection({ isOpen, revealed = false }: { isOpen: boo
                             onPick={() => void pick('windows')}
                             onReset={() => void reset('windows')}
                         />
+                        {status?.notproton && status.bottle_steam_count > 0 && (
+                            <WindowsGamesSteamRow value={windowsGamesSteam} onChange={next => void changeWindowsGamesSteam(next)} />
+                        )}
                     </>
                 ) : (
                     <PathRow

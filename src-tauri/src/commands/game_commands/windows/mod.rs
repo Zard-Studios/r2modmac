@@ -914,6 +914,13 @@ fn plan_has_windows_steam_client(plan: &WindowsLaunchPlan) -> bool {
     matches!(plan, WindowsLaunchPlan::ViaSteam(target) if target.client_root.join("steam.exe").exists())
 }
 
+/// Whether the user picked the macOS Steam (NotProton) for Windows games that
+/// a bottle's Steam also knows.
+#[cfg(target_os = "macos")]
+fn prefers_macos_steam(app: &AppHandle) -> bool {
+    load_settings_impl(app).windows_games_steam.as_deref() == Some("macos")
+}
+
 pub(crate) fn launch_windows_game(
     app: &AppHandle,
     game_path: &std::path::Path,
@@ -929,10 +936,11 @@ pub(crate) fn launch_windows_game(
 
     let plan = plan_windows_launch(&steam_roots, game_path);
 
-    // No bottle's Steam owns the game, but the macOS client may: a Windows
-    // build it runs through NotProton.
+    // The macOS client may own the game too: a Windows build it runs through
+    // NotProton. A library both clients list belongs to whichever the user
+    // picked in Preferences; without a pick the bottle's Steam goes first.
     #[cfg(target_os = "macos")]
-    if !plan_has_windows_steam_client(&plan) {
+    if !plan_has_windows_steam_client(&plan) || prefers_macos_steam(app) {
         if let Some(game) = notproton_game_for_path(game_path) {
             log::info!(
                 "[launch_windows_game] {:?} is app {} of the macOS Steam client, run through NotProton",

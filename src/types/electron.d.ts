@@ -37,6 +37,8 @@ export interface AppSettings {
     steam_path: string | null;
     windows_steam_path?: string | null;
     mac_steam_path?: string | null;
+    /** macOS: which Steam plays a Windows game both clients know. Unset means the Wine one. */
+    windows_games_steam?: 'macos' | 'wine' | null;
     extra_steam_libraries?: string[];
     favorite_games: string[];
     default_game?: string | null;
