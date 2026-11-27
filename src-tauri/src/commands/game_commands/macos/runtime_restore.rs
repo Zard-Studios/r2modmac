@@ -378,7 +378,9 @@ pub(crate) async fn ensure_macos_bepinex_runtime_present(
     }
 }
 
-#[cfg(test)]
+// macOS and Wine launching only runs on a Unix host (it writes shell
+// scripts and Unix links), so these tests do not apply to Windows.
+#[cfg(all(test, unix))]
 mod isolated_runtime_layout_tests {
     use super::{
         configure_macos_doorstop_target_assembly, isolated_macos_bepinex_runtime_is_complete,

@@ -1287,7 +1287,7 @@ mod notproton_game_path_tests {
 
         let found = find_game_in_steam_roots(&[bottle], "LethalCompany", |_| true)
             .or_else(|| find_game_in_steam_roots(&[mac], "LethalCompany", is_windows_build_dir));
-        assert_eq!(found, Some(in_bottle.to_string_lossy().to_string()));
+        assert_eq!(found.map(std::path::PathBuf::from), Some(in_bottle.clone()));
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -1311,8 +1311,9 @@ mod notproton_game_path_tests {
             None
         );
         assert_eq!(
-            find_game_in_steam_roots(&[mac], "LethalCompany", is_windows_build_dir),
-            Some(windows.to_string_lossy().to_string())
+            find_game_in_steam_roots(&[mac], "LethalCompany", is_windows_build_dir)
+                .map(std::path::PathBuf::from),
+            Some(windows.clone())
         );
         fs::remove_dir_all(root).unwrap();
     }
@@ -1326,8 +1327,9 @@ mod notproton_game_path_tests {
         let windows = game(&other, "Lethal Company", &["Lethal Company.exe"]);
 
         assert_eq!(
-            find_game_in_steam_roots(&[mac, other], "LethalCompany", is_windows_build_dir),
-            Some(windows.to_string_lossy().to_string())
+            find_game_in_steam_roots(&[mac, other], "LethalCompany", is_windows_build_dir)
+                .map(std::path::PathBuf::from),
+            Some(windows.clone())
         );
         fs::remove_dir_all(root).unwrap();
     }

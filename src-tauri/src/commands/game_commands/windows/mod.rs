@@ -816,9 +816,10 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["--mod-dir", "--pak-dir", "--cfg-dir", "--overlay-dir"]
         );
+        // Compared as paths: Windows writes the separators its own way.
         assert_eq!(
-            native[1],
-            profile_dir.join("shimloader/mod").to_string_lossy()
+            std::path::Path::new(&native[1]),
+            profile_dir.join("shimloader").join("mod")
         );
 
         // Under CrossOver/Wine the game only understands the prefix's drives.

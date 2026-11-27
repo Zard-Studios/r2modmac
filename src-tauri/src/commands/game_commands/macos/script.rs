@@ -599,7 +599,9 @@ mod doorstop_search_path_tests {
     }
 }
 
-#[cfg(test)]
+// macOS and Wine launching only runs on a Unix host (it writes shell
+// scripts and Unix links), so these tests do not apply to Windows.
+#[cfg(all(test, unix))]
 mod configured_script_tests {
     use super::*;
 

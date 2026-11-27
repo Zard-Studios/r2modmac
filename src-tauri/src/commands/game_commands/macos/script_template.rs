@@ -199,7 +199,9 @@ mod tests {
     }
 }
 
-#[cfg(test)]
+// macOS and Wine launching only runs on a Unix host (it writes shell
+// scripts and Unix links), so these tests do not apply to Windows.
+#[cfg(all(test, unix))]
 mod bepinex_root_tests {
     use super::*;
 

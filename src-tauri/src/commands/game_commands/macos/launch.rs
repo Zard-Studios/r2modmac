@@ -749,7 +749,9 @@ pub(crate) fn stop_game_for_macos(game_path: &std::path::Path) -> Result<(), Str
     Ok(())
 }
 
-#[cfg(test)]
+// macOS and Wine launching only runs on a Unix host (it writes shell
+// scripts and Unix links), so these tests do not apply to Windows.
+#[cfg(all(test, unix))]
 mod bepinex_takeover_signal_tests {
     use super::macos_bepinex_signal_updated;
 
